@@ -1,0 +1,18 @@
+[
+  {
+    "app_name": "Fortnite",
+    "title": "Fortnite",
+    "install_path": "C:\\Games\\Fortnite",
+    "version": "1",
+    "platform": "Windows",
+    "is_dlc": false
+  },
+  {
+    "app_name": "Imported",
+    "title": "Imported Game",
+    "install_path": "D:\\Games\\Imported",
+    "version": "1",
+    "platform": "Windows",
+    "is_dlc": false
+  }
+]
