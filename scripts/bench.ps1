@@ -25,13 +25,22 @@ function Get-Tree([int]$Root) {
   $ids
 }
 
+# Walking the process list is expensive (a WMI query), so it runs every 5 s only until the tree
+# stops changing (WebView2 starts its helpers early); after that only the known PIDs are read,
+# so the sampler doesn't compete with the measured scroll.
 $peak = 0
+$ids = @()
+$stable = $false
+$walked = [DateTime]::MinValue
 while (-not $app.HasExited) {
-  $bytes = 0
-  foreach ($id in Get-Tree $app.Id) {
-    $p = Get-Process -Id $id -ErrorAction SilentlyContinue
-    if ($p) { $bytes += $p.PrivateMemorySize64 }
+  if (-not $stable -and ((Get-Date) - $walked).TotalSeconds -ge 5) {
+    $now = @(Get-Tree $app.Id | Sort-Object)
+    $stable = $ids.Count -gt 1 -and (Compare-Object $ids $now).Count -eq 0
+    $ids = $now
+    $walked = Get-Date
   }
+  $bytes = 0
+  foreach ($p in Get-Process -Id $ids -ErrorAction SilentlyContinue) { $bytes += $p.PrivateMemorySize64 }
   $peak = [Math]::Max($peak, $bytes)
   Start-Sleep -Milliseconds 250
 }

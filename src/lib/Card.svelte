@@ -1,5 +1,5 @@
 <script lang="ts">
-  import StoreIcon from './StoreIcon.svelte'
+  import { logoFile, storeNames } from './StoreIcon.svelte'
   import { cover, type Card, type Progress } from './api'
 
   let { game, running, progress, onopen, onplay, oninstall }: {
@@ -48,7 +48,7 @@
     {/if}
   </button>
 
-  <span class="logo"><StoreIcon provider={game.provider} size={15} /></span>
+  <span class="logo"><img src={logoFile[game.provider]} alt={storeNames[game.provider]} width="15" height="15" /></span>
 
   {#if running}
     <span class="badge">Playing</span>
@@ -134,7 +134,7 @@
     color: var(--muted);
   }
 
-  img {
+  .open img {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -144,16 +144,16 @@
     transition: opacity 200ms;
   }
 
-  img.loaded {
+  .open img.loaded {
     opacity: 1;
   }
 
-  img.fill {
+  .open img.fill {
     object-fit: cover;
   }
 
   /* Option C: not installed fades a little, and the chip says what's next. */
-  .out img {
+  .out .open img {
     filter: saturate(0.5) brightness(0.75);
   }
 
@@ -168,8 +168,11 @@
     border-radius: 50%;
     background: rgb(10 10 16 / 0.62);
     border: 1px solid rgb(255 255 255 / 0.12);
-    color: #fff;
     pointer-events: none;
+  }
+
+  .logo img {
+    display: block;
   }
 
   .chip,
