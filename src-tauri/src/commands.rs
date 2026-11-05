@@ -18,10 +18,14 @@ use crate::{bench, epic_login};
 /// How long a launched Epic game may take to show up as a process before we stop looking.
 const EPIC_START_GRACE: Duration = Duration::from_secs(30);
 
+/// Covers fetched and shrunk at once. A cold fast scroll asks for hundreds; each decode holds ~8 MB.
+const COVER_JOBS: usize = 8;
+
 pub struct AppState {
     dirs: Dirs,
     http: reqwest::Client,
     shared: Mutex<Shared>,
+    cover_jobs: tokio::sync::Semaphore,
 }
 
 #[derive(Default)]
@@ -58,6 +62,7 @@ impl AppState {
                 .build()
                 .expect("default TLS backend is available"),
             shared: Mutex::new(Shared { status: "Loading library…".into(), ..Shared::default() }),
+            cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
         }
     }
 
@@ -216,11 +221,12 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
 }
 
 /// Thumbnail file for a card: cover first, landscape header as the fallback, each from its
-/// local file or URL. `None` means show a title card.
-// shortcut: requests for cards already scrolled away still finish; add cancellation if cold first scrolls feel slow.
+/// local file or URL. `None` means show a title card. At most `COVER_JOBS` run at once.
+// shortcut: requests for cards already scrolled away still run (queued); add cancellation if cold first scrolls feel slow.
 #[tauri::command]
 pub async fn cover(app: AppHandle, key: String) -> Option<String> {
     let state = app.state::<AppState>();
+    let _job = state.cover_jobs.acquire().await.ok()?;
     let game = state.game(&key)?;
     let art_dir = state.dirs.art.join(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {

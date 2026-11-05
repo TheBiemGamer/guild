@@ -96,7 +96,7 @@
       {#if loggingIn}
         <button class="primary" disabled>Logging in…</button>
       {:else if epicLoading}
-        <span class="pulse">Loading Epic games…</span>
+        <span class="loading">Loading Epic games…</span>
       {:else if lib.epic === 'loggedOut'}
         <button class="primary" onclick={logIn}>Log in to Epic</button>
       {:else if lib.epic === 'noLegendary'}
@@ -192,15 +192,9 @@
     color: var(--muted);
   }
 
-  .pulse {
+  /* Static on purpose: an endless animation kept the page repainting while Epic loads. */
+  .loading {
     color: var(--accent-2);
-    animation: pulse 1.4s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    50% {
-      opacity: 0.45;
-    }
   }
 
   .banner {

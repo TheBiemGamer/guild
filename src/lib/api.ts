@@ -35,11 +35,15 @@ export const benchDone = (frameMs: number[], games: number) => invoke<void>('ben
 const url = (path: string | null) => (path ? convertFileSrc(path) : null)
 
 // Remounted cards (virtual scrolling) reuse the answer instead of asking again.
+// "No art" isn't kept, so a later rescan that finds art can still show it.
 const covers = new Map<string, Promise<string | null>>()
 export const cover = (key: string) => {
   let found = covers.get(key)
   if (!found) {
-    found = invoke<string | null>('cover', { key }).then(url)
+    found = invoke<string | null>('cover', { key }).then((path) => {
+      if (!path) covers.delete(key)
+      return url(path)
+    })
     covers.set(key, found)
   }
   return found

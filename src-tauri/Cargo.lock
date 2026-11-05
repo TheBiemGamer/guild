@@ -1948,6 +1948,7 @@ dependencies = [
  "steamlocate",
  "tauri",
  "tauri-build",
+ "tokio",
  "winreg",
 ]
 
