@@ -5,8 +5,7 @@
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
@@ -62,8 +61,8 @@ pub struct Spike {
     thumbs_dir: Arc<PathBuf>,
     size: Size,
     offset_y: f32,
-    /// Item range still wanted, packed `start << 32 | end`; queued jobs outside it skip decoding.
-    wanted: Arc<AtomicU64>,
+    /// Item range still wanted; queued jobs outside it skip decoding.
+    wanted: Arc<Mutex<Range<usize>>>,
     bench: Option<Bench>,
 }
 
@@ -77,7 +76,7 @@ impl Spike {
             thumbs_dir: Arc::new(cache::thumbs_dir()),
             size: WINDOW,
             offset_y: 0.0,
-            wanted: Arc::new(AtomicU64::new(0)),
+            wanted: Arc::new(Mutex::new(0..0)),
             bench: bench.map(|speed| Bench { speed, last: None, frame_ms: Vec::new() }),
         };
         (spike, Task::perform(async move { list_covers(&dir) }, Message::Listed))
@@ -170,7 +169,7 @@ impl Spike {
         let visible = to_items(row_range(self.offset_y, self.size.height, rows, BUFFER_ROWS));
         let keep = to_items(row_range(self.offset_y, self.size.height, rows, KEEP_ROWS));
 
-        self.wanted.store((visible.start as u64) << 32 | visible.end as u64, Ordering::Relaxed);
+        *self.wanted.lock().unwrap() = visible.clone();
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if matches!(slot, Slot::Ready(_)) && !keep.contains(&i) {
                 *slot = Slot::Empty;
@@ -206,9 +205,8 @@ impl Spike {
     }
 }
 
-fn load(i: usize, src: &Path, dir: &Path, wanted: &AtomicU64) -> Loaded {
-    let w = wanted.load(Ordering::Relaxed);
-    if !((w >> 32) as usize..(w & 0xFFFF_FFFF) as usize).contains(&i) {
+fn load(i: usize, src: &Path, dir: &Path, wanted: &Mutex<Range<usize>>) -> Loaded {
+    if !wanted.lock().unwrap().contains(&i) {
         return Loaded::Skipped;
     }
     let key = src.file_stem().unwrap_or_default().to_string_lossy();
