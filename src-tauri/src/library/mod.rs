@@ -8,7 +8,8 @@ use std::time::SystemTime;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
     Steam,
     Epic,
@@ -49,7 +50,7 @@ impl ProviderKind {
 }
 
 /// Download progress as each store reports it: Steam in bytes, Legendary as a percentage with an ETA.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Progress {
     /// 0.0 to 1.0.
     pub fraction: f32,

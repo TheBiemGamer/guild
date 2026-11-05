@@ -24,7 +24,8 @@ pub enum InstallEvent {
     Progress(Progress),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Login {
     /// `legendary.exe` isn't on PATH or in `%LOCALAPPDATA%\Programs\legendary`.
     NoLegendary,

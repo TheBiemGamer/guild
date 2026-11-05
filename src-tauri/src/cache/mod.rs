@@ -4,7 +4,7 @@ pub mod db;
 
 use std::path::{Path, PathBuf};
 
-use image::{DynamicImage, ImageReader, ImageResult, RgbaImage};
+use image::{DynamicImage, ImageReader, ImageResult};
 
 use crate::library::Image;
 
@@ -16,8 +16,6 @@ pub struct Dirs {
     pub db: PathBuf,
     pub art: PathBuf,
     pub thumbs: PathBuf,
-    /// WebView2 profile for the Epic login window.
-    pub webview: PathBuf,
 }
 
 impl Dirs {
@@ -27,7 +25,6 @@ impl Dirs {
             db: dirs.data_local_dir().join("library-v2.sqlite"),
             art: dirs.cache_dir().join("art"),
             thumbs: dirs.cache_dir().join("thumbs"),
-            webview: dirs.cache_dir().join("webview"),
         }
     }
 }
@@ -74,21 +71,21 @@ pub fn open_image(path: &Path) -> ImageResult<DynamicImage> {
     ImageReader::open(path)?.with_guessed_format()?.decode()
 }
 
-/// Returns the cached thumbnail for `key`, creating it from `src` on a miss
-/// or when the cached file is unreadable. Keeps the source aspect ratio.
+/// Path of the cached JPEG thumbnail for `key`, creating it from `src` on a miss.
+/// Keeps the source aspect ratio. The webview decodes it, so nothing is decoded here on a hit.
 // shortcut: the cache never notices a changed source under the same key; include the source mtime in the key if stale art shows up.
-pub fn thumbnail(src: &Path, dir: &Path, key: &str) -> ImageResult<RgbaImage> {
+pub fn thumbnail(src: &Path, dir: &Path, key: &str) -> ImageResult<PathBuf> {
     let cached = dir.join(format!("{key}.jpg"));
-    if let Ok(img) = image::open(&cached) {
-        return Ok(img.to_rgba8());
+    if cached.exists() {
+        return Ok(cached);
     }
     let thumb = open_image(src)?.thumbnail(THUMB_W, THUMB_H).to_rgb8();
     std::fs::create_dir_all(dir)?;
-    // Write then rename so a crash never leaves a half-written cache file.
+    // Write then rename, so a cached file is always complete and the hit check above can trust it.
     let tmp = cached.with_extension("tmp");
-    thumb.save_with_format(&tmp, image::ImageFormat::Jpeg)?;
+    DynamicImage::ImageRgb8(thumb).save_with_format(&tmp, image::ImageFormat::Jpeg)?;
     std::fs::rename(&tmp, &cached)?;
-    Ok(DynamicImage::ImageRgb8(thumb).to_rgba8())
+    Ok(cached)
 }
 
 #[cfg(test)]
@@ -104,6 +101,7 @@ mod tests {
 
     #[test]
     fn creates_then_reuses_cached_thumbnail() {
+        use image::RgbaImage;
         let dir = temp_dir("thumb-test");
         let src = dir.join("src.png");
         RgbaImage::new(600, 900).save(&src).unwrap();
@@ -112,21 +110,21 @@ mod tests {
         // Downloaded art has no extension.
         let bare = dir.join("cover");
         std::fs::copy(&src, &bare).unwrap();
+        let size = |p: PathBuf| image::image_dimensions(p).unwrap();
 
         let first = thumbnail(&src, &dir, "a").unwrap();
-        assert_eq!(first.dimensions(), (THUMB_W, THUMB_H));
-        assert!(dir.join("a.jpg").exists());
+        assert_eq!(first, dir.join("a.jpg"));
+        assert_eq!(size(first), (THUMB_W, THUMB_H));
         // Landscape art keeps its shape instead of being stretched to 2:3.
-        assert_eq!(thumbnail(&header, &dir, "h").unwrap().dimensions(), (240, 112));
-        assert_eq!(thumbnail(&bare, &dir, "b").unwrap().dimensions(), (THUMB_W, THUMB_H));
+        assert_eq!(size(thumbnail(&header, &dir, "h").unwrap()), (240, 112));
+        assert_eq!(size(thumbnail(&bare, &dir, "b").unwrap()), (THUMB_W, THUMB_H));
 
         // Source gone: second call must come from the cache.
         std::fs::remove_file(&src).unwrap();
-        assert_eq!(thumbnail(&src, &dir, "a").unwrap().dimensions(), (THUMB_W, THUMB_H));
+        assert_eq!(thumbnail(&src, &dir, "a").unwrap(), dir.join("a.jpg"));
 
-        // Corrupt cache plus missing source is an error, not a panic.
-        std::fs::write(dir.join("a.jpg"), b"junk").unwrap();
-        assert!(thumbnail(&src, &dir, "a").is_err());
+        // No cache and no source is an error, not a panic.
+        assert!(thumbnail(&src, &dir, "missing").is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -138,8 +136,7 @@ mod tests {
         let cached = dir.join("cached");
         std::fs::write(&cached, b"x").unwrap();
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        rt.block_on(async {
+                tauri::async_runtime::block_on(async {
             let image = Image { path: Some(local.clone()), url: None };
             assert_eq!(resolve(&image, &http, dir.join("unused")).await, Some(local));
             // Local file deleted (e.g. Steam cleared its cache): an earlier download is used.
@@ -156,9 +153,8 @@ mod tests {
     fn downloads_once_and_treats_404_as_missing() {
         let dir = temp_dir("cdn-test");
         let http = reqwest::Client::new();
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let cdn = "https://shared.steamstatic.com/store_item_assets/steam/apps";
-        rt.block_on(async {
+                let cdn = "https://shared.steamstatic.com/store_item_assets/steam/apps";
+        tauri::async_runtime::block_on(async {
             let image = Image { path: None, url: Some(format!("{cdn}/2988410/library_600x900.jpg")) };
             let cover = resolve(&image, &http, dir.join("cover")).await.unwrap();
             assert!(open_image(&cover).is_ok());
