@@ -16,4 +16,4 @@ tauri = { version = "2", features = ["protocol-asset"] }
 winreg = "0.56"
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
