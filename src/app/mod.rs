@@ -96,7 +96,11 @@ impl App {
                 let db = self.dirs.db.clone();
                 Task::batch([shown, Task::perform(blocking(move || refresh(&db)), Message::Refreshed)])
             }
-            Message::Refreshed(Ok(games)) => self.set_games(games),
+            Message::Refreshed(Ok(games)) => {
+                // Only a finished scan may claim the library is empty.
+                self.status = "No installed games found.".into();
+                self.set_games(games)
+            }
             Message::Refreshed(Err(e)) => {
                 eprintln!("steam: {e}");
                 self.status = format!("Couldn't read the Steam library: {e}");
@@ -170,7 +174,6 @@ impl App {
     fn set_games(&mut self, mut games: Vec<Game>) -> Task<Message> {
         games.sort_by_cached_key(|g| g.title.to_lowercase());
         self.games = games;
-        self.status = "No installed games found.".into();
         self.request_visible()
     }
 
