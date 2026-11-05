@@ -59,8 +59,12 @@ impl Provider for Steam {
     }
 
     fn running_game(&self) -> Option<String> {
-        let key = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam");
-        running_id(key.and_then(|k| k.get_value("RunningAppID")))
+        let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam").ok()?;
+        let id = running_id(steam.get_value("RunningAppID"))?;
+        // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
+        // trust it while the Steam process it was written by is still alive.
+        let pid: u32 = steam.open_subkey("ActiveProcess").and_then(|k| k.get_value("pid")).ok()?;
+        steam_alive(pid).then_some(id)
     }
 
     fn download_progress(&self, game: &Game) -> Option<Progress> {
@@ -128,6 +132,23 @@ fn child<'a>(value: &'a Value<'a>, key: &str) -> Option<&'a Value<'a>> {
 /// Steam writes 0 when nothing runs; a missing key means Steam was never installed for this user.
 fn running_id(raw: std::io::Result<u32>) -> Option<String> {
     raw.ok().filter(|&id| id != 0).map(|id| id.to_string())
+}
+
+/// Whether `pid` is a live steam.exe (the name check guards against a reused pid).
+// shortcut: tasklist costs a process start; it only runs while RunningAppID claims a game is running.
+fn steam_alive(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    output.is_ok_and(|o| lists_steam(&String::from_utf8_lossy(&o.stdout)))
+}
+
+/// tasklist CSV rows look like `"steam.exe","16176","Console","1","131.968 K"`.
+fn lists_steam(tasklist_csv: &str) -> bool {
+    tasklist_csv.lines().any(|row| row.to_ascii_lowercase().starts_with("\"steam.exe\""))
 }
 
 fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
@@ -302,6 +323,17 @@ mod tests {
         assert_eq!(progress(&app(10)), None);
         // No byte counters at all.
         assert_eq!(progress(&app(30)), None);
+    }
+
+    #[test]
+    fn lists_steam_only_for_a_steam_row() {
+        assert!(lists_steam("\"steam.exe\",\"16176\",\"Console\",\"1\",\"131.968 K\"\r\n"));
+        assert!(lists_steam("\"Steam.exe\",\"1\",\"Console\",\"1\",\"1 K\""));
+        // No match: tasklist prints an INFO line instead of a row.
+        assert!(!lists_steam("INFO: No tasks are running which match the specified criteria.\r\n"));
+        // Pid reused by another program.
+        assert!(!lists_steam("\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\""));
+        assert!(!lists_steam("\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\""));
     }
 
     #[test]
