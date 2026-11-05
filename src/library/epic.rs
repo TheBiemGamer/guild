@@ -21,7 +21,7 @@ const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Login {
-    /// `legendary.exe` isn't on PATH.
+    /// `legendary.exe` isn't on PATH or in `%LOCALAPPDATA%\Programs\legendary`.
     NoLegendary,
     LoggedOut,
     LoggedIn,
@@ -87,8 +87,15 @@ pub fn log_in(authorization_code: &str) -> Result<(), Error> {
     run(legendary(&["auth", "--code", authorization_code]))
 }
 
+/// `%LOCALAPPDATA%\Programs\legendary\legendary.exe` if present (no PATH edit needed), else `legendary` on PATH.
+fn legendary_exe() -> PathBuf {
+    let local = directories::BaseDirs::new()
+        .map(|d| d.data_local_dir().join("Programs").join("legendary").join("legendary.exe"));
+    local.filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from("legendary"))
+}
+
 fn legendary(args: &[&str]) -> Command {
-    let mut command = Command::new("legendary");
+    let mut command = Command::new(legendary_exe());
     command.args(args).creation_flags(CREATE_NO_WINDOW);
     command
 }
