@@ -17,6 +17,7 @@ use iced::widget::image;
 use iced::{Size, Subscription, Task, window};
 
 use crate::cache::{self, Dirs};
+use crate::library::epic::{self, Login};
 use crate::library::{Game, Progress, ProviderKind};
 
 const CARD_W: f32 = 180.0;
@@ -101,8 +102,10 @@ pub enum Action {
 pub enum Message {
     CacheLoaded(Result<Vec<Game>, String>),
     Refresh,
-    /// One scan result per store.
-    Refreshed(Vec<(ProviderKind, Result<Vec<Game>, String>)>),
+    /// One scan result per store, plus whether Epic (via Legendary) is usable.
+    Refreshed(Vec<(ProviderKind, Result<Vec<Game>, String>)>, Login),
+    EpicLogIn,
+    EpicLoggedIn(Result<(), String>),
     Scrolled(Viewport),
     Resized(Size),
     Thumb(String, Loaded),
@@ -153,6 +156,9 @@ pub struct App {
     /// Games polled for download progress each tick.
     tracked: HashSet<String>,
     progress: HashMap<String, Progress>,
+    /// `None` until the first scan.
+    epic_login: Option<Login>,
+    logging_in: bool,
 }
 
 impl App {
@@ -181,6 +187,8 @@ impl App {
             detail: None,
             tracked: HashSet::new(),
             progress: HashMap::new(),
+            epic_login: None,
+            logging_in: false,
         };
         let load = blocking(move || cache::db::open(&db).and_then(|conn| cache::db::load(&conn)));
         (app, Task::perform(load, |r| Message::CacheLoaded(r.map_err(|e| e.to_string()))))
@@ -201,11 +209,28 @@ impl App {
             }
             Message::Refresh => {
                 let scan = blocking(|| {
-                    ProviderKind::ALL.map(|p| (p, p.provider().list_games().map_err(|e| e.to_string()))).to_vec()
+                    let login = epic::login_state();
+                    let results = ProviderKind::ALL.map(|p| {
+                        // Without a Legendary login there are no Epic games, rather than an error.
+                        let usable = p != ProviderKind::Epic || login == Login::LoggedIn;
+                        let games = if usable { p.provider().list_games().map_err(|e| e.to_string()) } else { Ok(Vec::new()) };
+                        (p, games)
+                    });
+                    (results.to_vec(), login)
                 });
-                Task::perform(scan, Message::Refreshed)
+                Task::perform(scan, |(results, login)| Message::Refreshed(results, login))
             }
-            Message::Refreshed(results) => {
+            Message::EpicLogIn => {
+                self.logging_in = true;
+                Task::perform(blocking(epic_log_in), Message::EpicLoggedIn)
+            }
+            Message::EpicLoggedIn(result) => {
+                self.logging_in = false;
+                self.error = result.err().map(|e| format!("Epic login: {e}"));
+                Task::done(Message::Refresh)
+            }
+            Message::Refreshed(results, login) => {
+                self.epic_login = Some(login);
                 let (mut games, mut scanned, mut errors) = (Vec::new(), Vec::new(), Vec::new());
                 for (provider, result) in results {
                     match result {
@@ -405,6 +430,17 @@ impl App {
             Task::perform(load_thumb(game, http, dirs, wanted), move |l| Message::Thumb(key.clone(), l))
         }))
     }
+}
+
+/// Opens our own login window as a child process, then hands its code to Legendary.
+fn epic_log_in() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let output = std::process::Command::new(exe).arg(crate::EPIC_LOGIN_ARG).output().map_err(|e| e.to_string())?;
+    let code = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if code.is_empty() {
+        return Err("the login window was closed before logging in".into());
+    }
+    epic::log_in(&code).map_err(|e| e.to_string())
 }
 
 fn sort_by_title(games: &mut [Game]) {

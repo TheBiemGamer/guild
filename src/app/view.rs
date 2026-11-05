@@ -12,7 +12,8 @@ use iced::{Alignment, ContentFit, Element, Length};
 use super::{
     Action, App, BUFFER_ROWS, CARD_H, CARD_W, Detail, GAP, GRID, Message, ROW_H, Slot, Sort, Store, columns, row_range,
 };
-use crate::library::{Game, Progress, ProviderKind};
+use crate::library::epic::Login;
+use crate::library::{Game, Progress};
 
 const HERO_H: f32 = 320.0;
 const LOGO_H: f32 = 110.0;
@@ -39,6 +40,7 @@ impl App {
             pick_list(Store::ALL, Some(self.store), Message::Store),
             pick_list(Sort::ALL, Some(self.sort), Message::SortBy),
             checkbox(self.installed_only).label("Installed only").on_toggle(Message::InstalledOnly),
+            self.epic_status(),
         ]
         .spacing(12)
         .padding([8.0, GAP])
@@ -67,6 +69,18 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill);
         column![toolbar, grid].into()
+    }
+
+    /// Toolbar slot: how to get Epic games, or nothing once they're available.
+    fn epic_status(&self) -> Element<'_, Message> {
+        match self.epic_login {
+            Some(Login::NoLegendary) => text("Epic: install Legendary to add your Epic games").size(14).into(),
+            Some(Login::LoggedOut) => {
+                let label = if self.logging_in { "Logging in…" } else { "Log in to Epic" };
+                button(label).on_press_maybe((!self.logging_in).then_some(Message::EpicLogIn)).into()
+            }
+            Some(Login::LoggedIn) | None => Space::new().into(),
+        }
     }
 
     fn card<'a>(&self, game: &'a Game) -> Element<'a, Message> {
@@ -116,8 +130,7 @@ impl App {
         } else {
             button(text("Install").size(18)).padding([10, 32]).on_press(Message::Act(Action::Install, key.clone()))
         };
-        // Epic has no known uninstall URI, so only Steam gets the button.
-        let uninstall = (game.installed && game.provider == ProviderKind::Steam).then(|| {
+        let uninstall = game.installed.then(|| {
             button("Uninstall").padding([10, 20]).style(button::secondary).on_press(Message::Act(Action::Uninstall, key.clone()))
         });
         let actions = row![primary, uninstall].spacing(12).align_y(Alignment::Center);
