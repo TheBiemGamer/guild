@@ -48,10 +48,12 @@ impl ProviderKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Download progress as each store reports it: Steam in bytes, Legendary as a percentage with an ETA.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Progress {
-    pub done: u64,
-    pub total: u64,
+    /// 0.0 to 1.0.
+    pub fraction: f32,
+    pub text: String,
 }
 
 /// One art slot: a local file, a URL to download into our art cache, or both (local wins).
@@ -107,4 +109,39 @@ pub trait Provider: Sync {
 pub fn open_uri(uri: &str) -> Result<(), Error> {
     std::process::Command::new("explorer.exe").arg(uri).spawn()?;
     Ok(())
+}
+
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Whether `tasklist /FI <filter>` (e.g. `PID eq 42`) lists a process named `image`.
+// shortcut: starts a tasklist process; callers only ask while a game is believed to be running.
+pub fn process_listed(filter: &str, image: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", filter, "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    output.is_ok_and(|o| lists_image(&String::from_utf8_lossy(&o.stdout), image))
+}
+
+/// tasklist CSV rows look like `"steam.exe","16176","Console","1","131.968 K"`.
+fn lists_image(tasklist_csv: &str, image: &str) -> bool {
+    let wanted = format!("\"{}\"", image.to_ascii_lowercase());
+    tasklist_csv.lines().any(|row| row.to_ascii_lowercase().starts_with(&wanted))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_image_matches_whole_name_ignoring_case() {
+        let row = "\"Steam.exe\",\"16176\",\"Console\",\"1\",\"131.968 K\"\r\n";
+        assert!(lists_image(row, "steam.exe"));
+        // No match: tasklist prints an INFO line instead of a row.
+        assert!(!lists_image("INFO: No tasks are running which match the specified criteria.\r\n", "steam.exe"));
+        // Pid reused by another program, or a name that only starts the same.
+        assert!(!lists_image("\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\"", "steam.exe"));
+        assert!(!lists_image("\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\"", "steam.exe"));
+    }
 }

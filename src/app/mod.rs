@@ -9,7 +9,7 @@ use std::fmt;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iced::widget::operation;
 use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset, Viewport};
@@ -17,7 +17,7 @@ use iced::widget::image;
 use iced::{Size, Subscription, Task, window};
 
 use crate::cache::{self, Dirs};
-use crate::library::epic::{self, Login};
+use crate::library::epic::{self, InstallEvent, Login};
 use crate::library::{Game, Progress, ProviderKind};
 
 const CARD_W: f32 = 180.0;
@@ -124,13 +124,33 @@ pub enum Message {
     Back,
     DetailArt(String, Option<image::Handle>, Option<image::Handle>),
     Act(Action, String),
-    /// Request result, and whether Epic must be rescanned (an Epic install or uninstall finished).
-    Acted(Result<(), String>, bool),
+    /// Game key, request result, and whether it was an Epic request (Epic is rescanned after one).
+    Acted(String, Result<(), String>, bool),
+    /// Events from a running Epic install.
+    EpicInstall(String, InstallEvent),
+    CancelInstall(String),
+    Cancelled(Result<(), String>),
+    /// Epic uninstalls have no store dialog, so the app asks first.
+    AskUninstall(String),
+    CancelUninstall,
+    /// Game key and the launched game's executable name, to watch for its process.
+    EpicLaunched(String, Result<Option<String>, String>),
+    EpicRunning(bool),
     Tick,
-    /// Key of the running game.
+    /// Key of the running Steam game.
     Running(Option<String>),
     Progress(Vec<(String, Option<Progress>)>),
 }
+
+/// An Epic game launched from here, watched through its process.
+struct EpicWatch {
+    key: String,
+    exe: String,
+    since: Instant,
+}
+
+/// How long a launched Epic game may take to show up as a process before we stop looking.
+const EPIC_START_GRACE: Duration = Duration::from_secs(30);
 
 struct Detail {
     key: String,
@@ -166,6 +186,18 @@ pub struct App {
     /// `None` until the first scan.
     epic_login: Option<Login>,
     logging_in: bool,
+    /// An Epic scan is running (Legendary can take a while for big libraries).
+    epic_loading: bool,
+    /// Games with a request in flight, and what to show meanwhile ("Launching...").
+    busy: HashMap<String, &'static str>,
+    /// Legendary's pid per running Epic install, for Cancel.
+    install_pids: HashMap<String, u32>,
+    /// Installs the user cancelled; their failure isn't an error.
+    cancelled: HashSet<String>,
+    confirm_uninstall: Option<String>,
+    epic_watch: Option<EpicWatch>,
+    /// Key of the running Epic game.
+    epic_running: Option<String>,
 }
 
 impl App {
@@ -196,6 +228,13 @@ impl App {
             progress: HashMap::new(),
             epic_login: None,
             logging_in: false,
+            epic_loading: false,
+            busy: HashMap::new(),
+            install_pids: HashMap::new(),
+            cancelled: HashSet::new(),
+            confirm_uninstall: None,
+            epic_watch: None,
+            epic_running: None,
         };
         let load = blocking(move || cache::db::open(&db).and_then(|conn| cache::db::load(&conn)));
         (app, Task::perform(load, |r| Message::CacheLoaded(r.map_err(|e| e.to_string()))))
@@ -214,9 +253,10 @@ impl App {
                 };
                 Task::batch([shown, Task::done(Message::Refresh { epic: true })])
             }
-            Message::Refresh { epic } => Task::perform(blocking(move || scan(epic)), |(results, login)| {
-                Message::Refreshed(results, login)
-            }),
+            Message::Refresh { epic } => {
+                self.epic_loading |= epic;
+                Task::perform(blocking(move || scan(epic)), |(results, login)| Message::Refreshed(results, login))
+            }
             Message::EpicLogIn => {
                 self.logging_in = true;
                 Task::perform(blocking(epic_log_in), Message::EpicLoggedIn)
@@ -229,6 +269,7 @@ impl App {
             Message::Refreshed(results, login) => {
                 if login.is_some() {
                     self.epic_login = login;
+                    self.epic_loading = false;
                 }
                 // Stores not scanned this time keep their games.
                 let mut games: Vec<Game> =
@@ -254,8 +295,9 @@ impl App {
                 if games == self.games {
                     return Task::none();
                 }
-                // Downloads that haven't finished yet get progress polling.
-                self.tracked.extend(games.iter().filter(|g| !g.installed).map(Game::key));
+                // Steam downloads that haven't finished get progress polling (Epic's come from its install task).
+                let unfinished = games.iter().filter(|g| g.provider == ProviderKind::Steam && !g.installed);
+                self.tracked.extend(unfinished.map(Game::key));
                 let (db, to_save) = (self.dirs.db.clone(), games.clone());
                 let save = blocking(move || {
                     let saved = cache::db::open(&db).and_then(|mut conn| {
@@ -326,11 +368,32 @@ impl App {
             }
             Message::Act(action, key) => {
                 let Some(game) = self.game(&key).cloned() else { return Task::none() };
-                if action == Action::Install {
-                    self.tracked.insert(key);
+                self.confirm_uninstall = None;
+                let label = match action {
+                    Action::Play => "Launching…",
+                    Action::Install => "Starting install…",
+                    Action::Uninstall => "Uninstalling…",
+                };
+                self.busy.insert(key.clone(), label);
+                if game.provider == ProviderKind::Epic {
+                    return match action {
+                        Action::Install => epic_install(game),
+                        Action::Play => {
+                            let launch = blocking(move || {
+                                game.provider.provider().launch(&game).and_then(|()| epic::executable(&game)).map_err(|e| e.to_string())
+                            });
+                            Task::perform(launch, move |result| Message::EpicLaunched(key.clone(), result))
+                        }
+                        Action::Uninstall => {
+                            let uninstall = blocking(move || game.provider.provider().uninstall(&game).map_err(|e| e.to_string()));
+                            Task::perform(uninstall, move |result| Message::Acted(key.clone(), result, true))
+                        }
+                    };
                 }
-                // Epic installs/uninstalls return once Legendary is done; Steam's only open a dialog.
-                let rescan_epic = game.provider == ProviderKind::Epic && action != Action::Play;
+                if action == Action::Install {
+                    self.tracked.insert(key.clone());
+                }
+                // Steam requests only open a Steam dialog or start the game, so they return at once.
                 let request = blocking(move || {
                     let store = game.provider.provider();
                     match action {
@@ -338,19 +401,82 @@ impl App {
                         Action::Install => store.install(&game),
                         Action::Uninstall => store.uninstall(&game),
                     }
-                    .map_err(|e| format!("{} request failed: {e}", game.provider.name()))
+                    .map_err(|e| e.to_string())
                 });
-                Task::perform(request, move |result| Message::Acted(result, rescan_epic))
+                Task::perform(request, move |result| Message::Acted(key.clone(), result, false))
             }
-            Message::Acted(result, rescan_epic) => {
-                self.error = result.err();
-                if rescan_epic { Task::done(Message::Refresh { epic: true }) } else { Task::none() }
+            Message::Acted(key, result, epic) => {
+                self.busy.remove(&key);
+                if epic {
+                    self.install_pids.remove(&key);
+                    self.progress.remove(&key);
+                }
+                // A cancelled install fails by design; don't report it.
+                let cancelled = self.cancelled.remove(&key);
+                let store = if epic { "Epic Games" } else { "Steam" };
+                self.error = result.err().filter(|_| !cancelled).map(|e| format!("{store}: {e}"));
+                if epic { Task::done(Message::Refresh { epic: true }) } else { Task::none() }
+            }
+            Message::EpicInstall(key, InstallEvent::Started(pid)) => {
+                self.install_pids.insert(key, pid);
+                Task::none()
+            }
+            Message::EpicInstall(key, InstallEvent::Progress(progress)) => {
+                self.busy.insert(key.clone(), "Installing…");
+                self.progress.insert(key, progress);
+                Task::none()
+            }
+            Message::CancelInstall(key) => {
+                let Some(&pid) = self.install_pids.get(&key) else { return Task::none() };
+                self.cancelled.insert(key.clone());
+                self.busy.insert(key, "Cancelling…");
+                Task::perform(blocking(move || epic::cancel(pid).map_err(|e| e.to_string())), Message::Cancelled)
+            }
+            Message::Cancelled(result) => {
+                self.error = result.err().map(|e| format!("Couldn't cancel the install: {e}"));
+                Task::none()
+            }
+            Message::AskUninstall(key) => {
+                self.confirm_uninstall = Some(key);
+                Task::none()
+            }
+            Message::CancelUninstall => {
+                self.confirm_uninstall = None;
+                Task::none()
+            }
+            Message::EpicLaunched(key, result) => {
+                self.busy.remove(&key);
+                match result {
+                    Ok(exe) => {
+                        self.error = None;
+                        self.epic_watch = exe.map(|exe| EpicWatch { key, exe, since: Instant::now() });
+                    }
+                    Err(e) => self.error = Some(format!("Epic Games: {e}")),
+                }
+                Task::none()
+            }
+            Message::EpicRunning(running) => {
+                let Some(watch) = &self.epic_watch else { return Task::none() };
+                self.epic_running = running.then(|| watch.key.clone());
+                // Stop watching once it's gone, after giving it time to start.
+                if !running && watch.since.elapsed() > EPIC_START_GRACE {
+                    self.epic_watch = None;
+                }
+                Task::none()
             }
             Message::Tick => {
                 let running = blocking(|| {
                     ProviderKind::ALL.into_iter().find_map(|p| p.provider().running_game().map(|id| p.key(&id)))
                 });
                 let running = Task::perform(running, Message::Running);
+                let epic = match &self.epic_watch {
+                    Some(watch) => {
+                        let exe = watch.exe.clone();
+                        Task::perform(blocking(move || epic::is_running(&exe)), Message::EpicRunning)
+                    }
+                    None => Task::none(),
+                };
+                let running = Task::batch([running, epic]);
                 let tracked: Vec<Game> = self.games.iter().filter(|g| self.tracked.contains(&g.key())).cloned().collect();
                 if tracked.is_empty() {
                     return running;
@@ -393,6 +519,11 @@ impl App {
             // Picks up installs and uninstalls finished in Steam's own dialogs.
             iced::time::every(Duration::from_secs(60)).map(|_| Message::Refresh { epic: false }),
         ])
+    }
+
+    /// Key of the game running in either store.
+    fn running_key(&self) -> Option<&String> {
+        self.running.as_ref().or(self.epic_running.as_ref())
     }
 
     fn game(&self, key: &str) -> Option<&Game> {
@@ -452,6 +583,19 @@ fn scan(with_epic: bool) -> (ScanResults, Option<Login>) {
     };
     results.push((ProviderKind::Epic, games));
     (results, Some(login))
+}
+
+/// Runs a Legendary install on its own thread and streams its events back as messages.
+fn epic_install(game: Game) -> Task<Message> {
+    let key = game.key();
+    let (tx, rx) = iced::futures::channel::mpsc::unbounded();
+    std::thread::spawn(move || {
+        let result = epic::install(&game, |event| {
+            let _ = tx.unbounded_send(Message::EpicInstall(key.clone(), event));
+        });
+        let _ = tx.unbounded_send(Message::Acted(key, result.map_err(|e| e.to_string()), true));
+    });
+    Task::run(rx, |message| message)
 }
 
 /// Opens our own login window as a child process, then hands its code to Legendary.
@@ -638,7 +782,7 @@ mod tests {
         let (dl, ok) = (downloading.key(), installed.key());
         app.games = vec![downloading, installed];
         app.tracked = HashSet::from([dl.clone(), ok.clone()]);
-        let p = Progress { done: 1, total: 4 };
+        let p = Progress { fraction: 0.25, text: "Downloading 1 of 4 GB (25%)".into() };
 
         // Nothing started yet: no rescan, and the not-installed game stays tracked
         // (the user may still be in Steam's dialog) while the installed one is dropped.
@@ -646,7 +790,7 @@ mod tests {
         assert_eq!(nothing.units(), 0);
         assert_eq!(app.tracked, HashSet::from([dl.clone()]));
 
-        let _ = app.update(Message::Progress(vec![(dl.clone(), Some(p))]));
+        let _ = app.update(Message::Progress(vec![(dl.clone(), Some(p.clone()))]));
         assert_eq!(app.progress.get(&dl), Some(&p));
 
         // Download finished: progress cleared and a rescan requested.

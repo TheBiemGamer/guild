@@ -76,7 +76,12 @@ impl Provider for Steam {
 /// Active download progress from an appmanifest; `None` once complete or never started.
 fn progress(app: &App) -> Option<Progress> {
     let (done, total) = (app.bytes_downloaded?, app.bytes_to_download?);
-    (total > 0 && done < total).then_some(Progress { done, total })
+    (total > 0 && done < total).then(|| Progress { fraction: done as f32 / total as f32, text: download_label(done, total) })
+}
+
+fn download_label(done: u64, total: u64) -> String {
+    let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
+    format!("Downloading {:.1} of {:.1} GB ({}%)", gb(done), gb(total), done * 100 / total.max(1))
 }
 
 /// Reads the newest `userdata/<account>/config/localconfig.vdf`.
@@ -135,20 +140,8 @@ fn running_id(raw: std::io::Result<u32>) -> Option<String> {
 }
 
 /// Whether `pid` is a live steam.exe (the name check guards against a reused pid).
-// shortcut: tasklist costs a process start; it only runs while RunningAppID claims a game is running.
 fn steam_alive(pid: u32) -> bool {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let output = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    output.is_ok_and(|o| lists_steam(&String::from_utf8_lossy(&o.stdout)))
-}
-
-/// tasklist CSV rows look like `"steam.exe","16176","Console","1","131.968 K"`.
-fn lists_steam(tasklist_csv: &str) -> bool {
-    tasklist_csv.lines().any(|row| row.to_ascii_lowercase().starts_with("\"steam.exe\""))
+    super::process_listed(&format!("PID eq {pid}"), "steam.exe")
 }
 
 fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
@@ -318,7 +311,9 @@ mod tests {
     fn progress_only_while_downloading() {
         let library = Library::from_dir(&fixtures()).unwrap();
         let app = |id| library.app(id).unwrap().unwrap();
-        assert_eq!(progress(&app(20)), Some(Progress { done: 1_000, total: 4_000 }));
+        let p = progress(&app(20)).unwrap();
+        assert_eq!(p.fraction, 0.25);
+        assert_eq!(p.text, "Downloading 0.0 of 0.0 GB (25%)");
         // SNUG-style finished manifest: downloaded == to_download.
         assert_eq!(progress(&app(10)), None);
         // No byte counters at all.
@@ -326,14 +321,9 @@ mod tests {
     }
 
     #[test]
-    fn lists_steam_only_for_a_steam_row() {
-        assert!(lists_steam("\"steam.exe\",\"16176\",\"Console\",\"1\",\"131.968 K\"\r\n"));
-        assert!(lists_steam("\"Steam.exe\",\"1\",\"Console\",\"1\",\"1 K\""));
-        // No match: tasklist prints an INFO line instead of a row.
-        assert!(!lists_steam("INFO: No tasks are running which match the specified criteria.\r\n"));
-        // Pid reused by another program.
-        assert!(!lists_steam("\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\""));
-        assert!(!lists_steam("\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\""));
+    fn download_label_handles_zero_total() {
+        assert_eq!(download_label(1 << 30, 4 << 30), "Downloading 1.0 of 4.0 GB (25%)");
+        assert_eq!(download_label(0, 0), "Downloading 0.0 of 0.0 GB (0%)");
     }
 
     #[test]

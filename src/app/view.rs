@@ -13,14 +13,14 @@ use super::{
     Action, App, BUFFER_ROWS, CARD_H, CARD_W, Detail, GAP, GRID, Message, ROW_H, Slot, Sort, Store, columns, row_range,
 };
 use crate::library::epic::Login;
-use crate::library::{Game, Progress};
+use crate::library::{Game, ProviderKind};
 
 const HERO_H: f32 = 320.0;
 const LOGO_H: f32 = 110.0;
 
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
-        let playing = self.running.as_ref().map(|key| match self.game(key) {
+        let playing = self.running_key().map(|key| match self.game(key) {
             Some(game) => format!("▶ Playing {}", game.title),
             // Running, but not in our scan (e.g. installed in a library we don't see).
             None => "▶ A game is running".into(),
@@ -75,10 +75,10 @@ impl App {
     fn epic_status(&self) -> Element<'_, Message> {
         match self.epic_login {
             Some(Login::NoLegendary) => text("Epic: install Legendary to add your Epic games").size(14).into(),
-            Some(Login::LoggedOut) => {
-                let label = if self.logging_in { "Logging in…" } else { "Log in to Epic" };
-                button(label).on_press_maybe((!self.logging_in).then_some(Message::EpicLogIn)).into()
-            }
+            // While Legendary logs in or loads the library, say so instead of looking idle.
+            _ if self.logging_in => button("Logging in…").into(),
+            _ if self.epic_loading => text("Loading Epic games…").size(14).into(),
+            Some(Login::LoggedOut) => button("Log in to Epic").on_press(Message::EpicLogIn).into(),
             Some(Login::Unreachable) => text("Epic: can't reach Epic, showing saved games").size(14).into(),
             Some(Login::LoggedIn) | None => Space::new().into(),
         }
@@ -86,7 +86,7 @@ impl App {
 
     fn card<'a>(&self, game: &'a Game) -> Element<'a, Message> {
         let key = game.key();
-        let running = self.running.as_ref() == Some(&key);
+        let running = self.running_key() == Some(&key);
         let content: Element<'a, Message> = match self.slots.get(&key) {
             // Contain: 2:3 covers fill the card, landscape headers sit centered.
             Some(Slot::Ready(handle)) => image(handle.clone())
@@ -96,6 +96,14 @@ impl App {
                 .into(),
             // Title card while loading or when there is no art.
             _ => center(text(&game.title).size(18).center()).padding(12).into(),
+        };
+        // A download in progress shows as a strip along the bottom of the card.
+        let content: Element<'a, Message> = match self.progress.get(&key) {
+            Some(p) => {
+                let strip = container(progress_bar(0.0..=1.0, p.fraction).girth(6)).padding(8).height(Length::Fill);
+                stack![content, strip.align_y(Vertical::Bottom)].into()
+            }
+            None => content,
         };
         let card = container(content).width(CARD_W).height(CARD_H).style(move |theme| {
             let mut style = container::bordered_box(theme);
@@ -124,20 +132,9 @@ impl App {
         let header = stack![hero, container(logo).padding(24).height(HERO_H).align_y(Vertical::Bottom)];
 
         let key = &detail.key;
-        let running = self.running.as_ref() == Some(key);
-        let primary = if game.installed {
-            let play = button(text(if running { "Running" } else { "Play" }).size(18)).padding([10, 32]).style(button::success);
-            if running { play } else { play.on_press(Message::Act(Action::Play, key.clone())) }
-        } else {
-            button(text("Install").size(18)).padding([10, 32]).on_press(Message::Act(Action::Install, key.clone()))
-        };
-        let uninstall = game.installed.then(|| {
-            button("Uninstall").padding([10, 20]).style(button::secondary).on_press(Message::Act(Action::Uninstall, key.clone()))
-        });
-        let actions = row![primary, uninstall].spacing(12).align_y(Alignment::Center);
-
-        let download = self.progress.get(key).map(|&p| {
-            column![progress_bar(0.0..=p.total as f32, p.done as f32).girth(8), text(progress_label(p)).size(14)].spacing(6)
+        let actions = self.actions(game, key);
+        let download = self.progress.get(key).map(|p| {
+            column![progress_bar(0.0..=1.0, p.fraction).girth(8), text(&p.text).size(14)].spacing(6)
         });
         let stats = column![
             text(playtime_label(game.playtime_minutes)),
@@ -147,6 +144,47 @@ impl App {
 
         let body = column![actions, download, stats].spacing(16).padding(GAP);
         scrollable(column![back, header, body]).height(Length::Fill).into()
+    }
+}
+
+impl App {
+    /// The detail page's buttons, or what's happening instead while a request runs.
+    fn actions<'a>(&'a self, game: &'a Game, key: &'a String) -> Element<'a, Message> {
+        let big = |label: &'a str| button(text(label).size(18)).padding([10, 32]);
+        if let Some(&busy) = self.busy.get(key) {
+            // A running Epic install can be cancelled; Legendary resumes it next time.
+            let cancel = self.install_pids.contains_key(key).then(|| {
+                button("Cancel").padding([10, 20]).style(button::secondary).on_press(Message::CancelInstall(key.clone()))
+            });
+            return row![big(busy), cancel].spacing(12).align_y(Alignment::Center).into();
+        }
+        if self.confirm_uninstall.as_ref() == Some(key) {
+            return row![
+                text(format!("Uninstall {}? Its files will be deleted.", game.title)),
+                button("Uninstall").padding([10, 20]).style(button::danger).on_press(Message::Act(Action::Uninstall, key.clone())),
+                button("Cancel").padding([10, 20]).style(button::secondary).on_press(Message::CancelUninstall),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .into();
+        }
+        let running = self.running_key() == Some(key);
+        let primary = if !game.installed {
+            big("Install").on_press(Message::Act(Action::Install, key.clone()))
+        } else if running {
+            big("Running").style(button::success)
+        } else {
+            big("Play").style(button::success).on_press(Message::Act(Action::Play, key.clone()))
+        };
+        // Steam asks in its own dialog; Legendary doesn't, so Epic asks here first.
+        let uninstall_press = match game.provider {
+            ProviderKind::Steam => Message::Act(Action::Uninstall, key.clone()),
+            ProviderKind::Epic => Message::AskUninstall(key.clone()),
+        };
+        let uninstall = game
+            .installed
+            .then(|| button("Uninstall").padding([10, 20]).style(button::secondary).on_press(uninstall_press));
+        row![primary, uninstall].spacing(12).align_y(Alignment::Center).into()
     }
 }
 
@@ -170,11 +208,6 @@ fn last_played_label(last: Option<SystemTime>, now: SystemTime) -> String {
         d if d < 365 => ago(d / 30, "month"),
         d => ago(d / 365, "year"),
     }
-}
-
-fn progress_label(p: Progress) -> String {
-    let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
-    format!("Downloading {:.1} of {:.1} GB ({}%)", gb(p.done), gb(p.total), p.done * 100 / p.total.max(1))
 }
 
 #[cfg(test)]
@@ -203,11 +236,5 @@ mod tests {
         assert_eq!(last_played_label(days_ago(800), now), "Last played 2 years ago");
         // Clock moved backwards: treat as today rather than panic.
         assert_eq!(last_played_label(Some(now + Duration::from_secs(60)), now), "Last played today");
-    }
-
-    #[test]
-    fn progress_label_handles_zero_total() {
-        assert_eq!(progress_label(Progress { done: 1 << 30, total: 4 << 30 }), "Downloading 1.0 of 4.0 GB (25%)");
-        assert_eq!(progress_label(Progress { done: 0, total: 0 }), "Downloading 0.0 of 0.0 GB (0%)");
     }
 }

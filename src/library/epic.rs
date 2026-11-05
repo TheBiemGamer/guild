@@ -7,17 +7,22 @@
 //! - `status --json`: `{account: "<not logged in>" | name, …}`
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
+use std::io::{BufRead, BufReader, ErrorKind};
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
-use super::{Art, Error, Game, Image, Progress, Provider, ProviderKind};
+use super::{Art, CREATE_NO_WINDOW, Error, Game, Image, Progress, Provider, ProviderKind};
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+/// What a running install reports back.
+#[derive(Debug, Clone)]
+pub enum InstallEvent {
+    /// Legendary's process id, so the install can be cancelled.
+    Started(u32),
+    Progress(Progress),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Login {
@@ -41,28 +46,94 @@ impl Provider for Epic {
         run(legendary(&["launch", &game.external_id]))
     }
 
-    /// Waits until the download finishes, so the library rescans right after.
-    // shortcut: progress shows in Legendary's own console window; parse its output for an in-app bar if needed.
-    // shortcut: installs to Legendary's default folder; add `--base-path` when a folder setting exists.
     fn install(&self, game: &Game) -> Result<(), Error> {
-        let mut command = legendary(&["-y", "install", &game.external_id, "--skip-sdl"]);
-        // A visible console replaces the hidden one, so the user can watch and cancel the download.
-        let status = command.creation_flags(CREATE_NEW_CONSOLE).status()?;
-        if status.success() { Ok(()) } else { Err(format!("Legendary install exited with {status}").into()) }
+        install(game, |_| {})
     }
 
     fn uninstall(&self, game: &Game) -> Result<(), Error> {
         run(legendary(&["-y", "uninstall", &game.external_id]))
     }
 
-    // shortcut: Legendary doesn't report running games; would need process matching against the install dir.
+    /// Epic has no RunningAppID: the app watches the process of games it launched (`executable`).
     fn running_game(&self) -> Option<String> {
         None
     }
 
+    /// Progress arrives through `install`'s events instead.
     fn download_progress(&self, _game: &Game) -> Option<Progress> {
         None
     }
+}
+
+/// Runs a hidden `legendary install`, reporting its pid and progress as they come.
+/// Returns once the download ends; killing the pid (see `cancel`) ends it with an error.
+// shortcut: installs to Legendary's default folder; add `--base-path` when a folder setting exists.
+pub fn install(game: &Game, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+    let mut child = legendary(&["-y", "install", &game.external_id, "--skip-sdl"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    on_event(InstallEvent::Started(child.id()));
+    let mut downloaded_mib = 0.0;
+    let mut last_line = String::new();
+    for line in BufReader::new(child.stderr.take().expect("stderr is piped")).lines().map_while(Result::ok) {
+        if let Some(progress) = parse_progress(&line, &mut downloaded_mib) {
+            on_event(InstallEvent::Progress(progress));
+        }
+        if !line.trim().is_empty() {
+            last_line = line;
+        }
+    }
+    let status = child.wait()?;
+    if status.success() { Ok(()) } else { Err(format!("Legendary install failed ({status}): {last_line}").into()) }
+}
+
+/// Stops an install started by `install`, including Legendary's download worker processes.
+/// Legendary resumes the download next time.
+pub fn cancel(pid: u32) -> Result<(), Error> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()?;
+    if status.success() { Ok(()) } else { Err(format!("taskkill exited with {status}").into()) }
+}
+
+/// Legendary's DLManager logs, about once a second:
+/// `= Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:00`
+/// ` - Downloaded: 123.45 MiB, Written: 234.56 MiB`
+/// The Downloaded line follows the Progress line, so the text shows the previous second's total.
+fn parse_progress(line: &str, downloaded_mib: &mut f64) -> Option<Progress> {
+    if let Some((_, rest)) = line.split_once(" - Downloaded: ") {
+        if let Some(mib) = rest.split_whitespace().next().and_then(|n| n.parse().ok()) {
+            *downloaded_mib = mib;
+        }
+        return None;
+    }
+    let (_, rest) = line.split_once("= Progress: ")?;
+    let percent: f32 = rest.split('%').next()?.trim().parse().ok()?;
+    let eta = rest.split_once("ETA: ").map_or("--:--:--", |(_, eta)| eta.trim());
+    let text = format!("Installing {percent:.0}% · {:.1} GB downloaded · {eta} left", *downloaded_mib / 1024.0);
+    Some(Progress { fraction: (percent / 100.0).clamp(0.0, 1.0), text })
+}
+
+/// File name of an installed game's main executable (from `list-installed`), to spot it in the process list.
+pub fn executable(game: &Game) -> Result<Option<String>, Error> {
+    let installed = json(&["list-installed", "--json"])?;
+    let exe = installed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|g| g["app_name"] == game.external_id.as_str())
+        .and_then(|g| g["executable"].as_str())
+        .and_then(|exe| Path::new(exe).file_name())
+        .map(|name| name.to_string_lossy().into_owned());
+    Ok(exe)
+}
+
+/// Whether a process named `exe` runs.
+// shortcut: games whose executable is a bootstrapper that hands off to another exe stop counting as running early.
+pub fn is_running(exe: &str) -> bool {
+    super::process_listed(&format!("IMAGENAME eq {exe}"), exe)
 }
 
 pub fn login_state() -> Login {
@@ -215,6 +286,23 @@ mod tests {
         let imported = &all[2];
         assert_eq!(imported.title, "Imported Game");
         assert!(imported.installed);
+    }
+
+    #[test]
+    fn parses_legendary_progress_lines() {
+        let mut mib = 0.0;
+        let progress = "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05";
+        let first = parse_progress(progress, &mut mib).unwrap();
+        assert!((first.fraction - 0.1234).abs() < 1e-6);
+        assert_eq!(first.text, "Installing 12% · 0.0 GB downloaded · 00:01:05 left");
+
+        assert_eq!(parse_progress("[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB", &mut mib), None);
+        assert_eq!(mib, 2048.0);
+        assert_eq!(parse_progress(progress, &mut mib).unwrap().text, "Installing 12% · 2.0 GB downloaded · 00:01:05 left");
+
+        // Other log lines and broken numbers are ignored.
+        assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", &mut mib), None);
+        assert_eq!(parse_progress("= Progress: abc%", &mut mib), None);
     }
 
     #[test]
