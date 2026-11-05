@@ -1,18 +1,17 @@
-//! M0 spike: a manually virtualized cover grid with async, disk-cached thumbnails.
-//!
-//! `LAUNCHER_BENCH=<px/s>` auto-scrolls top to bottom at that speed, prints
-//! frame-time stats and exits.
+//! Library grid: manually virtualized, cached library first, async disk-cached thumbnails.
 
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::Duration;
 
-use iced::widget::scrollable::{AbsoluteOffset, Viewport};
-use iced::widget::{Space, column, container, image, row, scrollable, text};
+use iced::widget::scrollable::Viewport;
+use iced::widget::{Space, center, column, container, image, row, scrollable, text};
 use iced::{ContentFit, Element, Length, Size, Subscription, Task, window};
 
-use crate::cache;
+use crate::cache::{self, Dirs};
+use crate::library::steam::{self, Steam};
+use crate::library::{Game, Provider, ProviderKind};
 
 const CARD_W: f32 = 180.0;
 const CARD_H: f32 = 270.0;
@@ -22,14 +21,14 @@ const ROW_H: f32 = CARD_H + GAP;
 const BUFFER_ROWS: usize = 2;
 /// Handles further than this from the viewport are dropped to bound memory.
 const KEEP_ROWS: usize = 12;
-const GRID: &str = "grid";
 pub const WINDOW: Size = Size::new(1280.0, 800.0);
 
+/// Thumbnail state per game key. Absent means not requested.
 enum Slot {
-    Empty,
     Pending,
     Ready(image::Handle),
-    Failed,
+    /// No art anywhere: the card stays a title card.
+    NoArt,
 }
 
 #[derive(Debug, Clone)]
@@ -37,57 +36,71 @@ pub enum Loaded {
     Ready(image::Handle),
     /// Scrolled out of view before the job started.
     Skipped,
-    Failed,
+    NoArt,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Listed(Vec<PathBuf>),
+    CacheLoaded(Result<Vec<Game>, String>),
+    Refreshed(Result<Vec<Game>, String>),
     Scrolled(Viewport),
     Resized(Size),
-    Thumb(usize, Loaded),
-    Frame(Instant),
+    Thumb(String, Loaded),
 }
 
-struct Bench {
-    speed: f32,
-    last: Option<Instant>,
-    frame_ms: Vec<f32>,
-}
-
-pub struct Spike {
-    covers: Vec<PathBuf>,
-    slots: Vec<Slot>,
-    thumbs_dir: Arc<PathBuf>,
+pub struct App {
+    games: Vec<Game>,
+    slots: HashMap<String, Slot>,
+    dirs: Arc<Dirs>,
+    http: reqwest::Client,
     size: Size,
     offset_y: f32,
-    /// Item range still wanted; queued jobs outside it skip decoding.
-    wanted: Arc<Mutex<Range<usize>>>,
-    bench: Option<Bench>,
+    /// Keys still wanted; queued jobs for other games skip their work.
+    wanted: Arc<Mutex<HashSet<String>>>,
+    /// Shown when there is nothing to list.
+    status: String,
 }
 
-impl Spike {
+impl App {
     pub fn new() -> (Self, Task<Message>) {
-        let dir = std::env::args().nth(1).map_or_else(|| PathBuf::from("covers"), PathBuf::from);
-        let bench = std::env::var("LAUNCHER_BENCH").ok().and_then(|s| s.parse().ok());
-        let spike = Self {
-            covers: Vec::new(),
-            slots: Vec::new(),
-            thumbs_dir: Arc::new(cache::thumbs_dir()),
+        let dirs = Arc::new(Dirs::new());
+        let db = dirs.db.clone();
+        let app = Self {
+            games: Vec::new(),
+            slots: HashMap::new(),
+            dirs,
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .expect("default TLS backend is available"),
             size: WINDOW,
             offset_y: 0.0,
-            wanted: Arc::new(Mutex::new(0..0)),
-            bench: bench.map(|speed| Bench { speed, last: None, frame_ms: Vec::new() }),
+            wanted: Arc::default(),
+            status: "Loading library…".into(),
         };
-        (spike, Task::perform(async move { list_covers(&dir) }, Message::Listed))
+        let load = blocking(move || cache::db::open(&db).and_then(|conn| cache::db::load(&conn)));
+        (app, Task::perform(load, |r| Message::CacheLoaded(r.map_err(|e| e.to_string()))))
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Listed(covers) => {
-                self.slots = covers.iter().map(|_| Slot::Empty).collect();
-                self.covers = covers;
-                self.request_visible()
+            Message::CacheLoaded(cached) => {
+                // Refresh only after the cache is shown, so stale rows can't overwrite fresh ones.
+                let shown = match cached {
+                    Ok(games) => self.set_games(games),
+                    Err(e) => {
+                        eprintln!("library cache: {e}");
+                        Task::none()
+                    }
+                };
+                let db = self.dirs.db.clone();
+                Task::batch([shown, Task::perform(blocking(move || refresh(&db)), Message::Refreshed)])
+            }
+            Message::Refreshed(Ok(games)) => self.set_games(games),
+            Message::Refreshed(Err(e)) => {
+                eprintln!("steam: {e}");
+                self.status = format!("Couldn't read the Steam library: {e}");
+                Task::none()
             }
             Message::Scrolled(viewport) => {
                 self.offset_y = viewport.absolute_offset().y;
@@ -98,37 +111,38 @@ impl Spike {
                 self.size = size;
                 self.request_visible()
             }
-            Message::Thumb(i, loaded) => {
-                self.slots[i] = match loaded {
-                    Loaded::Ready(handle) => Slot::Ready(handle),
-                    Loaded::Failed => Slot::Failed,
+            Message::Thumb(key, loaded) => {
+                match loaded {
+                    Loaded::Ready(handle) => self.slots.insert(key, Slot::Ready(handle)),
+                    Loaded::NoArt => self.slots.insert(key, Slot::NoArt),
                     // May have scrolled back into view while queued.
                     Loaded::Skipped => {
-                        self.slots[i] = Slot::Empty;
+                        self.slots.remove(&key);
                         return self.request_visible();
                     }
                 };
                 Task::none()
             }
-            Message::Frame(at) => self.bench_frame(at),
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        if self.games.is_empty() {
+            return center(text(&self.status)).into();
+        }
         let cols = columns(self.size.width);
-        let rows = self.covers.len().div_ceil(cols);
+        let rows = self.games.len().div_ceil(cols);
         let range = row_range(self.offset_y, self.size.height, rows, BUFFER_ROWS);
 
         // Spacers stand in for unbuilt rows so the scrollbar and offsets stay correct.
         let mut grid = column![Space::new().height(range.start as f32 * ROW_H)];
         for r in range.clone() {
-            let items = r * cols..((r + 1) * cols).min(self.covers.len());
-            grid = grid.push(row(items.map(|i| self.card(i))).spacing(GAP).height(ROW_H));
+            let games = &self.games[r * cols..((r + 1) * cols).min(self.games.len())];
+            grid = grid.push(row(games.iter().map(|g| self.card(g))).spacing(GAP).height(ROW_H));
         }
         grid = grid.push(Space::new().height((rows - range.end) as f32 * ROW_H));
 
         scrollable(grid.padding(GAP))
-            .id(GRID)
             .on_scroll(Message::Scrolled)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -136,127 +150,95 @@ impl Spike {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let resized = window::resize_events().map(|(_, size)| Message::Resized(size));
-        if self.bench.is_some() && !self.covers.is_empty() {
-            Subscription::batch([resized, window::frames().map(Message::Frame)])
-        } else {
-            resized
-        }
+        window::resize_events().map(|(_, size)| Message::Resized(size))
     }
 
-    fn card(&self, i: usize) -> Element<'_, Message> {
-        match &self.slots[i] {
-            Slot::Ready(handle) => image(handle.clone())
-                .width(CARD_W)
-                .height(CARD_H)
-                .content_fit(ContentFit::Cover)
+    fn card<'a>(&self, game: &'a Game) -> Element<'a, Message> {
+        let content: Element<'a, Message> = match self.slots.get(&game.key()) {
+            // Contain: 2:3 covers fill the card, landscape headers sit centered.
+            Some(Slot::Ready(handle)) => image(handle.clone())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(ContentFit::Contain)
                 .into(),
-            slot => container(text(if matches!(slot, Slot::Failed) { "no art" } else { "" }))
-                .center(Length::Fill)
-                .width(CARD_W)
-                .height(CARD_H)
-                .style(container::bordered_box)
-                .into(),
-        }
+            // Title card while loading or when there is no art.
+            _ => center(text(&game.title).size(18).center()).padding(12).into(),
+        };
+        container(content).width(CARD_W).height(CARD_H).style(container::bordered_box).into()
     }
 
-    /// Queues thumbnails for visible rows and drops handles far from the viewport.
+    fn set_games(&mut self, mut games: Vec<Game>) -> Task<Message> {
+        games.sort_by_cached_key(|g| g.title.to_lowercase());
+        self.games = games;
+        self.status = "No installed games found.".into();
+        self.request_visible()
+    }
+
+    /// Queues thumbnails for visible games and drops handles far from the viewport.
     fn request_visible(&mut self) -> Task<Message> {
         let cols = columns(self.size.width);
-        let len = self.covers.len();
+        let len = self.games.len();
         let rows = len.div_ceil(cols);
         let to_items = |r: Range<usize>| r.start * cols..(r.end * cols).min(len);
-        let visible = to_items(row_range(self.offset_y, self.size.height, rows, BUFFER_ROWS));
-        let keep = to_items(row_range(self.offset_y, self.size.height, rows, KEEP_ROWS));
+        let visible = &self.games[to_items(row_range(self.offset_y, self.size.height, rows, BUFFER_ROWS))];
+        let keep: HashSet<String> = self.games[to_items(row_range(self.offset_y, self.size.height, rows, KEEP_ROWS))]
+            .iter()
+            .map(Game::key)
+            .collect();
 
-        *self.wanted.lock().unwrap() = visible.clone();
-        for (i, slot) in self.slots.iter_mut().enumerate() {
-            if matches!(slot, Slot::Ready(_)) && !keep.contains(&i) {
-                *slot = Slot::Empty;
-            }
-        }
+        *self.wanted.lock().unwrap() = visible.iter().map(Game::key).collect();
+        self.slots.retain(|key, slot| !matches!(slot, Slot::Ready(_)) || keep.contains(key));
 
-        let missing: Vec<usize> = visible.filter(|&i| matches!(self.slots[i], Slot::Empty)).collect();
-        Task::batch(missing.into_iter().map(|i| {
-            self.slots[i] = Slot::Pending;
-            let (src, dir, wanted) = (self.covers[i].clone(), self.thumbs_dir.clone(), self.wanted.clone());
-            // shortcut: decodes block the iced thread-pool executor; give them their own pool if M1's network tasks starve.
-            Task::perform(async move { load(i, &src, &dir, &wanted) }, move |l| Message::Thumb(i, l))
+        let missing: Vec<Game> = visible.iter().filter(|g| !self.slots.contains_key(&g.key())).cloned().collect();
+        Task::batch(missing.into_iter().map(|game| {
+            let key = game.key();
+            self.slots.insert(key.clone(), Slot::Pending);
+            let (http, dirs, wanted) = (self.http.clone(), self.dirs.clone(), self.wanted.clone());
+            Task::perform(load_thumb(game, http, dirs, wanted), move |l| Message::Thumb(key.clone(), l))
         }))
-    }
-
-    fn bench_frame(&mut self, at: Instant) -> Task<Message> {
-        let rows = self.covers.len().div_ceil(columns(self.size.width));
-        let bottom = (rows as f32 * ROW_H + 2.0 * GAP - self.size.height).max(0.0);
-        let Some(bench) = &mut self.bench else { return Task::none() };
-
-        let dt = bench.last.map_or(0.0, |last| (at - last).as_secs_f32());
-        if bench.last.is_some() {
-            bench.frame_ms.push(dt * 1000.0);
-        }
-        bench.last = Some(at);
-
-        if self.offset_y >= bottom - 1.0 && !bench.frame_ms.is_empty() {
-            print_stats(&mut bench.frame_ms);
-            return iced::exit();
-        }
-        // At least 1px so the first frame still triggers a redraw.
-        iced::widget::operation::scroll_by(GRID, AbsoluteOffset { x: 0.0, y: (bench.speed * dt).max(1.0) })
     }
 }
 
-fn load(i: usize, src: &Path, dir: &Path, wanted: &Mutex<Range<usize>>) -> Loaded {
-    if !wanted.lock().unwrap().contains(&i) {
+/// Scans the stores and saves the result. A failed save still shows the fresh list.
+fn refresh(db: &std::path::Path) -> Result<Vec<Game>, String> {
+    let games = Steam.list_games().map_err(|e| e.to_string())?;
+    if let Err(e) = cache::db::open(db).and_then(|mut conn| cache::db::replace(&mut conn, ProviderKind::Steam, &games)) {
+        eprintln!("library cache save: {e}");
+    }
+    Ok(games)
+}
+
+async fn load_thumb(game: Game, http: reqwest::Client, dirs: Arc<Dirs>, wanted: Arc<Mutex<HashSet<String>>>) -> Loaded {
+    let key = game.key();
+    if !wanted.lock().unwrap().contains(&key) {
         return Loaded::Skipped;
     }
-    let key = src.file_stem().unwrap_or_default().to_string_lossy();
-    match cache::thumbnail(src, dir, &key) {
+    let Some(src) = steam::cover_source(&game, &http, &dirs.art).await else {
+        return Loaded::NoArt;
+    };
+    // Source name in the key so a later real cover doesn't reuse a header thumbnail.
+    let thumb_key = format!("{key}-{}", src.file_stem().unwrap_or_default().to_string_lossy());
+    let result = blocking(move || cache::thumbnail(&src, &dirs.thumbs, &thumb_key).map_err(|e| (src, e))).await;
+    match result {
         Ok(img) => {
             let (w, h) = img.dimensions();
             Loaded::Ready(image::Handle::from_rgba(w, h, img.into_raw()))
         }
-        Err(e) => {
+        Err((src, e)) => {
             eprintln!("thumbnail {}: {e}", src.display());
-            Loaded::Failed
+            Loaded::NoArt
         }
     }
 }
 
-fn list_covers(dir: &Path) -> Vec<PathBuf> {
-    let mut covers: Vec<PathBuf> = match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .filter_map(|e| Some(e.ok()?.path()))
-            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jpg")))
-            .collect(),
-        Err(e) => {
-            eprintln!("covers dir {}: {e}", dir.display());
-            Vec::new()
-        }
-    };
-    covers.sort();
-    covers
-}
-
-fn print_stats(frame_ms: &mut [f32]) {
-    frame_ms.sort_by(f32::total_cmp);
-    let pct = |p: f32| frame_ms[((frame_ms.len() - 1) as f32 * p) as usize];
-    let median = pct(0.5);
-    let total: f32 = frame_ms.iter().sum();
-    let slow = frame_ms.iter().filter(|&&ms| ms > median * 1.5).count();
-    println!(
-        "frames {} | avg fps {:.1} | p50 {:.2}ms p95 {:.2}ms p99 {:.2}ms max {:.2}ms | >1.5x median: {slow}",
-        frame_ms.len(),
-        frame_ms.len() as f32 / total * 1000.0,
-        median,
-        pct(0.95),
-        pct(0.99),
-        pct(1.0),
-    );
+/// Runs disk or CPU-heavy work on tokio's blocking pool instead of an async worker.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    tokio::task::spawn_blocking(f).await.expect("blocking task panicked")
 }
 
 fn columns(width: f32) -> usize {
-    // 2*GAP padding plus room for the scrollbar.
-    (((width - 2.0 * GAP - 12.0 + GAP) / (CARD_W + GAP)).floor() as usize).max(1)
+    // Left padding plus room for the scrollbar.
+    (((width - GAP - 12.0) / (CARD_W + GAP)).floor() as usize).max(1)
 }
 
 /// Rows intersecting the viewport, widened by `buffer` on each side.
