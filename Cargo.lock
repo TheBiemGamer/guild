@@ -2229,6 +2229,7 @@ dependencies = [
  "rusqlite",
  "steamlocate",
  "tokio",
+ "winreg",
 ]
 
 [[package]]

@@ -57,4 +57,16 @@ impl Game {
 
 pub trait Provider {
     fn list_games(&self) -> Result<Vec<Game>, Error>;
+    /// Asks the store client to start the game; returns once the request is handed off.
+    fn launch(&self, game: &Game) -> Result<(), Error>;
+    /// `external_id` of the game this store reports as running, if any.
+    fn running_game(&self) -> Option<String>;
+}
+
+/// Opens a store URI (`steam://…`) with its registered handler.
+/// explorer.exe hands it to the shell without cmd.exe parsing, so `&` in Epic URIs is safe.
+// shortcut: explorer never reports a missing handler (Windows shows its own dialog); use ShellExecuteW if we need the error in-app.
+pub fn open_uri(uri: &str) -> Result<(), Error> {
+    std::process::Command::new("explorer.exe").arg(uri).spawn()?;
+    Ok(())
 }

@@ -29,6 +29,21 @@ impl Provider for Steam {
         }
         Ok(games)
     }
+
+    /// Starts Steam first if it isn't running.
+    fn launch(&self, game: &Game) -> Result<(), Error> {
+        super::open_uri(&format!("steam://rungameid/{}", game.external_id))
+    }
+
+    fn running_game(&self) -> Option<String> {
+        let key = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam");
+        running_id(key.and_then(|k| k.get_value("RunningAppID")))
+    }
+}
+
+/// Steam writes 0 when nothing runs; a missing key means Steam was never installed for this user.
+fn running_id(raw: std::io::Result<u32>) -> Option<String> {
+    raw.ok().filter(|&id| id != 0).map(|id| id.to_string())
 }
 
 fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
@@ -193,6 +208,13 @@ mod tests {
         assert_eq!(art.cover, Some(dir.join("aaa111/library_capsule.jpg")));
         assert_eq!(art.hero, Some(dir.join("bbb222/library_hero.jpg")));
         assert_eq!(art.header, None);
+    }
+
+    #[test]
+    fn running_id_ignores_zero_and_missing_key() {
+        assert_eq!(running_id(Ok(447040)), Some("447040".into()));
+        assert_eq!(running_id(Ok(0)), None);
+        assert_eq!(running_id(Err(std::io::ErrorKind::NotFound.into())), None);
     }
 
     #[test]
