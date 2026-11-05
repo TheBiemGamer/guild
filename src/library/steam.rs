@@ -1,11 +1,17 @@
 //! Installed Steam games from appmanifests, plus art from Steam's local cache and CDN.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use keyvalues_parser::{Value, Vdf};
 use steamlocate::app::StateFlag;
 use steamlocate::{App, Library, SteamDir};
 
-use super::{Art, Error, Game, Provider, ProviderKind};
+use super::{Art, Error, Game, Progress, Provider, ProviderKind};
+
+/// Playtime in minutes and last played time, per app id.
+type PlayStats = HashMap<u32, (Option<u64>, Option<SystemTime>)>;
 
 /// Shared redistributables Steam installs next to games.
 // shortcut: hard-coded; filtering tools/SDKs properly needs the app "type" from appinfo.vdf, do that when they show up.
@@ -27,6 +33,13 @@ impl Provider for Steam {
                 Err(e) => eprintln!("steam library: {e}"),
             }
         }
+        let stats = play_stats(steam.path());
+        for game in &mut games {
+            if let Some(&(playtime, last_played)) = game.external_id.parse().ok().and_then(|id| stats.get(&id)) {
+                game.playtime_minutes = playtime;
+                game.last_played = last_played;
+            }
+        }
         Ok(games)
     }
 
@@ -35,10 +48,81 @@ impl Provider for Steam {
         super::open_uri(&format!("steam://rungameid/{}", game.external_id))
     }
 
+    /// Steam shows its own install dialog.
+    fn install(&self, game: &Game) -> Result<(), Error> {
+        super::open_uri(&format!("steam://install/{}", game.external_id))
+    }
+
+    /// Steam shows its own confirmation dialog.
+    fn uninstall(&self, game: &Game) -> Result<(), Error> {
+        super::open_uri(&format!("steam://uninstall/{}", game.external_id))
+    }
+
     fn running_game(&self) -> Option<String> {
         let key = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam");
         running_id(key.and_then(|k| k.get_value("RunningAppID")))
     }
+
+    fn download_progress(&self, game: &Game) -> Option<Progress> {
+        let (app, _) = SteamDir::locate().ok()?.find_app(game.external_id.parse().ok()?).ok()??;
+        progress(&app)
+    }
+}
+
+/// Active download progress from an appmanifest; `None` once complete or never started.
+fn progress(app: &App) -> Option<Progress> {
+    let (done, total) = (app.bytes_downloaded?, app.bytes_to_download?);
+    (total > 0 && done < total).then_some(Progress { done, total })
+}
+
+/// Reads the newest `userdata/<account>/config/localconfig.vdf`.
+// shortcut: with several Steam accounts on this PC it follows whoever used Steam last; read loginusers.vdf if that's wrong.
+fn play_stats(steam_root: &Path) -> PlayStats {
+    let newest = std::fs::read_dir(steam_root.join("userdata"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().join("config").join("localconfig.vdf"))
+        .filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p)))
+        .max();
+    let Some((_, path)) = newest else { return PlayStats::new() };
+    match std::fs::read_to_string(&path) {
+        Ok(text) => parse_play_stats(&text),
+        Err(e) => {
+            eprintln!("steam {}: {e}", path.display());
+            PlayStats::new()
+        }
+    }
+}
+
+fn parse_play_stats(text: &str) -> PlayStats {
+    let vdf = match Vdf::parse(text) {
+        Ok(vdf) => vdf,
+        Err(e) => {
+            eprintln!("steam localconfig.vdf: {e}");
+            return PlayStats::new();
+        }
+    };
+    let apps = ["Software", "Valve", "Steam", "apps"].iter().try_fold(&vdf.value, |v, key| child(v, key));
+    let Some(apps) = apps.and_then(Value::get_obj) else { return PlayStats::new() };
+
+    let mut stats = PlayStats::new();
+    for (id, values) in &apps.0 {
+        let (Ok(id), Some(app)) = (id.parse::<u32>(), values.first()) else { continue };
+        let num = |key| child(app, key)?.get_str()?.parse::<u64>().ok();
+        let playtime = num("Playtime");
+        // 0 means "never" in some entries.
+        let last_played = num("LastPlayed").filter(|&s| s > 0).map(|s| UNIX_EPOCH + Duration::from_secs(s));
+        if playtime.is_some() || last_played.is_some() {
+            stats.insert(id, (playtime, last_played));
+        }
+    }
+    stats
+}
+
+/// Child value by key, ignoring case: Steam writes both "apps" and "Apps".
+fn child<'a>(value: &'a Value<'a>, key: &str) -> Option<&'a Value<'a>> {
+    value.get_obj()?.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(key))?.1.first()
 }
 
 /// Steam writes 0 when nothing runs; a missing key means Steam was never installed for this user.
@@ -68,7 +152,7 @@ fn to_game(library: &Library, app: &App, librarycache: &Path) -> Game {
         // Mid-update games keep FullyInstalled; first-time downloads don't have it yet.
         installed: app.state_flags.is_some_and(|f| f.flags().any(|f| f == StateFlag::FullyInstalled)),
         install_dir: Some(library.resolve_app_dir(app)),
-        // shortcut: playtime and last played live in userdata/<user>/config/localconfig.vdf; M3 reads them for sorting.
+        // Filled from localconfig.vdf by list_games.
         playtime_minutes: None,
         last_played: None,
         art: local_art(&librarycache.join(app.app_id.to_string())),
@@ -113,6 +197,20 @@ pub async fn cover_source(game: &Game, http: &reqwest::Client, art_dir: &Path) -
         return Some(header.clone());
     }
     fetch_art(http, &game.external_id, "header.jpg", art_dir).await
+}
+
+/// Hero and logo for the detail view: local first, else CDN, both fetched at once.
+pub async fn hero_and_logo(game: &Game, http: &reqwest::Client, art_dir: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
+    let local_or_cdn = |local: &Option<PathBuf>, file| {
+        let local = local.clone();
+        async move {
+            match local {
+                Some(path) => Some(path),
+                None => fetch_art(http, &game.external_id, file, art_dir).await,
+            }
+        }
+    };
+    iced::futures::join!(local_or_cdn(&game.art.hero, "library_hero.jpg"), local_or_cdn(&game.art.logo, "logo.png"))
 }
 
 /// Downloads `file` for `appid` into `art_dir/<appid>/` unless it is already there.
@@ -208,6 +306,44 @@ mod tests {
         assert_eq!(art.cover, Some(dir.join("aaa111/library_capsule.jpg")));
         assert_eq!(art.hero, Some(dir.join("bbb222/library_hero.jpg")));
         assert_eq!(art.header, None);
+    }
+
+    #[test]
+    fn reads_play_stats_from_newest_localconfig() {
+        let stats = play_stats(&fixtures());
+        let at = |s| Some(UNIX_EPOCH + Duration::from_secs(s));
+        assert_eq!(stats.get(&10), Some(&(Some(903), at(1_785_680_112))));
+        // Playtime only; LastPlayed "0" means never.
+        assert_eq!(stats.get(&30), Some(&(Some(5), None)));
+        // Cloud-only entry with no stats is left out.
+        assert_eq!(stats.get(&7), None);
+    }
+
+    /// Real-world check that this parser copes with a full localconfig.vdf: `cargo test -- --ignored`.
+    #[test]
+    #[ignore = "needs a local Steam install"]
+    fn real_localconfig_parses() {
+        let steam = SteamDir::locate().unwrap();
+        let stats = play_stats(steam.path());
+        eprintln!("{} apps with play stats", stats.len());
+        assert!(!stats.is_empty());
+    }
+
+    #[test]
+    fn broken_localconfig_gives_no_stats() {
+        assert!(parse_play_stats("\"UserLocalConfigStore\" {").is_empty());
+        assert!(parse_play_stats("\"UserLocalConfigStore\" { }").is_empty());
+    }
+
+    #[test]
+    fn progress_only_while_downloading() {
+        let library = Library::from_dir(&fixtures()).unwrap();
+        let app = |id| library.app(id).unwrap().unwrap();
+        assert_eq!(progress(&app(20)), Some(Progress { done: 1_000, total: 4_000 }));
+        // SNUG-style finished manifest: downloaded == to_download.
+        assert_eq!(progress(&app(10)), None);
+        // No byte counters at all.
+        assert_eq!(progress(&app(30)), None);
     }
 
     #[test]

@@ -1,0 +1,37 @@
+"UserLocalConfigStore"
+{
+	"friends"
+	{
+		"PersonaName"		"fixture"
+	}
+	"Software"
+	{
+		"valve"
+		{
+			"Steam"
+			{
+				"Apps"
+				{
+					"7"
+					{
+						"cloud"
+						{
+							"last_sync_state"		"synchronized"
+						}
+					}
+					"10"
+					{
+						"LastPlayed"		"1785680112"
+						"Playtime"		"903"
+						"10_eula_0"		"0"
+					}
+					"30"
+					{
+						"LastPlayed"		"0"
+						"Playtime"		"5"
+					}
+				}
+			}
+		}
+	}
+}

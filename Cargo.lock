@@ -2225,6 +2225,7 @@ dependencies = [
  "directories",
  "iced",
  "image",
+ "keyvalues-parser",
  "reqwest",
  "rusqlite",
  "steamlocate",
