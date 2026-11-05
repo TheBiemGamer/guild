@@ -11,6 +11,69 @@
         ],
         "createdAt": "2026-11-05T20:43:51.919Z",
         "reason": "Claude: <img {src}> uses Svelte shorthand and only renders inside {#if src}, so src is always a real asset URL"
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/visual-style.html"
+        ],
+        "createdAt": "2026-11-05T21:40:00.579Z",
+        "reason": "Claude: throwaway brainstorm mockup; option B deliberately shows a neon-glow direction for the user to accept or reject"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/visual-style.html"
+        ],
+        "createdAt": "2026-11-05T21:40:21.698Z",
+        "reason": "Claude: throwaway brainstorm mockup drawn as scaled-down miniatures of the app; real UI keeps text >= 11px with normal padding"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/visual-style.html"
+        ],
+        "createdAt": "2026-11-05T21:40:22.168Z",
+        "reason": "Claude: throwaway brainstorm mockup drawn as scaled-down miniatures of the app; real UI keeps text >= 11px with normal padding"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/ambient-v2.html"
+        ],
+        "createdAt": "2026-11-05T22:29:19.170Z",
+        "reason": "Claude: throwaway brainstorm mockup already reviewed with the user; the real build sets its own padding"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/game-page.html"
+        ],
+        "createdAt": "2026-11-05T22:29:19.570Z",
+        "reason": "Claude: throwaway brainstorm mockup already reviewed with the user; the real build sets its own padding"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/settings.html"
+        ],
+        "createdAt": "2026-11-05T22:29:19.990Z",
+        "reason": "Claude: throwaway brainstorm mockup already reviewed with the user; the real build sets its own padding"
+      },
+      {
+        "rule": "icon-tile-stack",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/26-1793914734/content/settings.html"
+        ],
+        "createdAt": "2026-11-05T22:29:20.448Z",
+        "reason": "Claude: false positive; the account logo tile sits beside its text in a flex row, not stacked above a heading"
       }
     ]
   }
