@@ -6,8 +6,19 @@ export type Sort = 'title' | 'lastPlayed' | 'playtime'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type Action = 'play' | 'install' | 'uninstall'
 
-export interface Card { key: string; title: string; installed: boolean }
-export interface Library { games: Card[]; total: number; status: string; epic: Login | null }
+export interface Card { key: string; title: string; provider: Store; installed: boolean }
+export interface Library {
+  games: Card[]
+  total: number
+  status: string
+  epic: Login | null
+  /** Epic's state is known and it isn't logged in: the settings button carries a dot. */
+  epicAttention: boolean
+  /** Logged out since the last run: one dismissible banner. */
+  epicNotice: boolean
+}
+/** The game played last; `hero` is ready for an `<img>` or CSS `url()`. */
+export interface Featured { key: string; title: string; hero: string | null }
 export interface Detail {
   key: string
   title: string
@@ -28,6 +39,8 @@ export const act = (action: Action, key: string) => invoke<void>('act', { action
 export const cancelInstall = (key: string) => invoke<void>('cancel_install', { key })
 export const poll = () => invoke<Poll>('poll')
 export const epicLogIn = () => invoke<void>('epic_log_in')
+export const epicLogOut = () => invoke<void>('epic_log_out')
+export const dismissEpicNotice = () => invoke<void>('dismiss_epic_notice')
 export const benchSpeed = () => invoke<number | null>('bench_speed')
 export const benchDone = (frameMs: number[], games: number) => invoke<void>('bench_done', { frameMs, games })
 
@@ -47,6 +60,11 @@ export const cover = (key: string) => {
     covers.set(key, found)
   }
   return found
+}
+
+export const featured = async (): Promise<Featured | null> => {
+  const f = await invoke<Featured | null>('featured')
+  return f && { ...f, hero: url(f.hero) }
 }
 
 export const detailArt = async (key: string) => {

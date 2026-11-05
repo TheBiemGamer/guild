@@ -94,6 +94,7 @@ fn allow(app: &AppHandle, path: PathBuf) -> Option<String> {
 pub struct Card {
     key: String,
     title: String,
+    provider: ProviderKind,
     installed: bool,
 }
 
@@ -120,7 +121,10 @@ pub fn library(
     let s = state.lock();
     let games = view::arrange(&s.games, &query, store, installed_only, sort)
         .into_iter()
-        .map(|i| Card { key: s.games[i].key(), title: s.games[i].title.clone(), installed: s.games[i].installed })
+        .map(|i| {
+            let g = &s.games[i];
+            Card { key: g.key(), title: g.title.clone(), provider: g.provider, installed: g.installed }
+        })
         .collect();
     Library {
         games,

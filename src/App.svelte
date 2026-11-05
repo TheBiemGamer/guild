@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import * as api from './lib/api'
-  import type { Library, Progress, Sort, Store } from './lib/api'
+  import type { Action, Featured, Library, Progress, Sort, Store } from './lib/api'
+  import Ambient from './lib/Ambient.svelte'
+  import Toolbar from './lib/Toolbar.svelte'
+  import Continue from './lib/Continue.svelte'
   import Grid from './lib/Grid.svelte'
   import Detail from './lib/Detail.svelte'
 
@@ -10,14 +13,16 @@
   let sort = $state<Sort>('title')
   let installedOnly = $state(false)
 
-  let lib = $state<Library>({ games: [], total: 0, status: 'Loading library…', epic: null })
+  let lib = $state<Library>({ games: [], total: 0, status: '', epic: null, epicAttention: false, epicNotice: false })
+  let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
   let progress = $state<Record<string, Progress>>({})
   let open = $state<string | null>(null)
   let error = $state<string | null>(null)
-  let epicLoading = $state(false)
   let loggingIn = $state(false)
+  /** The saved library has been read; until then the window stays quiet instead of saying "loading". */
+  let started = $state(false)
   let benchSpeed = $state<number | null>(null)
   /** The benchmark waits for both stores, so it scrolls the whole library. */
   let ready = $state(false)
@@ -27,16 +32,24 @@
     version++
   }
 
+  /** Library and the last-played game together, so the banner and the tint arrive with the grid. */
+  async function reload() {
+    const [, f] = await Promise.all([load(), api.featured()])
+    featured = f
+  }
+
   $effect(() => {
     void [query, store, sort, installedOnly]
     load()
   })
 
-  async function refreshEpic() {
-    epicLoading = true
-    await api.refresh(true)
-    epicLoading = false
-    await load()
+  async function act(action: Action, key: string) {
+    try {
+      await api.act(action, key)
+    } catch (e) {
+      error = api.message(e)
+    }
+    await reload()
   }
 
   async function logIn() {
@@ -48,16 +61,28 @@
       error = `Epic login: ${api.message(e)}`
     }
     loggingIn = false
-    await load()
+    await reload()
+  }
+
+  // shortcut: the settings panel arrives in Task 5; until then the button does the one fix it would offer.
+  function openSettings() {
+    if (lib.epic === 'loggedOut' && !loggingIn) logIn()
+  }
+
+  function dismissNotice() {
+    lib.epicNotice = false
+    api.dismissEpicNotice()
   }
 
   onMount(() => {
-    // Cached library first, then the stores: Steam is quick, Legendary can take a while.
+    // Saved library first, then a quiet rescan: Steam is quick, Legendary can take a while.
     ;(async () => {
       benchSpeed = await api.benchSpeed()
       await api.loadCache().catch((e) => console.error('library cache', e))
-      await load()
-      await refreshEpic()
+      await reload()
+      started = true
+      await api.refresh(true)
+      await reload()
       ready = true
     })()
 
@@ -65,10 +90,10 @@
       const p = await api.poll()
       running = p.running
       progress = p.progress
-      if (p.changed) await load()
+      if (p.changed) await reload()
     }, 2000)
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.
-    const steam = setInterval(() => api.refresh(false).then(load), 60_000)
+    const steam = setInterval(() => api.refresh(false).then(reload), 60_000)
     return () => {
       clearInterval(tick)
       clearInterval(steam)
@@ -76,44 +101,41 @@
   })
 
   const runningTitle = $derived(running ? lib.games.find((g) => g.key === running)?.title : undefined)
+  const showContinue = $derived(featured !== null && query === '')
+  const BANNER_H = 180
+  const LABEL_H = 18
+  const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + LABEL_H)
+  /** The Epic filter with no Epic games at all: say why and offer the fix. */
+  const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
 </script>
 
-<main>
-  <nav class="toolbar">
-    <input class="search" type="search" placeholder="Search {lib.total} games…" bind:value={query} />
-    <select bind:value={store} aria-label="Store">
-      <option value={null}>All stores</option>
-      <option value="steam">Steam</option>
-      <option value="epic">Epic Games</option>
-    </select>
-    <select bind:value={sort} aria-label="Sort by">
-      <option value="title">Title</option>
-      <option value="lastPlayed">Last played</option>
-      <option value="playtime">Playtime</option>
-    </select>
-    <label class="check"><input type="checkbox" bind:checked={installedOnly} /> Installed only</label>
-    <span class="epic">
-      {#if loggingIn}
-        <button class="primary" disabled>Logging in…</button>
-      {:else if epicLoading}
-        <span class="loading">Loading Epic games…</span>
-      {:else if lib.epic === 'loggedOut'}
-        <button class="primary" onclick={logIn}>Log in to Epic</button>
-      {:else if lib.epic === 'noLegendary'}
-        <span class="muted">Install Legendary to add Epic games</span>
-      {:else if lib.epic === 'unreachable'}
-        <span class="muted">Can't reach Epic, showing saved games</span>
-      {/if}
-    </span>
-  </nav>
+<Ambient hero={featured?.hero ?? null} enabled={true} />
 
+<main>
+  <Toolbar
+    bind:query
+    bind:store
+    bind:installedOnly
+    bind:sort
+    total={lib.total}
+    attention={lib.epicAttention}
+    onsettings={openSettings}
+  />
+
+  {#if lib.epicNotice}
+    <div class="notice">
+      <span>You were logged out of Epic Games. Log in again in Settings.</span>
+      <button class="glass" onclick={openSettings}>Settings</button>
+      <button class="close" onclick={dismissNotice} aria-label="Dismiss">✕</button>
+    </div>
+  {/if}
   {#if running}
-    <div class="banner playing">▶ Playing {runningTitle ?? 'a game'}</div>
+    <div class="notice playing"><span class="live"></span>Playing {runningTitle ?? 'a game'}</div>
   {/if}
   {#if error}
-    <div class="banner error">
+    <div class="notice error">
       <span>{error}</span>
-      <button onclick={() => (error = null)} aria-label="Dismiss">✕</button>
+      <button class="close" onclick={() => (error = null)} aria-label="Dismiss">✕</button>
     </div>
   {/if}
 
@@ -125,10 +147,42 @@
         {running}
         {progress}
         onopen={(key) => (open = key)}
+        onplay={(key) => act('play', key)}
+        oninstall={(key) => act('install', key)}
         benchSpeed={ready ? benchSpeed : null}
-      />
-    {:else}
-      <p class="empty">{lib.total > 0 ? 'No games match.' : lib.status}</p>
+        {headerHeight}
+      >
+        {#snippet header()}
+          {#if showContinue && featured}
+            <div style="height: {BANNER_H}px; margin-bottom: 24px">
+              <Continue
+                {featured}
+                running={running === featured.key}
+                onplay={(key) => act('play', key)}
+                onopen={(key) => (open = key)}
+              />
+            </div>
+          {/if}
+          <h2 class="label">
+            {query || store || installedOnly ? 'Results' : 'Library'}
+            <span>{lib.games.length}</span>
+          </h2>
+        {/snippet}
+      </Grid>
+    {:else if epicEmpty && lib.epic === 'noLegendary'}
+      <div class="empty">
+        <p>Legendary isn't installed, so Epic games can't be listed.</p>
+        <small>Install Legendary, then refresh to add your Epic library.</small>
+      </div>
+    {:else if epicEmpty && lib.epic !== 'loggedIn'}
+      <div class="empty">
+        <p>Log in to Epic to see your Epic games</p>
+        <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? 'Logging in…' : 'Log in to Epic'}</button>
+      </div>
+    {:else if started}
+      <div class="empty">
+        <p>{lib.total > 0 ? 'No games match.' : lib.status}</p>
+      </div>
     {/if}
     {#if open}
       <Detail
@@ -138,7 +192,7 @@
         {version}
         onback={() => (open = null)}
         onerror={(m) => (error = m)}
-        onchanged={load}
+        onchanged={reload}
       />
     {/if}
   </div>
@@ -146,77 +200,53 @@
 
 <style>
   main {
+    position: relative;
+    z-index: 1;
     height: 100%;
     display: flex;
     flex-direction: column;
   }
 
-  .toolbar {
+  .notice {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    margin: 0 24px 12px;
+    padding: 8px 8px 8px 16px;
+    min-height: 44px;
+    border-radius: 12px;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-line);
+    color: var(--text);
   }
 
-  .search {
+  .notice > span:first-child {
     flex: 1;
-    max-width: 520px;
-    padding: 9px 14px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--bg);
   }
 
-  select {
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--bg);
+  .notice.playing {
+    gap: 10px;
+    color: var(--text-2);
   }
 
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-    user-select: none;
+  .live {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--play);
   }
 
-  .epic {
-    margin-left: auto;
+  .notice.error {
+    border-color: rgb(239 68 68 / 0.35);
+    color: #fecaca;
   }
 
-  .muted {
-    color: var(--muted);
-  }
-
-  /* Static on purpose: an endless animation kept the page repainting while Epic loads. */
-  .loading {
-    color: var(--accent-2);
-  }
-
-  .banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px;
-  }
-
-  .banner button {
-    padding: 2px 8px;
+  .close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
     background: transparent;
-  }
-
-  .playing {
-    background: rgb(34 197 94 / 0.14);
-    color: #86efac;
-  }
-
-  .error {
-    background: rgb(239 68 68 / 0.14);
-    color: #fca5a5;
+    color: var(--text-2);
   }
 
   .content {
@@ -225,12 +255,44 @@
     min-height: 0;
   }
 
-  .empty {
-    display: grid;
-    place-items: center;
-    height: 100%;
+  .label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    height: 18px;
     margin: 0;
-    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+  }
+
+  .label span {
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    height: 100%;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-2);
+  }
+
+  .empty p {
+    margin: 0;
+    font-size: 16px;
     white-space: pre-line;
+  }
+
+  .empty small {
+    color: var(--text-3);
   }
 </style>

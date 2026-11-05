@@ -1,14 +1,25 @@
 :root {
-  --bg: #0d0f14;
-  --surface: #161a22;
-  --surface-2: #1e2330;
-  --line: #2a3040;
-  --text: #e8ebf2;
-  --muted: #8b93a7;
+  --bg: #0e0e14;
+  --surface: #16161f;
+  --surface-2: #1f1f2a;
+  --line: #2c2c3a;
+  --text: #eef0f6;
+  --text-2: rgb(255 255 255 / 0.75);
+  --text-3: rgb(255 255 255 / 0.5);
+  --muted: #8d90a3;
   --accent: #7c5cff;
   --accent-2: #a48bff;
   --play: #22c55e;
+  --warn: #f5b942;
   --danger: #ef4444;
+  --focus: rgb(255 255 255 / 0.85);
+  /* Ambient chrome: dark translucent glass with a thin light edge. */
+  --glass: rgb(0 0 0 / 0.32);
+  --glass-strong: rgb(10 10 16 / 0.6);
+  --glass-hover: rgb(255 255 255 / 0.09);
+  --glass-line: rgb(255 255 255 / 0.08);
+  --glass-on: rgb(255 255 255 / 0.16);
+  --glass-on-line: rgb(255 255 255 / 0.22);
   --radius: 10px;
   color-scheme: dark;
   font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
@@ -67,8 +78,40 @@ button.primary:hover:not(:disabled) {
   background: var(--accent-2);
 }
 
+/* The primary action: a solid white pill with dark text. */
+button.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 20px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--bg);
+  font-weight: 700;
+}
+
+button.pill:hover:not(:disabled) {
+  background: #e4e6ee;
+}
+
+button.pill.small {
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+button.glass {
+  padding: 6px 14px;
+  background: var(--glass-on);
+  border: 1px solid var(--glass-on-line);
+}
+
+button.glass:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.22);
+}
+
 :focus-visible {
-  outline: 2px solid var(--accent-2);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -77,9 +120,14 @@ button.primary:hover:not(:disabled) {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--line);
+  background: rgb(255 255 255 / 0.14);
   border-radius: 5px;
-  border: 2px solid var(--bg);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 0.24);
 }
 
 @media (prefers-reduced-motion: reduce) {
