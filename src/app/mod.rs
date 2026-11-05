@@ -350,10 +350,8 @@ impl App {
     }
 
     fn set_games(&mut self, games: Vec<Game>) -> Task<Message> {
+        // An open page whose game vanished shows a notice; Back restores the grid's scroll.
         self.games = games;
-        if self.detail.as_ref().is_some_and(|d| self.game(&d.key).is_none()) {
-            self.detail = None; // e.g. uninstalled while its page was open
-        }
         self.shown = arrange(&self.games, &self.query, self.store, self.installed_only, self.sort);
         self.request_visible()
     }
@@ -521,6 +519,31 @@ mod tests {
 
     fn titles(games: &[Game], shown: Vec<usize>) -> Vec<&str> {
         shown.into_iter().map(|i| games[i].title.as_str()).collect()
+    }
+
+    #[test]
+    fn progress_tracks_until_done_and_rescans_once() {
+        let (mut app, _) = App::new();
+        let downloading = game("dl", false, None, None);
+        let installed = game("ok", true, None, None);
+        let (dl, ok) = (downloading.key(), installed.key());
+        app.games = vec![downloading, installed];
+        app.tracked = HashSet::from([dl.clone(), ok.clone()]);
+        let p = Progress { done: 1, total: 4 };
+
+        // Nothing started yet: no rescan, and the not-installed game stays tracked
+        // (the user may still be in Steam's dialog) while the installed one is dropped.
+        let nothing = app.update(Message::Progress(vec![(dl.clone(), None), (ok.clone(), None)]));
+        assert_eq!(nothing.units(), 0);
+        assert_eq!(app.tracked, HashSet::from([dl.clone()]));
+
+        let _ = app.update(Message::Progress(vec![(dl.clone(), Some(p))]));
+        assert_eq!(app.progress.get(&dl), Some(&p));
+
+        // Download finished: progress cleared and a rescan requested.
+        let rescan = app.update(Message::Progress(vec![(dl.clone(), None)]));
+        assert!(app.progress.is_empty());
+        assert_eq!(rescan.units(), 1);
     }
 
     #[test]
