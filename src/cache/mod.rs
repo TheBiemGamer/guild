@@ -16,6 +16,8 @@ pub struct Dirs {
     pub db: PathBuf,
     pub art: PathBuf,
     pub thumbs: PathBuf,
+    /// WebView2 profile for the Epic login window.
+    pub webview: PathBuf,
 }
 
 impl Dirs {
@@ -25,6 +27,7 @@ impl Dirs {
             db: dirs.data_local_dir().join("library-v2.sqlite"),
             art: dirs.cache_dir().join("art"),
             thumbs: dirs.cache_dir().join("thumbs"),
+            webview: dirs.cache_dir().join("webview"),
         }
     }
 }
