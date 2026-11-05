@@ -1,6 +1,7 @@
 //! Library UI state: virtualized grid, detail view, search/filter/sort, launching and installs.
 //! Disk, network and image decoding all run in tasks; `view.rs` only reads state.
 
+mod bench;
 mod view;
 
 use std::cmp::Reverse;
@@ -136,6 +137,8 @@ pub enum Message {
     /// Game key and the launched game's executable name, to watch for its process.
     EpicLaunched(String, Result<Option<String>, String>),
     EpicRunning(bool),
+    /// Benchmark mode only: a rendered frame.
+    Frame(Instant),
     Tick,
     /// Key of the running Steam game.
     Running(Option<String>),
@@ -198,6 +201,7 @@ pub struct App {
     epic_watch: Option<EpicWatch>,
     /// Key of the running Epic game.
     epic_running: Option<String>,
+    bench: Option<bench::Bench>,
 }
 
 impl App {
@@ -235,6 +239,7 @@ impl App {
             confirm_uninstall: None,
             epic_watch: None,
             epic_running: None,
+            bench: bench::Bench::from_env(),
         };
         let load = blocking(move || cache::db::open(&db).and_then(|conn| cache::db::load(&conn)));
         (app, Task::perform(load, |r| Message::CacheLoaded(r.map_err(|e| e.to_string()))))
@@ -464,6 +469,17 @@ impl App {
                 }
                 Task::none()
             }
+            Message::Frame(at) => {
+                let Some(bench) = &mut self.bench else { return Task::none() };
+                let rows = self.shown.len().div_ceil(columns(self.size.width));
+                let bottom = (rows as f32 * ROW_H - self.size.height).max(0.0);
+                if self.offset_y >= bottom - 1.0 && bench.has_frames() {
+                    bench.print(self.shown.len());
+                    return iced::exit();
+                }
+                let dy = bench.frame(at);
+                operation::scroll_by(GRID, AbsoluteOffset { x: 0.0, y: dy })
+            }
             Message::Tick => {
                 let running = blocking(|| {
                     ProviderKind::ALL.into_iter().find_map(|p| p.provider().running_game().map(|id| p.key(&id)))
@@ -512,7 +528,11 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        // Benchmark starts once both stores have loaded, so it scrolls the full library.
+        let bench_ready = self.bench.is_some() && self.epic_login.is_some() && !self.epic_loading && !self.shown.is_empty();
+        let frames = if bench_ready { window::frames().map(Message::Frame) } else { Subscription::none() };
         Subscription::batch([
+            frames,
             window::resize_events().map(|(_, size)| Message::Resized(size)),
             // Registry and one manifest per tracked download: cheap enough every 2 s.
             iced::time::every(Duration::from_secs(2)).map(|_| Message::Tick),
