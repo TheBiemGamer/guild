@@ -35,6 +35,8 @@ struct Shared {
     /// Shown when nothing is listed.
     status: String,
     epic_login: Option<Login>,
+    /// Epic logged out since the last run; shown once until dismissed.
+    epic_notice: bool,
     /// Steam games polled for download progress.
     tracked: HashSet<String>,
     /// Steam (polled) and Epic (streamed) download progress by game key.
@@ -102,6 +104,9 @@ pub struct Library {
     total: usize,
     status: String,
     epic: Option<Login>,
+    /// Epic state is known and isn't logged in.
+    epic_attention: bool,
+    epic_notice: bool,
 }
 
 #[tauri::command]
@@ -117,7 +122,14 @@ pub fn library(
         .into_iter()
         .map(|i| Card { key: s.games[i].key(), title: s.games[i].title.clone(), installed: s.games[i].installed })
         .collect();
-    Library { games, total: s.games.len(), status: s.status.clone(), epic: s.epic_login }
+    Library {
+        games,
+        total: s.games.len(),
+        status: s.status.clone(),
+        epic: s.epic_login,
+        epic_attention: s.epic_login.is_some_and(|l| l != Login::LoggedIn),
+        epic_notice: s.epic_notice,
+    }
 }
 
 /// Fills the library from SQLite so the UI renders before the stores are scanned.
@@ -152,8 +164,9 @@ fn rescan(app: &AppHandle, with_epic: bool) {
     let (results, login) = scan(with_epic);
     let state = app.state::<AppState>();
     let mut s = state.lock();
-    if login.is_some() {
-        s.epic_login = login;
+    if let Some(login) = login {
+        s.epic_login = Some(login);
+        note_epic_login(&state, &mut s, login);
     }
     let mut merged = merge(&s.games, results);
     match cache::db::open(&state.dirs.db).and_then(|c| cache::db::launches(&c)) {
@@ -188,14 +201,46 @@ fn scan(with_epic: bool) -> (ScanResults, Option<Login>) {
         return (results, None);
     }
     let login = epic::login_state();
-    let games = match login {
-        Login::LoggedIn => ProviderKind::Epic.provider().list_games().map_err(|e| e.to_string()),
-        Login::LoggedOut | Login::NoLegendary => Ok(Vec::new()),
-        // Offline or Epic down: an error keeps the last known Epic games.
-        Login::Unreachable => Err("Legendary couldn't reach Epic".into()),
-    };
+    let games = epic_result(login, || ProviderKind::Epic.provider().list_games().map_err(|e| e.to_string()));
     results.push((ProviderKind::Epic, games));
     (results, Some(login))
+}
+
+/// Only a logged-in Epic is listed. Any other state is an `Err`, so `merge` keeps the cached Epic games.
+fn epic_result(login: Login, list: impl FnOnce() -> Result<Vec<Game>, String>) -> Result<Vec<Game>, String> {
+    match login {
+        Login::LoggedIn => list(),
+        Login::LoggedOut => Err("not logged in to Epic".into()),
+        Login::NoLegendary => Err("Legendary isn't installed".into()),
+        Login::Unreachable => Err("Legendary couldn't reach Epic".into()),
+    }
+}
+
+/// True only when Epic went from logged in to logged out between two scans.
+fn logged_out_since_last_run(previous: Option<&str>, now: Login) -> bool {
+    previous == Some("loggedIn") && now == Login::LoggedOut
+}
+
+const EPIC_LAST_LOGIN: &str = "epic_last_login";
+
+/// Compares with the state stored by the last scan, raises the notice on a fresh logout and stores the new state.
+/// `Unreachable` says nothing about the login, so it leaves the stored state alone.
+fn note_epic_login(state: &AppState, s: &mut Shared, login: Login) {
+    let name = match login {
+        Login::LoggedIn => "loggedIn",
+        Login::LoggedOut => "loggedOut",
+        Login::NoLegendary => "noLegendary",
+        Login::Unreachable => return,
+    };
+    let stored = cache::db::open(&state.dirs.db).and_then(|c| {
+        let previous = cache::db::setting(&c, EPIC_LAST_LOGIN)?;
+        cache::db::set_setting(&c, EPIC_LAST_LOGIN, Some(name))?;
+        Ok(previous)
+    });
+    match stored {
+        Ok(previous) => s.epic_notice |= logged_out_since_last_run(previous.as_deref(), login),
+        Err(e) => eprintln!("epic login state: {e}"),
+    }
 }
 
 struct Merged {
@@ -466,6 +511,24 @@ pub async fn epic_log_in(app: AppHandle) -> Res<()> {
     .await
 }
 
+#[tauri::command]
+pub fn dismiss_epic_notice(state: State<'_, AppState>) {
+    state.lock().epic_notice = false;
+}
+
+/// Forgets the Epic login in Legendary, then rescans Epic. Cached Epic games stay.
+#[tauri::command]
+pub async fn epic_log_out(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        epic::log_out().map_err(|e| e.to_string())?;
+        rescan(&app, true);
+        // The user did this; it isn't news.
+        app.state::<AppState>().lock().epic_notice = false;
+        Ok(())
+    })
+    .await
+}
+
 /// `LAUNCHER_BENCH=<px/s>` makes the UI scroll the full library at that speed, then report.
 #[tauri::command]
 pub fn bench_speed() -> Option<f32> {
@@ -501,6 +564,22 @@ mod tests {
         assert_eq!(merged.games, vec![epic_game, fresh]);
         assert_eq!(merged.scanned, vec![ProviderKind::Steam]);
         assert_eq!(merged.errors.len(), 1);
+    }
+
+    #[test]
+    fn epic_result_keeps_cache_when_not_logged_in() {
+        for login in [Login::LoggedOut, Login::NoLegendary, Login::Unreachable] {
+            assert!(epic_result(login, || panic!("must not list")).is_err());
+        }
+        assert_eq!(epic_result(Login::LoggedIn, || Ok(vec![])).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn logged_out_notice_only_on_change() {
+        assert!(logged_out_since_last_run(Some("loggedIn"), Login::LoggedOut));
+        assert!(!logged_out_since_last_run(Some("loggedOut"), Login::LoggedOut));
+        assert!(!logged_out_since_last_run(None, Login::LoggedOut));
+        assert!(!logged_out_since_last_run(Some("loggedIn"), Login::Unreachable));
     }
 
     #[test]

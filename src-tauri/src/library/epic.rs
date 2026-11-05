@@ -159,6 +159,11 @@ pub fn log_in(authorization_code: &str) -> Result<(), Error> {
     run(legendary(&["auth", "--code", authorization_code]))
 }
 
+/// Makes Legendary forget the login.
+pub fn log_out() -> Result<(), Error> {
+    run(legendary(&["auth", "--delete"]))
+}
+
 /// `%LOCALAPPDATA%\Programs\legendary\legendary.exe` if present (no PATH edit needed), else `legendary` on PATH.
 fn legendary_exe() -> PathBuf {
     let local = directories::BaseDirs::new()

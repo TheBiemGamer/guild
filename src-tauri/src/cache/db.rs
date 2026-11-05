@@ -95,15 +95,11 @@ pub fn launches(conn: &Connection) -> Result<HashMap<String, i64>, Error> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-// Consumed by later tasks of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn setting(conn: &Connection, name: &str) -> Result<Option<String>, Error> {
     Ok(conn.query_row("SELECT value FROM settings WHERE name = ?1", [name], |r| r.get(0)).optional()?)
 }
 
 /// Stores `value` under `name`, or removes the setting when `value` is `None`.
-// Consumed by later tasks of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn set_setting(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), Error> {
     match value {
         Some(value) => conn.execute(

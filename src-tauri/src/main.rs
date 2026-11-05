@@ -23,6 +23,8 @@ fn main() {
             commands::cancel_install,
             commands::poll,
             commands::epic_log_in,
+            commands::dismiss_epic_notice,
+            commands::epic_log_out,
             commands::bench_speed,
             commands::bench_done,
         ])
