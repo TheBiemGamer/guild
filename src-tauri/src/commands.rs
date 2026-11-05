@@ -210,11 +210,14 @@ fn scan(with_epic: bool) -> (ScanResults, Option<Login>) {
 fn epic_result(login: Login, list: impl FnOnce() -> Result<Vec<Game>, String>) -> Result<Vec<Game>, String> {
     match login {
         Login::LoggedIn => list(),
-        Login::LoggedOut => Err("not logged in to Epic".into()),
-        Login::NoLegendary => Err("Legendary isn't installed".into()),
-        Login::Unreachable => Err("Legendary couldn't reach Epic".into()),
+        Login::LoggedOut => Err(format!("{EPIC_QUIET}: not logged in")),
+        Login::NoLegendary => Err(format!("{EPIC_QUIET}: Legendary isn't installed")),
+        Login::Unreachable => Err(format!("{EPIC_QUIET}: Legendary couldn't reach Epic")),
     }
 }
+
+/// Prefix of the `Err`s that only keep the cache; `Library::epic_attention` reports them, so they stay out of `status`.
+const EPIC_QUIET: &str = "Epic unavailable";
 
 /// True only when Epic went from logged in to logged out between two scans.
 fn logged_out_since_last_run(previous: Option<&str>, now: Login) -> bool {
@@ -262,7 +265,9 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
             }
             Err(e) => {
                 eprintln!("{}: {e}", provider.name());
-                errors.push(format!("Couldn't read the {} library: {e}", provider.name()));
+                if !(provider == ProviderKind::Epic && e.starts_with(EPIC_QUIET)) {
+                    errors.push(format!("Couldn't read the {} library: {e}", provider.name()));
+                }
                 games.extend(current.iter().filter(|g| g.provider == provider).cloned());
             }
         }
@@ -572,6 +577,19 @@ mod tests {
             assert!(epic_result(login, || panic!("must not list")).is_err());
         }
         assert_eq!(epic_result(Login::LoggedIn, || Ok(vec![])).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn quiet_epic_states_add_no_status_error() {
+        let mut epic_game = game("Fortnite", true, None, None);
+        epic_game.provider = ProviderKind::Epic;
+        for login in [Login::LoggedOut, Login::NoLegendary, Login::Unreachable] {
+            let results = vec![(ProviderKind::Epic, epic_result(login, || panic!("must not list")))];
+            let merged = merge(&[epic_game.clone()], results);
+            assert!(merged.errors.is_empty(), "{login:?}");
+            assert_eq!(merged.games, vec![epic_game.clone()]);
+            assert!(merged.scanned.is_empty());
+        }
     }
 
     #[test]
