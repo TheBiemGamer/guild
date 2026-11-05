@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use iced::widget::scrollable::Viewport;
-use iced::widget::{Space, center, column, container, image, row, scrollable, text};
+use iced::widget::{Space, button, center, column, container, image, row, scrollable, text};
 use iced::{ContentFit, Element, Length, Size, Subscription, Task, window};
 
 use crate::cache::{self, Dirs};
@@ -46,6 +46,12 @@ pub enum Message {
     Scrolled(Viewport),
     Resized(Size),
     Thumb(String, Loaded),
+    /// Game key.
+    Launch(String),
+    Launched(Result<(), String>),
+    PollRunning,
+    /// Key of the running game.
+    Running(Option<String>),
 }
 
 pub struct App {
@@ -59,6 +65,10 @@ pub struct App {
     wanted: Arc<Mutex<HashSet<String>>>,
     /// Shown when there is nothing to list.
     status: String,
+    /// Key of the game the store reports as running.
+    running: Option<String>,
+    /// Last launch error, shown in the top bar.
+    launch_error: Option<String>,
 }
 
 impl App {
@@ -77,6 +87,8 @@ impl App {
             offset_y: 0.0,
             wanted: Arc::default(),
             status: "Loading library…".into(),
+            running: None,
+            launch_error: None,
         };
         let load = blocking(move || cache::db::open(&db).and_then(|conn| cache::db::load(&conn)));
         (app, Task::perform(load, |r| Message::CacheLoaded(r.map_err(|e| e.to_string()))))
@@ -127,6 +139,24 @@ impl App {
                 };
                 Task::none()
             }
+            Message::Launch(key) => {
+                let Some(game) = self.games.iter().find(|g| g.key() == key).cloned() else {
+                    return Task::none();
+                };
+                let launch = blocking(move || Steam.launch(&game).map_err(|e| e.to_string()));
+                Task::perform(launch, Message::Launched)
+            }
+            Message::Launched(result) => {
+                self.launch_error = result.err().map(|e| format!("Couldn't launch: {e}"));
+                Task::none()
+            }
+            Message::PollRunning => Task::perform(blocking(|| Steam.running_game()), |id| {
+                Message::Running(id.map(|id| format!("{}-{id}", ProviderKind::Steam.as_str())))
+            }),
+            Message::Running(key) => {
+                self.running = key;
+                Task::none()
+            }
         }
     }
 
@@ -146,19 +176,33 @@ impl App {
         }
         grid = grid.push(Space::new().height((rows - range.end) as f32 * ROW_H));
 
-        scrollable(grid.padding(GAP))
+        let grid = scrollable(grid.padding(GAP))
             .on_scroll(Message::Scrolled)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+
+        let playing = self.running.as_ref().map(|key| match self.games.iter().find(|g| &g.key() == key) {
+            Some(game) => format!("▶ Playing {}", game.title),
+            // Running but not installed here per our scan (e.g. a game from another library).
+            None => format!("▶ Playing Steam app {}", key.trim_start_matches("steam-")),
+        });
+        // Optional bar is an empty element when absent, so the grid keeps its tree slot and scroll position.
+        let bar = playing.or_else(|| self.launch_error.clone()).map(|bar| container(text(bar)).padding([8.0, GAP]));
+        column![bar, grid].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        window::resize_events().map(|(_, size)| Message::Resized(size))
+        Subscription::batch([
+            window::resize_events().map(|(_, size)| Message::Resized(size)),
+            // Registry read is cheap; 2 s keeps the badge responsive without busy polling.
+            iced::time::every(Duration::from_secs(2)).map(|_| Message::PollRunning),
+        ])
     }
 
     fn card<'a>(&self, game: &'a Game) -> Element<'a, Message> {
-        let content: Element<'a, Message> = match self.slots.get(&game.key()) {
+        let key = game.key();
+        let running = self.running.as_ref() == Some(&key);
+        let content: Element<'a, Message> = match self.slots.get(&key) {
             // Contain: 2:3 covers fill the card, landscape headers sit centered.
             Some(Slot::Ready(handle)) => image(handle.clone())
                 .width(Length::Fill)
@@ -168,7 +212,14 @@ impl App {
             // Title card while loading or when there is no art.
             _ => center(text(&game.title).size(18).center()).padding(12).into(),
         };
-        container(content).width(CARD_W).height(CARD_H).style(container::bordered_box).into()
+        let card = container(content).width(CARD_W).height(CARD_H).style(move |theme| {
+            let mut style = container::bordered_box(theme);
+            if running {
+                style.border = style.border.color(theme.palette().success).width(3);
+            }
+            style
+        });
+        button(card).padding(0).style(button::text).on_press(Message::Launch(key)).into()
     }
 
     fn set_games(&mut self, mut games: Vec<Game>) -> Task<Message> {
