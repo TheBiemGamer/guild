@@ -169,6 +169,7 @@ fn to_game(library: &Library, app: &App, librarycache: &Path) -> Game {
         // Filled from localconfig.vdf by list_games.
         playtime_minutes: None,
         last_played: None,
+        size_bytes: None,
         art: art(app.app_id, &librarycache.join(app.app_id.to_string())),
     }
 }

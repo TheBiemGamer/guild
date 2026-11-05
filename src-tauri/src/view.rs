@@ -77,6 +77,7 @@ pub(crate) mod tests {
             install_dir: None,
             playtime_minutes: playtime,
             last_played: last.map(|s| UNIX_EPOCH + Duration::from_secs(s)),
+            size_bytes: None,
             art: Art::default(),
         }
     }

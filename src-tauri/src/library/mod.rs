@@ -83,6 +83,8 @@ pub struct Game {
     pub install_dir: Option<PathBuf>,
     pub playtime_minutes: Option<u64>,
     pub last_played: Option<SystemTime>,
+    /// Bytes on disk for an installed game; `None` until measured.
+    pub size_bytes: Option<u64>,
     pub art: Art,
 }
 

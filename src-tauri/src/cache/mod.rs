@@ -22,7 +22,7 @@ impl Dirs {
     pub fn new() -> Self {
         let dirs = directories::ProjectDirs::from("", "", "launcher").expect("Windows always has a home dir");
         Self {
-            db: dirs.data_local_dir().join("library-v2.sqlite"),
+            db: dirs.data_local_dir().join("library-v3.sqlite"),
             art: dirs.cache_dir().join("art"),
             thumbs: dirs.cache_dir().join("thumbs"),
         }

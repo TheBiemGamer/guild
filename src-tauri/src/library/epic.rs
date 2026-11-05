@@ -224,6 +224,7 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         // shortcut: Legendary doesn't track playtime or last played.
         playtime_minutes: None,
         last_played: None,
+        size_bytes: None,
         art,
     }
 }
