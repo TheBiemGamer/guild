@@ -98,12 +98,18 @@ pub enum Action {
     Uninstall,
 }
 
+/// One scan result per store.
+pub type ScanResults = Vec<(ProviderKind, Result<Vec<Game>, String>)>;
+
 #[derive(Debug, Clone)]
 pub enum Message {
     CacheLoaded(Result<Vec<Game>, String>),
-    Refresh,
-    /// One scan result per store, plus whether Epic (via Legendary) is usable.
-    Refreshed(Vec<(ProviderKind, Result<Vec<Game>, String>)>, Login),
+    /// Rescan Steam, and Epic too when `epic`: Legendary is slow and online, so it isn't polled.
+    Refresh {
+        epic: bool,
+    },
+    /// One result per scanned store, plus Epic's login state when Epic was scanned.
+    Refreshed(ScanResults, Option<Login>),
     EpicLogIn,
     EpicLoggedIn(Result<(), String>),
     Scrolled(Viewport),
@@ -118,7 +124,8 @@ pub enum Message {
     Back,
     DetailArt(String, Option<image::Handle>, Option<image::Handle>),
     Act(Action, String),
-    Acted(Result<(), String>),
+    /// Request result, and whether Epic must be rescanned (an Epic install or uninstall finished).
+    Acted(Result<(), String>, bool),
     Tick,
     /// Key of the running game.
     Running(Option<String>),
@@ -205,21 +212,11 @@ impl App {
                         Task::none()
                     }
                 };
-                Task::batch([shown, Task::done(Message::Refresh)])
+                Task::batch([shown, Task::done(Message::Refresh { epic: true })])
             }
-            Message::Refresh => {
-                let scan = blocking(|| {
-                    let login = epic::login_state();
-                    let results = ProviderKind::ALL.map(|p| {
-                        // Without a Legendary login there are no Epic games, rather than an error.
-                        let usable = p != ProviderKind::Epic || login == Login::LoggedIn;
-                        let games = if usable { p.provider().list_games().map_err(|e| e.to_string()) } else { Ok(Vec::new()) };
-                        (p, games)
-                    });
-                    (results.to_vec(), login)
-                });
-                Task::perform(scan, |(results, login)| Message::Refreshed(results, login))
-            }
+            Message::Refresh { epic } => Task::perform(blocking(move || scan(epic)), |(results, login)| {
+                Message::Refreshed(results, login)
+            }),
             Message::EpicLogIn => {
                 self.logging_in = true;
                 Task::perform(blocking(epic_log_in), Message::EpicLoggedIn)
@@ -227,11 +224,16 @@ impl App {
             Message::EpicLoggedIn(result) => {
                 self.logging_in = false;
                 self.error = result.err().map(|e| format!("Epic login: {e}"));
-                Task::done(Message::Refresh)
+                Task::done(Message::Refresh { epic: true })
             }
             Message::Refreshed(results, login) => {
-                self.epic_login = Some(login);
-                let (mut games, mut scanned, mut errors) = (Vec::new(), Vec::new(), Vec::new());
+                if login.is_some() {
+                    self.epic_login = login;
+                }
+                // Stores not scanned this time keep their games.
+                let mut games: Vec<Game> =
+                    self.games.iter().filter(|g| results.iter().all(|(p, _)| *p != g.provider)).cloned().collect();
+                let (mut scanned, mut errors) = (Vec::new(), Vec::new());
                 for (provider, result) in results {
                     match result {
                         Ok(list) => {
@@ -327,6 +329,8 @@ impl App {
                 if action == Action::Install {
                     self.tracked.insert(key);
                 }
+                // Epic installs/uninstalls return once Legendary is done; Steam's only open a dialog.
+                let rescan_epic = game.provider == ProviderKind::Epic && action != Action::Play;
                 let request = blocking(move || {
                     let store = game.provider.provider();
                     match action {
@@ -336,11 +340,11 @@ impl App {
                     }
                     .map_err(|e| format!("{} request failed: {e}", game.provider.name()))
                 });
-                Task::perform(request, Message::Acted)
+                Task::perform(request, move |result| Message::Acted(result, rescan_epic))
             }
-            Message::Acted(result) => {
+            Message::Acted(result, rescan_epic) => {
                 self.error = result.err();
-                Task::none()
+                if rescan_epic { Task::done(Message::Refresh { epic: true }) } else { Task::none() }
             }
             Message::Tick => {
                 let running = blocking(|| {
@@ -375,7 +379,8 @@ impl App {
                     }
                 }
                 // A download just completed: rescan so the game shows as installed.
-                if finished { Task::done(Message::Refresh) } else { Task::none() }
+                // Progress only comes from Steam, so only Steam needs the rescan.
+                if finished { Task::done(Message::Refresh { epic: false }) } else { Task::none() }
             }
         }
     }
@@ -386,7 +391,7 @@ impl App {
             // Registry and one manifest per tracked download: cheap enough every 2 s.
             iced::time::every(Duration::from_secs(2)).map(|_| Message::Tick),
             // Picks up installs and uninstalls finished in Steam's own dialogs.
-            iced::time::every(Duration::from_secs(60)).map(|_| Message::Refresh),
+            iced::time::every(Duration::from_secs(60)).map(|_| Message::Refresh { epic: false }),
         ])
     }
 
@@ -430,6 +435,23 @@ impl App {
             Task::perform(load_thumb(game, http, dirs, wanted), move |l| Message::Thumb(key.clone(), l))
         }))
     }
+}
+
+fn scan(with_epic: bool) -> (ScanResults, Option<Login>) {
+    let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string());
+    let mut results = vec![(ProviderKind::Steam, steam)];
+    if !with_epic {
+        return (results, None);
+    }
+    let login = epic::login_state();
+    let games = match login {
+        Login::LoggedIn => ProviderKind::Epic.provider().list_games().map_err(|e| e.to_string()),
+        Login::LoggedOut | Login::NoLegendary => Ok(Vec::new()),
+        // Offline or Epic down: an error keeps the last known Epic games.
+        Login::Unreachable => Err("Legendary couldn't reach Epic".into()),
+    };
+    results.push((ProviderKind::Epic, games));
+    (results, Some(login))
 }
 
 /// Opens our own login window as a child process, then hands its code to Legendary.
@@ -586,6 +608,26 @@ mod tests {
 
     fn titles(games: &[Game], shown: Vec<usize>) -> Vec<&str> {
         shown.into_iter().map(|i| games[i].title.as_str()).collect()
+    }
+
+    #[test]
+    fn refresh_keeps_games_of_stores_not_scanned_or_failed() {
+        let (mut app, _) = App::new();
+        let mut epic_game = game("Fortnite", true, None, None);
+        epic_game.provider = ProviderKind::Epic;
+        app.games = vec![epic_game.clone(), game("old steam", true, None, None)];
+
+        // Timer refresh: Steam only. Epic's game stays, Steam's list is replaced.
+        let fresh = game("new steam", true, None, None);
+        let _ = app.update(Message::Refreshed(vec![(ProviderKind::Steam, Ok(vec![fresh.clone()]))], None));
+        assert_eq!(app.games, vec![epic_game.clone(), fresh.clone()]);
+        assert_eq!(app.epic_login, None);
+
+        // Offline: Epic's scan fails, so its last known games stay.
+        let results = vec![(ProviderKind::Steam, Ok(vec![fresh.clone()])), (ProviderKind::Epic, Err("offline".into()))];
+        let _ = app.update(Message::Refreshed(results, Some(Login::Unreachable)));
+        assert_eq!(app.games, vec![epic_game, fresh]);
+        assert_eq!(app.epic_login, Some(Login::Unreachable));
     }
 
     #[test]

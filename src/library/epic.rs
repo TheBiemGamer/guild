@@ -25,6 +25,8 @@ pub enum Login {
     NoLegendary,
     LoggedOut,
     LoggedIn,
+    /// Legendary ran but couldn't confirm the login, e.g. offline: keep the last known games.
+    Unreachable,
 }
 
 pub struct Epic;
@@ -39,11 +41,14 @@ impl Provider for Epic {
         run(legendary(&["launch", &game.external_id]))
     }
 
+    /// Waits until the download finishes, so the library rescans right after.
     // shortcut: progress shows in Legendary's own console window; parse its output for an in-app bar if needed.
     // shortcut: installs to Legendary's default folder; add `--base-path` when a folder setting exists.
     fn install(&self, game: &Game) -> Result<(), Error> {
-        legendary(&["-y", "install", &game.external_id, "--skip-sdl"]).creation_flags(CREATE_NEW_CONSOLE).spawn()?;
-        Ok(())
+        let mut command = legendary(&["-y", "install", &game.external_id, "--skip-sdl"]);
+        // A visible console replaces the hidden one, so the user can watch and cancel the download.
+        let status = command.creation_flags(CREATE_NEW_CONSOLE).status()?;
+        if status.success() { Ok(()) } else { Err(format!("Legendary install exited with {status}").into()) }
     }
 
     fn uninstall(&self, game: &Game) -> Result<(), Error> {
@@ -67,10 +72,11 @@ pub fn login_state() -> Login {
         Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == ErrorKind::NotFound) => {
             Login::NoLegendary
         }
+        // `status` refreshes the session online and exits 1 when that fails.
+        // shortcut: an expired session also lands here; it needs `legendary auth --delete` before "Log in" shows.
         Err(e) => {
-            // e.g. a refresh token Epic rejected: treat as logged out so the user can log in again.
             eprintln!("legendary status: {e}");
-            Login::LoggedOut
+            Login::Unreachable
         }
     }
 }

@@ -79,6 +79,7 @@ impl App {
                 let label = if self.logging_in { "Logging in…" } else { "Log in to Epic" };
                 button(label).on_press_maybe((!self.logging_in).then_some(Message::EpicLogIn)).into()
             }
+            Some(Login::Unreachable) => text("Epic: can't reach Epic, showing saved games").size(14).into(),
             Some(Login::LoggedIn) | None => Space::new().into(),
         }
     }
