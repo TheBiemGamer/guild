@@ -12,7 +12,7 @@ use iced::{Alignment, ContentFit, Element, Length};
 use super::{
     Action, App, BUFFER_ROWS, CARD_H, CARD_W, Detail, GAP, GRID, Message, ROW_H, Slot, Sort, Store, columns, row_range,
 };
-use crate::library::{Game, Progress};
+use crate::library::{Game, Progress, ProviderKind};
 
 const HERO_H: f32 = 320.0;
 const LOGO_H: f32 = 110.0;
@@ -116,7 +116,8 @@ impl App {
         } else {
             button(text("Install").size(18)).padding([10, 32]).on_press(Message::Act(Action::Install, key.clone()))
         };
-        let uninstall = game.installed.then(|| {
+        // Epic has no known uninstall URI, so only Steam gets the button.
+        let uninstall = (game.installed && game.provider == ProviderKind::Steam).then(|| {
             button("Uninstall").padding([10, 20]).style(button::secondary).on_press(Message::Act(Action::Uninstall, key.clone()))
         });
         let actions = row![primary, uninstall].spacing(12).align_y(Alignment::Center);
