@@ -21,8 +21,8 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let playing = self.running.as_ref().map(|key| match self.game(key) {
             Some(game) => format!("▶ Playing {}", game.title),
-            // Running, but not in our scan (e.g. not installed in a known library).
-            None => format!("▶ Playing Steam app {}", key.trim_start_matches("steam-")),
+            // Running, but not in our scan (e.g. installed in a library we don't see).
+            None => "▶ A game is running".into(),
         });
         // An absent bar is an empty element, so the body keeps its tree slot and scroll position.
         let bar = playing.or_else(|| self.error.clone()).map(|bar| container(text(bar)).padding([8.0, GAP]));

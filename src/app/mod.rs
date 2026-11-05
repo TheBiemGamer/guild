@@ -17,8 +17,7 @@ use iced::widget::image;
 use iced::{Size, Subscription, Task, window};
 
 use crate::cache::{self, Dirs};
-use crate::library::steam::{self, Steam};
-use crate::library::{Game, Progress, Provider, ProviderKind};
+use crate::library::{Game, Progress, ProviderKind};
 
 const CARD_W: f32 = 180.0;
 const CARD_H: f32 = 270.0;
@@ -75,7 +74,7 @@ pub enum Store {
 }
 
 impl Store {
-    const ALL: [Store; 2] = [Store::All, Store::Only(ProviderKind::Steam)];
+    const ALL: [Store; 3] = [Store::All, Store::Only(ProviderKind::Steam), Store::Only(ProviderKind::Epic)];
 
     fn matches(self, provider: ProviderKind) -> bool {
         self == Store::All || self == Store::Only(provider)
@@ -86,7 +85,7 @@ impl fmt::Display for Store {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Store::All => "All stores",
-            Store::Only(ProviderKind::Steam) => "Steam",
+            Store::Only(provider) => provider.name(),
         })
     }
 }
@@ -102,7 +101,8 @@ pub enum Action {
 pub enum Message {
     CacheLoaded(Result<Vec<Game>, String>),
     Refresh,
-    Refreshed(Result<Vec<Game>, String>),
+    /// One scan result per store.
+    Refreshed(Vec<(ProviderKind, Result<Vec<Game>, String>)>),
     Scrolled(Viewport),
     Resized(Size),
     Thumb(String, Loaded),
@@ -199,10 +199,30 @@ impl App {
                 };
                 Task::batch([shown, Task::done(Message::Refresh)])
             }
-            Message::Refresh => Task::perform(blocking(|| Steam.list_games().map_err(|e| e.to_string())), Message::Refreshed),
-            Message::Refreshed(Ok(mut games)) => {
+            Message::Refresh => {
+                let scan = blocking(|| {
+                    ProviderKind::ALL.map(|p| (p, p.provider().list_games().map_err(|e| e.to_string()))).to_vec()
+                });
+                Task::perform(scan, Message::Refreshed)
+            }
+            Message::Refreshed(results) => {
+                let (mut games, mut scanned, mut errors) = (Vec::new(), Vec::new(), Vec::new());
+                for (provider, result) in results {
+                    match result {
+                        Ok(list) => {
+                            scanned.push(provider);
+                            games.extend(list);
+                        }
+                        Err(e) => {
+                            eprintln!("{}: {e}", provider.name());
+                            errors.push(format!("Couldn't read the {} library: {e}", provider.name()));
+                            // A store that failed this time keeps what we last knew.
+                            games.extend(self.games.iter().filter(|g| g.provider == provider).cloned());
+                        }
+                    }
+                }
                 // Only a finished scan may claim the library is empty.
-                self.status = "No installed games found.".into();
+                self.status = if errors.is_empty() { "No installed games found.".into() } else { errors.join("\n") };
                 sort_by_title(&mut games);
                 if games == self.games {
                     return Task::none();
@@ -211,18 +231,14 @@ impl App {
                 self.tracked.extend(games.iter().filter(|g| !g.installed).map(Game::key));
                 let (db, to_save) = (self.dirs.db.clone(), games.clone());
                 let save = blocking(move || {
-                    let saved = cache::db::open(&db)
-                        .and_then(|mut conn| cache::db::replace(&mut conn, ProviderKind::Steam, &to_save));
+                    let saved = cache::db::open(&db).and_then(|mut conn| {
+                        scanned.into_iter().try_for_each(|p| cache::db::replace(&mut conn, p, &to_save))
+                    });
                     if let Err(e) = saved {
                         eprintln!("library cache save: {e}");
                     }
                 });
                 Task::batch([self.set_games(games), Task::future(save).discard()])
-            }
-            Message::Refreshed(Err(e)) => {
-                eprintln!("steam: {e}");
-                self.status = format!("Couldn't read the Steam library: {e}");
-                Task::none()
             }
             Message::Scrolled(viewport) => {
                 self.offset_y = viewport.absolute_offset().y;
@@ -287,28 +303,32 @@ impl App {
                     self.tracked.insert(key);
                 }
                 let request = blocking(move || {
+                    let store = game.provider.provider();
                     match action {
-                        Action::Play => Steam.launch(&game),
-                        Action::Install => Steam.install(&game),
-                        Action::Uninstall => Steam.uninstall(&game),
+                        Action::Play => store.launch(&game),
+                        Action::Install => store.install(&game),
+                        Action::Uninstall => store.uninstall(&game),
                     }
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| format!("{} request failed: {e}", game.provider.name()))
                 });
                 Task::perform(request, Message::Acted)
             }
             Message::Acted(result) => {
-                self.error = result.err().map(|e| format!("Steam request failed: {e}"));
+                self.error = result.err();
                 Task::none()
             }
             Message::Tick => {
-                let running = Task::perform(blocking(|| Steam.running_game()), |id| {
-                    Message::Running(id.map(|id| ProviderKind::Steam.key(&id)))
+                let running = blocking(|| {
+                    ProviderKind::ALL.into_iter().find_map(|p| p.provider().running_game().map(|id| p.key(&id)))
                 });
+                let running = Task::perform(running, Message::Running);
                 let tracked: Vec<Game> = self.games.iter().filter(|g| self.tracked.contains(&g.key())).cloned().collect();
                 if tracked.is_empty() {
                     return running;
                 }
-                let poll = blocking(move || tracked.iter().map(|g| (g.key(), Steam.download_progress(g))).collect());
+                let poll = blocking(move || {
+                    tracked.iter().map(|g| (g.key(), g.provider.provider().download_progress(g))).collect()
+                });
                 Task::batch([running, Task::perform(poll, Message::Progress)])
             }
             Message::Running(key) => {
@@ -416,11 +436,18 @@ async fn load_thumb(game: Game, http: reqwest::Client, dirs: Arc<Dirs>, wanted: 
     if !wanted.lock().unwrap().contains(&key) {
         return Loaded::Skipped;
     }
-    let Some(src) = steam::cover_source(&game, &http, &dirs.art).await else {
-        return Loaded::NoArt;
-    };
-    // Source name in the key so a later real cover doesn't reuse a header thumbnail.
-    let thumb_key = format!("{key}-{}", src.file_stem().unwrap_or_default().to_string_lossy());
+    // Cover first, landscape header as the fallback; each tries its local file, then its URL.
+    let art_dir = dirs.art.join(&key);
+    let mut found = None;
+    for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {
+        if let Some(path) = cache::resolve(image, &http, art_dir.join(slot)).await {
+            found = Some((slot, path));
+            break;
+        }
+    }
+    let Some((slot, src)) = found else { return Loaded::NoArt };
+    // Slot in the key so a cover that shows up later doesn't reuse a header thumbnail.
+    let thumb_key = format!("{key}-{slot}");
     let result = blocking(move || cache::thumbnail(&src, &dirs.thumbs, &thumb_key).map_err(|e| (src, e))).await;
     match result {
         Ok(img) => {
@@ -436,12 +463,16 @@ async fn load_thumb(game: Game, http: reqwest::Client, dirs: Arc<Dirs>, wanted: 
 
 /// Full-size hero and logo for the detail page, decoded off the UI thread.
 async fn load_detail_art(game: Game, http: reqwest::Client, dirs: Arc<Dirs>) -> (Option<image::Handle>, Option<image::Handle>) {
-    let (hero, logo) = steam::hero_and_logo(&game, &http, &dirs.art).await;
+    let art_dir = dirs.art.join(game.key());
+    let (hero, logo) = iced::futures::join!(
+        cache::resolve(&game.art.hero, &http, art_dir.join("hero")),
+        cache::resolve(&game.art.logo, &http, art_dir.join("logo")),
+    );
     blocking(move || (hero.and_then(decode), logo.and_then(decode))).await
 }
 
 fn decode(path: PathBuf) -> Option<image::Handle> {
-    match ::image::open(&path) {
+    match cache::open_image(&path) {
         Ok(img) => {
             let img = img.to_rgba8();
             Some(image::Handle::from_rgba(img.width(), img.height(), img.into_raw()))
