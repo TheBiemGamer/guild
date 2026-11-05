@@ -96,7 +96,7 @@ fn play_stats(steam_root: &Path) -> PlayStats {
 }
 
 fn parse_play_stats(text: &str) -> PlayStats {
-    let vdf = match Vdf::parse(text) {
+    let vdf = match keyvalues_parser::parse(text).map(Vdf::from) {
         Ok(vdf) => vdf,
         Err(e) => {
             eprintln!("steam localconfig.vdf: {e}");
