@@ -159,17 +159,18 @@ fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
 }
 
 fn to_game(library: &Library, app: &App, librarycache: &Path) -> Game {
+    // Mid-update games keep FullyInstalled; first-time downloads don't have it yet.
+    let installed = app.state_flags.is_some_and(|f| f.flags().any(|f| f == StateFlag::FullyInstalled));
     Game {
         provider: ProviderKind::Steam,
         external_id: app.app_id.to_string(),
         title: app.name.clone().unwrap_or_else(|| app.install_dir.clone()),
-        // Mid-update games keep FullyInstalled; first-time downloads don't have it yet.
-        installed: app.state_flags.is_some_and(|f| f.flags().any(|f| f == StateFlag::FullyInstalled)),
+        installed,
         install_dir: Some(library.resolve_app_dir(app)),
         // Filled from localconfig.vdf by list_games.
         playtime_minutes: None,
         last_played: None,
-        size_bytes: None,
+        size_bytes: app.size_on_disk.filter(|_| installed),
         art: art(app.app_id, &librarycache.join(app.app_id.to_string())),
     }
 }
@@ -238,6 +239,7 @@ mod tests {
     #[test]
     fn maps_installed_game() {
         let game = &games()[0];
+        assert_eq!(game.size_bytes, Some(16_521_526));
         assert_eq!(game.title, "Fixture Shooter");
         assert!(game.installed);
         assert_eq!(game.install_dir, Some(fixtures().join("steamapps/common/FixtureShooter")));
@@ -247,6 +249,7 @@ mod tests {
     #[test]
     fn first_download_is_not_installed() {
         assert!(!games()[1].installed);
+        assert_eq!(games()[1].size_bytes, None);
     }
 
     #[test]

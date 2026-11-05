@@ -1,7 +1,8 @@
 //! What the UI shows: search, store filter, sort and display labels. Pure functions, unit tested.
 
 use std::cmp::Reverse;
-use std::time::SystemTime;
+use std::collections::HashMap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
@@ -61,10 +62,31 @@ pub fn last_played_label(last: Option<SystemTime>, now: SystemTime) -> String {
     }
 }
 
+/// Install size: `27.3 GB` (GB = 1024^3), or whole megabytes under 1 GB.
+// Consumed by the game page in a later task of the ambient redesign; drop this allow once wired up.
+#[allow(dead_code)]
+pub fn size_label(bytes: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
+    if bytes < GB { format!("{} MB", bytes / MB) } else { format!("{:.1} GB", bytes as f64 / GB as f64) }
+}
+
+/// Launches made from here count for every store; the later of the store's and ours wins.
+pub fn merge_last_played(games: &mut [Game], launches: &HashMap<String, i64>) {
+    for g in games {
+        let Some(&at) = launches.get(&g.key()) else { continue };
+        let ours = UNIX_EPOCH + Duration::from_secs(at.max(0) as u64);
+        g.last_played = Some(g.last_played.map_or(ours, |theirs| theirs.max(ours)));
+    }
+}
+
+/// The installed game played most recently.
+pub fn featured(games: &[Game]) -> Option<&Game> {
+    games.iter().filter(|g| g.installed && g.last_played.is_some()).max_by_key(|g| g.last_played)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::time::{Duration, UNIX_EPOCH};
-
     use super::*;
     use crate::library::Art;
 
@@ -142,5 +164,28 @@ pub(crate) mod tests {
         assert_eq!(last_played_label(days_ago(800), now), "Last played 2 years ago");
         // Clock moved backwards: treat as today rather than panic.
         assert_eq!(last_played_label(Some(now + Duration::from_secs(60)), now), "Last played today");
+    }
+
+    #[test]
+    fn size_labels() {
+        assert_eq!(size_label(812 * 1024 * 1024), "812 MB");
+        assert_eq!(size_label(27_300 * 1024 * 1024 * 1024 / 1000), "27.3 GB");
+    }
+
+    #[test]
+    fn launches_override_older_last_played() {
+        let mut games = vec![game("a", true, None, Some(100)), game("b", true, None, None)];
+        let launches = HashMap::from([("steam-a".to_string(), 50), ("steam-b".to_string(), 300)]);
+        merge_last_played(&mut games, &launches);
+        assert_eq!(games[0].last_played, Some(UNIX_EPOCH + Duration::from_secs(100)));
+        assert_eq!(games[1].last_played, Some(UNIX_EPOCH + Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn featured_ignores_uninstalled_and_unplayed() {
+        let games =
+            vec![game("old", true, None, Some(10)), game("gone", false, None, Some(99)), game("never", true, None, None)];
+        assert_eq!(featured(&games).map(|g| g.title.as_str()), Some("old"));
+        assert!(featured(&[game("never", true, None, None)]).is_none());
     }
 }

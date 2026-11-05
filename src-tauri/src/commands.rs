@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -125,7 +125,9 @@ pub fn library(
 pub async fn load_cache(app: AppHandle) -> Res<()> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let mut games = cache::db::open(&state.dirs.db).and_then(|c| cache::db::load(&c)).map_err(|e| e.to_string())?;
+        let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
+        let mut games = cache::db::load(&conn).map_err(|e| e.to_string())?;
+        view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(|e| e.to_string())?);
         view::sort_by_title(&mut games);
         let mut s = state.lock();
         // A scan that already finished wins over the cache.
@@ -153,7 +155,11 @@ fn rescan(app: &AppHandle, with_epic: bool) {
     if login.is_some() {
         s.epic_login = login;
     }
-    let merged = merge(&s.games, results);
+    let mut merged = merge(&s.games, results);
+    match cache::db::open(&state.dirs.db).and_then(|c| cache::db::launches(&c)) {
+        Ok(launches) => view::merge_last_played(&mut merged.games, &launches),
+        Err(e) => eprintln!("launch history: {e}"),
+    }
     // Only a finished scan may claim the library is empty.
     s.status = if merged.errors.is_empty() { "No games found.".into() } else { merged.errors.join("\n") };
     if merged.games == s.games {
@@ -242,6 +248,31 @@ pub async fn cover(app: AppHandle, key: String) -> Option<String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Featured {
+    key: String,
+    title: String,
+    hero: Option<String>,
+}
+
+/// The game played last, with its hero art (cover as the fallback) for the library backdrop.
+#[tauri::command]
+pub async fn featured(app: AppHandle) -> Option<Featured> {
+    let state = app.state::<AppState>();
+    let game = view::featured(&state.lock().games)?.clone();
+    let key = game.key();
+    let dir = state.dirs.art.join(&key);
+    let mut hero = None;
+    for (slot, image) in [("hero", &game.art.hero), ("cover", &game.art.cover)] {
+        if let Some(path) = cache::resolve(image, &state.http, dir.join(slot)).await {
+            hero = allow(&app, path);
+            break;
+        }
+    }
+    Some(Featured { key, title: game.title, hero })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Detail {
     key: String,
     title: String,
@@ -302,10 +333,10 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
     let store = game.provider.provider();
     if game.provider == ProviderKind::Steam {
         if action == Action::Install {
-            state.lock().tracked.insert(key);
+            state.lock().tracked.insert(key.clone());
         }
         let result = match action {
-            Action::Play => store.launch(game),
+            Action::Play => store.launch(game).inspect(|()| record_play(&state, &key)),
             Action::Install => store.install(game),
             Action::Uninstall => store.uninstall(game),
         };
@@ -314,6 +345,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
     let result = match action {
         Action::Play => store.launch(game).and_then(|()| epic::executable(game)).map(|exe| {
             state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now() });
+            record_play(&state, &key);
         }),
         Action::Install => {
             let result = epic::install(game, |event| {
@@ -335,6 +367,19 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
         rescan(app, true);
     }
     result.map_err(|e| format!("Epic Games: {e}"))
+}
+
+/// Remembers a launch from here, for every store, so last played survives rescans.
+fn record_play(state: &AppState, key: &str) {
+    let now = SystemTime::now();
+    let secs = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    if let Some(g) = state.lock().games.iter_mut().find(|g| g.key() == key) {
+        g.last_played = Some(now);
+    }
+    let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::record_launch(&c, key, secs as i64));
+    if let Err(e) = saved {
+        eprintln!("record launch: {e}");
+    }
 }
 
 /// Stops a running Epic install; Legendary resumes it next time.

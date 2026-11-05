@@ -224,7 +224,7 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         // shortcut: Legendary doesn't track playtime or last played.
         playtime_minutes: None,
         last_played: None,
-        size_bytes: None,
+        size_bytes: installed.and_then(|l| l["install_size"].as_u64()),
         art,
     }
 }
@@ -273,6 +273,7 @@ mod tests {
 
         let fortnite = &all[0];
         assert!(fortnite.installed);
+        assert_eq!(fortnite.size_bytes, Some(1234));
         assert_eq!(fortnite.install_dir, Some(PathBuf::from(r"C:\Games\Fortnite")));
         assert_eq!(fortnite.key(), "epic-Fortnite");
         assert_eq!(fortnite.art.cover.url.as_deref(), Some("https://cdn1.epicgames.com/tall.jpg"));

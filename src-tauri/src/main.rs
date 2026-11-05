@@ -17,6 +17,7 @@ fn main() {
             commands::refresh,
             commands::cover,
             commands::game,
+            commands::featured,
             commands::detail_art,
             commands::act,
             commands::cancel_install,

@@ -79,8 +79,6 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
 }
 
 /// Records that `key` was launched at `at_secs`, keeping the latest time seen.
-// Consumed by later tasks of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn record_launch(conn: &Connection, key: &str, at_secs: i64) -> Result<(), Error> {
     conn.execute(
         "INSERT INTO launches (key, at) VALUES (?1, ?2)
@@ -91,8 +89,6 @@ pub fn record_launch(conn: &Connection, key: &str, at_secs: i64) -> Result<(), E
 }
 
 /// Latest launch time in seconds for every launched game key.
-// Consumed by later tasks of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn launches(conn: &Connection) -> Result<HashMap<String, i64>, Error> {
     let mut stmt = conn.prepare("SELECT key, at FROM launches")?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
