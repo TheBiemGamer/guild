@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/lib/Card.svelte"
+        ],
+        "createdAt": "2026-11-05T20:43:51.919Z",
+        "reason": "Claude: <img {src}> uses Svelte shorthand and only renders inside {#if src}, so src is always a real asset URL"
+      }
+    ]
+  }
+}
