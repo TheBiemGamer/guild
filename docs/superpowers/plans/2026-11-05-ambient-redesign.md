@@ -6,13 +6,14 @@
 
 **Architecture:** Rust (`src-tauri/src`) keeps all data, network and disk work behind Tauri commands; new modules `settings.rs`, `info.rs` and `igdb.rs` sit next to `commands.rs`, with SQLite (schema v3) caching launches, settings and fetched info. The Svelte frontend (`src/`) is split into focused components: shell (`Ambient`, `Toolbar`, `Continue`), grid (`Card`, `InstallPopup`), `Detail`, and `Settings`.
 
-**Tech Stack:** Tauri 2.12, Svelte 5 + TypeScript 6, Vite 8, Rust (reqwest, rusqlite bundled, serde_json, steamlocate, keyvalues-parser), Legendary 0.21 CLI.
+**Tech Stack:** Tauri 2.12, Svelte 5 + TypeScript 6, Vite 8, Rust (reqwest, rusqlite bundled, serde_json, steamlocate, keyvalues-parser, keyring 4.2 for the IGDB secret), Legendary 0.21 CLI.
 
 **Spec:** `docs/superpowers/specs/2026-11-05-ambient-redesign-design.md` (read it first; mockups in `.superpowers/brainstorm/26-1793914734/content/`: `ambient-v3.html`, `installed-marking-v2.html` option C, `hover-install.html` option B, `game-page.html`, `settings-v2.html`).
 
 ## Global Constraints
 
-- Windows 10/11 only; Tauri 2 + Svelte 5; no new Rust crates or npm packages without the owner's approval (none are expected).
+- Windows 10/11 only; Tauri 2 + Svelte 5; no new Rust crates or npm packages without the owner's approval. Approved: `keyring = { version = "4.2", default-features = false, features = ["windows-native-keyring-store"] }`, for the IGDB Client Secret only.
+- The IGDB Client Secret lives only in Windows Credential Manager (service `dev.noah.gamelauncher`, user `igdb-client-secret`): never in SQLite, files, logs, or the UI (UI shows "Saved ✓" with Replace and Remove).
 - The UI never reads disk or decodes images for display in Rust; local files reach the webview only through `allow(&app, path)` (asset protocol, per file). CSP stays `img-src 'self' asset: http://asset.localhost`, so every remote image is downloaded first (`cache::resolve`).
 - Scrolling must stay at the current level: `LAUNCHER_BENCH` 4000 and 15000 px/s over 613 games: 0 frames slower than 1.5× median.
 - No status text on every start; Epic refresh is silent. No gradient text, no colored glow halos.
@@ -204,13 +205,16 @@ Behavior (from the spec, mockup `ambient-v3.html`):
   `steam::persona_name(steam_root: &Path) -> Option<String>` (`UserLocalConfigStore/friends/PersonaName` from the newest `localconfig.vdf`, same file `play_stats` picks);
   `epic::legendary_version() -> Option<String>` (parses `legendary --version`: `legendary version "0.21.1", codename …` → `"0.21.1"`);
   `epic::install(game, base_path: Option<&Path>, on_event)` passes `--base-path <dir>` when set (verify the flag with `legendary install --help` first);
-  `settings::Settings { show_banner: bool, ambient: bool, epic_install_dir: Option<PathBuf>, igdb_client_id: Option<String>, igdb_secret: Option<String> }` with `load(conn) -> Settings` (defaults: banner and ambient on) and setters through `set_setting`;
+  `settings::Settings { show_banner: bool, ambient: bool, epic_install_dir: Option<PathBuf>, igdb_client_id: Option<String> }` with `load(conn) -> Settings` (defaults: banner and ambient on) and setters through `set_setting`;
+  `settings::secret() -> Option<String>`, `settings::set_secret(value: Option<&str>) -> Result<(), String>` (`None` deletes) on Windows Credential Manager through `keyring` (service `dev.noah.gamelauncher`, user `igdb-client-secret`). keyring 4.x splits stores into separate crates: check docs.rs/keyring/4.2.0 for how the Windows store is selected before writing this;
+  command `set_igdb_secret(app, value: Option<String>) -> Res<()>`; `update_setting` rejects `igdb_secret` (it must go through `set_igdb_secret`);
   command `settings_view(app) -> SettingsView { steam: Option<SteamAccount { name: Option<String>, path: String }>, epic: Option<Login>, epic_games: usize, epic_install_dir: Option<String>, igdb_client_id: Option<String>, igdb_secret_set: bool, show_banner: bool, ambient: bool, app_version: String, legendary_version: Option<String>, cache_bytes: u64 }`;
   command `update_setting(app, name: String, value: Option<String>) -> Res<()>` (rejects unknown names; `epic_install_dir` must be an existing folder);
   command `clear_cache(app) -> Res<()>` (deletes `Dirs::thumbs` and `Dirs::art`, keeps the database).
   Folder entry is a text field with validation (no dialog plugin: that would be a new dependency).
 
-- [ ] **Step 1: Failing tests:** `persona_name` reads `"fixture"` from `tests/fixtures/steam` (`assert_eq!(persona_name(&fixtures()).as_deref(), Some("fixture"))`); `parse_legendary_version("legendary version \"0.21.1\", codename \"Lowlife\"") == Some("0.21.1")`; `settings::load` on an empty db returns `show_banner == true && ambient == true`; `update_setting` with name `"nope"` is rejected (test the validator `settings::validate(name, value) -> Result<(), String>`).
+- [ ] **Step 0:** `cargo add keyring@4.2 --no-default-features --features windows-native-keyring-store` (approved).
+- [ ] **Step 1: Failing tests:** `validate("igdb_secret", Some("x"))` is rejected; an ignored test (`#[ignore = "touches Windows Credential Manager"]`) round-trips `set_secret(Some("test"))` → `secret() == Some("test")` → `set_secret(None)` → `secret() == None` under a test-only user name; `persona_name` reads `"fixture"` from `tests/fixtures/steam` (`assert_eq!(persona_name(&fixtures()).as_deref(), Some("fixture"))`); `parse_legendary_version("legendary version \"0.21.1\", codename \"Lowlife\"") == Some("0.21.1")`; `settings::load` on an empty db returns `show_banner == true && ambient == true`; `update_setting` with name `"nope"` is rejected (test the validator `settings::validate(name, value) -> Result<(), String>`).
 - [ ] **Step 2:** `cargo test` → FAIL.
 - [ ] **Step 3:** Implement backend; build `Settings.svelte` per `settings-v2.html` (frosted panel over the library, sections Accounts, Library, Downloads, Appearance, Game info, Storage, About; Epic row shows state + game count, Reconnect = `epic_log_in`, Log out = `epic_log_out`; Library: Refresh now with last-refreshed time, banner toggle; Appearance: ambient toggle; Game info: IGDB Client ID + Secret fields, link to `https://dev.twitch.tv/console/apps`, Test button (wired in Task 8); About: app and Legendary versions). `App.svelte` reads `settings_view` on start and after every change, and passes `show_banner` to `Continue` and `ambient` to `Ambient`.
 - [ ] **Step 4:** `cargo test`, clippy, `npm run check` → PASS; open the panel in the built app and capture it.
@@ -256,7 +260,7 @@ Behavior (from the spec, mockup `ambient-v3.html`):
 - Modify: `src-tauri/src/commands.rs`, `src-tauri/src/main.rs`, `src/lib/Settings.svelte`, `src/lib/api.ts`
 
 **Interfaces:**
-- Consumes: Task 5 `Settings.igdb_client_id/igdb_secret`; Task 1 info cache (kind `"ttb"`, 30 days for found, 7 days for "not found").
+- Consumes: Task 5 `Settings.igdb_client_id` and `settings::secret()`; Task 1 info cache (kind `"ttb"`, 30 days for found, 7 days for "not found").
 - Produces: `igdb::Token { value: String, expires_at: Instant }`;
   `igdb::TokenCache` in `AppState` (`Mutex<Option<Token>>` plus `failed_until: Option<Instant>` for a 10-minute back-off after a failed token request);
   `async fn igdb::token(http, client_id, secret) -> Result<Token, String>` (POST `https://id.twitch.tv/oauth2/token?client_id=…&client_secret=…&grant_type=client_credentials`; renew 60 s before `expires_in`);

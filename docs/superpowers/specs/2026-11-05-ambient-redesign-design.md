@@ -126,7 +126,11 @@ how big the game is, the store description, how long it takes to beat.
 but only an average-hours-played figure) and HowLongToBeat (unofficial, title-only matching).
 - IGDB is Twitch's official game database. Access needs a free **Twitch developer application**:
   the owner pastes its **Client ID and Client Secret** into Settings (a secret can't ship inside the
-  binary). The app exchanges them for an app access token (client-credentials flow) and renews it
+  binary).
+- **Secret storage (owner's decision):** the Client Secret is kept in **Windows Credential Manager**
+  through the `keyring` crate, never in SQLite or any file of ours. The Client ID is not secret and
+  lives in normal settings. Settings shows the secret only as "Saved ✓" with Replace and Remove,
+  never its value; the app never logs it and only sends it to `id.twitch.tv`. The app exchanges them for an app access token (client-credentials flow) and renews it
   when it expires. No credentials: the tile hides.
 - Match games by store ID, not title: IGDB links games to store pages ("external games"), so a
   Steam app ID maps exactly. Epic should map the same way; **verify** before relying on it, and
@@ -159,7 +163,8 @@ but only an average-hours-played figure) and HowLongToBeat (unofficial, title-on
     Epic games, shows an empty state with a "Log in to Epic" button.
 - **Store descriptions are shown as plain text** (markup stripped, paragraphs kept). No HTML
   sanitizer dependency, and no remote images inside descriptions (the CSP stays as is).
-- **No new dependencies are expected.** The Simple Icons logos are copied in as two SVG files;
+- **One new dependency, approved by the owner: `keyring`** (Windows Credential Manager only), for the
+  IGDB Client Secret. Otherwise none: the Simple Icons logos are copied in as two SVG files, and
   Steam `appdetails` and IGDB are JSON over the existing `reqwest` + `serde_json`.
   Anything beyond that still needs the owner's approval.
 - The ⋯ menu on the game page: Uninstall, Open install folder, Open store page.
