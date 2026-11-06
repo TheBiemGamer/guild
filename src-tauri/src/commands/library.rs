@@ -83,8 +83,10 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         if s.games.is_empty() {
             s.games = games;
         }
+        s.twins = crate::gamesdb::all_cached(&conn, super::unix_now());
         drop(s);
         refresh_owned(app.clone(), false);
+        fill_twins(app.clone());
         Ok(())
     })
     .await
@@ -96,7 +98,76 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
 pub async fn refresh(app: AppHandle, epic: bool, owned: bool) {
     let again = app.clone();
     blocking(move || rescan(&app, epic)).await;
+    fill_twins(again.clone());
     refresh_owned(again, owned);
+}
+
+/// Marks a twin run as running until dropped, even if the task panics or is cancelled.
+struct TwinsRunning(AppHandle);
+
+impl Drop for TwinsRunning {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.0.state::<AppState>().shared.lock() {
+            s.twins_running = false;
+        }
+    }
+}
+
+/// Looks up the Steam twin of every Epic game without a fresh cached answer, one request per
+/// `TWIN_GAP`, in the background. Answers are cached; errors are skipped and retried on a later run.
+/// Only one run at a time. Task 6 regroups the library when twins arrive.
+pub(crate) fn fill_twins(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        {
+            let mut s = state.lock();
+            if s.twins_running {
+                return;
+            }
+            s.twins_running = true;
+        }
+        let _running = TwinsRunning(app.clone());
+        let pending = {
+            let epic: Vec<String> = state
+                .lock()
+                .games
+                .iter()
+                .filter(|g| g.provider == ProviderKind::Epic)
+                .map(|g| g.external_id.clone())
+                .collect();
+            let Some(conn) = open_db(&state) else { return };
+            let now = super::unix_now();
+            let mut todo = Vec::new();
+            let mut known = HashMap::new();
+            for app_name in epic {
+                let key = format!("epic-{app_name}");
+                match crate::gamesdb::cached(&conn, &key, now) {
+                    Some(Some(id)) => _ = known.insert(key, id),
+                    Some(None) => {}
+                    None => todo.push(app_name),
+                }
+            }
+            state.lock().twins.extend(known);
+            todo
+        };
+        for (i, app_name) in pending.iter().enumerate() {
+            if i > 0 {
+                tokio::time::sleep(crate::gamesdb::TWIN_GAP).await;
+            }
+            match crate::gamesdb::look_up(&state.http, app_name).await {
+                Ok(twin) => {
+                    let key = format!("epic-{app_name}");
+                    if let Some(conn) = open_db(&state) {
+                        crate::gamesdb::remember(&conn, &key, twin, super::unix_now());
+                    }
+                    if let Some(id) = twin {
+                        state.lock().twins.insert(key, id);
+                    }
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+    });
 }
 
 /// Fetches the owned Steam games in the background when there is a saved login and the cached list is

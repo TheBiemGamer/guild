@@ -5,6 +5,7 @@ mod bench;
 mod cache;
 mod commands;
 mod epic_login;
+mod gamesdb;
 mod igdb;
 mod info;
 mod library;

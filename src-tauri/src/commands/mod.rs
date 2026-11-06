@@ -59,6 +59,10 @@ struct Shared {
     owned_running: bool,
     /// The library changed outside a UI call (owned games arrived); the next poll reports it.
     library_changed: bool,
+    /// Steam twin (app id) of an Epic game, by Epic game key.
+    twins: HashMap<String, u32>,
+    /// A twin lookup run is in flight.
+    twins_running: bool,
 }
 
 /// An Epic game launched from here, watched through its process.
