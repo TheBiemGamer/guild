@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 directories = "6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-keyring = { version = "4.2", default-features = false, features = ["v1", "windows-native-keyring-store"] }
+keyring-core = "1"
 keyvalues-parser = "0.2"
 reqwest = "0.13"
 rusqlite = { version = "0.41", features = ["bundled"] }
@@ -15,6 +15,7 @@ serde_json = "1"
 steamlocate = "2.1"
 tauri = { version = "2", features = ["protocol-asset"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
+windows-native-keyring-store = { version = "1.1", default-features = false }
 winreg = "0.56"
 
 [build-dependencies]

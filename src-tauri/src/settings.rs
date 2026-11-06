@@ -68,14 +68,21 @@ pub fn set_secret(value: Option<&str>) -> Result<(), String> {
     write(SECRET_USER, value)
 }
 
-fn entry(user: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, user).map_err(|e| format!("Credential Manager: {e}"))
+/// Windows Credential Manager, registered once as keyring-core's default store.
+fn entry(user: &str) -> Result<keyring_core::Entry, String> {
+    static STORE: std::sync::LazyLock<Result<(), String>> = std::sync::LazyLock::new(|| {
+        let store = windows_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
+        keyring_core::set_default_store(store);
+        Ok(())
+    });
+    STORE.clone().map_err(|e| format!("Credential Manager: {e}"))?;
+    keyring_core::Entry::new(SERVICE, user).map_err(|e| format!("Credential Manager: {e}"))
 }
 
 fn read(user: &str) -> Option<String> {
     match entry(user).ok()?.get_password() {
         Ok(secret) => Some(secret),
-        Err(keyring::Error::NoEntry) => None,
+        Err(keyring_core::Error::NoEntry) => None,
         Err(e) => {
             eprintln!("credential manager read: {e}");
             None
@@ -90,7 +97,7 @@ fn write(user: &str, value: Option<&str>) -> Result<(), String> {
         None => entry.delete_credential(),
     };
     match result {
-        Err(keyring::Error::NoEntry) if value.is_none() => Ok(()),
+        Err(keyring_core::Error::NoEntry) if value.is_none() => Ok(()),
         other => other.map_err(|e| format!("Credential Manager: {e}")),
     }
 }
