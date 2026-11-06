@@ -66,6 +66,11 @@ export const gameInfo = async (key: string) => {
   const info = await invoke<GameInfo | null>('game_info', { key })
   return info && { ...info, screenshots: info.screenshots.flatMap((p) => url(p) ?? []) }
 }
+/** How long to beat from IGDB, as labels like "32 h". Null: no credentials, an Epic game, or IGDB doesn't know it. */
+export type TimeToBeat = { normally: string | null; hastily: string | null; completely: string | null }
+export const timeToBeat = (key: string) => invoke<TimeToBeat | null>('time_to_beat', { key })
+/** Settings "Test": resolves when Twitch and IGDB accept the saved credentials, else rejects with the reason. */
+export const testIgdb = () => invoke<void>('test_igdb')
 export const cancelInstall = (key: string) => invoke<void>('cancel_install', { key })
 export const poll = () => invoke<Poll>('poll')
 export const epicLogIn = () => invoke<void>('epic_log_in')

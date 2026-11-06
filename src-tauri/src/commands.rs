@@ -14,6 +14,7 @@ use crate::library::epic::{self, InstallEvent, Login};
 use crate::library::{Game, Image, Progress, ProviderKind};
 use crate::view::{self, Sort};
 use crate::library::steam;
+use crate::igdb;
 use crate::info::{self, GameInfoView};
 use crate::{bench, epic_login, settings};
 
@@ -28,6 +29,8 @@ pub struct AppState {
     http: reqwest::Client,
     shared: Mutex<Shared>,
     cover_jobs: tokio::sync::Semaphore,
+    /// Twitch app access token for IGDB. Never held across a network call.
+    igdb: Mutex<igdb::TokenCache>,
 }
 
 #[derive(Default)]
@@ -67,6 +70,7 @@ impl AppState {
                 .expect("default TLS backend is available"),
             shared: Mutex::new(Shared { status: "Loading library…".into(), ..Shared::default() }),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
+            igdb: Mutex::new(igdb::TokenCache::default()),
         }
     }
 
@@ -509,6 +513,100 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
     Some(details)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeToBeatView {
+    normally: Option<String>,
+    hastily: Option<String>,
+    completely: Option<String>,
+}
+
+fn time_to_beat_view(t: igdb::TimeToBeat) -> Option<TimeToBeatView> {
+    let label = |secs: Option<u64>| secs.filter(|&s| s > 0).map(view::hours_label);
+    let shown = TimeToBeatView { normally: label(t.normally), hastily: label(t.hastily), completely: label(t.completely) };
+    (shown.normally.is_some() || shown.hastily.is_some() || shown.completely.is_some()).then_some(shown)
+}
+
+async fn look_up_time_to_beat(
+    state: &AppState,
+    client_id: &str,
+    secret: &str,
+    game: &Game,
+) -> Res<Option<igdb::TimeToBeat>> {
+    let token = igdb::cached_token(&state.igdb, &state.http, client_id, secret).await?;
+    let Some(id) = igdb::game_id(&state.http, &token, client_id, game.provider, &game.external_id).await? else {
+        return Ok(None);
+    };
+    igdb::time_to_beat(&state.http, &token, client_id, id).await
+}
+
+/// How long to beat, from IGDB, matched by Steam app ID (Epic games have no usable IGDB ID, so
+/// they get `None`). `None` too without saved credentials or when IGDB doesn't know the game.
+/// Cached 30 days when found, 7 when not; a failed request is not cached.
+// Attribution: IGDB asks for visible credit where its data is shown (a small "Data from IGDB"
+// link next to the tile). The game page tile is built in Task 9, which must add it.
+#[tauri::command]
+pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView> {
+    let state = app.state::<AppState>();
+    let game = state.game(&key).filter(|g| igdb::can_match(g.provider))?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let (cached, credentials) = {
+        let (app, key) = (app.clone(), key.clone());
+        blocking(move || {
+            let conn = open_db(&app.state::<AppState>());
+            let cached = conn.as_ref().and_then(|c| igdb::cached(c, &key, now));
+            if cached.is_some() {
+                return (cached, None);
+            }
+            let client_id = conn.and_then(|c| settings::load(&c).igdb_client_id);
+            (None, client_id.zip(settings::secret()))
+        })
+        .await
+    };
+    if let Some(answer) = cached {
+        return answer.and_then(time_to_beat_view);
+    }
+    let (client_id, secret) = credentials?;
+    let answer = match look_up_time_to_beat(&state, &client_id, &secret, &game).await {
+        Ok(answer) => answer,
+        Err(e) => {
+            eprintln!("how long to beat {key}: {e}");
+            return None;
+        }
+    };
+    {
+        let (app, key) = (app.clone(), key.clone());
+        blocking(move || {
+            if let Some(conn) = open_db(&app.state::<AppState>()) {
+                igdb::remember(&conn, &key, answer, now);
+            }
+        })
+        .await;
+    }
+    answer.and_then(time_to_beat_view)
+}
+
+/// Settings "Test": gets a token with the saved credentials and looks up Steam app 447040.
+/// Errors say what Twitch or IGDB answered and never contain the secret.
+#[tauri::command]
+pub async fn test_igdb(app: AppHandle) -> Res<()> {
+    let state = app.state::<AppState>();
+    let (client_id, secret) = {
+        let app = app.clone();
+        blocking(move || {
+            let conn = cache::db::open(&app.state::<AppState>().dirs.db).map_err(|e| e.to_string())?;
+            let client_id = settings::load(&conn).igdb_client_id.ok_or("Enter the Client ID first.")?;
+            let secret = settings::secret().ok_or("Save the Client Secret first.")?;
+            Ok::<_, String>((client_id, secret))
+        })
+        .await?
+    };
+    let token = igdb::token(&state.http, &client_id, &secret).await?;
+    state.igdb.lock().expect("token cache lock poisoned").store(token.clone());
+    igdb::game_id(&state.http, &token, &client_id, ProviderKind::Steam, "447040").await?;
+    Ok(())
+}
+
 /// Remembers a launch from here, for every store, so last played survives rescans.
 fn record_play(state: &AppState, key: &str) {
     let now = SystemTime::now();
@@ -702,17 +800,24 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
     blocking(move || {
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
-        settings::update(&conn, &name, value.as_deref())
+        settings::update(&conn, &name, value.as_deref())?;
+        if name == settings::IGDB_CLIENT_ID {
+            state.igdb.lock().expect("token cache lock poisoned").reset();
+        }
+        Ok(())
     })
     .await
 }
 
 /// Saves the IGDB Client Secret in Credential Manager, or removes it for `None`.
 #[tauri::command]
-pub async fn set_igdb_secret(value: Option<String>) -> Res<()> {
+pub async fn set_igdb_secret(app: AppHandle, value: Option<String>) -> Res<()> {
     blocking(move || {
         let value = value.as_deref().map(str::trim).filter(|v| !v.is_empty());
-        settings::set_secret(value)
+        settings::set_secret(value)?;
+        // A new secret deserves a fresh token request, even right after a failed one.
+        app.state::<AppState>().igdb.lock().expect("token cache lock poisoned").reset();
+        Ok(())
     })
     .await
 }

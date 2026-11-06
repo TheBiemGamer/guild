@@ -71,6 +71,11 @@ pub fn size_label(bytes: u64) -> String {
     if bytes < GB { format!("{} MB", bytes / MB) } else { format!("{:.1} GB", bytes as f64 / GB as f64) }
 }
 
+/// Time to beat: `32 h` (nearest hour), or `45 min` under an hour.
+pub fn hours_label(secs: u64) -> String {
+    if secs < 3600 { format!("{} min", secs / 60) } else { format!("{} h", (secs + 1800) / 3600) }
+}
+
 /// Launches made from here count for every store; the later of the store's and ours wins.
 pub fn merge_last_played(games: &mut [Game], launches: &HashMap<String, i64>) {
     for g in games {
@@ -170,6 +175,13 @@ pub(crate) mod tests {
     fn size_labels() {
         assert_eq!(size_label(812 * 1024 * 1024), "812 MB");
         assert_eq!(size_label(27_300 * 1024 * 1024 * 1024 / 1000), "27.3 GB");
+    }
+
+    #[test]
+    fn hours_labels() {
+        assert_eq!(hours_label(115_200), "32 h");
+        assert_eq!(hours_label(2_700), "45 min");
+        assert_eq!(hours_label(5_400), "2 h");
     }
 
     #[test]

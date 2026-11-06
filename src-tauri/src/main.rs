@@ -5,6 +5,7 @@ mod bench;
 mod cache;
 mod commands;
 mod epic_login;
+mod igdb;
 mod info;
 mod library;
 mod settings;
@@ -24,6 +25,8 @@ fn main() {
             commands::act,
             commands::download_size,
             commands::game_info,
+            commands::time_to_beat,
+            commands::test_igdb,
             commands::cancel_install,
             commands::poll,
             commands::epic_log_in,

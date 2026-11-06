@@ -78,6 +78,22 @@
     }
   }
 
+  let testing = $state(false)
+  let testPassed = $state(false)
+
+  async function testIgdb() {
+    error = null
+    testPassed = false
+    testing = true
+    try {
+      await api.testIgdb()
+      testPassed = true
+    } catch (e) {
+      error = api.message(e)
+    }
+    testing = false
+  }
+
   const removeSecret = () => change(() => api.setIgdbSecret(null))
   const logOut = () => change(() => api.epicLogOut())
   const clearCache = () => change(() => api.clearCache())
@@ -299,8 +315,15 @@
           <small class="hint">Kept in Windows Credential Manager, not in the app's files.</small>
         </div>
         <div class="row">
-          <div>Test the credentials<span>Checks that Twitch accepts them.</span></div>
-          <button class="btn" disabled title="Not available yet">Test</button>
+          <div>
+            Test the credentials
+            <span class:ok={testPassed}>
+              {testPassed ? 'OK: Twitch and IGDB accepted them.' : 'Checks that Twitch accepts them.'}
+            </span>
+          </div>
+          <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
+            {testing ? 'Testing…' : 'Test'}
+          </button>
         </div>
       </section>
 
@@ -536,6 +559,10 @@
 
   .saved {
     flex: 1;
+    color: #4ade80;
+  }
+
+  span.ok {
     color: #4ade80;
   }
 
