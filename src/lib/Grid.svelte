@@ -7,6 +7,7 @@
     games: Card[]
     /** Changes when search, filters or sort change; background reloads keep the scroll position. */
     resetKey: string
+    /** Copy keys, as `poll` reports them. */
     running: string | null
     progress: Record<string, Progress>
     onopen: (key: string) => void
@@ -88,8 +89,8 @@
       >
         <CardView
           {game}
-          running={running === game.key}
-          progress={progress[game.key]}
+          running={running !== null && game.copyKeys.includes(running)}
+          progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
           {onopen}
           {onplay}
           {oninstall}

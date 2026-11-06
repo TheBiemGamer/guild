@@ -6,8 +6,11 @@ export type Sort = 'title' | 'lastPlayed' | 'playtime'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type Action = 'play' | 'install' | 'uninstall'
 
-/** `stores`: every store this game is in, the one `key` belongs to first. */
-export interface Card { key: string; title: string; stores: Store[]; installed: boolean }
+/**
+ * `stores`: every store this game is in, the one `key` belongs to first. `chosen`: the copy key Play and
+ * Install use. `copyKeys`: every copy's key, which running state and install progress are reported under.
+ */
+export interface Card { key: string; chosen: string; copyKeys: string[]; title: string; stores: Store[]; installed: boolean }
 export interface Library {
   games: Card[]
   total: number
@@ -20,8 +23,8 @@ export interface Library {
   /** Logged out since the last run: one dismissible banner. */
   epicNotice: boolean
 }
-/** The game played last; `hero` is ready for an `<img>` or CSS `url()`. */
-export interface Featured { key: string; title: string; hero: string | null }
+/** The game played last; `hero` is ready for an `<img>` or CSS `url()`. `chosen` and `copyKeys` as on `Card`. */
+export interface Featured { key: string; chosen: string; copyKeys: string[]; title: string; hero: string | null }
 /** One store's copy of a game. */
 export interface CopyView {
   key: string

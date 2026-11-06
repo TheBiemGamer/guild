@@ -19,7 +19,7 @@
   <div class="text">
     <small>Continue playing</small>
     <h2>{featured.title}</h2>
-    <button class="pill" disabled={running} onclick={() => onplay(featured.key)}>
+    <button class="pill" disabled={running} onclick={() => onplay(featured.chosen)}>
       {#if running}
         Playing
       {:else}

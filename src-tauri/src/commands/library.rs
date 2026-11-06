@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager, State};
 use super::{allow, blocking, open_db, regroup, AppState, Res, Shared};
 use crate::bench;
 use crate::cache;
-use crate::entries;
+use crate::entries::{self, Entry};
 use crate::library::epic::{self, Login};
 use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
@@ -24,9 +24,29 @@ const EPIC_START_GRACE: Duration = Duration::from_secs(30);
 #[serde(rename_all = "camelCase")]
 pub struct Card {
     key: String,
+    /// The copy key Play and Install use (`entries::default_copy`).
+    chosen: String,
+    /// Every copy's key, for matching running state and install progress.
+    copy_keys: Vec<String>,
     title: String,
     stores: Vec<ProviderKind>,
     installed: bool,
+}
+
+/// The key of the copy Play and Install use.
+fn chosen(e: &Entry, games: &[Game]) -> String {
+    games[entries::default_copy(e, games)].key()
+}
+
+fn card(e: &Entry, games: &[Game]) -> Card {
+    Card {
+        key: e.key.clone(),
+        chosen: chosen(e, games),
+        copy_keys: e.copies.iter().map(|&i| games[i].key()).collect(),
+        title: games[e.copies[0]].title.clone(),
+        stores: entries::stores(e, games),
+        installed: entries::installed(e, games),
+    }
 }
 
 #[derive(Serialize)]
@@ -54,15 +74,7 @@ pub fn library(
     let s = state.lock();
     let games = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort)
         .into_iter()
-        .map(|i| {
-            let e = &s.entries[i];
-            Card {
-                key: e.key.clone(),
-                title: s.games[e.copies[0]].title.clone(),
-                stores: entries::stores(e, &s.games),
-                installed: entries::installed(e, &s.games),
-            }
-        })
+        .map(|i| card(&s.entries[i], &s.games))
         .collect();
     Library {
         games,
@@ -465,6 +477,9 @@ pub async fn cover(app: AppHandle, key: String) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 pub struct Featured {
     key: String,
+    /// The copy key Play uses.
+    chosen: String,
+    copy_keys: Vec<String>,
     title: String,
     hero: Option<String>,
 }
@@ -473,10 +488,9 @@ pub struct Featured {
 #[tauri::command]
 pub async fn featured(app: AppHandle) -> Option<Featured> {
     let state = app.state::<AppState>();
-    let (key, game) = {
+    let (card, game) = {
         let s = state.lock();
-        let e = view::featured(&s.games, &s.entries)?;
-        (e.key.clone(), s.games[e.copies[0]].clone())
+        featured_pick(&s.games, &s.entries)?
     };
     let dir = state.dirs.art.join(game.key());
     let mut hero = None;
@@ -486,7 +500,13 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
             break;
         }
     }
-    Some(Featured { key, title: game.title, hero })
+    Some(Featured { key: card.key, chosen: card.chosen, copy_keys: card.copy_keys, title: card.title, hero })
+}
+
+/// The featured entry as a card, and its first copy (for the art).
+fn featured_pick(games: &[Game], entries: &[Entry]) -> Option<(Card, Game)> {
+    let e = view::featured(games, entries)?;
+    Some((card(e, games), games[e.copies[0]].clone()))
 }
 
 #[derive(Serialize)]
@@ -582,6 +602,25 @@ mod tests {
         cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, Some("noah")).unwrap();
         assert!(remember_if_connected(&conn, &owned, 100));
         assert!(steam_owned::cached(&conn).is_some());
+    }
+
+    #[test]
+    fn card_and_featured_play_the_only_installed_copy() {
+        let steam = Game { external_id: "635320".into(), ..game("Pumpkin Jack", false, None, Some(100)) };
+        let epic = Game {
+            provider: ProviderKind::Epic,
+            external_id: "Pumpkin".into(),
+            ..game("Pumpkin Jack", true, None, Some(50))
+        };
+        let games = vec![epic, steam];
+        let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let c = card(&entries[0], &games);
+        assert_eq!(c.key, "steam-635320");
+        assert_eq!(c.chosen, "epic-Pumpkin");
+        assert_eq!(c.copy_keys, ["steam-635320", "epic-Pumpkin"]);
+        let (f, _) = featured_pick(&games, &entries).unwrap();
+        assert_eq!(f.key, "steam-635320");
+        assert_eq!(f.chosen, "epic-Pumpkin");
     }
 
     #[test]

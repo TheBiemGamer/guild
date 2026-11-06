@@ -13,7 +13,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Card, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
+  import type { Action, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -64,14 +64,19 @@
     load()
   })
 
-  /** The Epic game whose install is being confirmed, and its cover's rectangle. */
-  let confirming = $state<{ game: Card; anchor: DOMRect } | null>(null)
+  /** The Epic copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
+  let confirming = $state<{ game: { key: string; title: string }; anchor: DOMRect; go: () => void } | null>(null)
 
-  /** Steam installs in its own dialog; Epic asks here first, with size and folder. */
+  /** Steam installs in its own dialog; an Epic copy asks here first, with size and folder. */
+  function confirmInstall(key: string, title: string, anchor: DOMRect, go: () => void) {
+    if (key.startsWith('epic-')) confirming = { game: { key, title }, anchor, go }
+    else go()
+  }
+
+  /** `key` is the card's chosen copy. */
   function install(key: string, anchor: DOMRect) {
-    const game = lib.games.find((g) => g.key === key)
-    if (game?.stores[0] === 'epic') confirming = { game, anchor }
-    else act('install', key)
+    const title = lib.games.find((g) => g.chosen === key)?.title ?? ''
+    confirmInstall(key, title, anchor, () => act('install', key))
   }
 
   async function act(action: Action, key: string) {
@@ -212,7 +217,7 @@
   }
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
-  const runningTitle = $derived(running ? lib.games.find((g) => g.key === running)?.title : undefined)
+  const runningTitle = $derived(running ? lib.games.find((g) => g.copyKeys.includes(running!))?.title : undefined)
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
   const LABEL_H = 18
@@ -260,9 +265,9 @@
       folder={settings?.epicInstallDir}
       oncancel={() => (confirming = null)}
       onconfirm={() => {
-        const { key } = confirming!.game
+        const { go } = confirming!
         confirming = null
-        act('install', key)
+        go()
       }}
     />
     {/key}
@@ -288,7 +293,7 @@
             <div style="height: {BANNER_H}px; margin-bottom: 24px">
               <Continue
                 {featured}
-                running={running === featured.key}
+                running={running !== null && featured.copyKeys.includes(running)}
                 onplay={(key) => act('play', key)}
                 onopen={openGame}
               />
@@ -324,13 +329,14 @@
     {#if open}
       <Detail
         gameKey={open}
-        running={running === open}
-        progress={progress[open]}
+        runningKey={running}
+        progressByKey={progress}
         {version}
         onback={closeGame}
         onerror={(m) => (error = m)}
         onchanged={reload}
         ontint={(url) => (tint = url)}
+        onconfirminstall={confirmInstall}
       />
     {/if}
   </div>

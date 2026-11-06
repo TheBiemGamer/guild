@@ -7,6 +7,7 @@
     running: boolean
     progress: Progress | undefined
     onopen: (key: string) => void
+    /** Gets the chosen copy's key, like `oninstall`. */
     onplay: (key: string) => void
     /** `anchor` is the cover's rectangle, for a popup next to it. */
     oninstall: (key: string, anchor: DOMRect) => void
@@ -69,12 +70,12 @@
     <div class="hover">
       <b>{game.title}</b>
       {#if game.installed}
-        <button class="pill small" onclick={() => onplay(game.key)}>
+        <button class="pill small" onclick={() => onplay(game.chosen)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
           Play
         </button>
       {:else}
-        <button class="pill small" onclick={() => oninstall(game.key, el.getBoundingClientRect())}>
+        <button class="pill small" onclick={() => oninstall(game.chosen, el.getBoundingClientRect())}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
           Install
         </button>

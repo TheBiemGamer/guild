@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { downloadSize, type Card } from './api'
+  import { downloadSize } from './api'
 
   let { game, anchor, folder, onconfirm, oncancel }: {
-    game: Card
+    /** The Epic copy's key and the game's title. */
+    game: { key: string; title: string }
     /** The cover's rectangle; the popup opens beside it. */
     anchor: DOMRect
     /** The saved install folder; null means Legendary's own, undefined that settings aren't read yet. */

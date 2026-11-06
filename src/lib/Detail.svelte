@@ -44,10 +44,11 @@
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
-  let { gameKey, running, progress, version, onback, onerror, onchanged, ontint }: {
+  let { gameKey, runningKey, progressByKey, version, onback, onerror, onchanged, ontint, onconfirminstall }: {
     gameKey: string
-    running: boolean
-    progress: Progress | undefined
+    /** Copy keys, as `poll` reports them. */
+    runningKey: string | null
+    progressByKey: Record<string, Progress>
     /** Bumped whenever the library reloads, so installed state and stats stay current. */
     version: number
     onback: () => void
@@ -55,6 +56,8 @@
     onchanged: () => void
     /** This game's art for the window tint; null when it has none. */
     ontint: (url: string | null) => void
+    /** Install through the library's flow: an Epic copy asks in the install popup first, then calls `go`. */
+    onconfirminstall: (key: string, title: string, anchor: DOMRect, go: () => void) => void
   } = $props()
 
   // undefined: still loading. null: the answer is "none".
@@ -133,6 +136,10 @@
     }
   })
   const copy = $derived(game && (game.copies.find((c) => c.key === chosenKey) ?? game.copies[0]))
+  // Running state and progress arrive under copy keys.
+  const copyKeys = $derived(game ? game.copies.map((c) => c.key) : [gameKey])
+  const running = $derived(runningKey !== null && copyKeys.includes(runningKey))
+  const progress = $derived(copyKeys.map((k) => progressByKey[k]).find(Boolean))
 
   const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', uninstall: 'Uninstalling…' }
 
@@ -344,7 +351,8 @@
                 {busy}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
-                oninstall={() => act('install')}
+                oninstall={() =>
+                  onconfirminstall(copy!.key, game!.title, actionsEl!.getBoundingClientRect(), () => act('install'))}
               />
               {#if busy === 'Installing…' && copy!.provider === 'epic'}
                 <button class="glass round" onclick={cancel}>Cancel</button>
