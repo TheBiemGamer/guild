@@ -12,9 +12,11 @@
       "play": { "role": "status", "displayName": "Play Green", "canonical": "#22c55e", "tonalRamp": ["#04210f", "#0a4a21", "#12782f", "#22c55e", "#4ade80", "#86efac", "#bbf7d0", "#f0fdf4"] },
       "warn": { "role": "status", "displayName": "Amber", "canonical": "#f5b942", "tonalRamp": ["#3d2a05", "#6e4c0a", "#a37212", "#f5b942", "#f8c969", "#fbdc98", "#fdeccb", "#fff9ec"] },
       "danger": { "role": "status", "displayName": "Red", "canonical": "#ef4444", "tonalRamp": ["#3b0b0b", "#6e1414", "#a62020", "#ef4444", "#f87171", "#fca5a5", "#fecaca", "#fef2f2"] },
+      "danger-text": { "role": "status", "displayName": "Soft Red", "canonical": "#fca5a5", "tonalRamp": ["#3b0b0b", "#6e1414", "#a62020", "#ef4444", "#f87171", "#fca5a5", "#fecaca", "#fef2f2"] },
       "pill": { "role": "neutral", "displayName": "Pill White", "canonical": "#ffffff", "tonalRamp": ["#8d90a3", "#a9acbc", "#c3c5d1", "#d6d8e1", "#e4e6ee", "#eef0f6", "#f7f8fb", "#ffffff"] }
     },
     "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Game page title on the hero." },
       "title": { "displayName": "Title", "purpose": "Continue-playing banner game name." },
       "headline": { "displayName": "Headline", "purpose": "Settings section heading." },
       "body": { "displayName": "Body", "purpose": "Default UI text." },

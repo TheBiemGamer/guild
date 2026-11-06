@@ -1,8 +1,29 @@
-<script lang="ts">
-  import * as api from './api'
-  import type { Action, Detail, Progress } from './api'
+<script lang="ts" module>
+  /** The year in a store date: Steam "28 Nov, 2016", Epic "2019-06-26". */
+  export function releaseYear(date: string): string | null {
+    return /\b(\d{4})\b/.exec(date)?.[1] ?? null
+  }
 
-  let { gameKey, running, progress, version, onback, onerror, onchanged }: {
+  /** A store date as "28 Nov 2016". Anything not recognised ("Coming soon", "Q1 2025") is shown as given. */
+  export function releaseDate(date: string): string {
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(date)
+    if (iso) {
+      const at = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])))
+      if (!Number.isNaN(at.getTime())) {
+        return at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+      }
+    }
+    return date.replace(/^(\d{1,2}) (\p{L}+\.?), (\d{4})$/u, '$1 $2 $3')
+  }
+</script>
+
+<script lang="ts">
+  import { tick } from 'svelte'
+  import * as api from './api'
+  import type { Action, Detail, GameInfo, Progress, TimeToBeat } from './api'
+  import StoreIcon, { storeNames } from './StoreIcon.svelte'
+
+  let { gameKey, running, progress, version, onback, onerror, onchanged, ontint }: {
     gameKey: string
     running: boolean
     progress: Progress | undefined
@@ -11,30 +32,85 @@
     onback: () => void
     onerror: (message: string) => void
     onchanged: () => void
+    /** This game's art for the window tint; null when it has none. */
+    ontint: (url: string | null) => void
   } = $props()
 
-  let game = $state<Detail | null>(null)
+  // undefined: still loading. null: the answer is "none".
+  let game = $state<Detail | null | undefined>(undefined)
   let art = $state<{ hero: string | null; logo: string | null }>({ hero: null, logo: null })
+  let heroLoaded = $state(false)
+  let info = $state<GameInfo | null | undefined>(undefined)
+  let ttb = $state<TimeToBeat | null | undefined>(undefined)
+  let download = $state<number | null | undefined>(undefined)
   let busy = $state<string | null>(null)
   let confirming = $state(false)
+  let menuOpen = $state(false)
+  let moreButton = $state<HTMLButtonElement>()
+  let menu = $state<HTMLDivElement>()
 
+  // Each answer lands only if this is still the game asked about.
   $effect(() => {
+    const key = gameKey
     void version
-    api.game(gameKey).then((g) => (game = g))
+    let alive = true
+    api.game(key).then(
+      (g) => alive && (game = g),
+      (e) => alive && onerror(api.message(e)),
+    )
+    return () => {
+      alive = false
+    }
   })
 
   $effect(() => {
     const key = gameKey
+    let alive = true
     art = { hero: null, logo: null }
+    heroLoaded = false
+    info = undefined
+    ttb = undefined
     api.detailArt(key).then((a) => {
-      if (gameKey === key) art = a
+      if (!alive) return
+      art = a
+      if (a.hero) ontint(a.hero)
+      // No wide art: the cover still gives the page its colour.
+      else api.cover(key).then((c) => alive && ontint(c))
     })
+    api.gameInfo(key).then(
+      (i) => alive && (info = i),
+      () => alive && (info = null),
+    )
+    api.timeToBeat(key).then(
+      (t) => alive && (ttb = t),
+      () => alive && (ttb = null),
+    )
+    return () => {
+      alive = false
+    }
+  })
+
+  /** A not-installed Epic game shows its download size beside Install. */
+  const sizeKey = $derived(game && game.provider === 'epic' && !game.installed ? game.key : null)
+  $effect(() => {
+    const key = sizeKey
+    download = undefined
+    if (!key) return
+    let alive = true
+    api.downloadSize(key).then(
+      (b) => alive && (download = b),
+      () => alive && (download = null),
+    )
+    return () => {
+      alive = false
+    }
   })
 
   const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', uninstall: 'Uninstalling…' }
 
   async function act(action: Action) {
     confirming = false
+    menuOpen = false
     busy = labels[action]
     try {
       await api.act(action, gameKey)
@@ -57,62 +133,242 @@
 
   // Steam asks in its own dialog; Legendary doesn't, so Epic asks here first.
   const uninstall = () => (game?.provider === 'epic' ? (confirming = true) : act('uninstall'))
+
+  const run = (f: () => Promise<void>) => f().catch((e) => onerror(api.message(e)))
+
+  async function openMenu() {
+    menuOpen = true
+    await tick()
+    menu?.querySelector('button')?.focus()
+  }
+
+  function closeMenu(refocus: boolean) {
+    menuOpen = false
+    if (refocus) moreButton?.focus()
+  }
+
+  function pick(f: () => void) {
+    closeMenu(true)
+    f()
+  }
+
+  function menuKeydown(e: KeyboardEvent) {
+    if (!menu) return
+    const items = Array.from(menu.querySelectorAll('button'))
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    const go = (i: number) => {
+      e.preventDefault()
+      items[(i + items.length) % items.length]?.focus()
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      closeMenu(true)
+    } else if (e.key === 'ArrowDown') go(at + 1)
+    else if (e.key === 'ArrowUp') go(at - 1)
+    else if (e.key === 'Home') go(0)
+    else if (e.key === 'End') go(-1)
+    else if (e.key === 'Tab') closeMenu(false)
+  }
+
+  function onpointerdown(e: PointerEvent) {
+    if (!menuOpen) return
+    const target = e.target as Node
+    if (menu?.contains(target) || moreButton?.contains(target)) return
+    closeMenu(false)
+  }
+
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+  // Epic reports no playtime, so "Never played" can't be told from "unknown": that tile hides.
+  const playtime = $derived(game && game.playtime !== 'Never played' ? game.playtime.replace(/^Played /, '') : null)
+  const lastPlayed = $derived(game?.lastPlayed ? capitalize(game.lastPlayed.replace(/^Last played /, '')) : null)
+  const beatMain = $derived(ttb ? (ttb.normally ?? null) : null)
+  const beatMore = $derived(
+    ttb
+      ? [ttb.hastily && `${ttb.hastily} hastily`, ttb.completely && `${ttb.completely} completely`].filter(
+          (s): s is string => !!s,
+        )
+      : [],
+  )
+  /** Epic games never get a time to beat, so only a Steam game keeps a slot open while IGDB answers. */
+  const beatPending = $derived(ttb === undefined && game?.provider === 'steam')
+  const showTiles = $derived(!!game && (!!playtime || !!lastPlayed || !!ttb || beatPending))
+
+  const year = $derived(info?.released ? releaseYear(info.released) : null)
+  const meta = $derived(
+    game ? [game.installed ? 'Installed' : 'Not installed', info?.developer, year].filter((s): s is string => !!s) : [],
+  )
+  const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
+  const showDetails = $derived(
+    !!game &&
+      (!!info?.genres.length || !!info?.developer || !!info?.publisher || !!info?.released || !!game.size || !!game.installDir),
+  )
 </script>
 
-<section class="detail">
-  <header class="hero" style={art.hero ? `background-image: url('${art.hero}')` : ''}>
-    <button class="back" onclick={onback}>← Library</button>
-    {#if art.logo}
-      <img class="logo" src={art.logo} alt={game?.title ?? ''} />
-    {:else}
-      <h1>{game?.title ?? ''}</h1>
-    {/if}
-  </header>
+<svelte:window {onpointerdown} />
 
-  {#if game}
-    <div class="body">
-      <div class="actions">
-        {#if busy}
-          <button class="big" disabled>{busy}</button>
-          {#if game.provider === 'epic' && busy === 'Installing…'}
-            <button onclick={cancel}>Cancel</button>
-          {/if}
-        {:else if confirming}
-          <span>Uninstall {game.title}? Its files will be deleted.</span>
-          <button class="danger" onclick={() => act('uninstall')}>Uninstall</button>
-          <button onclick={() => (confirming = false)}>Cancel</button>
-        {:else if !game.installed}
-          <button class="big primary" onclick={() => act('install')}>Install</button>
-        {:else if running}
-          <button class="big play" disabled>Playing</button>
-        {:else}
-          <button class="big play" onclick={() => act('play')}>Play</button>
+<section class="detail" aria-label={game?.title ?? 'Game'}>
+  <div class="page">
+    <header class="hero">
+      <div class="frame">
+        {#if art.hero}
+          <img src={art.hero} alt="" class:loaded={heroLoaded} onload={() => (heroLoaded = true)} />
         {/if}
-        {#if game.installed && !busy && !confirming}
-          <button onclick={uninstall}>Uninstall</button>
-        {/if}
-        <span class="store">{game.provider === 'epic' ? 'Epic Games' : 'Steam'}</span>
       </div>
+      <button class="back" onclick={onback}>← Library</button>
 
-      {#if progress}
-        <div class="progress">
-          <div class="bar"><span style="width: {progress.fraction * 100}%"></span></div>
-          <small>{progress.text}</small>
+      {#if game}
+        <div class="bottom">
+          <div class="name">
+            <h1>{game.title}</h1>
+            <div class="meta">
+              <StoreIcon provider={game.provider} size={14} />
+              {#each meta as item}<span>{item}</span>{/each}
+            </div>
+            {#if progress}
+              <div class="progress">
+                <div
+                  class="bar"
+                  role="progressbar"
+                  aria-label="Install progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress.fraction * 100)}
+                >
+                  <span style="width: {progress.fraction * 100}%"></span>
+                </div>
+                <small>{progress.text}</small>
+              </div>
+            {/if}
+          </div>
+
+          <div class="actions">
+            {#if busy}
+              <button class="pill big" disabled>{busy}</button>
+              {#if game.provider === 'epic' && busy === 'Installing…'}
+                <button class="glass round" onclick={cancel}>Cancel</button>
+              {/if}
+            {:else if confirming}
+              <span class="ask">Uninstall {game.title}? Its files will be deleted.</span>
+              <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
+              <button class="glass round" onclick={() => (confirming = false)}>Cancel</button>
+            {:else}
+              <div class="more-wrap">
+                <button
+                  class="glass more"
+                  bind:this={moreButton}
+                  aria-label="More actions"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onclick={() => (menuOpen ? closeMenu(true) : openMenu())}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                  </svg>
+                </button>
+                {#if menuOpen}
+                  <div class="menu" role="menu" aria-label="More actions" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
+                    {#if game.installDir}
+                      <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(gameKey)))}>
+                        Open install folder
+                      </button>
+                    {/if}
+                    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openStorePage(gameKey)))}>
+                      Open {storeNames[game.provider]} store page
+                    </button>
+                    {#if game.installed}
+                      <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+              {#if !game.installed}
+                {#if sizeKey}
+                  <span class="download">
+                    {download === undefined ? 'Checking size…' : download === null ? '' : `${api.sizeLabel(download)} download`}
+                  </span>
+                {/if}
+                <button class="pill big" onclick={() => act('install')}>
+                  <svg class="stroke" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+                  Install
+                </button>
+              {:else if running}
+                <button class="pill big" disabled>Playing</button>
+              {:else}
+                <button class="pill big" onclick={() => act('play')}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
+                  Play
+                </button>
+              {/if}
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </header>
+
+    {#if game === null}
+      <p class="gone">This game is no longer in the library.</p>
+    {:else if game}
+      {#if showTiles}
+        <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
+        <div class="tiles">
+          {#if playtime}
+            <div class="tile"><h2>Playtime</h2><b>{playtime}</b></div>
+          {/if}
+          {#if lastPlayed}
+            <div class="tile"><h2>Last played</h2><b>{lastPlayed}</b></div>
+          {/if}
+          {#if ttb}
+            <div class="tile">
+              <h2>How long to beat</h2>
+              <p>
+                {#if beatMain}
+                  <b>{beatMain}</b>
+                  {#if beatMore.length}<small>{beatMore.join(' · ')}</small>{/if}
+                {:else}
+                  <b>{beatMore.join(' · ')}</b>
+                {/if}
+              </p>
+              <button class="credit" onclick={() => run(api.openIgdb)}>Data from IGDB</button>
+            </div>
+          {/if}
         </div>
       {/if}
 
-      <dl>
-        <dt>Playtime</dt>
-        <dd>{game.playtime}</dd>
-        {#if game.lastPlayed}
-          <dt>Last played</dt>
-          <dd>{game.lastPlayed.replace('Last played ', '')}</dd>
+      <div class="cols">
+        {#if showAbout && info}
+          <section class="panel about" aria-labelledby="about-heading">
+            <h2 id="about-heading">About</h2>
+            {#if info.description}<p class="text">{info.description}</p>{/if}
+            {#if info.screenshots.length}
+              <div class="shots">
+                {#each info.screenshots as shot, i (shot)}
+                  <img src={shot} alt="Screenshot {i + 1} of {game.title}" loading="lazy" />
+                {/each}
+              </div>
+            {/if}
+          </section>
         {/if}
-      </dl>
-    </div>
-  {:else}
-    <p class="gone">This game is no longer in the library.</p>
-  {/if}
+        {#if showDetails}
+          <section class="panel details" class:solo={info !== undefined && !showAbout} aria-labelledby="details-heading">
+            <h2 id="details-heading">Details</h2>
+            <dl>
+              {#if info?.genres.length}
+                <dt>Genres</dt>
+                <dd class="tags">{#each info.genres as genre}<span>{genre}</span>{/each}</dd>
+              {/if}
+              {#if info?.developer}<dt>Developer</dt><dd>{info.developer}</dd>{/if}
+              {#if info?.publisher}<dt>Publisher</dt><dd>{info.publisher}</dd>{/if}
+              {#if info?.released}<dt>Released</dt><dd>{releaseDate(info.released)}</dd>{/if}
+              {#if game.size}<dt>Size</dt><dd>{game.size}</dd>{/if}
+              {#if game.installDir}<dt>Install folder</dt><dd class="path">{game.installDir}</dd>{/if}
+            </dl>
+          </section>
+        {/if}
+      </div>
+    {/if}
+  </div>
 </section>
 
 <style>
@@ -120,7 +376,6 @@
     position: absolute;
     inset: 0;
     overflow-y: auto;
-    background: var(--bg);
     animation: enter 180ms ease-out;
   }
 
@@ -131,98 +386,112 @@
     }
   }
 
-  .hero {
-    position: relative;
-    height: 380px;
-    padding: 24px 32px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: flex-start;
-    background: var(--surface) center / cover no-repeat;
+  .page {
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 0 24px 24px;
   }
 
-  /* Fade the hero into the page so the actions sit on calm background. */
-  .hero::after {
+  /* Hero: rounded art banner. The frame clips the art; the hero itself doesn't, so the menu can hang below. */
+  .hero {
+    position: relative;
+    height: 300px;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  }
+
+  .frame {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    background: linear-gradient(160deg, var(--surface-2), var(--surface));
+  }
+
+  .frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 30%;
+    opacity: 0;
+    transition: opacity 300ms ease-out;
+  }
+
+  .frame img.loaded {
+    opacity: 1;
+  }
+
+  /* Darkens the top for the back button and the bottom for the title and actions. */
+  .frame::after {
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, rgb(13 15 20 / 0.1) 40%, var(--bg));
-    pointer-events: none;
-  }
-
-  .back,
-  .logo,
-  h1 {
-    position: relative;
-    z-index: 1;
+    background: linear-gradient(180deg, var(--glass) 0%, transparent 30%, transparent 35%, var(--scrim) 100%);
   }
 
   .back {
-    background: rgb(0 0 0 / 0.45);
-    backdrop-filter: blur(8px);
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    border-radius: var(--radius);
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-line);
   }
 
-  .logo {
-    max-width: 420px;
-    max-height: 140px;
-    object-fit: contain;
-    filter: drop-shadow(0 4px 16px rgb(0 0 0 / 0.6));
+  .back:hover:not(:disabled) {
+    background: var(--glass-on);
+  }
+
+  .bottom {
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    bottom: 20px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .name {
+    min-width: 0;
   }
 
   h1 {
     margin: 0;
-    font-size: 40px;
-    text-shadow: 0 2px 12px rgb(0 0 0 / 0.7);
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1.1;
+    overflow-wrap: break-word;
+    text-shadow: 0 1px 12px rgb(0 0 0 / 0.5);
   }
 
-  .body {
-    padding: 8px 32px 32px;
-    display: grid;
-    gap: 20px;
-    max-width: 900px;
-  }
-
-  .actions {
+  .meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    margin-top: 8px;
+    color: var(--text-2);
   }
 
-  .big {
-    padding: 12px 40px;
-    font-size: 17px;
-    font-weight: 600;
-  }
-
-  .play {
-    background: var(--play);
-    color: #04210f;
-  }
-
-  .play:hover:not(:disabled) {
-    background: #4ade80;
-  }
-
-  .danger {
-    background: var(--danger);
-    color: white;
-  }
-
-  .store {
-    margin-left: auto;
-    color: var(--muted);
+  .meta span::before {
+    content: '·';
+    margin-right: 8px;
+    color: var(--text-3);
   }
 
   .progress {
     display: grid;
-    gap: 6px;
+    gap: 4px;
+    margin-top: 12px;
+    max-width: 420px;
   }
 
   .bar {
-    height: 8px;
-    border-radius: 4px;
-    background: var(--surface-2);
+    height: 6px;
+    border-radius: 3px;
+    background: var(--glass-on);
     overflow: hidden;
   }
 
@@ -233,27 +502,257 @@
     transition: width 400ms linear;
   }
 
-  small {
-    color: var(--muted);
+  .progress small {
+    font-size: 12px;
+    color: var(--text-2);
+  }
+
+  .actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pill.big {
+    height: 44px;
+    padding: 0 32px;
+  }
+
+  .round {
+    height: 44px;
+    padding: 0 20px;
+    border-radius: 999px;
+  }
+
+  .ask {
+    max-width: 260px;
+    color: var(--text);
+  }
+
+  button.danger {
+    color: var(--danger-text);
+  }
+
+  .download {
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .more-wrap {
+    position: relative;
+  }
+
+  .more {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+  }
+
+  .more svg {
+    fill: currentColor;
+  }
+
+  .menu {
+    position: absolute;
+    z-index: 5;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 220px;
+    padding: 4px;
+    display: grid;
+    border-radius: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--glass-on-line);
+    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+  }
+
+  .menu button {
+    padding: 8px 12px;
+    text-align: left;
+    background: transparent;
+  }
+
+  .menu button:hover:not(:disabled),
+  .menu button:focus-visible {
+    background: var(--glass-hover);
+  }
+
+  .menu button:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .menu button:active:not(:disabled) {
+    transform: none;
+  }
+
+  svg {
+    flex: none;
+    fill: currentColor;
+  }
+
+  svg.stroke {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Quick facts: three fixed slots, so a late tile never resizes the others. */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    min-height: 112px;
+    margin-top: 16px;
+  }
+
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+  }
+
+  .tile b {
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tile p {
+    margin: 0;
+  }
+
+  .tile small {
+    display: block;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+
+  .credit {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 0;
+    background: transparent;
+    font-size: 12px;
+    color: var(--text-3);
+    text-decoration: underline;
+  }
+
+  .credit:hover:not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
+
+  .credit:active:not(:disabled) {
+    transform: none;
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .panel {
+    padding: 16px;
+    border-radius: 12px;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+  }
+
+  .panel h2 {
+    margin-bottom: 8px;
+  }
+
+  .about {
+    grid-column: 1;
+  }
+
+  /* Right column, or the left one when the game has nothing to say about itself. */
+  .details {
+    grid-column: 2;
+  }
+
+  .details.solo {
+    grid-column: 1;
+  }
+
+  .text {
+    margin: 0;
+    line-height: 1.55;
+    white-space: pre-line;
+  }
+
+  .shots {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .shots img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--surface);
   }
 
   dl {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 6px 24px;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 8px 16px;
     margin: 0;
   }
 
   dt {
-    color: var(--muted);
+    color: var(--text-2);
   }
 
   dd {
     margin: 0;
   }
 
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .tags span {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--glass-on);
+    font-size: 12px;
+  }
+
+  .path {
+    overflow-wrap: anywhere;
+  }
+
   .gone {
-    padding: 32px;
-    color: var(--muted);
+    padding: 24px 0;
+    color: var(--text-2);
   }
 </style>

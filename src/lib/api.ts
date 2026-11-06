@@ -26,6 +26,11 @@ export interface Detail {
   installed: boolean
   playtime: string
   lastPlayed: string
+  /** Size on disk of an installed game, like "27.3 GB". */
+  size: string | null
+  /** Only set for an installed game. */
+  installDir: string | null
+  storeUrl: string
 }
 export interface SettingsView {
   steam: { name: string | null; path: string } | null
@@ -82,6 +87,10 @@ export const updateSetting = (name: string, value: string | null) => invoke<void
 export const setIgdbSecret = (value: string | null) => invoke<void>('set_igdb_secret', { value })
 export const openSteam = () => invoke<void>('open_steam')
 export const openTwitchConsole = () => invoke<void>('open_twitch_console')
+export const openFolder = (key: string) => invoke<void>('open_folder', { key })
+export const openStorePage = (key: string) => invoke<void>('open_store_page', { key })
+/** The "Data from IGDB" credit. */
+export const openIgdb = () => invoke<void>('open_igdb')
 export const clearCache = async () => {
   await invoke<void>('clear_cache')
   // Covers shown from now on are fetched and shrunk again.

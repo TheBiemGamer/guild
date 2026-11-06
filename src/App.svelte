@@ -21,6 +21,8 @@
   let running = $state<string | null>(null)
   let progress = $state<Record<string, Progress>>({})
   let open = $state<string | null>(null)
+  /** The open game's art for the tint; undefined until it's known, so the library's tint stays meanwhile. */
+  let tint = $state<string | null | undefined>(undefined)
   let error = $state<string | null>(null)
   let loggingIn = $state(false)
   let settings = $state<SettingsView | null>(null)
@@ -144,6 +146,12 @@
     }
   })
 
+  function closeGame() {
+    open = null
+    tint = undefined
+  }
+
+  const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
   const runningTitle = $derived(running ? lib.games.find((g) => g.key === running)?.title : undefined)
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
@@ -153,7 +161,7 @@
   const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
 </script>
 
-<Ambient hero={featured?.hero ?? null} enabled={settings?.ambient ?? true} />
+<Ambient hero={ambientHero} enabled={settings?.ambient ?? true} />
 
 <main>
   <Toolbar
@@ -200,6 +208,8 @@
   {/if}
 
   <div class="content">
+    <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
+    <div class="library" class:away={open !== null}>
     {#if lib.games.length > 0}
       <Grid
         games={lib.games}
@@ -249,15 +259,17 @@
         <p>{lib.total > 0 ? 'No games match.' : lib.status}</p>
       </div>
     {/if}
+    </div>
     {#if open}
       <Detail
         gameKey={open}
         running={running === open}
         progress={progress[open]}
         {version}
-        onback={() => (open = null)}
+        onback={closeGame}
         onerror={(m) => (error = m)}
         onchanged={reload}
+        ontint={(url) => (tint = url)}
       />
     {/if}
   </div>
@@ -334,6 +346,14 @@
     position: relative;
     flex: 1;
     min-height: 0;
+  }
+
+  .library {
+    display: contents;
+  }
+
+  .library.away {
+    visibility: hidden;
   }
 
   .label {

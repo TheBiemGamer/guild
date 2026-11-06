@@ -502,7 +502,7 @@
   }
 
   .btn.danger {
-    color: #fca5a5;
+    color: var(--danger-text);
   }
 
   .row {

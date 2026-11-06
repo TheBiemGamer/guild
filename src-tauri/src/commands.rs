@@ -340,6 +340,11 @@ pub struct Detail {
     installed: bool,
     playtime: String,
     last_played: String,
+    /// Size on disk of an installed game, like `27.3 GB`.
+    size: Option<String>,
+    /// Only for an installed game (Steam knows a folder for games it hasn't installed yet).
+    install_dir: Option<String>,
+    store_url: String,
 }
 
 #[tauri::command]
@@ -347,12 +352,57 @@ pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
     let g = state.game(&key)?;
     Some(Detail {
         key,
+        store_url: store_url(&g),
+        size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
+        install_dir: installed_dir(&g).map(|p| p.to_string_lossy().into_owned()),
         title: g.title,
         provider: g.provider,
         installed: g.installed,
         playtime: view::playtime_label(g.playtime_minutes),
         last_played: view::last_played_label(g.last_played, SystemTime::now()),
     })
+}
+
+fn installed_dir(g: &Game) -> Option<&PathBuf> {
+    g.install_dir.as_ref().filter(|_| g.installed)
+}
+
+/// The game's store page. The Legendary catalog has no product slug, so Epic gets a store search by title.
+fn store_url(g: &Game) -> String {
+    match g.provider {
+        ProviderKind::Steam => format!("https://store.steampowered.com/app/{}", g.external_id),
+        ProviderKind::Epic => format!("https://store.epicgames.com/browse?q={}", percent_encode(&g.title)),
+    }
+}
+
+/// Percent-encodes every byte except RFC 3986 unreserved characters, for a query value.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Opens an installed game's folder in File Explorer.
+#[tauri::command]
+pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
+    let game = state.game(&key).ok_or("This game is no longer in the library.")?;
+    let dir = installed_dir(&game).ok_or("This game has no install folder.")?;
+    if !dir.is_dir() {
+        return Err(format!("The install folder is missing: {}", dir.display()));
+    }
+    std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(|e| e.to_string())
+}
+
+/// Opens the game's store page in the default browser.
+#[tauri::command]
+pub fn open_store_page(state: State<'_, AppState>, key: String) -> Res<()> {
+    let game = state.game(&key).ok_or("This game is no longer in the library.")?;
+    crate::library::open_uri(&store_url(&game)).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Default)]
@@ -543,8 +593,8 @@ async fn look_up_time_to_beat(
 /// How long to beat, from IGDB, matched by Steam app ID (Epic games have no usable IGDB ID, so
 /// they get `None`). `None` too without saved credentials or when IGDB doesn't know the game.
 /// Cached 30 days when found, 7 when not; a failed request is not cached.
-// Attribution: IGDB asks for visible credit where its data is shown (a small "Data from IGDB"
-// link next to the tile). The game page tile is built in Task 9, which must add it.
+// Attribution: IGDB asks for visible credit where its data is shown; the game page puts a small
+// "Data from IGDB" link (`open_igdb`) under the tile.
 #[tauri::command]
 pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView> {
     let state = app.state::<AppState>();
@@ -850,6 +900,12 @@ pub fn open_twitch_console() -> Res<()> {
     crate::library::open_uri("https://dev.twitch.tv/console/apps").map_err(|e| e.to_string())
 }
 
+/// IGDB's site, for the "Data from IGDB" credit next to how long to beat.
+#[tauri::command]
+pub fn open_igdb() -> Res<()> {
+    crate::library::open_uri("https://www.igdb.com").map_err(|e| e.to_string())
+}
+
 /// `LAUNCHER_BENCH=<px/s>` makes the UI scroll the full library at that speed, then report.
 #[tauri::command]
 pub fn bench_speed() -> Option<f32> {
@@ -914,6 +970,23 @@ mod tests {
         assert!(!logged_out_since_last_run(Some("loggedOut"), Login::LoggedOut));
         assert!(!logged_out_since_last_run(None, Login::LoggedOut));
         assert!(!logged_out_since_last_run(Some("loggedIn"), Login::Unreachable));
+    }
+
+    #[test]
+    fn store_url_links_steam_app_page() {
+        assert_eq!(store_url(&game("447040", true, None, None)), "https://store.steampowered.com/app/447040");
+    }
+
+    #[test]
+    fn store_url_searches_epic_store_by_encoded_title() {
+        // The Legendary catalog carries no product slug, so Epic gets a store search.
+        let mut epic_game = game("Assassin's Creed® Unity & more", false, None, None);
+        epic_game.provider = ProviderKind::Epic;
+        epic_game.external_id = "Flour".into();
+        assert_eq!(
+            store_url(&epic_game),
+            "https://store.epicgames.com/browse?q=Assassin%27s%20Creed%C2%AE%20Unity%20%26%20more"
+        );
     }
 
     #[test]

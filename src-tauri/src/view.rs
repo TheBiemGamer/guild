@@ -63,8 +63,6 @@ pub fn last_played_label(last: Option<SystemTime>, now: SystemTime) -> String {
 }
 
 /// Install size: `27.3 GB` (GB = 1024^3), or whole megabytes under 1 GB.
-// Consumed by the game page in a later task of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn size_label(bytes: u64) -> String {
     const MB: u64 = 1024 * 1024;
     const GB: u64 = 1024 * MB;

@@ -38,6 +38,9 @@ fn main() {
             commands::clear_cache,
             commands::open_steam,
             commands::open_twitch_console,
+            commands::open_folder,
+            commands::open_store_page,
+            commands::open_igdb,
             commands::bench_speed,
             commands::bench_done,
         ])

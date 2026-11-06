@@ -15,6 +15,8 @@ colors:
   play: "#22c55e"
   warn: "#f5b942"
   danger: "#ef4444"
+  danger-text: "#fca5a5"
+  scrim: "rgb(10 10 16 / 0.9)"
   focus: "rgb(255 255 255 / 0.85)"
   glass: "rgb(0 0 0 / 0.32)"
   glass-strong: "rgb(10 10 16 / 0.6)"
@@ -25,6 +27,11 @@ colors:
   pill: "#ffffff"
   pill-hover: "#e4e6ee"
 typography:
+  display:
+    fontFamily: "'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif"
+    fontSize: "34px"
+    fontWeight: 700
+    lineHeight: 1.1
   title:
     fontFamily: "'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif"
     fontSize: "26px"
@@ -62,6 +69,12 @@ components:
     padding: "9px 20px"
   button-pill-hover:
     backgroundColor: "{colors.pill-hover}"
+  button-pill-large:
+    backgroundColor: "{colors.pill}"
+    textColor: "{colors.bg}"
+    rounded: "{rounded.pill}"
+    height: "44px"
+    padding: "0 32px"
   button-pill-small:
     backgroundColor: "{colors.pill}"
     textColor: "{colors.bg}"
@@ -103,6 +116,18 @@ components:
     textColor: "{colors.text}"
     rounded: "{rounded.notice}"
     padding: "8px 8px 8px 16px"
+  game-hero:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.banner}"
+    height: "300px"
+  fact-tile:
+    backgroundColor: "{colors.glass}"
+    rounded: "{rounded.notice}"
+    padding: "12px 16px"
+  info-panel:
+    backgroundColor: "{colors.glass}"
+    rounded: "{rounded.notice}"
+    padding: "16px"
   settings-panel:
     backgroundColor: "rgb(22 22 32 / 0.82)"
     rounded: "{rounded.panel}"
@@ -128,7 +153,7 @@ The art of the last-played game, "heavily blurred and saturated, tints the whole
 A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text at three opacities, and a single violet accent used sparingly. Colour mostly comes from the game art through the ambient layer, not from the UI.
 
 ### Primary
-- **Signal Violet** (`accent` #7c5cff, hover `accent-2` #a48bff): the "on" state of toggles, links in Settings, the legacy `button.primary` and the progress bar on the game page. Never the main call to action; that is the white pill.
+- **Signal Violet** (`accent` #7c5cff, hover `accent-2` #a48bff): the "on" state of toggles, links in Settings, the legacy `button.primary` and the install progress bar in the game page hero. Never the main call to action; that is the white pill.
 
 ### Neutral
 - **Ink Black** (`bg` #0e0e14): window base, text on white pills, the neutral gradient floor.
@@ -138,10 +163,11 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 - **Pill White** (`pill` #fff, hover #e4e6ee): the primary action only. The code writes these two as literals in `app.css` (`button.pill`), not as custom properties.
 
 ### Status
-- **Play Green** (`play` #22c55e): running state only (the "Playing" badge, the running-card ring, the live dot). Today it also fills the game page's Play button; that page predates the redesign (see Components).
+- **Play Green** (`play` #22c55e): running state only (the "Playing" badge, the running-card ring, the live dot).
 - **Amber** (`warn` #f5b942): Epic needs attention (settings dot, "Not logged in").
-- **Red** (`danger` #ef4444): destructive actions and error notices.
-- Settings also uses literal, untokenised tints: success text #4ade80, danger text #fca5a5, error text #fecaca, store tiles #1b2838 (Steam) and #2a2a2a (Epic). Treat these as house values until tokenised.
+- **Red** (`danger` #ef4444): destructive actions and error notices. **Soft Red** (`danger-text` #fca5a5): destructive text on dark glass (Settings "Remove", the game page's Uninstall); plain `danger` is too dark for small text there.
+- **Scrim** (`scrim`, rgb(10 10 16 / 0.9)): the bottom stop of a gradient over art, so titles on photos stay readable (game page hero).
+- Settings also uses literal, untokenised tints: success text #4ade80, error text #fecaca, store tiles #1b2838 (Steam) and #2a2a2a (Epic). Treat these as house values until tokenised.
 
 ### Named Rules
 **The One Bright Thing Rule.** The solid white pill is the only solid-bright element on a screen. Accent violet and green never compete with it.
@@ -154,10 +180,11 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 **Character:** The native Windows face, plain and unforced; hierarchy comes from weight, size and uppercase tracking, not from a second font.
 
 ### Hierarchy
-- **Title** (700, 26px, 1.15): Continue-playing banner game name. The legacy game page title is 40px/700.
+- **Display** (700, 34px, 1.1): the game page title, on the hero.
+- **Title** (700, 26px, 1.15): Continue-playing banner game name.
 - **Headline** (600, 20px): Settings "Accounts" heading; 16px/700 for the Settings panel title.
 - **Body** (400, 14px): default text; 13px for hints, 15px/600 for the cover fallback title, 16px for empty states.
-- **Label** (600, 12px, 0.08em tracking, uppercase): section labels ("Library 613", Settings sub-headings, "Continue playing"); 11px/600 for chips and the banner kicker. Counts use tabular numerals.
+- **Label** (600, 12px, 0.08em tracking, uppercase): section labels ("Library 613", Settings sub-headings, game page tile and panel headings, "Continue playing"); 11px/600 for chips and the banner kicker. Counts use tabular numerals.
 
 ### Named Rules
 **The Eleven Pixel Floor Rule.** No UI text below 11px. (Observed in code, and the `.impeccable/config.json` waivers say the real UI keeps text at 11px or more; not an owner statement.)
@@ -166,7 +193,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 
 A full-window column: toolbar, optional notices, then a content area that fills the rest. The library is a **virtualised grid** of fixed 180x270 covers with a 16px gap, columns centred in the available width, a 24px page gutter on bars and notices, and the Continue banner (180px high) plus section label scrolling with the covers as the grid header. Only rows near the viewport exist in the DOM. Because of that, card size and gap are constants in code, not fluid.
 
-Settings is a modal panel (max 760px wide, 24px inset from the window) with a 190px section list on the left; under 640px wide it stacks, nav on top. The game page covers the whole content area.
+Settings is a modal panel (max 760px wide, 24px inset from the window) with a 190px section list on the left; under 640px wide it stacks, nav on top. The game page covers the whole content area (the library stays mounted underneath, hidden, so its scroll position survives): a column capped at 1360px with a 24px gutter, holding the 300px hero, a row of three equal fact-tile slots (16px gap, 112px reserved height) and a 1.7fr / 1fr About / Details grid.
 
 Spacing rhythm observed: 8 / 12 / 16 / 24 px. Controls on bars are 36px high.
 
@@ -218,8 +245,14 @@ Top bar only: search, chips, spacer, sort, settings. Settings has a left section
 ### Toggle
 40x22 pill switch, white 18% off, `accent` on, white knob; `role="switch"`.
 
-### Game page (legacy, to be redone)
-`src/lib/Detail.svelte` still has the pre-Ambient look (opaque `bg`, 380px hero, green Play button, `surface` bars). The owner-approved target (spec "Game page") is a rounded hero, white Play/Install pill, a `⋯` menu, Playtime / Last played / How long to beat tiles, About and Details panels, and the same ambient tint. Build against the spec, not the current file.
+### Game page
+`src/lib/Detail.svelte`, per the owner-approved mockup `game-page.html` with the owner's change (no size tile).
+- **Tint:** the window's ambient layer switches to this game's hero art (its cover when it has none) while the page is open, and back on leaving. Same `Ambient.svelte`, so the Appearance on/off setting applies.
+- **Hero:** 300px, 14px radius, banner shadow; art cover-fit at 30% from the top, fading in. A gradient darkens the top (`glass`) for the back button and the bottom (`scrim`) for the text. Back button top-left: `glass-strong` with `glass-line`, 10px radius (no backdrop blur: the hero scrolls). Bottom-left: Display title, then a meta line in `text-2` (store logo · Installed/Not installed · developer · year, `·` in `text-3`). Install progress, while it runs, is a 6px `accent` bar under the meta line.
+- **Actions** (bottom-right): a 44px round glass `⋯` button and the large white pill (Play, Install, or disabled "Playing" / busy text). A not-installed Epic game shows "Checking size…", then "27.3 GB download", in `text-2` beside Install. Epic uninstall asks inline (text, then Uninstall in `danger-text` and Cancel, both round glass); Steam asks in its own dialog.
+- **⋯ menu:** `surface-2` popover with a `glass-on-line` border, 12px radius and the modal shadow, hanging below the button. Items: Open install folder (installed only), Open Steam/Epic Games store page, Uninstall (installed only, `danger-text`, last). Keyboard: focus moves to the first item on open, arrows/Home/End move, Escape closes and returns focus to the button, Tab closes, and a click outside closes.
+- **Fact tiles:** Playtime, Last played, How long to beat, in three fixed slots so a late tile never resizes the others; the row reserves 112px. Each tile: `glass` fill, `glass-line` border, 12px radius, Label heading, value at 20px/600 tabular. How long to beat shows "normally" as the value with hastily / completely below in 12px `text-2`, and a quiet "Data from IGDB" link (`text-3`, underlined) that opens igdb.com. A tile with nothing to say is absent; Epic games get no playtime from Legendary, so "Never played" hides that tile.
+- **About / Details:** `glass` panels, 16px padding, 12px radius, Label headings. About: plain-text description (line breaks kept) and up to three 16:9 screenshots. Details: a two-column `dl` (`text-2` terms) with Genres (small `glass-on` pills), Developer, Publisher, Released ("28 Nov 2016"; the meta line shows only the year), Size, Install folder (wraps anywhere); each row is absent when unknown. Details sits in the right column, or the left one when the game has no About.
 
 ## Do's and Don'ts
 
@@ -272,5 +305,5 @@ No `design: waive` comments exist in `src/`, so no rule has recurred three times
 ## Open items
 
 - UNCONFIRMED: the exact radii, spacing steps and font sizes above are what the code uses, not owner-stated values.
-- The game page and the Epic install popup are specified by the owner but not built yet; this file describes the code as of commit `e13f9e2`, plus the spec where marked.
+- This file describes the code as of the game page redesign, plus the spec where marked. The game page has not been rendered yet; compare it with `game-page.html` on the first run.
 - No renders were captured (the app was not launched).

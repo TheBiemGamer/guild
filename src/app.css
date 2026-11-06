@@ -12,6 +12,10 @@
   --play: #22c55e;
   --warn: #f5b942;
   --danger: #ef4444;
+  /* Red text on dark glass; plain --danger is too dark for small text there. */
+  --danger-text: #fca5a5;
+  /* Bottom of a scrim over art, so text on photos stays readable. */
+  --scrim: rgb(10 10 16 / 0.9);
   --focus: rgb(255 255 255 / 0.85);
   /* Ambient chrome: dark translucent glass with a thin light edge. */
   --glass: rgb(0 0 0 / 0.32);
