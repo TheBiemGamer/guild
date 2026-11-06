@@ -408,7 +408,6 @@ pub fn open_store_page(state: State<'_, AppState>, key: String) -> Res<()> {
 #[derive(Serialize, Default)]
 pub struct DetailArt {
     hero: Option<String>,
-    logo: Option<String>,
 }
 
 #[tauri::command]
@@ -416,9 +415,9 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
     let state = app.state::<AppState>();
     let Some(game) = state.game(&key) else { return DetailArt::default() };
     let dir = state.dirs.art.join(&key);
+    // The game page shows a text title, so the logo art isn't fetched.
     let hero = cache::resolve(&game.art.hero, &state.http, dir.join("hero")).await;
-    let logo = cache::resolve(&game.art.logo, &state.http, dir.join("logo")).await;
-    DetailArt { hero: hero.and_then(|p| allow(&app, p)), logo: logo.and_then(|p| allow(&app, p)) }
+    DetailArt { hero: hero.and_then(|p| allow(&app, p)) }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

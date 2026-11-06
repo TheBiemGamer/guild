@@ -98,6 +98,20 @@ button.pill:hover:not(:disabled) {
   background: #e4e6ee;
 }
 
+/* A busy pill: looks disabled but stays focusable, so keyboard focus isn't dropped. */
+button.pill[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.6;
+}
+
+button.pill[aria-disabled='true']:hover {
+  background: #fff;
+}
+
+button.pill[aria-disabled='true']:active {
+  transform: none;
+}
+
 button.pill.small {
   gap: 6px;
   padding: 6px 14px;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
   import type { Action, Card, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
@@ -146,9 +146,22 @@
     }
   })
 
-  function closeGame() {
+  /** What opened the game page (a card or the banner), so Back can return focus there. */
+  let opener: HTMLElement | null = null
+
+  function openGame(key: string) {
+    opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    open = key
+  }
+
+  async function closeGame() {
     open = null
     tint = undefined
+    const back = opener
+    opener = null
+    // The library is visible again only after the update; a recycled-away card is gone (isConnected).
+    await tick()
+    if (back?.isConnected) back.focus({ preventScroll: true })
   }
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
@@ -216,7 +229,7 @@
         resetKey={`${query}|${store}|${sort}|${installedOnly}`}
         {running}
         {progress}
-        onopen={(key) => (open = key)}
+        onopen={openGame}
         onplay={(key) => act('play', key)}
         oninstall={install}
         benchSpeed={ready ? benchSpeed : null}
@@ -229,7 +242,7 @@
                 {featured}
                 running={running === featured.key}
                 onplay={(key) => act('play', key)}
-                onopen={(key) => (open = key)}
+                onopen={openGame}
               />
             </div>
           {/if}

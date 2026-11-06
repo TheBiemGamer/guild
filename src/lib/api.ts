@@ -123,8 +123,8 @@ export const featured = async (): Promise<Featured | null> => {
 }
 
 export const detailArt = async (key: string) => {
-  const art = await invoke<{ hero: string | null; logo: string | null }>('detail_art', { key })
-  return { hero: url(art.hero), logo: url(art.logo) }
+  const art = await invoke<{ hero: string | null }>('detail_art', { key })
+  return { hero: url(art.hero) }
 }
 
 /** Same format as the Rust `size_label`: `27.3 GB` (GB = 1024^3), or whole megabytes under 1 GB. */

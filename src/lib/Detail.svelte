@@ -4,21 +4,40 @@
     return /\b(\d{4})\b/.exec(date)?.[1] ?? null
   }
 
-  /** A store date as "28 Nov 2016". Anything not recognised ("Coming soon", "Q1 2025") is shown as given. */
+  // Fixed English names: toLocaleDateString's short months vary by ICU version ("Sept").
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+  /** Month number 1–12 from a name like "Nov" or "November"; null when it isn't one. */
+  function monthNumber(name: string): number | null {
+    const at = MONTHS.indexOf(name.charAt(0).toUpperCase() + name.slice(1, 3).toLowerCase())
+    return at < 0 ? null : at + 1
+  }
+
+  const dayMonthYear = (day: number, month: number, year: string) => `${day} ${MONTHS[month - 1]} ${year}`
+
+  /**
+   * A store date as "28 Nov 2016": Epic "2019-06-26", Steam "28 Nov, 2016" or "Nov 28, 2016".
+   * Anything not recognised ("Coming soon", "Q1 2025") is shown as given.
+   */
   export function releaseDate(date: string): string {
     const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(date)
     if (iso) {
-      const at = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])))
-      if (!Number.isNaN(at.getTime())) {
-        return at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
-      }
+      const month = Number(iso[2])
+      const day = Number(iso[3])
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return dayMonthYear(day, month, iso[1])
+      return date
     }
-    return date.replace(/^(\d{1,2}) (\p{L}+\.?), (\d{4})$/u, '$1 $2 $3')
+    const dmy = /^(\d{1,2}) ([A-Za-z]+)\.?,? (\d{4})$/.exec(date.trim())
+    const mdy = /^([A-Za-z]+)\.? (\d{1,2}),? (\d{4})$/.exec(date.trim())
+    const parts: string[] = dmy ? [dmy[1], dmy[2], dmy[3]] : mdy ? [mdy[2], mdy[1], mdy[3]] : []
+    const [day, name, year] = parts
+    const month = name ? monthNumber(name) : null
+    return day && year && month ? dayMonthYear(Number(day), month, year) : date
   }
 </script>
 
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import * as api from './api'
   import type { Action, Detail, GameInfo, Progress, TimeToBeat } from './api'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
@@ -38,7 +57,7 @@
 
   // undefined: still loading. null: the answer is "none".
   let game = $state<Detail | null | undefined>(undefined)
-  let art = $state<{ hero: string | null; logo: string | null }>({ hero: null, logo: null })
+  let art = $state<{ hero: string | null }>({ hero: null })
   let heroLoaded = $state(false)
   let info = $state<GameInfo | null | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
@@ -48,6 +67,20 @@
   let menuOpen = $state(false)
   let moreButton = $state<HTMLButtonElement>()
   let menu = $state<HTMLDivElement>()
+  let backButton = $state<HTMLButtonElement>()
+  let busyPill = $state<HTMLButtonElement>()
+  let confirmCancel = $state<HTMLButtonElement>()
+  let actionsEl = $state<HTMLDivElement>()
+
+  // The page takes focus on open, so keyboard users start at "← Library".
+  onMount(() => backButton?.focus({ preventScroll: true }))
+
+  /** After the actions swap buttons, focus would fall to <body>; put it on what replaced them. */
+  async function keepFocus(target: () => HTMLElement | null | undefined) {
+    await tick()
+    const active = document.activeElement
+    if (!active || active === document.body) target()?.focus()
+  }
 
   // Each answer lands only if this is still the game asked about.
   $effect(() => {
@@ -66,7 +99,7 @@
   $effect(() => {
     const key = gameKey
     let alive = true
-    art = { hero: null, logo: null }
+    art = { hero: null }
     heroLoaded = false
     info = undefined
     ttb = undefined
@@ -112,6 +145,7 @@
     confirming = false
     menuOpen = false
     busy = labels[action]
+    keepFocus(() => busyPill)
     try {
       await api.act(action, gameKey)
     } catch (e) {
@@ -119,11 +153,13 @@
     } finally {
       busy = null
       onchanged()
+      keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill'))
     }
   }
 
   async function cancel() {
     busy = 'Cancelling…'
+    keepFocus(() => busyPill)
     try {
       await api.cancelInstall(gameKey)
     } catch (e) {
@@ -132,7 +168,19 @@
   }
 
   // Steam asks in its own dialog; Legendary doesn't, so Epic asks here first.
-  const uninstall = () => (game?.provider === 'epic' ? (confirming = true) : act('uninstall'))
+  function uninstall() {
+    if (game?.provider !== 'epic') {
+      act('uninstall')
+      return
+    }
+    confirming = true
+    keepFocus(() => confirmCancel)
+  }
+
+  function keepUninstalled() {
+    confirming = false
+    keepFocus(() => moreButton)
+  }
 
   const run = (f: () => Promise<void>) => f().catch((e) => onerror(api.message(e)))
 
@@ -191,9 +239,9 @@
         )
       : [],
   )
-  /** Epic games never get a time to beat, so only a Steam game keeps a slot open while IGDB answers. */
-  const beatPending = $derived(ttb === undefined && game?.provider === 'steam')
-  const showTiles = $derived(!!game && (!!playtime || !!lastPlayed || !!ttb || beatPending))
+  // Decided from `game` alone, never from how long to beat: a row that appeared never collapses.
+  // A Steam game may still get a time to beat, so it always keeps the row; Epic games never get one.
+  const showTiles = $derived(!!game && (!!playtime || !!lastPlayed || game.provider === 'steam'))
 
   const year = $derived(info?.released ? releaseYear(info.released) : null)
   const meta = $derived(
@@ -216,7 +264,7 @@
           <img src={art.hero} alt="" class:loaded={heroLoaded} onload={() => (heroLoaded = true)} />
         {/if}
       </div>
-      <button class="back" onclick={onback}>← Library</button>
+      <button class="back" bind:this={backButton} onclick={onback}>← Library</button>
 
       {#if game}
         <div class="bottom">
@@ -243,16 +291,17 @@
             {/if}
           </div>
 
-          <div class="actions">
+          <div class="actions" bind:this={actionsEl}>
             {#if busy}
-              <button class="pill big" disabled>{busy}</button>
+              <!-- aria-disabled, not disabled: it stays focusable, so focus has somewhere to land. -->
+              <button class="pill big" aria-disabled="true" bind:this={busyPill}>{busy}</button>
               {#if game.provider === 'epic' && busy === 'Installing…'}
                 <button class="glass round" onclick={cancel}>Cancel</button>
               {/if}
             {:else if confirming}
               <span class="ask">Uninstall {game.title}? Its files will be deleted.</span>
               <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
-              <button class="glass round" onclick={() => (confirming = false)}>Cancel</button>
+              <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
             {:else}
               <div class="more-wrap">
                 <button
@@ -343,7 +392,7 @@
             {#if info.description}<p class="text">{info.description}</p>{/if}
             {#if info.screenshots.length}
               <div class="shots">
-                {#each info.screenshots as shot, i (shot)}
+                {#each info.screenshots as shot, i (i)}
                   <img src={shot} alt="Screenshot {i + 1} of {game.title}" loading="lazy" />
                 {/each}
               </div>
@@ -607,7 +656,7 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
-    min-height: 112px;
+    min-height: 120px;
     margin-top: 16px;
   }
 
@@ -646,9 +695,11 @@
     color: var(--text-2);
   }
 
+  /* 24px tall: the minimum target size for dense desktop UI. */
   .credit {
     align-self: flex-start;
     margin-top: auto;
+    min-height: 24px;
     padding: 0;
     background: transparent;
     font-size: 12px;
