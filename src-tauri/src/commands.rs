@@ -561,10 +561,20 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
     let mut details: GameInfoView = serde_json::from_str(&json).ok()?;
     let state = app.state::<AppState>();
     let dir = state.dirs.art.join(&key);
+    // Downloaded side by side; awaited in order, so the screenshots keep theirs.
+    let downloads: Vec<_> = details
+        .screenshots
+        .iter()
+        .enumerate()
+        .map(|(n, shot)| {
+            let (http, dest) = (state.http.clone(), dir.join(format!("shot{n}")));
+            let image = Image { path: None, url: Some(shot.clone()) };
+            tauri::async_runtime::spawn(async move { cache::resolve(&image, &http, dest).await })
+        })
+        .collect();
     let mut shots = Vec::new();
-    for (n, shot) in details.screenshots.iter().enumerate() {
-        let image = Image { path: None, url: Some(shot.clone()) };
-        if let Some(path) = cache::resolve(&image, &state.http, dir.join(format!("shot{n}"))).await {
+    for download in downloads {
+        if let Ok(Some(path)) = download.await {
             shots.extend(allow(&app, path));
         }
     }
