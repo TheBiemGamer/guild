@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::db;
-use crate::library::{ProviderKind, percent_encode};
+use crate::library::percent_encode;
 
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const API_URL: &str = "https://api.igdb.com/v4";
@@ -20,6 +20,10 @@ const RENEW_BEFORE: Duration = Duration::from_secs(60);
 const BACK_OFF: Duration = Duration::from_secs(10 * 60);
 /// IGDB `external_game_source` id of Steam.
 const STEAM_SOURCE: u32 = 1;
+/// IGDB `external_game_source` id of the Epic Games Store.
+const EPIC_SOURCE: u32 = 26;
+/// `info` kind holding an Epic copy's store page URL, as IGDB gave it.
+pub const EPIC_URL: &str = "epic-url";
 
 /// How long a found answer stays good, and a "not found" one.
 pub const FOUND_MAX_AGE_SECS: i64 = 30 * 24 * 60 * 60;
@@ -98,12 +102,6 @@ pub fn parse_game_id(body: &str) -> Result<Option<u64>, String> {
 pub fn parse_time_to_beat(body: &str) -> Result<Option<TimeToBeat>, String> {
     let rows: Vec<TimeToBeat> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
     Ok(rows.into_iter().find(|t| t.hastily.is_some() || t.normally.is_some() || t.completely.is_some()))
-}
-
-/// Only Steam can be matched. IGDB's Epic ID is a store offer id that Epic's library data
-/// (which Legendary gives us) doesn't carry, and matching by title would be a guess.
-pub fn can_match(store: ProviderKind) -> bool {
-    store == ProviderKind::Steam
 }
 
 /// What Twitch said was wrong, e.g. "invalid client secret". Never contains `secret`.
@@ -191,21 +189,67 @@ async fn post(
     response.text().await.map_err(|_| "Couldn't read IGDB's answer.".to_string())
 }
 
-/// IGDB's id for a store game, matched on the store's own ID. `Ok(None)` when IGDB doesn't know
-/// it or the store can't be matched (Epic).
-pub async fn game_id(
+/// IGDB's id for a Steam game, matched on its app id. `Ok(None)` when IGDB doesn't know it.
+pub async fn game_id_for_steam(
     http: &reqwest::Client,
     token: &Token,
     client_id: &str,
-    store: ProviderKind,
-    uid: &str,
+    appid: u32,
 ) -> Result<Option<u64>, String> {
-    // The uid goes into the query text, so only a plain number is accepted.
-    if !can_match(store) || uid.is_empty() || !uid.bytes().all(|b| b.is_ascii_digit()) {
+    let query = format!("fields game; where external_game_source = {STEAM_SOURCE} & uid = \"{appid}\"; limit 1;");
+    parse_game_id(&post(http, token, client_id, "external_games", query).await?)
+}
+
+/// The query for Epic rows named exactly `title`.
+pub fn epic_title_query(title: &str) -> String {
+    let title = title.replace('\\', r"\\").replace('"', "\\\"");
+    format!("fields game,url; where external_game_source = {EPIC_SOURCE} & name = \"{title}\"; limit 10;")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct EpicMatch {
+    pub game: u64,
+    pub url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct EpicRow {
+    game: Option<u64>,
+    url: Option<String>,
+}
+
+/// The IGDB game when there is at least one row and every row names the same game; a title
+/// shared by different games is a guess, so it matches nothing.
+pub fn parse_epic_title_match(body: &str) -> Result<Option<EpicMatch>, String> {
+    let rows: Vec<EpicRow> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
+    let Some(game) = rows.first().and_then(|r| r.game) else { return Ok(None) };
+    if rows.iter().any(|r| r.game != Some(game)) {
         return Ok(None);
     }
-    let query = format!("fields game; where external_game_source = {STEAM_SOURCE} & uid = \"{uid}\"; limit 1;");
-    parse_game_id(&post(http, token, client_id, "external_games", query).await?)
+    let url = rows.into_iter().filter_map(|r| r.url).find(|u| u.starts_with("https://store.epicgames.com/"));
+    Ok(Some(EpicMatch { game, url }))
+}
+
+pub async fn epic_by_title(
+    http: &reqwest::Client,
+    token: &Token,
+    client_id: &str,
+    title: &str,
+) -> Result<Option<EpicMatch>, String> {
+    parse_epic_title_match(&post(http, token, client_id, "external_games", epic_title_query(title)).await?)
+}
+
+/// Remembers the store page URL of an Epic copy; it never expires and is replaced when re-learned.
+pub fn remember_epic_url(conn: &Connection, epic_key: &str, url: &str) {
+    if let Ok(json) = serde_json::to_string(url) {
+        _ = db::put_info(conn, epic_key, EPIC_URL, &json, 0);
+    }
+}
+
+#[cfg_attr(not(test), expect(dead_code, reason = "the game page uses it in a later task"))]
+pub fn epic_url(conn: &Connection, epic_key: &str) -> Option<String> {
+    let json = db::cached_info(conn, epic_key, EPIC_URL, i64::MAX, 0).ok().flatten()?;
+    serde_json::from_str(&json).ok()
 }
 
 pub async fn time_to_beat(
@@ -301,10 +345,44 @@ mod tests {
         assert!(!cache.backing_off(now), "a good token clears it too");
     }
 
+    const EPIC_TITLE: &str = include_str!("../tests/fixtures/igdb/epic_title.json");
+
     #[test]
-    fn only_steam_can_be_matched() {
-        assert!(can_match(ProviderKind::Steam));
-        assert!(!can_match(ProviderKind::Epic));
+    fn epic_title_match_accepts_rows_of_one_game() {
+        let m = parse_epic_title_match(EPIC_TITLE).unwrap().unwrap();
+        assert_eq!(m.game, 36543);
+        assert_eq!(m.url.as_deref(), Some("https://store.epicgames.com/en-US/p/last-day-of-june"));
+    }
+
+    #[test]
+    fn epic_title_match_rejects_mixed_games_and_empty() {
+        assert_eq!(parse_epic_title_match(r#"[{"game":1},{"game":2}]"#).unwrap(), None);
+        assert_eq!(parse_epic_title_match("[]").unwrap(), None);
+        assert_eq!(parse_epic_title_match(r#"[{"game":1},{}]"#).unwrap(), None);
+        assert!(parse_epic_title_match("nope").is_err());
+    }
+
+    #[test]
+    fn epic_title_query_escapes_quotes_and_backslashes() {
+        assert_eq!(
+            epic_title_query(r#"Say "Hi" \o/"#),
+            r#"fields game,url; where external_game_source = 26 & name = "Say \"Hi\" \\o/"; limit 10;"#
+        );
+    }
+
+    #[test]
+    fn epic_match_ignores_non_store_urls() {
+        let m = parse_epic_title_match(r#"[{"game":7,"url":"https://example.com/x"}]"#).unwrap().unwrap();
+        assert_eq!((m.game, m.url), (7, None));
+    }
+
+    #[test]
+    fn epic_url_is_remembered_and_overwritten() {
+        let conn = temp_db("epic-url");
+        assert_eq!(epic_url(&conn, "epic-A"), None);
+        remember_epic_url(&conn, "epic-A", "https://store.epicgames.com/a");
+        remember_epic_url(&conn, "epic-A", "https://store.epicgames.com/b");
+        assert_eq!(epic_url(&conn, "epic-A").as_deref(), Some("https://store.epicgames.com/b"));
     }
 
     #[test]

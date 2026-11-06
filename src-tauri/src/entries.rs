@@ -88,7 +88,6 @@ pub fn stores(entry: &Entry, games: &[Game]) -> Vec<ProviderKind> {
 }
 
 /// The Steam copy's app id, else the Epic copy's twin.
-#[cfg_attr(not(test), expect(dead_code, reason = "the game page uses it from the next task"))]
 pub fn steam_appid(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) -> Option<u32> {
     let first = &games[entry.copies[0]];
     match first.provider {

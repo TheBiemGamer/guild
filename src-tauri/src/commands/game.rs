@@ -307,28 +307,51 @@ fn time_to_beat_view(t: igdb::TimeToBeat) -> Option<TimeToBeatView> {
     (shown.normally.is_some() || shown.hastily.is_some() || shown.completely.is_some()).then_some(shown)
 }
 
+/// A Steam app id matches by id; otherwise an Epic copy matches by exact title. The Epic page URL
+/// IGDB reports is remembered for the copy.
 async fn look_up_time_to_beat(
     state: &AppState,
     client_id: &str,
     secret: &str,
-    game: &Game,
+    appid: Option<u32>,
+    title: &str,
+    epic_key: Option<&str>,
 ) -> Res<Option<igdb::TimeToBeat>> {
     let token = igdb::cached_token(&state.igdb, &state.http, client_id, secret).await?;
-    let Some(id) = igdb::game_id(&state.http, &token, client_id, game.provider, &game.external_id).await? else {
-        return Ok(None);
-    };
+    let mut id = None;
+    if let Some(appid) = appid {
+        id = igdb::game_id_for_steam(&state.http, &token, client_id, appid).await?;
+    }
+    if let (None, Some(epic_key)) = (id, epic_key)
+        && let Some(m) = igdb::epic_by_title(&state.http, &token, client_id, title).await?
+    {
+        id = Some(m.game);
+        if let (Some(url), Some(conn)) = (m.url, open_db(state)) {
+            igdb::remember_epic_url(&conn, epic_key, &url);
+        }
+    }
+    let Some(id) = id else { return Ok(None) };
     igdb::time_to_beat(&state.http, &token, client_id, id).await
 }
 
-/// How long to beat, from IGDB, matched by Steam app ID (Epic games have no usable IGDB ID, so
-/// they get `None`). `None` too without saved credentials or when IGDB doesn't know the game.
+/// How long to beat, from IGDB, matched by Steam app ID (an Epic-only game by exact title, and
+/// only when IGDB has one game for it). `None` too without saved credentials or when IGDB doesn't know the game.
 /// Cached 30 days when found, 7 when not; a failed request is not cached.
 // Attribution: IGDB asks for visible credit where its data is shown; the game page puts a small
 // "Data from IGDB" link (`open_igdb`) under the tile.
 #[tauri::command]
 pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView> {
     let state = app.state::<AppState>();
-    let game = state.game(&key).filter(|g| igdb::can_match(g.provider))?;
+    let (appid, title, epic_key) = {
+        let s = state.lock();
+        let entry = entries::find(&s.entries, &s.games, &key)?;
+        let epic = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Epic);
+        (
+            entries::steam_appid(entry, &s.games, &s.twins),
+            epic.map_or_else(String::new, |g| g.title.clone()),
+            epic.map(|g| g.key()),
+        )
+    };
     let now = unix_now();
     let (cached, credentials) = {
         let (app, key) = (app.clone(), key.clone());
@@ -347,7 +370,7 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
         return answer.and_then(time_to_beat_view);
     }
     let (client_id, secret) = credentials?;
-    let answer = match look_up_time_to_beat(&state, &client_id, &secret, &game).await {
+    let answer = match look_up_time_to_beat(&state, &client_id, &secret, appid, &title, epic_key.as_deref()).await {
         Ok(answer) => answer,
         Err(e) => {
             eprintln!("how long to beat {key}: {e}");
@@ -383,7 +406,7 @@ pub async fn test_igdb(app: AppHandle) -> Res<()> {
     };
     let token = igdb::token(&state.http, &client_id, &secret).await?;
     state.igdb.lock().expect("token cache lock poisoned").store(token.clone());
-    igdb::game_id(&state.http, &token, &client_id, ProviderKind::Steam, "447040").await?;
+    igdb::game_id_for_steam(&state.http, &token, &client_id, 447040).await?;
     Ok(())
 }
 
