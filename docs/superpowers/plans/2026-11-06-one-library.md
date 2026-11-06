@@ -728,3 +728,122 @@ Owner request, 2026-11-07. Today `legendary list --json` gives every catalog ite
 
 - [ ] **Step 1:** Write the failing tests (trim real entries from `~/.config/legendary/metadata/` for the fixture), implement, then run the full suite, clippy and `npm run check`.
 - [ ] **Step 2: Commit:** `fix(epic): list only games, not engine assets, DLC or apps`.
+
+### Task 20b: DLC under its base game (amends Task 20)
+
+Owner decision, 2026-11-07: DLC must be handled, not just hidden. Task 20 drops DLC from the card list. This task attaches each DLC to its base game.
+
+**Files:**
+- Modify: `library/epic.rs`, `library/mod.rs` (`Game.dlc`), `library/steam.rs`, `commands/game.rs`, `src/lib/Detail.svelte`, `src/lib/InstallPopup.svelte`.
+
+**Interfaces:**
+- **Epic.**
+  - A Legendary item whose categories contain `addons` is a DLC. Its base is `metadata.mainGameItem.id` (catalog id), matched to the base game's catalog id.
+  - `Game { dlc: Vec<Dlc> }` with `Dlc { id: String, title: String, installed: bool }`.
+  - Install and uninstall go through Legendary: `legendary install <base> --dlcs-only` / `--skip-dlcs`, or the DLC's own app_name, depending on what the Legendary version supports (check `legendary install --help`).
+  - The install popup gets a "Include DLC" checkbox, on by default.
+- **Steam.**
+  - List the owned DLC: GetOwnedGames doesn't return DLC; use PICS app info `extended.listofdlc` intersected with the account's licenses, or the store appdetails `dlc` list filtered to owned. Pick the one that works anonymously or with the existing token, and record which.
+  - Steam DLC is shown only. Steam installs DLC itself.
+- **Game page.** A "DLC" section under Details lists each DLC with its installed state. For Epic it adds Install / Uninstall per DLC. It is hidden when the game has no DLC.
+
+**Tests:**
+- `addon_attaches_to_its_base_game` (fixture from real Legendary metadata).
+- `dlc_without_base_in_library_is_hidden`.
+
+- [ ] **Step 1:** Write the failing tests, implement, then run the full suite, clippy and `npm run check`.
+- [ ] **Step 2:** VERIFY-LATER: install a game with and without DLC; install and uninstall one DLC.
+- [ ] **Step 3: Commit:** `feat(dlc): show and manage DLC under its game`.
+
+## Feature parity tasks (owner, 2026-11-07)
+
+These tasks bring over Heroic features the owner chose: updates, cloud saves, install management, a download queue, and launch options.
+
+**Linux later:** the owner may want Linux support one day. New OS-specific code (process spawning flags, opening URLs and folders, registry and paths) goes behind small functions in one place (`src-tauri/src/platform.rs`, created by the first task that needs it), with the Windows implementation behind `#[cfg(windows)]`. No Windows-only calls are scattered through feature code. Don't build Linux support now.
+
+### Task 21: Epic game updates
+
+**Files:** `library/epic.rs`, `commands/game.rs` and `commands/library.rs`, `src/lib/Card.svelte`, `src/lib/Detail.svelte`, `src/lib/PlayButton.svelte`.
+
+**Interfaces:**
+- **Finding updates.** After each Epic refresh, `legendary list-installed --check-updates --json` (or the equivalent in the installed Legendary version) marks installed games that have an update. The result goes in `Game.update_available: bool`.
+- **Game page.**
+  - The Play button becomes **Update** when an update is available.
+  - Update runs `legendary update <app>` with the same progress, cancel and popup flow as Install.
+  - The ⋯ menu offers "Play without updating".
+- **Card.** A small "Update" chip like the existing "Install" chip.
+- Steam is left alone: Steam updates games itself.
+
+**Tests:** `parses_update_available_from_list_installed` (fixture).
+
+- [ ] **Steps:** Write the failing test, implement, run the full suite, clippy and `npm run check`. VERIFY-LATER: update a game with a pending update. **Commit:** `feat(epic): find and install game updates`.
+
+### Task 22: Epic cloud saves
+
+**Files:** `library/epic.rs`, `commands/game.rs`, settings (per-game toggle and a global default), `src/lib/Detail.svelte`, `src/lib/Settings.svelte`.
+
+**Interfaces:**
+- **When it syncs.** For Epic games with cloud saves (the catalog's `customAttributes.CloudSaveFolder` is present):
+  - `legendary sync-saves <app> --skip-upload` runs before launch;
+  - `legendary sync-saves <app> --skip-download` runs after the game exits. The existing Epic process watch knows when it exits.
+- **Conflicts.** When Legendary reports one, show "Cloud save is newer / local save is newer" with Keep cloud / Keep local, and never pick silently.
+- **Setting.** "Sync cloud saves", on by default, plus a per-game override in the ⋯ menu.
+- **Failure.** A sync failure shows a quiet note on the game page and never blocks launching.
+
+**Tests:**
+- `cloud_save_folder_detected` (fixture);
+- `sync_args_before_and_after_launch`.
+
+- [ ] **Steps:** Write the failing tests, implement, run the full suite, clippy and `npm run check`. VERIFY-LATER: a save made in a game appears after a reinstall or on another PC. **Commit:** `feat(epic): sync cloud saves around play`.
+
+### Task 23: Manage installs (verify, move, import)
+
+**Files:** `library/epic.rs`, `commands/game.rs`, `src/lib/Detail.svelte` (⋯ menu), `src/lib/Settings.svelte` (Import).
+
+**Interfaces:**
+- **Verify / repair.**
+  - Epic: `legendary verify <app>`, then `legendary repair <app>` if files are bad, with progress like Install.
+  - Steam: `steam://validate/<appid>`.
+- **Move** (Epic): pick a folder, then run `legendary move <app> <dest>` with progress. Steam: open Steam's storage manager (`steam://open/storage`).
+- **Import** (Epic):
+  - "Import existing install": pick the game folder, then `legendary import <app> <path>`.
+  - Settings also offers "Sync with Epic Games Launcher" (`legendary egl-sync`), so games installed by EGL show up.
+- The ⋯ menu lists Verify, Move and Uninstall for the chosen copy.
+
+**Tests:** argument builders for verify, move and import (pure); `import_requires_existing_folder`.
+
+- [ ] **Steps:** Write the failing tests, implement, run the full suite, clippy and `npm run check`. VERIFY-LATER: verify one game, move one game, import one folder. **Commit:** `feat(install): verify, move and import games`.
+
+### Task 24: Download queue
+
+**Files:** `commands/game.rs` / a new `src-tauri/src/downloads.rs`, `src/App.svelte` (a small downloads indicator), `src/lib/Downloads.svelte`.
+
+**Interfaces:**
+- **What the queue does.** Epic installs, updates and repairs go through one queue:
+  - one active Legendary job at a time;
+  - the rest wait in order;
+  - the owner can reorder, pause (stop the Legendary process; Legendary resumes partial downloads), resume and cancel.
+- **Where it shows.** A toolbar indicator shows the active job's progress. Clicking it opens a Downloads panel with the active job and the queue.
+- **Steam.** Steam jobs aren't queued (Steam has its own), but they are shown in the panel as "in Steam" with their progress.
+- **Restarts.** The queue survives an app restart: queued jobs are stored as a `settings` value (JSON list of `{key, action}`) and resumed on start.
+
+**Tests:** queue order, pause and resume, cancel, and restore from the stored list (pure queue model).
+
+- [ ] **Steps:** Write the failing tests, implement, run the full suite, clippy and `npm run check`. VERIFY-LATER: queue two installs, pause and resume, restart the app mid-queue. **Commit:** `feat(downloads): queue Epic installs with pause and resume`.
+
+### Task 25: Launch options per game
+
+**Files:** `library/epic.rs`, `library/steam.rs`, `commands/game.rs`, `src/lib/Detail.svelte` (a "Launch options" dialog from the ⋯ menu).
+
+**Interfaces:**
+- **Per-game options** (stored in `settings` as JSON keyed by the copy key):
+  - extra arguments;
+  - offline mode (Epic: `--offline`);
+  - "skip version check" (Epic);
+  - an alternative executable (Epic: `--override-exe`).
+- **Steam.** Steam keeps its own launch options. The dialog shows a short note and a button that opens the game's Steam properties (`steam://gameproperties/<appid>`), because Steam has no URI that accepts arguments for every game.
+- **Validation.** Arguments are passed as separate arguments, never through a shell. The alternative executable must exist inside the install folder.
+
+**Tests:** argument building from options; `override_exe_must_be_inside_install_dir`.
+
+- [ ] **Steps:** Write the failing tests, implement, run the full suite, clippy and `npm run check`. VERIFY-LATER: launch with extra arguments and in offline mode. **Commit:** `feat(launch): per-game launch options`.
