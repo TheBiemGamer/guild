@@ -40,6 +40,7 @@
   import { onMount, tick } from 'svelte'
   import * as api from './api'
   import type { Action, Detail, GameInfo, Progress, TimeToBeat } from './api'
+  import PlayButton from './PlayButton.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
   let { gameKey, running, progress, version, onback, onerror, onchanged, ontint }: {
@@ -61,14 +62,12 @@
   let heroLoaded = $state(false)
   let info = $state<GameInfo | null | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
-  let download = $state<string | null | undefined>(undefined)
   let busy = $state<string | null>(null)
   let confirming = $state(false)
   let menuOpen = $state(false)
   let moreButton = $state<HTMLButtonElement>()
   let menu = $state<HTMLDivElement>()
   let backButton = $state<HTMLButtonElement>()
-  let busyPill = $state<HTMLButtonElement>()
   let confirmCancel = $state<HTMLButtonElement>()
   let actionsEl = $state<HTMLDivElement>()
 
@@ -123,24 +122,16 @@
     }
   })
 
-  // Temporary until the copy switcher: the copy Play and Install use.
-  const copy = $derived(game && (game.copies.find((c) => c.key === game!.chosen) ?? game.copies[0]))
-
-  /** A not-installed Epic game shows its download size beside Install. */
-  const sizeKey = $derived(copy && copy.provider === 'epic' && !copy.installed ? copy.key : null)
+  // Which copy Play and Install use: the default until the owner picks one. Not stored.
+  let chosenKey = $state('')
+  let chosenFor = ''
   $effect(() => {
-    const key = sizeKey
-    download = undefined
-    if (!key) return
-    let alive = true
-    api.downloadSize(key).then(
-      (b) => alive && (download = b),
-      () => alive && (download = null),
-    )
-    return () => {
-      alive = false
+    if (game && game.key !== chosenFor) {
+      chosenFor = game.key
+      chosenKey = game.chosen
     }
   })
+  const copy = $derived(game && (game.copies.find((c) => c.key === chosenKey) ?? game.copies[0]))
 
   const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', uninstall: 'Uninstalling…' }
 
@@ -148,7 +139,7 @@
     confirming = false
     menuOpen = false
     busy = labels[action]
-    keepFocus(() => busyPill)
+    keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
     try {
       await api.act(action, copy!.key)
     } catch (e) {
@@ -156,13 +147,13 @@
     } finally {
       busy = null
       onchanged()
-      keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill'))
+      keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill, button.go'))
     }
   }
 
   async function cancel() {
     busy = 'Cancelling…'
-    keepFocus(() => busyPill)
+    keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
     try {
       await api.cancelInstall(copy!.key)
     } catch (e) {
@@ -245,8 +236,14 @@
   const showTiles = $derived(!!playtime || !!lastPlayed)
 
   const year = $derived(info?.released ? releaseYear(info.released) : null)
+  // The chosen copy's store when it is installed, else the first installed copy's.
+  const installedOn = $derived(game && (copy!.installed ? copy! : game.copies.find((c) => c.installed)))
   const meta = $derived(
-    game ? [game.installed ? 'Installed' : 'Not installed', info?.developer, year].filter((s): s is string => !!s) : [],
+    game
+      ? [installedOn ? `Installed on ${storeNames[installedOn.provider]}` : 'Not installed', info?.developer, year].filter(
+          (s): s is string => !!s,
+        )
+      : [],
   )
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
   const showDetails = $derived(
@@ -272,7 +269,7 @@
           <div class="name">
             <h1>{game.title}</h1>
             <div class="meta">
-              <StoreIcon provider={copy!.provider} size={14} />
+              {#each game.stores as store}<StoreIcon provider={store} size={14} />{/each}
               {#each meta as item}<span>{item}</span>{/each}
             </div>
             {#if progress}
@@ -293,63 +290,50 @@
           </div>
 
           <div class="actions" bind:this={actionsEl}>
-            {#if busy}
-              <!-- aria-disabled, not disabled: it stays focusable, so focus has somewhere to land. -->
-              <button class="pill big" aria-disabled="true" bind:this={busyPill}>{busy}</button>
-              {#if copy!.provider === 'epic' && busy === 'Installing…'}
-                <button class="glass round" onclick={cancel}>Cancel</button>
-              {/if}
-            {:else if confirming}
+            {#if confirming}
               <span class="ask">Uninstall {game.title}? Its files will be deleted.</span>
               <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
             {:else}
-              <div class="more-wrap">
-                <button
-                  class="glass more"
-                  bind:this={moreButton}
-                  aria-label="More actions"
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  onclick={() => (menuOpen ? closeMenu(true) : openMenu())}
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-                  </svg>
-                </button>
-                {#if menuOpen}
-                  <div class="menu" role="menu" aria-label="More actions" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
-                    {#if copy!.installDir}
-                      <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>
-                        Open install folder
-                      </button>
-                    {/if}
-                    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openStorePage(copy!.key)))}>
-                      Open {storeNames[copy!.provider]} store page
-                    </button>
-                    {#if copy!.installed}
-                      <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-              {#if !copy!.installed}
-                {#if sizeKey}
-                  <span class="download">
-                    {download === undefined ? 'Checking size…' : download === null ? '' : `${download} download`}
-                  </span>
-                {/if}
-                <button class="pill big" onclick={() => act('install')}>
-                  <svg class="stroke" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-                  Install
-                </button>
-              {:else if running}
-                <button class="pill big" disabled>Playing</button>
-              {:else}
-                <button class="pill big" onclick={() => act('play')}>
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
-                  Play
-                </button>
+              {#if !busy}
+                <div class="more-wrap">
+                  <button
+                    class="glass more"
+                    bind:this={moreButton}
+                    aria-label="More actions"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    onclick={() => (menuOpen ? closeMenu(true) : openMenu())}
+                  >
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                    </svg>
+                  </button>
+                  {#if menuOpen}
+                    <div class="menu" role="menu" aria-label="More actions" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
+                      {#if copy!.installDir}
+                        <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>
+                          Open install folder
+                        </button>
+                      {/if}
+                      {#if copy!.installed}
+                        <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+              <PlayButton
+                copies={game.copies}
+                chosen={chosenKey}
+                {running}
+                {busy}
+                onchoose={(key) => (chosenKey = key)}
+                onplay={() => act('play')}
+                oninstall={() => act('install')}
+              />
+              {#if busy === 'Installing…' && copy!.provider === 'epic'}
+                <button class="glass round" onclick={cancel}>Cancel</button>
               {/if}
             {/if}
           </div>
@@ -364,10 +348,13 @@
         <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
         <div class="tiles">
           {#if playtime}
-            <div class="tile"><div class="head"><h2>Playtime</h2></div><p><b>{playtime}</b></p></div>
+            <div class="tile"><div class="head">
+                <h2>Playtime</h2>
+                {#if game.playtimeNote}<small>{game.playtimeNote}</small>{/if}
+              </div><p><b>{playtime}</b></p></div>
           {/if}
           {#if lastPlayed}
-            <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>{lastPlayed}</b></p></div>
+            <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · {game.lastPlayedStore}</span>{/if}</p></div>
           {/if}
           {#if ttb}
             <div class="tile">
@@ -561,11 +548,6 @@
     gap: 8px;
   }
 
-  .pill.big {
-    height: 44px;
-    padding: 0 32px;
-  }
-
   .round {
     height: 44px;
     padding: 0 20px;
@@ -579,11 +561,6 @@
 
   button.danger {
     color: var(--danger-text);
-  }
-
-  .download {
-    color: var(--text-2);
-    font-variant-numeric: tabular-nums;
   }
 
   .more-wrap {
@@ -641,14 +618,6 @@
     fill: currentColor;
   }
 
-  svg.stroke {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2.4;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
   /* Quick facts: three fixed slots. Every tile is one head line plus one value line, so a late
      tile is exactly as tall as the ones already there and the row never changes height. */
   .tiles {
@@ -697,6 +666,11 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  .head small {
+    font-size: 12px;
+    color: var(--text-2);
   }
 
   .tile p span {
