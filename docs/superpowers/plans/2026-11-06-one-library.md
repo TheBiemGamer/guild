@@ -703,3 +703,28 @@ Owner request, 2026-11-07. Today:
 - [ ] **Step 2:** Benchmark 4000 and 15000. Both must stay at 0 slow frames, and idle must stay at today's level.
 - [ ] **Step 3:** VERIFY-LATER: the start shows no empty flash, covers fade in on their colour, and the game page doesn't jump.
 - [ ] **Step 4: Commit:** `feat(ui): smoother loading without pop-in`.
+
+### Task 20: Only games in the Epic library
+
+Owner request, 2026-11-07. Today `legendary list --json` gives every catalog item the account owns, and the launcher lists all of them. In the owner's library of 656 items, 547 are games. The rest are:
+- 64 Unreal Engine assets, plugins and engines (for example "Async Loading Screen" several times, "City Sample", "ARK ModKit (UE4)");
+- 36 DLC add-ons (for example "Train Sim World 5: Sand Patch Grade");
+- 4 apps (Spotify, Brave, Discord, itch.io);
+- 2 hidden content items (Fortnite content);
+- 2 dedicated servers;
+- 1 bonus pack.
+
+**Files:**
+- Modify: `src-tauri/src/library/epic.rs` (the parser behind `list --json`) and a fixture under `src-tauri/tests/fixtures/legendary/`.
+
+**Interfaces:**
+- `fn is_game(item: &Value) -> bool` returns true when `metadata.categories[].path` contains `"games"`. The epic list parser keeps only those items.
+- Installed items always stay, even without the `games` category, so nothing the owner installed disappears.
+- The scan replaces the Epic rows in SQLite, so the filtered-out items disappear on the next Epic refresh. Their launch history and info rows stay harmless.
+
+**Tests:**
+- `list_keeps_only_games`: a fixture with one game, one UE asset (`plugins`/`asset-format`), one addon, one `engines` item and one software app gives only the game.
+- `installed_non_game_is_kept`.
+
+- [ ] **Step 1:** Write the failing tests (trim real entries from `~/.config/legendary/metadata/` for the fixture), implement, then run the full suite, clippy and `npm run check`.
+- [ ] **Step 2: Commit:** `fix(epic): list only games, not engine assets, DLC or apps`.
