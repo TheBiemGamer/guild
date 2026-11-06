@@ -164,6 +164,18 @@ In `settings.rs`, add `#[ignore = "touches Windows Credential Manager"] steam_to
     - On `KeepAndFlag` it sets `steam_attention = true` and never retries until the next connect or app start.
     - On `KeepQuiet` it does nothing.
     - It is called at the end of `load_cache` and of `refresh`.
+    - `refresh` gains a parameter: `refresh(app, epic: bool, owned: bool)`, with TS `api.refresh(epic, owned)`.
+      - The toolbar Refresh button calls `refresh(true, true)`, which is `refresh_owned(app, force = true)`: a fresh Steam list every time the owner clicks (owner decision, 2026-11-06).
+      - Startup and the 60 s timer pass `owned: false`, so the 6 h rule applies.
+  - **Background full refresh** (owner decision, 2026-11-06), done in `App.svelte`:
+    - **Triggers:**
+      - every 6 h while the app is open;
+      - when the window becomes visible or focused again (`visibilitychange` / window `focus`) after at least 1 h since the last full refresh.
+    - **What it calls:** `api.refresh(true, true)`, with the same quiet behaviour as startup: no status text, failures only as the Settings dot.
+    - **Never two at once:** reuse the existing `refreshing` flag. A trigger while a refresh runs is dropped.
+    - `refreshedAt` already records the last full refresh, so use it for the 1 h check.
+    - Pure helper in `App.svelte`'s module script: `export function dueForRefresh(lastMs: number | null, nowMs: number, minGapMs: number): boolean`. `null` means due.
+    - Constants: `FULL_REFRESH_EVERY_MS = 6 * 60 * 60 * 1000` and `REFRESH_ON_RETURN_AFTER_MS = 60 * 60 * 1000`.
 - `Library` gains `steam_attention: bool`, which the toolbar's settings dot ORs with `epic_attention`.
 
 - [ ] **Step 1: Write failing tests:**
