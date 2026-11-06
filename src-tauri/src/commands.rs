@@ -251,9 +251,14 @@ fn note_epic_login(state: &AppState, s: &mut Shared, login: Login) {
         Ok(previous)
     });
     match stored {
-        Ok(previous) => s.epic_notice |= logged_out_since_last_run(previous.as_deref(), login),
+        Ok(previous) => s.epic_notice = epic_notice(s.epic_notice, previous.as_deref(), login),
         Err(e) => eprintln!("epic login state: {e}"),
     }
+}
+
+/// Whether the "logged out of Epic" notice shows after a scan found `login`. Logging back in clears it.
+fn epic_notice(showing: bool, previous: Option<&str>, login: Login) -> bool {
+    login != Login::LoggedIn && (showing || logged_out_since_last_run(previous, login))
 }
 
 struct Merged {
@@ -969,6 +974,14 @@ mod tests {
         assert!(!logged_out_since_last_run(Some("loggedOut"), Login::LoggedOut));
         assert!(!logged_out_since_last_run(None, Login::LoggedOut));
         assert!(!logged_out_since_last_run(Some("loggedIn"), Login::Unreachable));
+    }
+
+    #[test]
+    fn logging_back_in_clears_the_notice() {
+        assert!(epic_notice(false, Some("loggedIn"), Login::LoggedOut));
+        assert!(epic_notice(true, Some("loggedOut"), Login::LoggedOut), "stays until dismissed");
+        assert!(!epic_notice(true, Some("loggedOut"), Login::LoggedIn));
+        assert!(!epic_notice(true, Some("loggedIn"), Login::LoggedIn));
     }
 
     #[test]
