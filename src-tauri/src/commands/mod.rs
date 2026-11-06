@@ -60,6 +60,8 @@ struct Shared {
     steam_attention: bool,
     /// An owned-games fetch is in flight.
     owned_running: bool,
+    /// When the last owned-games fetch started; non-forced fetches wait `OWNED_RETRY_SECS` after it.
+    owned_attempt: Option<Instant>,
     /// The library changed outside a UI call (owned games arrived); the next poll reports it.
     library_changed: bool,
     /// Steam twin (app id) of an Epic game, by Epic game key.

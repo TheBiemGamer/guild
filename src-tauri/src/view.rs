@@ -44,7 +44,7 @@ pub fn arrange(
     match sort {
         Sort::Title => {}
         Sort::LastPlayed => shown.sort_by_key(|&i| Reverse(entries::last_played(&entries[i], games).map(|(t, _)| t))),
-        Sort::Playtime => shown.sort_by_key(|&i| Reverse(entries::playtime(&entries[i], games).0)),
+        Sort::Playtime => shown.sort_by_cached_key(|&i| Reverse(entries::playtime(&entries[i], games).0)),
     }
     shown
 }

@@ -45,10 +45,6 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), String> {
             _ => Ok(()),
         },
         IGDB_CLIENT_ID => Ok(()),
-        STEAM_ACCOUNT => match value {
-            Some(v) if v.trim().is_empty() => Err("The Steam account name can't be blank.".into()),
-            _ => Ok(()),
-        },
         "igdb_secret" => Err("The IGDB secret is saved through its own command.".into()),
         _ => Err(format!("Unknown setting: {name}")),
     }
@@ -162,6 +158,8 @@ mod tests {
         assert!(validate("igdb_secret", Some("x")).is_err());
         assert!(validate("igdb_secret", None).is_err());
         assert!(validate("nope", Some("x")).is_err());
+        // Written only by connect and disconnect.
+        assert!(validate(STEAM_ACCOUNT, Some("x")).is_err());
         assert!(validate(AMBIENT, Some("maybe")).is_err());
         assert!(validate(EPIC_INSTALL_DIR, Some(r"Z:\no\such\folder")).is_err());
         assert!(validate(AMBIENT, Some("false")).is_ok());

@@ -264,9 +264,16 @@ pub async fn steam_connect_poll(app: AppHandle) -> Res<ConnectStep> {
 /// Stores the login and clears the "connect again" flag. The token goes nowhere else.
 fn save_login(app: &AppHandle, approved: steam_login::Approved) -> Res<()> {
     let state = app.state::<AppState>();
-    settings::set_steam_token(Some(&approved.refresh_token))?;
+    if approved.account.trim().is_empty() {
+        return Err("Steam sent no account name.".into());
+    }
+    // Account first, so there is never a token without an account.
     let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
-    settings::update(&conn, settings::STEAM_ACCOUNT, Some(&approved.account))?;
+    cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, Some(&approved.account)).map_err(|e| e.to_string())?;
+    if let Err(e) = settings::set_steam_token(Some(&approved.refresh_token)) {
+        _ = cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, None);
+        return Err(e);
+    }
     state.lock().steam_attention = false;
     Ok(())
 }
@@ -306,7 +313,7 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
         let state = app.state::<AppState>();
         settings::set_steam_token(None)?;
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
-        settings::update(&conn, settings::STEAM_ACCOUNT, None)?;
+        cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, None).map_err(|e| e.to_string())?;
         steam_owned::forget(&conn);
         state.lock().steam_attention = false;
         rescan(&app, false);

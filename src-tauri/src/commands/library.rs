@@ -1,8 +1,7 @@
 //! The library list, scanning and merging the stores, covers, the featured game and the 2 s poll.
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -14,6 +13,7 @@ use crate::entries;
 use crate::library::epic::{self, Login};
 use crate::library::steam::with_owned;
 use crate::library::{Game, Progress, ProviderKind};
+use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
 use crate::view::{self, Sort};
 
@@ -84,12 +84,13 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         let mut games = cache::db::load(&conn).map_err(|e| e.to_string())?;
         view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(|e| e.to_string())?);
         view::sort_by_title(&mut games);
+        let twins = crate::gamesdb::all_cached(&conn, super::unix_now());
         let mut s = state.lock();
         // A scan that already finished wins over the cache.
         if s.games.is_empty() {
             s.games = games;
         }
-        s.twins = crate::gamesdb::all_cached(&conn, super::unix_now());
+        s.twins = twins;
         regroup(&mut s);
         drop(s);
         refresh_owned(app.clone(), false);
@@ -105,18 +106,21 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
 pub async fn refresh(app: AppHandle, epic: bool, owned: bool) {
     let again = app.clone();
     blocking(move || rescan(&app, epic)).await;
-    fill_twins(again.clone());
+    if epic {
+        fill_twins(again.clone());
+    }
     refresh_owned(again, owned);
 }
 
-/// Marks a twin run as running until dropped, even if the task panics or is cancelled.
-struct TwinsRunning(AppHandle);
+/// Marks a background job (the flag the second field picks) as running until dropped, even if the
+/// task panics or is cancelled. A poisoned lock still gets its flag cleared.
+struct Running(AppHandle, fn(&mut Shared) -> &mut bool);
 
-impl Drop for TwinsRunning {
+impl Drop for Running {
     fn drop(&mut self) {
-        if let Ok(mut s) = self.0.state::<AppState>().shared.lock() {
-            s.twins_running = false;
-        }
+        let state = self.0.state::<AppState>();
+        let mut s = state.shared.lock().unwrap_or_else(|e| e.into_inner());
+        *(self.1)(&mut s) = false;
     }
 }
 
@@ -133,7 +137,7 @@ pub(crate) fn fill_twins(app: AppHandle) {
             }
             s.twins_running = true;
         }
-        let _running = TwinsRunning(app.clone());
+        let _running = Running(app.clone(), |s: &mut Shared| &mut s.twins_running);
         let pending = {
             let epic: Vec<String> = state
                 .lock()
@@ -144,21 +148,10 @@ pub(crate) fn fill_twins(app: AppHandle) {
                 .collect();
             let Some(conn) = open_db(&state) else { return };
             let now = super::unix_now();
-            let mut todo = Vec::new();
-            let mut known = HashMap::new();
-            for app_name in epic {
-                let key = format!("epic-{app_name}");
-                match crate::gamesdb::cached(&conn, &key, now) {
-                    Some(Some(id)) => _ = known.insert(key, id),
-                    Some(None) => {}
-                    None => todo.push(app_name),
-                }
-            }
-            let mut s = state.lock();
-            s.twins.extend(known);
-            regroup(&mut s);
-            drop(s);
-            todo
+            // Cached answers are already in `twins` (load_cache), so only the unanswered remain.
+            epic.into_iter()
+                .filter(|app_name| crate::gamesdb::cached(&conn, &format!("epic-{app_name}"), now).is_none())
+                .collect::<Vec<_>>()
         };
         for (i, app_name) in pending.iter().enumerate() {
             if i > 0 {
@@ -209,28 +202,28 @@ fn error_kind(e: &steam_owned::OwnedError) -> String {
     }
 }
 
-/// Marks an owned fetch as running until dropped, even if the task panics or is cancelled.
-struct OwnedRunning(AppHandle);
+/// Non-forced fetches that fail aren't cached, so they wait this long before trying again.
+const OWNED_RETRY_SECS: u64 = 15 * 60;
 
-impl Drop for OwnedRunning {
-    fn drop(&mut self) {
-        if let Ok(mut s) = self.0.state::<AppState>().shared.lock() {
-            s.owned_running = false;
-        }
-    }
+/// Whether a non-forced fetch may start: none was tried in the last `OWNED_RETRY_SECS`.
+fn retry_due(last_attempt: Option<Instant>) -> bool {
+    last_attempt.is_none_or(|t| t.elapsed().as_secs() >= OWNED_RETRY_SECS)
 }
 
 /// The saved token and a running mark when a fetch is due and none is running. The cheap checks come
 /// first so Credential Manager is only read when a fetch will happen.
-fn owned_job(app: &AppHandle, force: bool) -> Option<(String, OwnedRunning)> {
+fn owned_job(app: &AppHandle, force: bool) -> Option<(String, Running)> {
     let state = app.state::<AppState>();
     {
         let s = state.lock();
-        if s.owned_running || (s.steam_attention && !force) {
+        if s.owned_running || (!force && (s.steam_attention || !retry_due(s.owned_attempt))) {
             return None;
         }
     }
-    if !force && cache::db::open(&state.dirs.db).is_ok_and(|c| steam_owned::fresh(&c, super::unix_now())) {
+    let conn = open_db(&state)?;
+    // Never connected: nothing to fetch, and no reason to touch Credential Manager.
+    cache::db::setting(&conn, settings::STEAM_ACCOUNT).ok().flatten()?;
+    if !force && steam_owned::fresh(&conn, super::unix_now()) {
         return None;
     }
     {
@@ -239,18 +232,30 @@ fn owned_job(app: &AppHandle, force: bool) -> Option<(String, OwnedRunning)> {
             return None;
         }
         s.owned_running = true;
+        s.owned_attempt = Some(Instant::now());
     }
-    let running = OwnedRunning(app.clone());
+    let running = Running(app.clone(), |s: &mut Shared| &mut s.owned_running);
     let token = crate::settings::steam_token()?;
     Some((token, running))
+}
+
+/// Saves a fetched list only while an account is still connected: a Disconnect that ran during the
+/// fetch must not be undone. Returns whether it was saved.
+fn remember_if_connected(conn: &rusqlite::Connection, games: &[OwnedGame], now: i64) -> bool {
+    let connected = cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().is_some();
+    if connected {
+        steam_owned::remember(conn, games, now);
+    }
+    connected
 }
 
 fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
     let state = app.state::<AppState>();
     match outcome {
         OwnedOutcome::Store(games) => {
-            if let Some(conn) = open_db(&state) {
-                steam_owned::remember(&conn, &games, super::unix_now());
+            let saved = open_db(&state).is_some_and(|conn| remember_if_connected(&conn, &games, super::unix_now()));
+            if !saved {
+                return;
             }
             state.lock().steam_attention = false;
             rescan(app, false);
@@ -308,19 +313,14 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) {
     }
 }
 
-/// Steam's installed games plus the cached owned list, if there is one.
-fn merge_owned(installed: Vec<Game>, owned: Option<&[OwnedGame]>, librarycache: &Path) -> Vec<Game> {
-    match owned {
-        Some(owned) => with_owned(installed, owned, librarycache),
-        None => installed,
-    }
-}
-
 fn scan(with_epic: bool, owned: Option<&[OwnedGame]>) -> (ScanResults, Option<Login>) {
     let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string()).map(|installed| {
         let cache = steamlocate::SteamDir::locate().map(|d| d.path().join("appcache").join("librarycache"));
         match cache {
-            Ok(cache) => merge_owned(installed, owned, &cache),
+            Ok(cache) => match owned {
+                Some(owned) => with_owned(installed, owned, &cache),
+                None => installed,
+            },
             Err(_) => installed,
         }
     });
@@ -542,13 +542,22 @@ mod tests {
     use crate::view::tests::game;
 
     #[test]
-    fn scan_merges_cached_owned_without_network() {
-        let installed = vec![game("400", true, None, None)];
+    fn a_fetch_finishing_after_disconnect_is_not_saved() {
+        let path = std::env::temp_dir().join(format!("launcher-owned-test-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let conn = cache::db::open(&path).unwrap();
         let owned = [OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 3 }];
-        let merged = merge_owned(installed.clone(), Some(&owned), Path::new("cache"));
-        assert!(merged.iter().any(|g| g.external_id == "70" && !g.installed));
-        // No cached list: installed games only.
-        assert_eq!(merge_owned(installed.clone(), None, Path::new("cache")), installed);
+        assert!(!remember_if_connected(&conn, &owned, 100));
+        assert!(steam_owned::cached(&conn).is_none());
+        cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, Some("noah")).unwrap();
+        assert!(remember_if_connected(&conn, &owned, 100));
+        assert!(steam_owned::cached(&conn).is_some());
+    }
+
+    #[test]
+    fn failed_owned_fetches_wait_before_retrying() {
+        assert!(retry_due(None));
+        assert!(!retry_due(Some(Instant::now())));
     }
 
     #[test]
