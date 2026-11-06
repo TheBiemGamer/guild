@@ -351,7 +351,6 @@ pub struct Detail {
     size: Option<String>,
     /// Only for an installed game (Steam knows a folder for games it hasn't installed yet).
     install_dir: Option<String>,
-    store_url: String,
 }
 
 #[tauri::command]
@@ -359,7 +358,6 @@ pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
     let g = state.game(&key)?;
     Some(Detail {
         key,
-        store_url: store_url(&g),
         size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
         install_dir: installed_dir(&g).map(|p| p.to_string_lossy().into_owned()),
         title: g.title,
@@ -378,20 +376,10 @@ fn installed_dir(g: &Game) -> Option<&PathBuf> {
 fn store_url(g: &Game) -> String {
     match g.provider {
         ProviderKind::Steam => format!("https://store.steampowered.com/app/{}", g.external_id),
-        ProviderKind::Epic => format!("https://store.epicgames.com/browse?q={}", percent_encode(&g.title)),
-    }
-}
-
-/// Percent-encodes every byte except RFC 3986 unreserved characters, for a query value.
-fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
+        ProviderKind::Epic => {
+            format!("https://store.epicgames.com/browse?q={}", crate::library::percent_encode(&g.title))
         }
     }
-    out
 }
 
 /// Opens an installed game's folder in File Explorer.

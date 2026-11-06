@@ -32,7 +32,6 @@ export interface Detail {
   size: string | null
   /** Only set for an installed game. */
   installDir: string | null
-  storeUrl: string
 }
 export interface SettingsView {
   steam: { name: string | null; path: string } | null

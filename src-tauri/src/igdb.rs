@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::db;
-use crate::library::ProviderKind;
+use crate::library::{ProviderKind, percent_encode};
 
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const API_URL: &str = "https://api.igdb.com/v4";
@@ -106,16 +106,6 @@ pub fn can_match(store: ProviderKind) -> bool {
     store == ProviderKind::Steam
 }
 
-/// Percent-encodes everything but unreserved characters, for an `x-www-form-urlencoded` body.
-fn form_encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
 /// What Twitch said was wrong, e.g. "invalid client secret". Never contains `secret`.
 fn token_failure(status: u16, body: &str, secret: &str) -> String {
     #[derive(Deserialize)]
@@ -134,8 +124,8 @@ fn token_failure(status: u16, body: &str, secret: &str) -> String {
 pub async fn token(http: &reqwest::Client, client_id: &str, secret: &str) -> Result<Token, String> {
     let body = format!(
         "client_id={}&client_secret={}&grant_type=client_credentials",
-        form_encode(client_id),
-        form_encode(secret)
+        percent_encode(client_id),
+        percent_encode(secret)
     );
     let response = http
         .post(TOKEN_URL)
@@ -315,12 +305,6 @@ mod tests {
     fn only_steam_can_be_matched() {
         assert!(can_match(ProviderKind::Steam));
         assert!(!can_match(ProviderKind::Epic));
-    }
-
-    #[test]
-    fn form_values_are_percent_encoded() {
-        assert_eq!(form_encode("ab-1_.~"), "ab-1_.~");
-        assert_eq!(form_encode("a&b=c d"), "a%26b%3Dc%20d");
     }
 
     #[test]

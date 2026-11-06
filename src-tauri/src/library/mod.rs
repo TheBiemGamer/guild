@@ -114,6 +114,19 @@ pub fn open_uri(uri: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Percent-encodes every byte except RFC 3986 unreserved characters: for a URL query value or an
+/// `x-www-form-urlencoded` body.
+pub fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Whether `tasklist /FI <filter>` (e.g. `PID eq 42`) lists a process named `image`.
@@ -146,5 +159,12 @@ mod tests {
         // Pid reused by another program, or a name that only starts the same.
         assert!(!lists_image("\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\"", "steam.exe"));
         assert!(!lists_image("\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\"", "steam.exe"));
+    }
+
+    #[test]
+    fn percent_encodes_all_but_unreserved() {
+        assert_eq!(percent_encode("ab-1_.~"), "ab-1_.~");
+        assert_eq!(percent_encode("a&b=c d"), "a%26b%3Dc%20d");
+        assert_eq!(percent_encode("®"), "%C2%AE");
     }
 }
