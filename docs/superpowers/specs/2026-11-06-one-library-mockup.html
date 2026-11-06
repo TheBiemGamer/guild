@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game page mockup</title>
+<style>
+  :root {
+    --bg: #0e0e14; --surface-2: #1f1f2a; --text: #eef0f6; --text-2: rgb(255 255 255 / 0.75);
+    --glass: rgb(0 0 0 / 0.32); --glass-strong: rgb(10 10 16 / 0.6); --glass-hover: rgb(255 255 255 / 0.09);
+    --glass-line: rgb(255 255 255 / 0.08); --glass-on: rgb(255 255 255 / 0.16); --glass-on-line: rgb(255 255 255 / 0.22);
+    --scrim: rgb(10 10 16 / 0.9); --new: #a48bff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(120% 60% at 30% 0%, #2a2140 0%, var(--bg) 60%) fixed, var(--bg); color: var(--text);
+    font: 14px 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  a { color: var(--text); text-decoration: none; }
+  :focus-visible { outline: 2px solid rgb(255 255 255 / 0.85); outline-offset: 2px; }
+  .page { max-width: 1360px; margin: 0 auto; padding: 0 24px 24px; }
+  .note { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; border: 1px dashed var(--new); color: var(--text-2); }
+  .note b { color: var(--new); }
+  .new { outline: 1px dashed var(--new); outline-offset: 4px; }
+
+  .hero { position: relative; height: 300px; border-radius: 14px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.45); }
+  .frame { position: absolute; inset: 0; border-radius: 14px; overflow: hidden; background: linear-gradient(160deg, #4a3a5e 0%, #2b2f4a 45%, #16161f 100%); }
+  .frame::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, var(--glass) 0%, transparent 30%, transparent 35%, var(--scrim) 100%); }
+  .art { position: absolute; top: 16px; right: 20px; font-size: 12px; color: rgb(255 255 255 / 0.5); z-index: 1; }
+  .back { position: absolute; top: 16px; left: 16px; padding: 8px 16px; border-radius: 10px; background: var(--glass-strong); border: 1px solid var(--glass-line); }
+  .bottom { position: absolute; left: 24px; right: 24px; bottom: 20px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  h1 { margin: 0; font-size: 34px; font-weight: 700; line-height: 1.1; text-shadow: 0 1px 12px rgb(0 0 0 / 0.5); }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-2); }
+  .actions { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+  .more { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 999px; background: var(--glass-on); border: 1px solid var(--glass-on-line); }
+
+  .split { position: relative; }
+  .pill { display: flex; align-items: stretch; height: 44px; border-radius: 999px; overflow: hidden; background: #fff; color: var(--bg); font-weight: 700; }
+  .pill button { display: flex; align-items: center; gap: 8px; background: #fff; color: var(--bg); font-weight: 700; }
+  .pill button:hover { background: #e4e6ee; }
+  .pill .switch { gap: 6px; padding: 0 12px 0 16px; }
+  .pill .go { padding: 0 28px 0 18px; }
+  .pill .sep { width: 1px; margin: 10px 0; background: rgb(14 14 20 / 0.18); }
+
+  .menu { position: absolute; z-index: 5; top: calc(100% + 8px); right: 0; width: 290px; padding: 4px; display: none; flex-direction: column;
+    border-radius: 12px; background: var(--surface-2); border: 1px solid var(--glass-on-line); box-shadow: 0 30px 80px rgb(0 0 0 / 0.6); }
+  .menu.open { display: flex; }
+  .menu .label { padding: 8px 12px 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); }
+  .menu button { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 8px; background: transparent; text-align: left; }
+  .menu button:hover { background: var(--glass-hover); }
+  .menu .txt { flex-grow: 1; display: flex; flex-direction: column; }
+  .menu small { font-size: 12px; color: var(--text-2); }
+  .menu .check { visibility: hidden; }
+  .menu button[aria-checked='true'] .check { visibility: visible; }
+
+  h2 { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-2); }
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+  .tile, .panel { padding: 12px 16px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-line); }
+  .tile { display: flex; flex-direction: column; gap: 4px; }
+  .head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
+  .head small, .tile p span { font-size: 12px; color: var(--text-2); }
+  .tile p { margin: 0; } .tile b { font-size: 20px; font-weight: 600; }
+  .tile p span { font-size: 14px; }
+  .credit { font-size: 12px; color: var(--text-2); text-decoration: underline; }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); align-items: start; gap: 16px; margin-top: 16px; }
+  .panel { padding: 16px; } .panel h2 { margin-bottom: 8px; }
+  .right { display: flex; flex-direction: column; gap: 16px; }
+  .text { margin: 0; line-height: 1.55; color: var(--text-2); }
+  .shots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+  .shots div { aspect-ratio: 16 / 9; border-radius: 8px; background: linear-gradient(135deg, #3a3150, #1f1f2a); }
+  .group { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .group:first-of-type { margin-top: 0; }
+  .group > span { font-size: 12px; color: var(--text-2); }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tags span { padding: 2px 8px; border-radius: 999px; background: var(--glass-on); font-size: 12px; }
+  .path { overflow-wrap: anywhere; }
+  dt { align-self: center; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; font-size: 13px; border-radius: 999px; background: var(--glass-hover); border: 1px solid var(--glass-line); }
+  .chip:hover { background: var(--glass-on); }
+  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+  dt { color: var(--text-2); } dd { margin: 0; }
+  svg { flex: none; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="steam" viewBox="0 0 24 24"><path fill="currentColor" d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0z"/></symbol>
+  <symbol id="epic" viewBox="0 0 24 24"><path fill="currentColor" d="M3.537 0C2.165 0 1.66.506 1.66 1.879V18.44c0 .3.04.59.336 1.353l9.054 3.936c.433.199.614.276.928.27.314.006.495-.071.928-.27l9.054-3.936c.296-.763.336-1.053.336-1.353V1.879C22.296.506 21.79 0 20.418 0z"/></symbol>
+</svg>
+
+<div class="page">
+
+  <header class="hero">
+    <div class="frame"></div>
+    <span class="art">[Game art]</span>
+    <button class="back">← Library</button>
+    <div class="bottom">
+      <div>
+        <h1>Last Day of June</h1>
+        <div class="meta">
+          <span style="display:inline-flex;gap:6px" title="Owned on Steam and Epic Games">
+            <svg width="14" height="14" role="img" aria-label="Steam"><use href="#steam"/></svg>
+            <svg width="14" height="14" role="img" aria-label="Epic Games"><use href="#epic"/></svg>
+          </span>
+          <span>· Installed on Steam</span><span>· Ovosonico</span><span>· 2017</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="more" aria-label="More actions"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+        <div class="split">
+          <div class="pill">
+            <button class="switch" id="switch" aria-haspopup="menu" aria-expanded="false" aria-label="Choose launcher, now Steam">
+              <svg width="18" height="18" aria-hidden="true"><use id="cur" href="#steam"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <span class="sep"></span>
+            <button class="go" id="go">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path id="goicon" d="M7 4.5v15l12.5-7.5z"/></svg>
+              <span id="golabel">Play</span>
+            </button>
+          </div>
+          <div class="menu" id="menu" role="menu" aria-label="Play with">
+            <span class="label">Play with</span>
+            <button role="menuitemradio" aria-checked="true" data-store="steam">
+              <svg width="18" height="18" aria-hidden="true"><use href="#steam"/></svg>
+              <span class="txt"><span>Steam</span><small>Installed · [4.1 GB]</small></span>
+              <svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>
+            </button>
+            <button role="menuitemradio" aria-checked="false" data-store="epic">
+              <svg width="18" height="18" aria-hidden="true"><use href="#epic"/></svg>
+              <span class="txt"><span>Epic Games</span><small>Not installed · [4.3 GB] download</small></span>
+              <svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="tiles">
+    <div class="tile"><div class="head"><h2>Playtime</h2><small>Steam + Epic</small></div><p><b>[3h 12m]</b></p></div>
+    <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>[2 weeks ago]</b><span> · on Steam</span></p></div>
+    <div class="tile"><div class="head"><h2>How long to beat</h2><a class="credit" href="#">IGDB</a></div><p><b>[x]h</b><span> · [y]h all</span></p></div>
+  </div>
+
+  <div class="cols">
+    <section class="panel">
+      <h2>About</h2>
+      <p class="text">[Store description from Steam or Epic.]</p>
+      <div class="shots"><div></div><div></div><div></div></div>
+    </section>
+    <section class="panel">
+      <h2>Details</h2>
+      <dl>
+        <dt>Genres</dt><dd class="tags"><span>Adventure</span><span>Indie</span></dd>
+        <dt>Developer</dt><dd>Ovosonico</dd>
+        <dt>Publisher</dt><dd>505 Games</dd>
+        <dt>Released</dt><dd>31 Aug 2017</dd>
+        <dt>Size</dt><dd>[4.1 GB]</dd>
+        <dt>Install folder</dt><dd class="path">[C:\Program Files (x86)\Steam\steamapps\common\Last Day of June]</dd>
+        <dt>Store pages</dt>
+        <dd class="chips">
+          <a class="chip" href="#"><svg width="14" height="14" aria-hidden="true"><use href="#steam"/></svg>Steam</a>
+          <a class="chip" href="#"><svg width="14" height="14" aria-hidden="true"><use href="#epic"/></svg>Epic Games</a>
+        </dd>
+        <dt>Info</dt>
+        <dd class="chips">
+          <a class="chip" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h6M8 11h6"/></svg>PCGamingWiki</a>
+          <a class="chip" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>SteamDB</a>
+          <a class="chip" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg>ProtonDB</a>
+        </dd>
+      </dl>
+    </section>
+  </div>
+</div>
+
+<script>
+  const sw = document.getElementById('switch'), menu = document.getElementById('menu')
+  const names = { steam: 'Steam', epic: 'Epic Games' }
+  const installed = { steam: true, epic: false }
+  function setOpen(open) { menu.classList.toggle('open', open); sw.setAttribute('aria-expanded', open) }
+  sw.addEventListener('click', () => setOpen(!menu.classList.contains('open')))
+  menu.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    const s = b.dataset.store
+    menu.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', x === b))
+    document.getElementById('cur').setAttribute('href', '#' + s)
+    sw.setAttribute('aria-label', 'Choose launcher, now ' + names[s])
+    document.getElementById('golabel').textContent = installed[s] ? 'Play' : 'Install'
+    document.getElementById('goicon').setAttribute('d', installed[s] ? 'M7 4.5v15l12.5-7.5z' : 'M11 4h2v9l3.5-3.5 1.4 1.4L12 16.8 6.1 10.9l1.4-1.4L11 13zM5 18h14v2H5z')
+    setOpen(false); sw.focus()
+  }))
+  document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.split')) setOpen(false) })
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && menu.classList.contains('open')) { setOpen(false); sw.focus() } })
+</script>
+</body>
+</html>
