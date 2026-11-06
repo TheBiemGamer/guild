@@ -53,6 +53,19 @@ export const game = (key: string) => invoke<Detail | null>('game', { key })
 export const act = (action: Action, key: string) => invoke<void>('act', { action, key })
 /** Epic download size in bytes (asks Legendary online, cached); null when unknown. */
 export const downloadSize = (key: string) => invoke<number | null>('download_size', { key })
+/** Store details for the game page; screenshots are ready-to-use URLs. Null when the store has none. */
+export type GameInfo = {
+  description: string
+  genres: string[]
+  developer: string | null
+  publisher: string | null
+  released: string | null
+  screenshots: string[]
+}
+export const gameInfo = async (key: string) => {
+  const info = await invoke<GameInfo | null>('game_info', { key })
+  return info && { ...info, screenshots: info.screenshots.flatMap((p) => url(p) ?? []) }
+}
 export const cancelInstall = (key: string) => invoke<void>('cancel_install', { key })
 export const poll = () => invoke<Poll>('poll')
 export const epicLogIn = () => invoke<void>('epic_log_in')

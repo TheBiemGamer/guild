@@ -11,9 +11,10 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::cache::{self, Dirs};
 use crate::library::epic::{self, InstallEvent, Login};
-use crate::library::{Game, Progress, ProviderKind};
+use crate::library::{Game, Image, Progress, ProviderKind};
 use crate::view::{self, Sort};
 use crate::library::steam;
+use crate::info::{self, GameInfoView};
 use crate::{bench, epic_login, settings};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
@@ -427,6 +428,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
 
 /// How long an Epic download size stays good; sizes change only with game updates.
 const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
+const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// Download size in bytes of an Epic game that isn't installed, for the install popup.
 /// Asks Legendary online (slow, seconds), so the answer is cached for a week. None if unknown.
@@ -453,6 +455,58 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
         Some(size)
     })
     .await
+}
+
+/// Store details for the game page (description, genres, developer, screenshots).
+/// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
+/// Screenshots come back as local files, downloaded on first use.
+#[tauri::command]
+pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
+    let game = app.state::<AppState>().game(&key)?;
+    let json = {
+        let (app, key, game) = (app.clone(), key.clone(), game.clone());
+        blocking(move || {
+            let state = app.state::<AppState>();
+            let conn = open_db(&state);
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+            let http = state.http.clone();
+            info::cached_or_fetch(conn.as_ref(), &key, INFO_MAX_AGE_SECS, now, || {
+                let details = match game.provider {
+                    ProviderKind::Steam => {
+                        let url = format!(
+                            "https://store.steampowered.com/api/appdetails?appids={}&l=english",
+                            game.external_id
+                        );
+                        let body = tauri::async_runtime::block_on(async {
+                            http.get(url).send().await?.error_for_status()?.text().await
+                        })
+                        .inspect_err(|e| eprintln!("appdetails {key}: {e}"))
+                        .ok()?;
+                        info::parse_steam_appdetails(&body, &game.external_id)
+                    }
+                    ProviderKind::Epic => epic::catalog_metadata(&game)
+                        .inspect_err(|e| eprintln!("legendary list {key}: {e}"))
+                        .ok()
+                        .flatten()
+                        .and_then(|meta| info::parse_epic_info(&meta)),
+                }?;
+                serde_json::to_string(&details).ok()
+            })
+        })
+        .await?
+    };
+    let mut details: GameInfoView = serde_json::from_str(&json).ok()?;
+    let state = app.state::<AppState>();
+    let dir = state.dirs.art.join(&key);
+    let mut shots = Vec::new();
+    for (n, shot) in details.screenshots.iter().enumerate() {
+        let image = Image { path: None, url: Some(shot.clone()) };
+        if let Some(path) = cache::resolve(&image, &state.http, dir.join(format!("shot{n}"))).await {
+            shots.extend(allow(&app, path));
+        }
+    }
+    details.screenshots = shots;
+    Some(details)
 }
 
 /// Remembers a launch from here, for every store, so last played survives rescans.

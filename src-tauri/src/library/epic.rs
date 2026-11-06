@@ -131,6 +131,16 @@ pub fn download_size_from_info(info: &Value) -> Option<u64> {
     info["manifest"]["download_size"].as_u64()
 }
 
+/// The Epic catalog item for `game` from `legendary list --json` (description, developer, screenshots).
+/// The scan only keeps art, so this asks again; callers cache the answer.
+pub fn catalog_metadata(game: &Game) -> Result<Option<Value>, Error> {
+    let owned = json(&["list", "--json"])?;
+    Ok(owned
+        .as_array()
+        .and_then(|games| games.iter().find(|g| g["app_name"] == game.external_id.as_str()))
+        .map(|g| g["metadata"].clone()))
+}
+
 /// File name of an installed game's main executable (from `list-installed`), to spot it in the process list.
 pub fn executable(game: &Game) -> Result<Option<String>, Error> {
     let installed = json(&["list-installed", "--json"])?;
