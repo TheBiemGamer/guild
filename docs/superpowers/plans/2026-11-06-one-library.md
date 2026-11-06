@@ -664,3 +664,42 @@ Repeat Task 11 Steps 2–4: release build, bench 4000 and 15000, idle, and the o
 - Steam is now connected, so the bench runs with the full library.
 - If idle regresses, A/B against `c520547`.
 - Record the results in the ledger.
+
+### Task 19: Smoother loading (no pop-in)
+
+Owner request, 2026-11-07. Today:
+- the window opens on an empty library and the grid then jumps in;
+- covers fill in one by one on blank cards;
+- the game page's info, how long to beat and size arrive separately and push content down.
+
+**Files:**
+- Modify: `src-tauri/tauri.conf.json` (window `visible: false`) and `src-tauri/src/commands/library.rs` (a `ready` command that shows the window).
+- Modify: `src-tauri/src/cache/mod.rs` (store each thumbnail's average colour next to it).
+- Modify: `src/App.svelte`, `src/lib/Card.svelte`, `src/lib/Detail.svelte`.
+
+**Interfaces:**
+- **Window shown when ready.**
+  - The window starts hidden.
+  - `App.svelte` calls `api.ready()` after `loadCache()`, the first `reload()`, and the covers for the first screen (the cards visible at start) have resolved.
+  - A 300 ms cap applies. Whatever is still missing at that point fills in after the window shows.
+  - `ready` is idempotent and also fires from Rust after 2 s as a safety net, so the app can never stay invisible.
+- **Cover colour placeholder.**
+  - `cache::thumbnail` also writes the average RGB of the thumbnail, either in a `<key>.color` file or in the info table, the builder's choice.
+  - `cover(key)` returns `{ src, color }`.
+  - `Card.svelte` paints `color` immediately, then fades the image in over 150 ms.
+  - Cards with no colour yet use `--surface-2`.
+- **Cover order.** Cover requests are issued in on-screen order, top to bottom and left to right, not in order of arrival.
+- **Game page.**
+  - About and Details reserve their space with skeleton lines in DESIGN.md tokens that fill in place. Nothing pushes content down when data arrives.
+  - `gameInfo`, `timeToBeat` and `downloadSize` are prefetched when the pointer has rested on a card for 150 ms, or a card is focused. Results are kept in a small in-memory map (last 20 keys), so opening the page usually shows them at once.
+- **Motion.** All fades respect `prefers-reduced-motion` (no fade).
+
+**Tests:**
+- Rust: `thumbnail_writes_average_color` (a solid-colour fixture image gives that colour).
+- Rust: `ready_is_idempotent`.
+- Frontend: `npm run check`.
+
+- [ ] **Step 1:** Write the failing Rust tests, implement, then run the full suite, clippy and `npm run check`.
+- [ ] **Step 2:** Benchmark 4000 and 15000. Both must stay at 0 slow frames, and idle must stay at today's level.
+- [ ] **Step 3:** VERIFY-LATER: the start shows no empty flash, covers fade in on their colour, and the game page doesn't jump.
+- [ ] **Step 4: Commit:** `feat(ui): smoother loading without pop-in`.
