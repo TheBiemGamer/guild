@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { downloadSize, sizeLabel, type Card } from './api'
+  import { downloadSize, type Card } from './api'
 
   let { game, anchor, folder, onconfirm, oncancel }: {
     game: Card
@@ -19,7 +19,7 @@
   let installButton: HTMLButtonElement
   let height = $state(0)
   /** undefined while Legendary is looking it up, null when it couldn't tell. */
-  let size = $state<number | null | undefined>(undefined)
+  let size = $state<string | null | undefined>(undefined)
 
   // Right of the cover, or left when the window's edge is in the way; kept inside the window.
   const x = $derived(
@@ -32,7 +32,7 @@
     installButton.focus()
     // Answers arriving after the popup is gone are dropped.
     let alive = true
-    downloadSize(game.key).then((bytes) => alive && (size = bytes), () => alive && (size = null))
+    downloadSize(game.key).then((label) => alive && (size = label), () => alive && (size = null))
 
     // The grid scrolls under a fixed popup, so a scroll anywhere closes it.
     const onscroll = () => oncancel()
@@ -67,7 +67,7 @@
   style="left: {x}px; top: {y}px; width: {WIDTH}px"
 >
   <h4>Install {game.title}?</h4>
-  <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${sizeLabel(size)} download`}</p>
+  <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${size} download`}</p>
   <p class="folder">{folder === undefined ? '' : `To ${folder ?? "Legendary's default folder"}`}</p>
   <div class="buttons">
     <button class="pill" bind:this={installButton} onclick={onconfirm}>Install</button>

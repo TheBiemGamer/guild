@@ -61,7 +61,7 @@
   let heroLoaded = $state(false)
   let info = $state<GameInfo | null | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
-  let download = $state<number | null | undefined>(undefined)
+  let download = $state<string | null | undefined>(undefined)
   let busy = $state<string | null>(null)
   let confirming = $state(false)
   let menuOpen = $state(false)
@@ -333,7 +333,7 @@
               {#if !game.installed}
                 {#if sizeKey}
                   <span class="download">
-                    {download === undefined ? 'Checking size…' : download === null ? '' : `${api.sizeLabel(download)} download`}
+                    {download === undefined ? 'Checking size…' : download === null ? '' : `${download} download`}
                   </span>
                 {/if}
                 <button class="pill big" onclick={() => act('install')}>

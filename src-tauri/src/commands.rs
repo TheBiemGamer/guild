@@ -495,10 +495,10 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
 const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
-/// Download size in bytes of an Epic game that isn't installed, for the install popup.
-/// Asks Legendary online (slow, seconds), so the answer is cached for a week. None if unknown.
+/// Download size of an Epic game that isn't installed, like `27.3 GB`, for the install popup and game page.
+/// Asks Legendary online (slow, seconds), so the bytes are cached for a week. None if unknown.
 #[tauri::command]
-pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
+pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
     let game = app.state::<AppState>().game(&key).filter(|g| g.provider == ProviderKind::Epic)?;
     blocking(move || {
         let conn = open_db(&app.state::<AppState>());
@@ -520,6 +520,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
         Some(size)
     })
     .await
+    .map(view::size_label)
 }
 
 /// Store details for the game page (description, genres, developer, screenshots).
@@ -823,6 +824,8 @@ pub struct SettingsView {
     app_version: String,
     legendary_version: Option<String>,
     cache_bytes: u64,
+    /// `cache_bytes` as shown, like `812 MB`.
+    cache_size: String,
 }
 
 #[tauri::command]
@@ -835,6 +838,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             let s = state.lock();
             (s.epic_login, s.games.iter().filter(|g| g.provider == ProviderKind::Epic).count())
         };
+        let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
         let steam = steamlocate::SteamDir::locate().ok().map(|dir| SteamAccount {
             name: steam::persona_name(dir.path()),
             path: dir.path().to_string_lossy().into_owned(),
@@ -850,7 +854,8 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             ambient: saved.ambient,
             app_version: app.package_info().version.to_string(),
             legendary_version: epic::legendary_version(),
-            cache_bytes: dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art),
+            cache_bytes,
+            cache_size: view::size_label(cache_bytes),
         })
     })
     .await

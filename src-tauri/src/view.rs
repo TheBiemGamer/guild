@@ -65,11 +65,17 @@ pub fn last_played_tile(last: Option<SystemTime>, now: SystemTime) -> Option<Str
     })
 }
 
-/// Install size: `27.3 GB` (GB = 1024^3), or whole megabytes under 1 GB.
+/// The one size format: `27.3 GB` (GB = 1024^3), whole megabytes under 1 GB, and whole
+/// kilobytes (rounded up, so only empty is `0 KB`) under 1 MB.
 pub fn size_label(bytes: u64) -> String {
-    const MB: u64 = 1024 * 1024;
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
     const GB: u64 = 1024 * MB;
-    if bytes < GB { format!("{} MB", bytes / MB) } else { format!("{:.1} GB", bytes as f64 / GB as f64) }
+    match bytes {
+        b if b < MB => format!("{} KB", b.div_ceil(KB)),
+        b if b < GB => format!("{} MB", b / MB),
+        b => format!("{:.1} GB", b as f64 / GB as f64),
+    }
 }
 
 /// Time to beat: `32 h` (nearest hour), or `45 min` under an hour.
@@ -182,6 +188,11 @@ pub(crate) mod tests {
     fn size_labels() {
         assert_eq!(size_label(812 * 1024 * 1024), "812 MB");
         assert_eq!(size_label(27_300 * 1024 * 1024 * 1024 / 1000), "27.3 GB");
+        // Under a megabyte (Settings' cache size): kilobytes, a non-empty cache never reads 0.
+        assert_eq!(size_label(0), "0 KB");
+        assert_eq!(size_label(100), "1 KB");
+        assert_eq!(size_label(500 * 1024), "500 KB");
+        assert_eq!(size_label(1024 * 1024), "1 MB");
     }
 
     #[test]

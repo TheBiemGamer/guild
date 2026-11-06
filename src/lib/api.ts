@@ -48,6 +48,8 @@ export interface SettingsView {
   appVersion: string
   legendaryVersion: string | null
   cacheBytes: number
+  /** `cacheBytes` as shown, like "812 MB". */
+  cacheSize: string
 }
 export interface Progress { fraction: number; text: string }
 export interface Poll { running: string | null; progress: Record<string, Progress>; changed: boolean }
@@ -58,8 +60,8 @@ export const loadCache = () => invoke<void>('load_cache')
 export const refresh = (epic: boolean) => invoke<void>('refresh', { epic })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 export const act = (action: Action, key: string) => invoke<void>('act', { action, key })
-/** Epic download size in bytes (asks Legendary online, cached); null when unknown. */
-export const downloadSize = (key: string) => invoke<number | null>('download_size', { key })
+/** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
+export const downloadSize = (key: string) => invoke<string | null>('download_size', { key })
 /** Store details for the game page; screenshots are ready-to-use URLs. Null when the store has none. */
 export type GameInfo = {
   description: string
@@ -128,10 +130,6 @@ export const detailArt = async (key: string) => {
   const art = await invoke<{ hero: string | null }>('detail_art', { key })
   return { hero: url(art.hero) }
 }
-
-/** Same format as the Rust `size_label`: `27.3 GB` (GB = 1024^3), or whole megabytes under 1 GB. */
-export const sizeLabel = (bytes: number) =>
-  bytes < 1024 ** 3 ? `${Math.floor(bytes / 1024 ** 2)} MB` : `${(bytes / 1024 ** 3).toFixed(1)} GB`
 
 /** Command errors arrive as plain strings. */
 export const message = (e: unknown) => (typeof e === 'string' ? e : String(e))

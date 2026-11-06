@@ -98,11 +98,6 @@
   const logOut = () => change(() => api.epicLogOut())
   const clearCache = () => change(() => api.clearCache())
 
-  function size(bytes: number) {
-    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
-    return bytes < 1024 ** 3 ? `${(bytes / 1024 ** 2).toFixed(0)} MB` : `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  }
-
   function ago(at: number | null, nowMs: number) {
     if (at === null) return 'Not refreshed since the app started.'
     const mins = Math.floor((nowMs - at) / 60_000)
@@ -330,7 +325,7 @@
       <section id={id('Storage')}>
         <h4>Storage</h4>
         <div class="row">
-          <div>Cached covers and art<span>{size(view.cacheBytes)}. They download again when needed.</span></div>
+          <div>Cached covers and art<span>{view.cacheSize}. They download again when needed.</span></div>
           <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>Clear cache</button>
         </div>
       </section>
