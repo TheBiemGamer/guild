@@ -112,7 +112,7 @@ components:
 
 ## Overview
 
-**Creative North Star: UNCONFIRMED.** No owner document names a metaphor for the system. The owner named the look **"Ambient"** and asked for it to be "**sleek, modern and gradient**" (`docs/superpowers/specs/2026-11-05-ambient-redesign-design.md`, Why). Use "Ambient" as the working name only; do not treat it as a north star until the owner confirms one.
+**Creative North Star: "Afterglow"** (confirmed by the owner, 2026-11-06). The library glows with whatever you played last. Everything else stays dark, quiet glass, so the covers and that one glow carry all the color. When in doubt, chrome gets no color of its own; color belongs to the games, and white belongs to the one primary action.
 
 The art of the last-played game, "heavily blurred and saturated, tints the whole window. It fades to near-black lower down so content stays readable." On top of that sit translucent dark-glass chrome with thin light borders, covers as the main content, and one solid white pill for the primary action. It is a dark-only, dense, content-first desktop app (Windows 10/11, Tauri webview), not a page. Light theme is an owner non-goal.
 
@@ -271,7 +271,6 @@ No `design: waive` comments exist in `src/`, so no rule has recurred three times
 
 ## Open items
 
-- UNCONFIRMED: Creative North Star and overall voice/mood words (no owner doc states them).
 - UNCONFIRMED: the exact radii, spacing steps and font sizes above are what the code uses, not owner-stated values.
 - The game page and the Epic install popup are specified by the owner but not built yet; this file describes the code as of commit `e13f9e2`, plus the spec where marked.
 - No renders were captured (the app was not launched).
