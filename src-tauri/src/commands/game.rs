@@ -315,7 +315,7 @@ fn time_to_beat_view(t: igdb::TimeToBeat) -> Option<TimeToBeatView> {
 }
 
 /// A Steam app id matches by id; otherwise an Epic copy matches by exact title. The Epic page URL
-/// IGDB reports is remembered for the copy.
+/// IGDB reports (either way) is remembered for the copy.
 async fn look_up_time_to_beat(
     app: &AppHandle,
     state: &AppState,
@@ -327,23 +327,33 @@ async fn look_up_time_to_beat(
 ) -> Res<Option<igdb::TimeToBeat>> {
     let token = igdb::cached_token(&state.igdb, &state.http, client_id, secret).await?;
     let mut id = None;
+    let mut url = None;
     if let Some(appid) = appid {
         id = igdb::game_id_for_steam(&state.http, &token, client_id, appid).await?;
+        // Found by Steam id: the Epic page comes from the game's Epic rows. Without it the time still shows.
+        if let (Some(game), Some(_)) = (id, epic_key) {
+            url = igdb::epic_url_for_game(&state.http, &token, client_id, game)
+                .await
+                .inspect_err(|e| eprintln!("igdb epic url: {e}"))
+                .ok()
+                .flatten();
+        }
     }
-    if let (None, Some(epic_key)) = (id, epic_key)
+    if let (None, Some(_)) = (id, epic_key)
         && let Some(m) = igdb::epic_by_title(&state.http, &token, client_id, title).await?
     {
         id = Some(m.game);
-        if let Some(url) = m.url {
-            let epic_key = epic_key.to_string();
-            let app = app.clone();
-            blocking(move || {
-                if let Some(conn) = open_db(&app.state::<AppState>()) {
-                    igdb::remember_epic_url(&conn, &epic_key, &url);
-                }
-            })
-            .await;
-        }
+        url = m.url;
+    }
+    if let (Some(url), Some(epic_key)) = (url, epic_key) {
+        let epic_key = epic_key.to_string();
+        let app = app.clone();
+        blocking(move || {
+            if let Some(conn) = open_db(&app.state::<AppState>()) {
+                igdb::remember_epic_url(&conn, &epic_key, &url);
+            }
+        })
+        .await;
     }
     let Some(id) = id else { return Ok(None) };
     igdb::time_to_beat(&state.http, &token, client_id, id).await

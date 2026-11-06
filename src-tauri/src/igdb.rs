@@ -226,8 +226,29 @@ pub fn parse_epic_title_match(body: &str) -> Result<Option<EpicMatch>, String> {
     if rows.iter().any(|r| r.game != Some(game)) {
         return Ok(None);
     }
-    let url = rows.into_iter().filter_map(|r| r.url).find(|u| u.starts_with("https://store.epicgames.com/"));
-    Ok(Some(EpicMatch { game, url }))
+    Ok(Some(EpicMatch { game, url: store_url(rows) }))
+}
+
+/// The first row URL that is an Epic store page.
+fn store_url(rows: Vec<EpicRow>) -> Option<String> {
+    rows.into_iter().filter_map(|r| r.url).find(|u| u.starts_with("https://store.epicgames.com/"))
+}
+
+/// The Epic store page among an IGDB game's Epic rows.
+pub fn parse_epic_store_url(body: &str) -> Result<Option<String>, String> {
+    let rows: Vec<EpicRow> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
+    Ok(store_url(rows))
+}
+
+/// The Epic store page IGDB knows for a game found another way (by Steam app id).
+pub async fn epic_url_for_game(
+    http: &reqwest::Client,
+    token: &Token,
+    client_id: &str,
+    game_id: u64,
+) -> Result<Option<String>, String> {
+    let query = format!("fields url; where game = {game_id} & external_game_source = {EPIC_SOURCE}; limit 10;");
+    parse_epic_store_url(&post(http, token, client_id, "external_games", query).await?)
 }
 
 pub async fn epic_by_title(
@@ -373,6 +394,17 @@ mod tests {
     fn epic_match_ignores_non_store_urls() {
         let m = parse_epic_title_match(r#"[{"game":7,"url":"https://example.com/x"}]"#).unwrap().unwrap();
         assert_eq!((m.game, m.url), (7, None));
+    }
+
+    #[test]
+    fn epic_store_url_from_a_games_epic_rows() {
+        assert_eq!(
+            parse_epic_store_url(EPIC_TITLE).unwrap().as_deref(),
+            Some("https://store.epicgames.com/en-US/p/last-day-of-june")
+        );
+        assert_eq!(parse_epic_store_url(r#"[{"url":"https://example.com/x"}]"#).unwrap(), None);
+        assert_eq!(parse_epic_store_url("[]").unwrap(), None);
+        assert!(parse_epic_store_url("nope").is_err());
     }
 
     #[test]
