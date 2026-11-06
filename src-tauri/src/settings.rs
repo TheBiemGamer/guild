@@ -78,7 +78,6 @@ pub fn set_secret(value: Option<&str>) -> Result<(), String> {
 }
 
 /// The Steam refresh token, if one is saved.
-#[allow(dead_code)]
 pub fn steam_token() -> Option<String> {
     read(STEAM_TOKEN_USER)
 }

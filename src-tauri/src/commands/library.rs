@@ -1,16 +1,19 @@
 //! The library list, scanning and merging the stores, covers, the featured game and the 2 s poll.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use super::{allow, blocking, AppState, Res, Shared};
+use super::{allow, blocking, open_db, AppState, Res, Shared};
 use crate::bench;
 use crate::cache;
 use crate::library::epic::{self, Login};
+use crate::library::steam::with_owned;
 use crate::library::{Game, Progress, ProviderKind};
+use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
 use crate::view::{self, Sort};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
@@ -34,6 +37,8 @@ pub struct Library {
     epic: Option<Login>,
     /// Epic state is known and isn't logged in.
     epic_attention: bool,
+    /// Steam rejected the saved login: the settings button carries a dot too.
+    steam_attention: bool,
     epic_notice: bool,
 }
 
@@ -59,6 +64,7 @@ pub fn library(
         status: s.status.clone(),
         epic: s.epic_login,
         epic_attention: s.epic_login.is_some_and(|l| l != Login::LoggedIn),
+        steam_attention: s.steam_attention,
         epic_notice: s.epic_notice,
     }
 }
@@ -77,23 +83,92 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         if s.games.is_empty() {
             s.games = games;
         }
+        drop(s);
+        refresh_owned(app.clone(), false);
         Ok(())
     })
     .await
 }
 
 /// Rescans Steam, and Epic too when `epic`: Legendary is slow and online, so the UI only asks on demand.
+/// `owned` forces a fresh owned-games fetch; without it the 6 h rule applies.
 #[tauri::command]
-pub async fn refresh(app: AppHandle, epic: bool) {
+pub async fn refresh(app: AppHandle, epic: bool, owned: bool) {
+    let again = app.clone();
     blocking(move || rescan(&app, epic)).await;
+    refresh_owned(again, owned);
+}
+
+/// Fetches the owned Steam games in the background when there is a saved login and the cached list is
+/// older than `OWNED_MAX_AGE_SECS` (or `force`), then rescans. A rejected login raises `steam_attention`
+/// and stops further tries until the owner connects again or the app restarts.
+pub(crate) fn refresh_owned(app: AppHandle, force: bool) {
+    tauri::async_runtime::spawn(async move {
+        let job = app.clone();
+        let Some(token) = blocking(move || owned_job_token(&job, force)).await else { return };
+        let result = steam_owned::fetch(&token).await;
+        drop(token);
+        if let Err(e) = &result {
+            eprintln!("steam owned: {}", error_kind(e));
+        }
+        let done = app.clone();
+        blocking(move || finish_owned(&done, steam_owned::outcome(result))).await;
+    });
+}
+
+/// For the log: steam-vent's error text describes the failure, never the token.
+fn error_kind(e: &steam_owned::OwnedError) -> String {
+    match e {
+        steam_owned::OwnedError::TokenRejected => "login rejected".into(),
+        steam_owned::OwnedError::Network(why) => format!("network: {why}"),
+    }
+}
+
+/// The saved token when a fetch is due and none is running; marks one as running.
+fn owned_job_token(app: &AppHandle, force: bool) -> Option<String> {
+    let state = app.state::<AppState>();
+    let token = crate::settings::steam_token()?;
+    let mut s = state.lock();
+    if s.owned_running || (s.steam_attention && !force) {
+        return None;
+    }
+    if !force && cache::db::open(&state.dirs.db).is_ok_and(|c| steam_owned::fresh(&c, super::unix_now())) {
+        return None;
+    }
+    s.owned_running = true;
+    Some(token)
+}
+
+fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
+    let state = app.state::<AppState>();
+    match outcome {
+        OwnedOutcome::Store(games) => {
+            if let Some(conn) = open_db(&state) {
+                steam_owned::remember(&conn, &games, super::unix_now());
+            }
+            {
+                let mut s = state.lock();
+                s.steam_attention = false;
+                s.owned_running = false;
+            }
+            rescan(app, false);
+        }
+        OwnedOutcome::KeepAndFlag => {
+            let mut s = state.lock();
+            s.steam_attention = true;
+            s.owned_running = false;
+        }
+        OwnedOutcome::KeepQuiet => state.lock().owned_running = false,
+    }
 }
 
 type ScanResults = Vec<(ProviderKind, Result<Vec<Game>, String>)>;
 
 /// Scans, merges and saves. Runs on a blocking thread.
 pub(super) fn rescan(app: &AppHandle, with_epic: bool) {
-    let (results, login) = scan(with_epic);
     let state = app.state::<AppState>();
+    let owned = open_db(&state).and_then(|c| steam_owned::cached(&c)).map(|(games, _)| games);
+    let (results, login) = scan(with_epic, owned.as_deref());
     let mut s = state.lock();
     if let Some(login) = login {
         s.epic_login = Some(login);
@@ -112,7 +187,8 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) {
     let unfinished: Vec<String> = merged
         .games
         .iter()
-        .filter(|g| g.provider == ProviderKind::Steam && !g.installed)
+        // Owned-only games have no manifest to poll.
+        .filter(|g| g.provider == ProviderKind::Steam && !g.installed && g.install_dir.is_some())
         .map(Game::key)
         .collect();
     s.tracked.extend(unfinished);
@@ -125,8 +201,22 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) {
     }
 }
 
-fn scan(with_epic: bool) -> (ScanResults, Option<Login>) {
-    let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string());
+/// Steam's installed games plus the cached owned list, if there is one.
+fn merge_owned(installed: Vec<Game>, owned: Option<&[OwnedGame]>, librarycache: &Path) -> Vec<Game> {
+    match owned {
+        Some(owned) => with_owned(installed, owned, librarycache),
+        None => installed,
+    }
+}
+
+fn scan(with_epic: bool, owned: Option<&[OwnedGame]>) -> (ScanResults, Option<Login>) {
+    let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string()).map(|installed| {
+        let cache = steamlocate::SteamDir::locate().map(|d| d.path().join("appcache").join("librarycache"));
+        match cache {
+            Ok(cache) => merge_owned(installed, owned, &cache),
+            Err(_) => installed,
+        }
+    });
     let mut results = vec![(ProviderKind::Steam, steam)];
     if !with_epic {
         return (results, None);
@@ -334,6 +424,16 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::view::tests::game;
+
+    #[test]
+    fn scan_merges_cached_owned_without_network() {
+        let installed = vec![game("400", true, None, None)];
+        let owned = [OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 3 }];
+        let merged = merge_owned(installed.clone(), Some(&owned), Path::new("cache"));
+        assert!(merged.iter().any(|g| g.external_id == "70" && !g.installed));
+        // No cached list: installed games only.
+        assert_eq!(merge_owned(installed.clone(), None, Path::new("cache")), installed);
+    }
 
     #[test]
     fn merge_keeps_games_of_stores_not_scanned_or_failed() {

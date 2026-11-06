@@ -1,3 +1,15 @@
+<script lang="ts" module>
+  /** Both stores and the owned Steam list are refreshed at least this often while the app is open. */
+  export const FULL_REFRESH_EVERY_MS = 6 * 60 * 60 * 1000
+  /** Coming back to the window refreshes when the last full refresh is at least this old. */
+  export const REFRESH_ON_RETURN_AFTER_MS = 60 * 60 * 1000
+
+  /** Whether at least `minGapMs` passed since `lastMs`; never refreshed (`null`) is due. */
+  export function dueForRefresh(lastMs: number | null, nowMs: number, minGapMs: number): boolean {
+    return lastMs === null || nowMs - lastMs >= minGapMs
+  }
+</script>
+
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
@@ -15,7 +27,7 @@
   let sort = $state<Sort>('title')
   let installedOnly = $state(false)
 
-  let lib = $state<Library>({ games: [], total: 0, status: '', epic: null, epicAttention: false, epicNotice: false })
+  let lib = $state<Library>({ games: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false })
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
@@ -105,12 +117,33 @@
   async function refreshNow() {
     refreshing = true
     try {
-      await api.refresh(true)
+      await api.refresh(true, true)
       refreshedAt = Date.now()
     } finally {
       refreshing = false
     }
     await settingsChanged()
+  }
+
+  /** The quiet full refresh: no status text, failures only show as the Settings dot. A running refresh wins. */
+  async function backgroundRefresh() {
+    if (refreshing) return
+    refreshing = true
+    try {
+      await api.refresh(true, true)
+      refreshedAt = Date.now()
+      await reload()
+    } catch (e) {
+      console.error('background refresh', e)
+    } finally {
+      refreshing = false
+    }
+  }
+
+  function returned() {
+    if (document.visibilityState === 'visible' && dueForRefresh(refreshedAt, Date.now(), REFRESH_ON_RETURN_AFTER_MS)) {
+      backgroundRefresh()
+    }
   }
 
   function dismissNotice() {
@@ -126,7 +159,7 @@
       await reload()
       started = true
       loadSettings()
-      await api.refresh(true)
+      await api.refresh(true, false)
       refreshedAt = Date.now()
       await reload()
       ready = true
@@ -139,10 +172,16 @@
       if (p.changed) await reload()
     }, 2000)
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.
-    const steam = setInterval(() => api.refresh(false).then(reload), 60_000)
+    const steam = setInterval(() => api.refresh(false, false).then(reload), 60_000)
+    const full = setInterval(backgroundRefresh, FULL_REFRESH_EVERY_MS)
+    document.addEventListener('visibilitychange', returned)
+    window.addEventListener('focus', returned)
     return () => {
       clearInterval(poller)
       clearInterval(steam)
+      clearInterval(full)
+      document.removeEventListener('visibilitychange', returned)
+      window.removeEventListener('focus', returned)
     }
   })
 
@@ -183,7 +222,7 @@
     bind:installedOnly
     bind:sort
     total={lib.total}
-    attention={lib.epicAttention}
+    attention={lib.epicAttention || lib.steamAttention}
     onsettings={openSettings}
   />
 

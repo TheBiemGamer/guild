@@ -47,6 +47,10 @@ struct Shared {
     /// Installs the user cancelled; their failure isn't an error.
     cancelled: HashSet<String>,
     epic_watch: Option<EpicWatch>,
+    /// Steam rejected the saved token; the Settings dot asks the owner to connect again.
+    steam_attention: bool,
+    /// An owned-games fetch is in flight.
+    owned_running: bool,
 }
 
 /// An Epic game launched from here, watched through its process.

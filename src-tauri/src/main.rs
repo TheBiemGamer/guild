@@ -10,6 +10,7 @@ mod info;
 mod library;
 mod settings;
 mod steam_login;
+mod steam_owned;
 mod view;
 
 fn main() {

@@ -9,6 +9,7 @@ use steamlocate::app::StateFlag;
 use steamlocate::{App, Library, SteamDir};
 
 use super::{Art, Error, Game, Progress, Provider, ProviderKind};
+use crate::steam_owned::OwnedGame;
 
 /// Playtime in minutes and last played time, per app id.
 type PlayStats = HashMap<u32, (Option<u64>, Option<SystemTime>)>;
@@ -71,6 +72,32 @@ impl Provider for Steam {
         let (app, _) = SteamDir::locate().ok()?.find_app(game.external_id.parse().ok()?).ok()??;
         progress(&app)
     }
+}
+
+/// The installed games plus every other owned game as a not-installed entry. Owned playtime wins for every match.
+pub fn with_owned(mut installed: Vec<Game>, owned: &[OwnedGame], librarycache: &Path) -> Vec<Game> {
+    let mut known: HashMap<String, usize> =
+        installed.iter().enumerate().map(|(i, g)| (g.external_id.clone(), i)).collect();
+    for o in owned {
+        let id = o.appid.to_string();
+        if let Some(&i) = known.get(&id) {
+            installed[i].playtime_minutes = Some(o.playtime_minutes);
+            continue;
+        }
+        known.insert(id.clone(), installed.len());
+        installed.push(Game {
+            provider: ProviderKind::Steam,
+            title: o.name.clone(),
+            installed: false,
+            install_dir: None,
+            playtime_minutes: Some(o.playtime_minutes),
+            last_played: None,
+            size_bytes: None,
+            art: art(o.appid, &librarycache.join(&id)),
+            external_id: id,
+        });
+    }
+    installed
 }
 
 /// Active download progress from an appmanifest; `None` once complete or never started.
@@ -192,7 +219,7 @@ fn to_game(library: &Library, app: &App, librarycache: &Path) -> Game {
 
 /// Local files where Steam has them, with CDN URLs as the fallback for each slot.
 /// The CDN still serves these legacy names for new apps too (404s are handled by the downloader).
-fn art(app_id: u32, librarycache_dir: &Path) -> Art {
+pub(crate) fn art(app_id: u32, librarycache_dir: &Path) -> Art {
     let mut art = local_art(librarycache_dir);
     let cdn = |file| Some(format!("{CDN}/{app_id}/{file}"));
     art.cover.url = cdn("library_600x900.jpg");
@@ -240,6 +267,27 @@ mod tests {
         let mut games = library_games(&library, &fixtures().join("appcache/librarycache"));
         games.sort_by(|a, b| a.external_id.cmp(&b.external_id));
         games
+    }
+
+    #[test]
+    fn with_owned_adds_uninstalled_games_and_keeps_installed() {
+        let mut portal = games().remove(0);
+        portal.external_id = "400".into();
+        portal.title = "Portal".into();
+        let owned = [
+            OwnedGame { appid: 400, name: "Portal".into(), playtime_minutes: 51 },
+            OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 0 },
+        ];
+        let all = with_owned(vec![portal], &owned, &fixtures().join("appcache/librarycache"));
+        assert_eq!(all.len(), 2);
+        let (p, hl) = (&all[0], &all[1]);
+        assert!(p.installed);
+        assert_eq!(p.playtime_minutes, Some(51));
+        assert_eq!(hl.title, "Half-Life");
+        assert!(!hl.installed);
+        assert_eq!(hl.install_dir, None);
+        assert_eq!(hl.size_bytes, None);
+        assert!(hl.art.cover.url.as_deref().unwrap().ends_with("/70/library_600x900.jpg"));
     }
 
     #[test]

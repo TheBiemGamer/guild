@@ -14,6 +14,8 @@ export interface Library {
   epic: Login | null
   /** Epic's state is known and it isn't logged in: the settings button carries a dot. */
   epicAttention: boolean
+  /** Steam rejected the saved login: the settings button carries a dot too. */
+  steamAttention: boolean
   /** Logged out since the last run: one dismissible banner. */
   epicNotice: boolean
 }
@@ -56,7 +58,8 @@ export interface Poll { running: string | null; progress: Record<string, Progres
 export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort) =>
   invoke<Library>('library', { query, store, installedOnly, sort })
 export const loadCache = () => invoke<void>('load_cache')
-export const refresh = (epic: boolean) => invoke<void>('refresh', { epic })
+/** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. */
+export const refresh = (epic: boolean, owned: boolean) => invoke<void>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 export const act = (action: Action, key: string) => invoke<void>('act', { action, key })
 /** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
