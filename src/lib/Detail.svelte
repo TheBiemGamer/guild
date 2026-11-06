@@ -228,8 +228,11 @@
 
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-  // Epic reports no playtime, so "Never played" can't be told from "unknown": that tile hides.
-  const playtime = $derived(game && game.playtime !== 'Never played' ? game.playtime.replace(/^Played /, '') : null)
+  // Steam's playtime is a fact even at zero ("Never played"). Legendary reports none, so for Epic
+  // "Never played" means unknown and the tile hides.
+  const playtime = $derived(
+    !game ? null : game.provider === 'epic' && game.playtime === 'Never played' ? null : game.playtime.replace(/^Played /, ''),
+  )
   const lastPlayed = $derived(game?.lastPlayed ? capitalize(game.lastPlayed.replace(/^Last played /, '')) : null)
   const beatMain = $derived(ttb ? (ttb.normally ?? null) : null)
   const beatMore = $derived(
@@ -239,9 +242,9 @@
         )
       : [],
   )
-  // Decided from `game` alone, never from how long to beat: a row that appeared never collapses.
-  // A Steam game may still get a time to beat, so it always keeps the row; Epic games never get one.
-  const showTiles = $derived(!!game && (!!playtime || !!lastPlayed || game.provider === 'steam'))
+  // Decided from `game` alone, never from how long to beat, so a row that appeared never collapses.
+  // A Steam game always has its Playtime tile, so its row is never empty; the free slot waits for a time to beat.
+  const showTiles = $derived(!!playtime || !!lastPlayed)
 
   const year = $derived(info?.released ? releaseYear(info.released) : null)
   const meta = $derived(
@@ -656,7 +659,7 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
-    min-height: 120px;
+    min-height: 136px;
     margin-top: 16px;
   }
 

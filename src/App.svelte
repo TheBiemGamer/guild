@@ -132,7 +132,7 @@
       ready = true
     })()
 
-    const tick = setInterval(async () => {
+    const poller = setInterval(async () => {
       const p = await api.poll()
       running = p.running
       progress = p.progress
@@ -141,7 +141,7 @@
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.
     const steam = setInterval(() => api.refresh(false).then(reload), 60_000)
     return () => {
-      clearInterval(tick)
+      clearInterval(poller)
       clearInterval(steam)
     }
   })
