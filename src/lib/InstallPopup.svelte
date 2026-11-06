@@ -30,13 +30,16 @@
   onMount(() => {
     const before = document.activeElement
     installButton.focus()
-    downloadSize(game.key).then((bytes) => (size = bytes), () => (size = null))
-    settingsView().then((s) => (folder = s.epicInstallDir), () => (folder = null))
+    // Answers arriving after the popup is gone are dropped.
+    let alive = true
+    downloadSize(game.key).then((bytes) => alive && (size = bytes), () => alive && (size = null))
+    settingsView().then((s) => alive && (folder = s.epicInstallDir), () => alive && (folder = null))
 
     // The grid scrolls under a fixed popup, so a scroll anywhere closes it.
     const onscroll = () => oncancel()
     window.addEventListener('scroll', onscroll, true)
     return () => {
+      alive = false
       window.removeEventListener('scroll', onscroll, true)
       if (before instanceof HTMLElement && before.isConnected) before.focus()
     }

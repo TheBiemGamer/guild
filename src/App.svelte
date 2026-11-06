@@ -184,6 +184,8 @@
   {/if}
 
   {#if confirming}
+    <!-- A fresh popup per game, so a late size never lands on another game. -->
+    {#key confirming.game.key}
     <InstallPopup
       game={confirming.game}
       anchor={confirming.anchor}
@@ -194,6 +196,7 @@
         act('install', key)
       }}
     />
+    {/key}
   {/if}
 
   <div class="content">
