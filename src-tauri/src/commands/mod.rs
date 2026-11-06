@@ -51,6 +51,8 @@ struct Shared {
     steam_attention: bool,
     /// An owned-games fetch is in flight.
     owned_running: bool,
+    /// The library changed outside a UI call (owned games arrived); the next poll reports it.
+    library_changed: bool,
 }
 
 /// An Epic game launched from here, watched through its process.

@@ -159,8 +159,14 @@
       await reload()
       started = true
       loadSettings()
-      await api.refresh(true, false)
-      refreshedAt = Date.now()
+      // Holds the flag so a focus event during startup doesn't start a second full refresh.
+      refreshing = true
+      try {
+        await api.refresh(true, false)
+        refreshedAt = Date.now()
+      } finally {
+        refreshing = false
+      }
       await reload()
       ready = true
     })()

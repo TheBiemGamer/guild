@@ -105,7 +105,7 @@ pub async fn refresh(app: AppHandle, epic: bool, owned: bool) {
 pub(crate) fn refresh_owned(app: AppHandle, force: bool) {
     tauri::async_runtime::spawn(async move {
         let job = app.clone();
-        let Some(token) = blocking(move || owned_job_token(&job, force)).await else { return };
+        let Some((token, _running)) = blocking(move || owned_job(&job, force)).await else { return };
         let result = steam_owned::fetch(&token).await;
         drop(token);
         if let Err(e) = &result {
@@ -124,19 +124,40 @@ fn error_kind(e: &steam_owned::OwnedError) -> String {
     }
 }
 
-/// The saved token when a fetch is due and none is running; marks one as running.
-fn owned_job_token(app: &AppHandle, force: bool) -> Option<String> {
+/// Marks an owned fetch as running until dropped, even if the task panics or is cancelled.
+struct OwnedRunning(AppHandle);
+
+impl Drop for OwnedRunning {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.0.state::<AppState>().shared.lock() {
+            s.owned_running = false;
+        }
+    }
+}
+
+/// The saved token and a running mark when a fetch is due and none is running. The cheap checks come
+/// first so Credential Manager is only read when a fetch will happen.
+fn owned_job(app: &AppHandle, force: bool) -> Option<(String, OwnedRunning)> {
     let state = app.state::<AppState>();
-    let token = crate::settings::steam_token()?;
-    let mut s = state.lock();
-    if s.owned_running || (s.steam_attention && !force) {
-        return None;
+    {
+        let s = state.lock();
+        if s.owned_running || (s.steam_attention && !force) {
+            return None;
+        }
     }
     if !force && cache::db::open(&state.dirs.db).is_ok_and(|c| steam_owned::fresh(&c, super::unix_now())) {
         return None;
     }
-    s.owned_running = true;
-    Some(token)
+    {
+        let mut s = state.lock();
+        if s.owned_running {
+            return None;
+        }
+        s.owned_running = true;
+    }
+    let running = OwnedRunning(app.clone());
+    let token = crate::settings::steam_token()?;
+    Some((token, running))
 }
 
 fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
@@ -146,20 +167,20 @@ fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
             if let Some(conn) = open_db(&state) {
                 steam_owned::remember(&conn, &games, super::unix_now());
             }
-            {
-                let mut s = state.lock();
-                s.steam_attention = false;
-                s.owned_running = false;
-            }
+            state.lock().steam_attention = false;
             rescan(app, false);
+            // The next poll tells the UI to re-ask the library.
+            state.lock().library_changed = true;
         }
-        OwnedOutcome::KeepAndFlag => {
-            let mut s = state.lock();
-            s.steam_attention = true;
-            s.owned_running = false;
-        }
-        OwnedOutcome::KeepQuiet => state.lock().owned_running = false,
+        OwnedOutcome::KeepAndFlag => state.lock().steam_attention = true,
+        OwnedOutcome::KeepQuiet => {}
     }
+}
+
+/// Whether the next poll reports a change: a finished download, or a library update made in the background.
+/// Reading the flag clears it.
+fn take_changed(s: &mut Shared, finished: bool) -> bool {
+    std::mem::take(&mut s.library_changed) | finished
 }
 
 type ScanResults = Vec<(ProviderKind, Result<Vec<Game>, String>)>;
@@ -385,7 +406,11 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     if finished {
         rescan(app, false);
     }
-    Poll { running: steam_running.or(epic_running), progress: state.lock().progress.clone(), changed: finished }
+    let (progress, changed) = {
+        let mut s = state.lock();
+        (s.progress.clone(), take_changed(&mut s, finished))
+    };
+    Poll { running: steam_running.or(epic_running), progress, changed }
 }
 
 /// Records polled Steam progress. Returns whether a download that was showing progress just ended.
@@ -490,6 +515,14 @@ mod tests {
         assert!(epic_notice(true, Some("loggedOut"), Login::LoggedOut), "stays until dismissed");
         assert!(!epic_notice(true, Some("loggedOut"), Login::LoggedIn));
         assert!(!epic_notice(true, Some("loggedIn"), Login::LoggedIn));
+    }
+
+    #[test]
+    fn background_library_change_is_reported_once() {
+        let mut s = Shared { library_changed: true, ..Shared::default() };
+        assert!(take_changed(&mut s, false));
+        assert!(!take_changed(&mut s, false));
+        assert!(take_changed(&mut s, true));
     }
 
     #[test]
