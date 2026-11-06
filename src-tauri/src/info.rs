@@ -65,9 +65,75 @@ pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
     })
 }
 
+/// A GamesDB localized field (`{"en-US": .., "*": ..}`): English, else the default.
+fn english(v: &Value) -> Option<&str> {
+    v["en-US"].as_str().or_else(|| v["*"].as_str()).filter(|s| !s.is_empty())
+}
+
+/// GOG GamesDB game object (inside an `external_releases` answer). `None` when it has nothing to show.
+pub fn parse_gamesdb_info(json: &str) -> Option<GameInfo> {
+    let root: Value = serde_json::from_str(json).ok()?;
+    let game = &root["game"];
+    let first = |field: &str| game[field].as_array().and_then(|a| a.first()).and_then(|p| p["name"].as_str()).map(str::to_owned);
+    let parsed = GameInfo {
+        description: english(&game["summary"]).map(strip_html).unwrap_or_default(),
+        genres: game["genres"].as_array().into_iter().flatten().filter_map(|g| english(&g["name"])).map(str::to_owned).collect(),
+        developer: first("developers"),
+        publisher: first("publishers"),
+        released: game["first_release_date"].as_str().and_then(|d| d.split('T').next()).filter(|d| !d.is_empty()).map(str::to_owned),
+        // An empty formatter is the original image; the art cache stores it at any size.
+        screenshots: game["screenshots"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s["url_format"].as_str())
+            .take(MAX_SCREENSHOTS)
+            .map(|u| u.replace("{formatter}", "").replace("{ext}", "jpg"))
+            .collect(),
+    };
+    (parsed != GameInfo::default()).then_some(parsed)
+}
+
+/// `base` with each of its empty fields taken from `extra`.
+pub fn fill_missing(base: GameInfo, extra: GameInfo) -> GameInfo {
+    GameInfo {
+        description: if base.description.is_empty() { extra.description } else { base.description },
+        genres: if base.genres.is_empty() { extra.genres } else { base.genres },
+        developer: base.developer.or(extra.developer),
+        publisher: base.publisher.or(extra.publisher),
+        released: base.released.or(extra.released),
+        screenshots: if base.screenshots.is_empty() { extra.screenshots } else { base.screenshots },
+    }
+}
+
+/// The `info` cache kind for GamesDB details; `null` is a remembered miss.
+pub const DETAILS_GAMESDB: &str = "details-gamesdb";
+const GAMESDB_FOUND_SECS: i64 = 30 * 24 * 60 * 60;
+const GAMESDB_MISS_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// Cached GamesDB details: a find lasts 30 days, a miss (`null`) 7; else a fetch whose result is cached.
+pub fn gamesdb_cached_or_fetch(
+    conn: Option<&Connection>,
+    key: &str,
+    now_secs: i64,
+    fetch: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    let cached = |age| conn.and_then(|c| db::cached_info(c, key, DETAILS_GAMESDB, age, now_secs).ok().flatten());
+    if let Some(json) = cached(GAMESDB_FOUND_SECS)
+        && (json != "null" || cached(GAMESDB_MISS_SECS).is_some())
+    {
+        return Some(json);
+    }
+    let json = fetch()?;
+    if let Some(c) = conn {
+        _ = db::put_info(c, key, DETAILS_GAMESDB, &json, now_secs);
+    }
+    Some(json)
+}
+
 /// Epic catalog item (the `metadata` of a `legendary list --json` entry).
 /// `None` when it carries nothing worth showing.
-// shortcut: the catalog has no genres, publisher or screenshots (keyImages is box art only), so Epic games show none.
+// shortcut: the catalog has no genres, publisher or screenshots (keyImages is box art only); `game_info` fills them from the Steam twin or GamesDB.
 pub fn parse_epic_info(info: &Value) -> Option<GameInfo> {
     if !info.is_object() {
         return None;
@@ -277,6 +343,59 @@ mod tests {
         assert_eq!(again.as_deref(), Some("null"));
         // The 7-day lifetime still applies.
         assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_200).unwrap(), None);
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn gamesdb_info_reads_summary_genres_and_screenshots() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gamesdb/pumpkin.json");
+        let info = parse_gamesdb_info(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(info.description.starts_with("A deep, interactive adventure about love and loss"));
+        assert_eq!(info.genres, vec!["Role-playing (RPG)", "Adventure"]);
+        assert_eq!(info.developer.as_deref(), Some("Ovosonico"));
+        assert_eq!(info.publisher.as_deref(), Some("505 Games"));
+        assert_eq!(info.released.as_deref(), Some("2017-08-31"));
+        // The fixture has 4 screenshots; only 3 are kept, with the template filled in.
+        assert_eq!(info.screenshots.len(), 3);
+        assert!(info.screenshots[0].starts_with("https://images.gog.com/f3e96fe8"));
+        assert!(info.screenshots[0].ends_with(".jpg?namespace=gamesdb"));
+        assert!(!info.screenshots[0].contains('{'));
+        assert_eq!(parse_gamesdb_info(r#"{"game":{"id":"1"}}"#), None);
+        assert_eq!(parse_gamesdb_info("nope"), None);
+    }
+
+    #[test]
+    fn fill_missing_keeps_base_and_fills_gaps() {
+        let base = GameInfo { description: "mine".into(), developer: Some("Me".into()), ..GameInfo::default() };
+        let extra = GameInfo {
+            description: "theirs".into(),
+            genres: vec!["RPG".into()],
+            developer: Some("Them".into()),
+            publisher: Some("Pub".into()),
+            released: Some("2020-01-01".into()),
+            screenshots: vec!["u".into()],
+        };
+        let got = fill_missing(base, extra);
+        assert_eq!(got.description, "mine");
+        assert_eq!(got.developer.as_deref(), Some("Me"));
+        assert_eq!(got.genres, vec!["RPG"]);
+        assert_eq!(got.publisher.as_deref(), Some("Pub"));
+        assert_eq!(got.released.as_deref(), Some("2020-01-01"));
+        assert_eq!(got.screenshots, vec!["u"]);
+    }
+
+    #[test]
+    fn gamesdb_details_cache_keeps_finds_longer_than_misses() {
+        let (conn, dir) = temp_db("info-gamesdb");
+        let day = 24 * 60 * 60;
+        gamesdb_cached_or_fetch(Some(&conn), "epic-A", 0, || Some("{}".into()));
+        gamesdb_cached_or_fetch(Some(&conn), "epic-B", 0, || Some("null".into()));
+        let again = |key, at| gamesdb_cached_or_fetch(Some(&conn), key, at, || Some("new".into())).unwrap();
+        assert_eq!(again("epic-A", 20 * day), "{}");
+        assert_eq!(again("epic-B", 6 * day), "null");
+        assert_eq!(again("epic-B", 8 * day), "new");
+        assert_eq!(again("epic-A", 31 * day), "new");
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }

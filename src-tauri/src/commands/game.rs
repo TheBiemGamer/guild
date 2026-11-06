@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
@@ -11,6 +12,7 @@ use super::library::rescan;
 use super::{allow, blocking, open_db, unix_now, AppState, EpicWatch, Res};
 use crate::cache;
 use crate::entries::{self, Entry};
+use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent};
@@ -233,50 +235,77 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
     bytes.parse().ok().map(view::size_label)
 }
 
+/// Steam `appdetails` JSON for an app, cached as `steam-<appid>` (the same entry a Steam copy uses).
+fn steam_details(conn: Option<&Connection>, http: &reqwest::Client, appid: &str, now: i64) -> Option<String> {
+    let key = format!("steam-{appid}");
+    info::cached_or_fetch(conn, &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
+        let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&l=english");
+        let body = tauri::async_runtime::block_on(async { http.get(url).send().await?.error_for_status()?.text().await })
+            .inspect_err(|e| eprintln!("appdetails {key}: {e}"))
+            .ok()?;
+        serde_json::to_string(&info::parse_steam_appdetails(&body, appid)?).ok()
+    })
+}
+
+/// Cached details JSON as a game's info; `null`, a miss or bad JSON is `None`.
+fn parse_details(json: Option<String>) -> Option<GameInfo> {
+    serde_json::from_str::<Option<GameInfo>>(&json?).ok()?
+}
+
 /// Store details for the game page (description, genres, developer, screenshots).
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
-/// An Epic game the catalog says nothing about is cached as `null` like the rest of its list.
+/// An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
+/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss).
 /// Screenshots come back as local files, downloaded on first use.
 #[tauri::command]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
     let game = app.state::<AppState>().game(&key)?;
-    let json = {
+    let twin = {
+        let state = app.state::<AppState>();
+        let s = state.lock();
+        entries::find(&s.entries, &s.games, &key).and_then(|e| entries::steam_appid(e, &s.games, &s.twins))
+    };
+    let mut details = {
         let (app, key, game) = (app.clone(), key.clone(), game.clone());
         blocking(move || {
             let state = app.state::<AppState>();
             let conn = open_db(&state);
             let now = unix_now();
             let http = state.http.clone();
-            info::cached_or_fetch(conn.as_ref(), &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || match game.provider {
-                ProviderKind::Steam => {
-                    let url = format!(
-                        "https://store.steampowered.com/api/appdetails?appids={}&l=english",
-                        game.external_id
-                    );
-                    let body = tauri::async_runtime::block_on(async {
-                        http.get(url).send().await?.error_for_status()?.text().await
-                    })
-                    .inspect_err(|e| eprintln!("appdetails {key}: {e}"))
-                    .ok()?;
-                    serde_json::to_string(&info::parse_steam_appdetails(&body, &game.external_id)?).ok()
+            if game.provider == ProviderKind::Steam {
+                return parse_details(steam_details(conn.as_ref(), &http, &game.external_id, now));
+            }
+            // One list answers for every Epic game, so all of them are cached from it.
+            let catalog = info::cached_or_fetch(conn.as_ref(), &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
+                let list = epic::catalog().inspect_err(|e| eprintln!("legendary list {key}: {e}")).ok()?;
+                let all = info::epic_details(&list);
+                if let Some(c) = &conn
+                    && let Err(e) = info::remember_all(c, &all, now)
+                {
+                    eprintln!("epic details cache: {e}");
                 }
-                // One list answers for every Epic game, so all of them are cached from it.
-                ProviderKind::Epic => {
-                    let list = epic::catalog().inspect_err(|e| eprintln!("legendary list {key}: {e}")).ok()?;
-                    let all = info::epic_details(&list);
-                    if let Some(c) = &conn
-                        && let Err(e) = info::remember_all(c, &all, now)
-                    {
-                        eprintln!("epic details cache: {e}");
-                    }
-                    Some(all.into_iter().find(|(k, _)| *k == key).map_or_else(|| "null".into(), |(_, json)| json))
-                }
-            })
+                Some(all.into_iter().find(|(k, _)| *k == key).map_or_else(|| "null".into(), |(_, json)| json))
+            });
+            let base = parse_details(catalog).unwrap_or_default();
+            let gamesdb = || {
+                let json = info::gamesdb_cached_or_fetch(conn.as_ref(), &key, now, || {
+                    let body = tauri::async_runtime::block_on(gamesdb::fetch(&http, &game.external_id))
+                        .inspect_err(|e| eprintln!("gamesdb details {key}: {e}"))
+                        .ok()?;
+                    serde_json::to_string(&body.and_then(|b| info::parse_gamesdb_info(&b))).ok()
+                });
+                parse_details(json)
+            };
+            let extra = match twin {
+                // A twin whose store page is gone still has GamesDB.
+                Some(id) => parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now)).or_else(gamesdb),
+                None => gamesdb(),
+            };
+            let all = extra.map_or(base.clone(), |extra| info::fill_missing(base, extra));
+            (all != GameInfo::default()).then_some(all)
         })
         .await?
     };
-    // `null` is a cached "nothing to show".
-    let mut details: GameInfo = serde_json::from_str::<Option<GameInfo>>(&json).ok()??;
     let state = app.state::<AppState>();
     let dir = state.dirs.art.join(&key);
     // Downloaded side by side; awaited in order, so the screenshots keep theirs.

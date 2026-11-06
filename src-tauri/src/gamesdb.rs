@@ -53,6 +53,14 @@ pub fn parse_steam_twin(json: &str) -> Result<Option<u32>, String> {
 
 /// Asks GamesDB for the Steam twin of an Epic app name. A 404 means GamesDB doesn't know the game.
 pub async fn look_up(http: &reqwest::Client, app_name: &str) -> Result<Option<u32>, String> {
+    match fetch(http, app_name).await? {
+        Some(body) => parse_steam_twin(&body),
+        None => Ok(None),
+    }
+}
+
+/// GamesDB's answer body for an Epic app name; `None` when it doesn't know the game (404).
+pub async fn fetch(http: &reqwest::Client, app_name: &str) -> Result<Option<String>, String> {
     let url = format!("{URL}/{}", percent_encode(app_name));
     let resp = http.get(url).send().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
     let status = resp.status();
@@ -63,7 +71,7 @@ pub async fn look_up(http: &reqwest::Client, app_name: &str) -> Result<Option<u3
         return Err(format!("gamesdb: HTTP {status}"));
     }
     let body = resp.text().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
-    parse_steam_twin(&body)
+    Ok(Some(body))
 }
 
 #[derive(Serialize, Deserialize)]
