@@ -35,6 +35,10 @@
           onconnected()
           return
         }
+        if (step.step === 'failed') {
+          failure = step.message
+          return
+        }
         if (step.step === 'rotated') svg = step.svg
         if (step.step === 'scanned') scanned = true
       } catch (e) {

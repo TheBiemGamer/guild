@@ -1,5 +1,7 @@
 //! The settings page and the Epic login actions.
 
+use std::sync::atomic::Ordering;
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -203,15 +205,24 @@ pub enum ConnectStep {
     Rotated { svg: String },
     Scanned,
     Connected { account: String },
+    /// The login was approved but couldn't be saved; the dialog stops here.
+    Failed { message: String },
 }
 
 /// Starts a QR login, replacing any running one, and returns the code as an SVG.
 #[tauri::command]
 pub async fn steam_connect_start(app: AppHandle) -> Res<String> {
     let state = app.state::<AppState>();
+    let generation = state.steam_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let session = steam_login::begin(&state.http).await?;
     let svg = steam_login::qr_svg(&session.challenge_url)?;
-    *state.steam_qr.lock().await = Some(session);
+    let mut slot = state.steam_qr.lock().await;
+    // A cancel (or newer start) while Steam was answering wins.
+    if !should_save(generation, state.steam_gen.load(Ordering::SeqCst)) {
+        return Err("Not connecting.".into());
+    }
+    *slot = Some(session);
+    state.steam_session_gen.store(generation, Ordering::SeqCst);
     Ok(svg)
 }
 
@@ -220,6 +231,7 @@ pub async fn steam_connect_start(app: AppHandle) -> Res<String> {
 pub async fn steam_connect_poll(app: AppHandle) -> Res<ConnectStep> {
     let state = app.state::<AppState>();
     let mut slot = state.steam_qr.lock().await;
+    let generation = state.steam_session_gen.load(Ordering::SeqCst);
     let step = poll_session(&state.http, &mut slot).await?;
     let approved = match step {
         PollStep::Waiting => return Ok(ConnectStep::Waiting),
@@ -231,13 +243,20 @@ pub async fn steam_connect_poll(app: AppHandle) -> Res<ConnectStep> {
         PollStep::Done(approved) => approved,
     };
     drop(slot);
+    // Closed while Steam was answering: save nothing.
+    if !should_save(generation, state.steam_gen.load(Ordering::SeqCst)) {
+        return Err("Not connecting.".into());
+    }
     let account = approved.account.clone();
     // The token goes straight from Steam's answer into Credential Manager.
-    blocking({
+    let saved = blocking({
         let app = app.clone();
         move || save_login(&app, approved)
     })
-    .await?;
+    .await;
+    if let Err(message) = saved {
+        return Ok(ConnectStep::Failed { message });
+    }
     refresh_owned(app, true);
     Ok(ConnectStep::Connected { account })
 }
@@ -262,6 +281,11 @@ async fn poll_session(http: &reqwest::Client, slot: &mut Option<QrSession>) -> R
     Ok(step)
 }
 
+/// A login approved under `started` may be saved only if no cancel or newer start happened since.
+fn should_save(started: u64, now: u64) -> bool {
+    started == now
+}
+
 fn cancel_session(slot: &mut Option<QrSession>) {
     *slot = None;
 }
@@ -269,7 +293,10 @@ fn cancel_session(slot: &mut Option<QrSession>) {
 /// Drops the running QR login, if any.
 #[tauri::command]
 pub async fn steam_connect_cancel(app: AppHandle) {
-    cancel_session(&mut *app.state::<AppState>().steam_qr.lock().await);
+    let state = app.state::<AppState>();
+    // Before waiting for the lock, so a poll already in flight sees it when Steam answers.
+    state.steam_gen.fetch_add(1, Ordering::SeqCst);
+    cancel_session(&mut *state.steam_qr.lock().await);
 }
 
 /// Forgets the Steam login and the owned list, then rescans so only installed Steam games remain.
@@ -300,6 +327,12 @@ mod tests {
         let http = reqwest::Client::new();
         let r = tauri::async_runtime::block_on(poll_session(&http, &mut slot));
         assert_eq!(r.err().as_deref(), Some("Not connecting."));
+    }
+
+    #[test]
+    fn a_login_approved_after_cancel_is_not_saved() {
+        assert!(should_save(3, 3));
+        assert!(!should_save(3, 4));
     }
 
     #[test]

@@ -97,6 +97,7 @@ export type ConnectStep =
   | { step: 'rotated'; svg: string }
   | { step: 'scanned' }
   | { step: 'connected'; account: string }
+  | { step: 'failed'; message: string }
 /** Starts a Steam QR login; resolves to the code as an SVG. */
 export const steamConnectStart = () => invoke<string>('steam_connect_start')
 export const steamConnectPoll = () => invoke<ConnectStep>('steam_connect_poll')

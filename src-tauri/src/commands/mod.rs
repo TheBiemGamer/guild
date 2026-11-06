@@ -29,6 +29,10 @@ pub struct AppState {
     igdb: Mutex<igdb::TokenCache>,
     /// The Steam QR login in progress, if any. Held across the poll call so a cancel waits for it.
     steam_qr: tokio::sync::Mutex<Option<crate::steam_login::QrSession>>,
+    /// Bumped by every connect start and cancel; a poll that finishes under a newer one is discarded.
+    steam_gen: std::sync::atomic::AtomicU64,
+    /// The `steam_gen` the session in `steam_qr` was started under.
+    steam_session_gen: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -76,6 +80,8 @@ impl AppState {
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
             igdb: Mutex::new(igdb::TokenCache::default()),
             steam_qr: tokio::sync::Mutex::new(None),
+            steam_gen: std::sync::atomic::AtomicU64::new(0),
+            steam_session_gen: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
