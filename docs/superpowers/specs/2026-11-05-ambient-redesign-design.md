@@ -1,6 +1,6 @@
 # Ambient redesign: library, game page, settings
 
-Status: reviewed, awaiting owner approval · 2026-11-05 · Tauri 2 + Svelte 5 app on branch `feat/tauri-rewrite`
+Status: approved by the owner · 2026-11-05 · Tauri 2 + Svelte 5 app on branch `feat/tauri-rewrite`
 
 Mockups (throwaway, for reference): `.superpowers/brainstorm/26-1793914734/content/`
 `ambient-v3.html` (library), `installed-marking-v2.html` (option C), `game-page.html`, `settings-v2.html`.

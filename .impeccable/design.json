@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-06T00:00:00.000Z",
+  "title": "Design System: Game Launcher",
+  "extensions": {
+    "colorMeta": {
+      "bg": { "role": "neutral", "displayName": "Ink Black", "canonical": "#0e0e14", "tonalRamp": ["#08080c", "#0e0e14", "#16161f", "#1f1f2a", "#2c2c3a", "#5a5c70", "#8d90a3", "#eef0f6"] },
+      "surface": { "role": "neutral", "displayName": "Night Surface", "canonical": "#16161f", "tonalRamp": ["#08080c", "#0e0e14", "#16161f", "#1f1f2a", "#2c2c3a", "#5a5c70", "#8d90a3", "#eef0f6"] },
+      "surface-2": { "role": "neutral", "displayName": "Raised Surface", "canonical": "#1f1f2a", "tonalRamp": ["#08080c", "#0e0e14", "#16161f", "#1f1f2a", "#2c2c3a", "#5a5c70", "#8d90a3", "#eef0f6"] },
+      "text": { "role": "neutral", "displayName": "Cloud White", "canonical": "#eef0f6", "tonalRamp": ["#2c2c3a", "#5a5c70", "#8d90a3", "#b4b7c6", "#cfd1dc", "#e1e3ec", "#eef0f6", "#ffffff"] },
+      "accent": { "role": "primary", "displayName": "Signal Violet", "canonical": "#7c5cff", "tonalRamp": ["#1e1650", "#33258f", "#4b36cc", "#7c5cff", "#a48bff", "#c3b3ff", "#dcd3ff", "#f1edff"] },
+      "play": { "role": "status", "displayName": "Play Green", "canonical": "#22c55e", "tonalRamp": ["#04210f", "#0a4a21", "#12782f", "#22c55e", "#4ade80", "#86efac", "#bbf7d0", "#f0fdf4"] },
+      "warn": { "role": "status", "displayName": "Amber", "canonical": "#f5b942", "tonalRamp": ["#3d2a05", "#6e4c0a", "#a37212", "#f5b942", "#f8c969", "#fbdc98", "#fdeccb", "#fff9ec"] },
+      "danger": { "role": "status", "displayName": "Red", "canonical": "#ef4444", "tonalRamp": ["#3b0b0b", "#6e1414", "#a62020", "#ef4444", "#f87171", "#fca5a5", "#fecaca", "#fef2f2"] },
+      "pill": { "role": "neutral", "displayName": "Pill White", "canonical": "#ffffff", "tonalRamp": ["#8d90a3", "#a9acbc", "#c3c5d1", "#d6d8e1", "#e4e6ee", "#eef0f6", "#f7f8fb", "#ffffff"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Continue-playing banner game name." },
+      "headline": { "displayName": "Headline", "purpose": "Settings section heading." },
+      "body": { "displayName": "Body", "purpose": "Default UI text." },
+      "label": { "displayName": "Label", "purpose": "Uppercase tracked section labels and kickers." }
+    },
+    "shadows": [
+      { "name": "cover-rest", "value": "0 4px 12px rgb(0 0 0 / 0.45)", "purpose": "Covers at rest." },
+      { "name": "cover-lift", "value": "0 16px 34px rgb(0 0 0 / 0.6), 0 0 0 2px rgb(255 255 255 / 0.85)", "purpose": "Hovered or focused cover with white outline." },
+      { "name": "banner", "value": "0 10px 30px rgb(0 0 0 / 0.45)", "purpose": "Continue-playing banner." },
+      { "name": "modal", "value": "0 30px 80px rgb(0 0 0 / 0.6)", "purpose": "Settings panel." }
+    ],
+    "motion": [
+      { "name": "press", "value": "background 120ms, transform 120ms", "purpose": "Buttons; active scales to 0.97." },
+      { "name": "cover-lift", "value": "transform 160ms ease-out, box-shadow 160ms ease-out", "purpose": "Cover hover." },
+      { "name": "ambient-fade", "value": "opacity 600ms ease-out", "purpose": "Ambient tint fading in when the last-played art loads." },
+      { "name": "page-enter", "value": "180ms ease-out, translateY(8px) to 0", "purpose": "Game page entrance." }
+    ],
+    "breakpoints": [
+      { "name": "settings-stack", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Pill",
+      "kind": "button",
+      "refersTo": "button-pill",
+      "description": "The one primary action: Play, Install, Log in.",
+      "html": "<button class=\"ds-pill\">Play</button>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 8px; padding: 9px 20px; border: 0; border-radius: 999px; background: #fff; color: #0e0e14; font: 700 14px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; cursor: pointer; transition: background 120ms, transform 120ms; } .ds-pill:hover { background: #e4e6ee; } .ds-pill:active { transform: scale(0.97); } .ds-pill:focus-visible { outline: 2px solid rgb(255 255 255 / 0.85); outline-offset: 2px; }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Glass filter chip; selected state is brighter glass.",
+      "html": "<button class=\"ds-chip\" aria-pressed=\"true\">Installed</button>",
+      "css": ".ds-chip { height: 36px; min-width: 36px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: rgb(0 0 0 / 0.32); border: 1px solid rgb(255 255 255 / 0.08); color: rgb(255 255 255 / 0.75); font: 14px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; cursor: pointer; } .ds-chip:hover { background: rgb(255 255 255 / 0.09); color: #eef0f6; } .ds-chip[aria-pressed='true'] { background: rgb(255 255 255 / 0.16); border-color: rgb(255 255 255 / 0.22); color: #eef0f6; } .ds-chip:focus-visible { outline: 2px solid rgb(255 255 255 / 0.85); outline-offset: 2px; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "Glass search box in the top bar.",
+      "html": "<label class=\"ds-search\"><input type=\"search\" placeholder=\"Search 613 games\"></label>",
+      "css": ".ds-search { height: 36px; width: 280px; display: flex; align-items: center; padding: 0 12px; border-radius: 10px; background: rgb(0 0 0 / 0.32); border: 1px solid rgb(255 255 255 / 0.08); } .ds-search:focus-within { border-color: rgb(255 255 255 / 0.22); background: rgb(10 10 16 / 0.6); } .ds-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #eef0f6; font: 14px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; } .ds-search input::placeholder { color: rgb(255 255 255 / 0.5); }"
+    },
+    {
+      "name": "Cover Card (not installed)",
+      "kind": "card",
+      "refersTo": "cover-card",
+      "description": "2:3 cover with faded art, store logo top-right and Install chip bottom-left.",
+      "html": "<div class=\"ds-cover\"><span class=\"ds-name\">Game Title</span><span class=\"ds-logo\"></span><span class=\"ds-install\">Install</span></div>",
+      "css": ".ds-cover { position: relative; width: 180px; height: 270px; border-radius: 10px; background: linear-gradient(160deg, #1f1f2a, #16161f); box-shadow: 0 4px 12px rgb(0 0 0 / 0.45); transition: transform 160ms ease-out, box-shadow 160ms ease-out; } .ds-cover:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 16px 34px rgb(0 0 0 / 0.6), 0 0 0 2px rgb(255 255 255 / 0.85); } .ds-name { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; font: 600 15px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; text-align: center; color: #8d90a3; } .ds-logo { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%; background: rgb(10 10 16 / 0.62); border: 1px solid rgb(255 255 255 / 0.12); } .ds-install { position: absolute; left: 8px; bottom: 8px; padding: 4px 9px; border-radius: 999px; background: rgb(10 10 16 / 0.68); border: 1px solid rgb(255 255 255 / 0.12); color: #fff; font: 600 11px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; }"
+    },
+    {
+      "name": "Notice",
+      "kind": "custom",
+      "refersTo": "notice",
+      "description": "Dismissible one-line glass banner under the toolbar.",
+      "html": "<div class=\"ds-notice\"><span>You were logged out of Epic Games. Log in again in Settings.</span><button>Settings</button></div>",
+      "css": ".ds-notice { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; min-height: 44px; border-radius: 12px; background: rgb(10 10 16 / 0.6); border: 1px solid rgb(255 255 255 / 0.08); color: #eef0f6; font: 14px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; } .ds-notice span { flex: 1; } .ds-notice button { padding: 6px 14px; border: 1px solid rgb(255 255 255 / 0.22); border-radius: 8px; background: rgb(255 255 255 / 0.16); color: inherit; font: inherit; cursor: pointer; }"
+    },
+    {
+      "name": "Toggle",
+      "kind": "custom",
+      "refersTo": "toggle",
+      "description": "Settings switch; accent violet when on.",
+      "html": "<button class=\"ds-toggle\" role=\"switch\" aria-checked=\"true\" aria-label=\"Example\"></button>",
+      "css": ".ds-toggle { position: relative; width: 40px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: #7c5cff; cursor: pointer; transition: background 120ms; } .ds-toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 120ms; transform: translateX(18px); } .ds-toggle[aria-checked='false'] { background: rgb(255 255 255 / 0.18); } .ds-toggle[aria-checked='false']::after { transform: none; } .ds-toggle:focus-visible { outline: 2px solid rgb(255 255 255 / 0.85); outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "UNCONFIRMED",
+    "overview": "Working name 'Ambient' (owner): the last-played game's art, heavily blurred and saturated, tints the window and fades to near-black; chrome is translucent dark glass with thin light borders; the primary action is a solid white pill. Dark-only, dense, content-first desktop app.",
+    "keyCharacteristics": [
+      "One ambient tint layer behind everything, static while scrolling.",
+      "Dark glass chrome with thin light borders.",
+      "Solid white pill is the only primary action.",
+      "Store identity and installed state readable on every cover.",
+      "Quiet by default: no status text or spinners on every start."
+    ],
+    "rules": [
+      { "name": "The One Bright Thing Rule", "body": "The solid white pill is the only solid-bright element on a screen.", "section": "colors" },
+      { "name": "The Tint Comes From The Art Rule", "body": "Chromatic colour on the library comes from the ambient layer. UI chrome stays neutral.", "section": "colors" },
+      { "name": "The Eleven Pixel Floor Rule", "body": "No UI text below 11px.", "section": "typography" },
+      { "name": "The No Halo Rule", "body": "Shadows are black and directional. No coloured glow halos.", "section": "elevation" },
+      { "name": "The Static Backdrop Rule", "body": "Blur is applied once off-screen or only on small non-scrolling surfaces.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use the CSS custom properties in src/app.css; add a token before adding a raw value.",
+      "Do keep scrolling at the benchmark level: LAUNCHER_BENCH 175 fps, 0 dropped frames over 613 games at 4,000 and 15,000 px/s.",
+      "Do reserve space for late data so nothing jumps.",
+      "Do hide a missing fact's tile or row instead of showing a dash.",
+      "Do show store logos from the bundled Simple Icons SVGs, white, never fetched at runtime.",
+      "Do honour prefers-reduced-motion."
+    ],
+    "donts": [
+      "Don't use gradient text, coloured glow halos, or neon for its own sake.",
+      "Don't flash status text or spinners on every start.",
+      "Don't add a light theme.",
+      "Don't put a live blur or backdrop-filter on scrolling content.",
+      "Don't show a second solid-bright button next to the white pill.",
+      "Don't add UI libraries or packages without the owner's approval."
+    ]
+  }
+}
