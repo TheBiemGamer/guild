@@ -1,6 +1,14 @@
 //! The settings page and the Epic login actions.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+
+use steam_vent::auth::{
+    AuthConfirmationHandler, ClientInfo, ConfirmationAction, ConfirmationMethod, ConfirmationMethodClass,
+    GuardDataStore, GuardTokenType, NullGuardDataStore, SteamGuardToken,
+};
+use steam_vent::{Connection as Session, ConnectionError, EResult, LoginError, NetworkError, ServerList};
+use tokio::sync::mpsc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -326,6 +334,159 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
     .await
 }
 
+/// One answer to the password login. Never carries the password, the code or the token.
+#[derive(Serialize)]
+#[serde(tag = "step", rename_all = "camelCase")]
+pub enum LoginStep {
+    /// Approve the login in the Steam app.
+    Approve,
+    /// Type the Steam Guard code sent by `kind`: "email" or "app".
+    Code { kind: String },
+    Connected { account: String },
+    Failed { message: String },
+}
+
+/// Logs in with account name and password. Returns the first step: Approve, Code, or the end.
+#[tauri::command]
+pub async fn steam_password_login(app: AppHandle, account: String, password: String) -> Res<LoginStep> {
+    let account = account.trim().to_owned();
+    if account.is_empty() || password.is_empty() {
+        return Ok(LoginStep::Failed { message: "Type your account name and password.".into() });
+    }
+    let state = app.state::<AppState>();
+    // Read, not bumped: the QR code in the same window keeps working.
+    let generation = state.steam_gen.load(Ordering::SeqCst);
+    let (code_tx, codes) = mpsc::unbounded_channel();
+    let (steps, step_rx) = mpsc::unbounded_channel();
+    // Replacing the sender aborts an older attempt.
+    *state.steam_pw_codes.lock().expect("codes lock poisoned") = Some(code_tx);
+    *state.steam_pw_steps.lock().await = Some(step_rx);
+    let task_app = app.clone();
+    // steam-vent's confirmation future isn't Send, so the login runs on its own thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let handler = UiConfirmation { steps: steps.clone(), codes };
+        let step = tauri::async_runtime::block_on(password_login(&task_app, generation, &account, &password, handler));
+        _ = steps.send(step);
+    });
+    next_step(&app).await
+}
+
+/// Sends the Steam Guard code and returns what happened next.
+#[tauri::command]
+pub async fn steam_password_code(app: AppHandle, code: String) -> Res<LoginStep> {
+    let state = app.state::<AppState>();
+    let sent = {
+        let codes = state.steam_pw_codes.lock().expect("codes lock poisoned");
+        codes.as_ref().is_some_and(|tx| tx.send(code.trim().to_owned()).is_ok())
+    };
+    if !sent {
+        return Err("Not logging in.".into());
+    }
+    next_step(&app).await
+}
+
+/// Waits for the next step, like the end of an Approve.
+#[tauri::command]
+pub async fn steam_password_next(app: AppHandle) -> Res<LoginStep> {
+    next_step(&app).await
+}
+
+/// Stops the password login; one that completes anyway is not saved.
+#[tauri::command]
+pub fn steam_login_cancel(app: AppHandle) {
+    let state = app.state::<AppState>();
+    cancel_password(&state.steam_gen, &state.steam_pw_codes);
+}
+
+async fn next_step(app: &AppHandle) -> Res<LoginStep> {
+    let state = app.state::<AppState>();
+    let mut steps = state.steam_pw_steps.lock().await;
+    steps.as_mut().ok_or("Not logging in.")?.recv().await.ok_or_else(|| "Not logging in.".into())
+}
+
+/// Bumps the generation, then drops the code sender so a waiting confirmation aborts.
+fn cancel_password(generation: &AtomicU64, codes: &Mutex<Option<mpsc::UnboundedSender<String>>>) {
+    generation.fetch_add(1, Ordering::SeqCst);
+    *codes.lock().expect("codes lock poisoned") = None;
+}
+
+/// Machine tokens are never kept: nothing about the login is written to disk.
+fn guard_store() -> impl GuardDataStore {
+    NullGuardDataStore
+}
+
+async fn password_login(app: &AppHandle, generation: u64, account: &str, password: &str, handler: UiConfirmation) -> LoginStep {
+    let login = async {
+        let servers = ServerList::discover().await.map_err(|_| "Couldn't reach Steam.".to_owned())?;
+        let client = ClientInfo::new("Game Launcher".into());
+        Session::login(&servers, account, password, guard_store(), handler, &client).await.map_err(|e| login_message(&e))
+    };
+    let connection = match login.await {
+        Ok(c) => c,
+        Err(message) => return LoginStep::Failed { message },
+    };
+    if !should_save(generation, app.state::<AppState>().steam_gen.load(Ordering::SeqCst)) {
+        return LoginStep::Failed { message: "Not logging in.".into() };
+    }
+    let approved = steam_login::Approved {
+        account: account.to_owned(),
+        refresh_token: connection.refresh_token().token().to_owned(),
+    };
+    drop(connection);
+    if let Err(message) = save_login(app, approved) {
+        return LoginStep::Failed { message };
+    }
+    refresh_owned(app.clone(), true);
+    LoginStep::Connected { account: account.to_owned() }
+}
+
+/// Steam's answer as a short message. Never includes what the user typed.
+fn login_message(e: &ConnectionError) -> String {
+    use ConnectionError::{LoginError as Login, Network};
+    match e {
+        Login(LoginError::InvalidCredentials) | Network(NetworkError::ApiError(EResult::InvalidPassword)) => {
+            "Wrong account name or password."
+        }
+        Login(LoginError::RateLimited) | Network(NetworkError::ApiError(EResult::RateLimitExceeded)) => {
+            "Too many tries. Wait a while, then try again."
+        }
+        Network(NetworkError::ApiError(EResult::TwoFactorCodeMismatch)) => "That code didn't work.",
+        ConnectionError::Aborted => "Not logging in.",
+        _ => "Couldn't log in to Steam. Try again, or scan the QR code.",
+    }
+    .into()
+}
+
+/// Tells the window what Steam Guard wants, then waits for its code. A cancel drops the sender: abort.
+struct UiConfirmation {
+    steps: mpsc::UnboundedSender<LoginStep>,
+    codes: mpsc::UnboundedReceiver<String>,
+}
+
+impl AuthConfirmationHandler for UiConfirmation {
+    fn handle_confirmation<'a>(
+        &'a mut self,
+        allowed: &[ConfirmationMethod],
+    ) -> Box<dyn Future<Output = Option<ConfirmationAction>> + 'a> {
+        let code = allowed.iter().find_map(ConfirmationMethod::token_type);
+        let approve = allowed.iter().any(|m| m.class() == ConfirmationMethodClass::Confirmation);
+        let step = match &code {
+            // Steam finishes on its own once approved in the app; a code still works meanwhile.
+            _ if approve => LoginStep::Approve,
+            Some(GuardTokenType::Email) => LoginStep::Code { kind: "email".into() },
+            Some(_) => LoginStep::Code { kind: "app".into() },
+            None => return Box::new(std::future::ready(None)),
+        };
+        _ = self.steps.send(step);
+        Box::new(async move {
+            match (self.codes.recv().await, code) {
+                (Some(c), Some(kind)) => Some(ConfirmationAction::GuardToken(SteamGuardToken::new(c), kind)),
+                _ => Some(ConfirmationAction::Abort),
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,5 +513,46 @@ mod tests {
             serde_json::to_string(&ConnectStep::Connected { account: "a".into() }).unwrap(),
             r#"{"step":"connected","account":"a"}"#
         );
+    }
+
+    #[test]
+    fn login_step_serializes_with_a_step_tag() {
+        let json = |s: &LoginStep| serde_json::to_string(s).unwrap();
+        assert_eq!(json(&LoginStep::Approve), r#"{"step":"approve"}"#);
+        assert_eq!(json(&LoginStep::Code { kind: "email".into() }), r#"{"step":"code","kind":"email"}"#);
+        assert_eq!(json(&LoginStep::Connected { account: "a".into() }), r#"{"step":"connected","account":"a"}"#);
+    }
+
+    #[test]
+    fn a_password_login_approved_after_cancel_is_not_saved() {
+        let generation = AtomicU64::new(7);
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        let codes = Mutex::new(Some(tx));
+        let started = generation.load(Ordering::SeqCst);
+        cancel_password(&generation, &codes);
+        assert!(!should_save(started, generation.load(Ordering::SeqCst)));
+        // The waiting confirmation hears the cancel and aborts the login.
+        assert!(codes.lock().unwrap().is_none());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_guard_store_stores_nothing() {
+        use steam_vent::auth::GuardDataStore;
+        let mut store = guard_store();
+        tauri::async_runtime::block_on(async {
+            store.store("someone", "machine-token".into()).await.unwrap();
+            assert_eq!(store.load("someone").await.unwrap(), None);
+        });
+    }
+
+    #[test]
+    fn steam_errors_map_to_short_messages() {
+        use steam_vent::{EResult, LoginError, NetworkError};
+        let msg = |e: ConnectionError| login_message(&e);
+        assert_eq!(msg(LoginError::InvalidCredentials.into()), "Wrong account name or password.");
+        assert_eq!(msg(NetworkError::ApiError(EResult::InvalidPassword).into()), "Wrong account name or password.");
+        assert_eq!(msg(LoginError::RateLimited.into()), "Too many tries. Wait a while, then try again.");
+        assert_eq!(msg(NetworkError::ApiError(EResult::TwoFactorCodeMismatch).into()), "That code didn't work.");
     }
 }

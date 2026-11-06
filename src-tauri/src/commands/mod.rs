@@ -34,6 +34,10 @@ pub struct AppState {
     steam_gen: std::sync::atomic::AtomicU64,
     /// The `steam_gen` the session in `steam_qr` was started under.
     steam_session_gen: std::sync::atomic::AtomicU64,
+    /// Steam Guard codes for the password login in progress; dropping the sender cancels it.
+    steam_pw_codes: Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
+    /// What the password login asks next.
+    steam_pw_steps: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<settings::LoginStep>>>,
 }
 
 #[derive(Default)]
@@ -94,6 +98,8 @@ impl AppState {
             steam_qr: tokio::sync::Mutex::new(None),
             steam_gen: std::sync::atomic::AtomicU64::new(0),
             steam_session_gen: std::sync::atomic::AtomicU64::new(0),
+            steam_pw_codes: Mutex::new(None),
+            steam_pw_steps: tokio::sync::Mutex::new(None),
         }
     }
 

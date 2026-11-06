@@ -3,7 +3,7 @@
   import * as api from './api'
   import type { SettingsView } from './api'
   import StoreIcon from './StoreIcon.svelte'
-  import SteamConnect from './SteamConnect.svelte'
+  import SteamLogin from './SteamLogin.svelte'
 
   let { view, refreshedAt, refreshing, loggingIn, onclose, onchange, onrefresh, onlogin }: {
     view: SettingsView
@@ -18,7 +18,7 @@
     onlogin: () => void
   } = $props()
 
-  const sections = ['Accounts', 'Library', 'Downloads', 'Appearance', 'Game info', 'Storage', 'About']
+  const sections = ['Accounts', 'Library', 'Downloads', 'Appearance', 'Extra metadata', 'Storage', 'About']
   let active = $state(sections[0])
   let main: HTMLElement
   let closeButton: HTMLButtonElement
@@ -115,6 +115,15 @@
     return `Last refreshed ${Math.floor(mins / 60)} hour${mins < 120 ? '' : 's'} ago.`
   }
 
+  /** What the Steam row says; built like the Epic row. */
+  const steam = $derived.by(() => {
+    const account = view.steamLibrary.account
+    if (!account) return { tone: 'warn', text: 'Not logged in', detail: '', fix: 'Log in', logout: false }
+    if (view.steamLibrary.attention)
+      return { tone: 'warn', text: `Logged in as ${account}`, detail: 'Steam needs you to log in again', fix: 'Log in', logout: true }
+    return { tone: 'ok', text: `Logged in as ${account}`, detail: '', fix: null, logout: true }
+  })
+
   /** What the Epic row says, and which fix it offers. */
   const epic = $derived.by(() => {
     const games = `${view.epicGames} game${view.epicGames === 1 ? '' : 's'}`
@@ -182,24 +191,20 @@
           <div class="logo steam"><StoreIcon provider="steam" size={24} /></div>
           <div class="who">
             <b>Steam</b>
-            {#if view.steam}
-              <span>
-                <span class="ok">● Found</span>{#if view.steam.name}{' · '}{view.steam.name}{/if}{' · '}{view.steam.path}
-              </span>
-              <span class="line">
-                Library:
-                {#if view.steamLibrary.account}
-                  {view.steamLibrary.account}{' · '}<button class="link" disabled={busy} onclick={disconnectSteam}>Disconnect</button>
-                {:else}
-                  <button class="link" onclick={() => (connecting = true)}>Connect</button>
-                {/if}
-                {#if view.steamLibrary.attention}<span class="warn" title="Steam needs you to connect again">●</span>{/if}
-              </span>
-            {:else}
-              <span><span class="warn">● Not found</span> · Install Steam to list its games</span>
-            {/if}
+            <span>
+              <span class={steam.tone}>● {steam.text}</span>{#if steam.detail}{' · '}{steam.detail}{/if}
+            </span>
+            <span class="line">
+              {#if view.steam}
+                Found{#if view.steam.name}{' · '}{view.steam.name}{/if}{' · '}{view.steam.path}
+              {:else}
+                Not found on this PC · Install Steam to play its games
+              {/if}
+            </span>
           </div>
           {#if view.steam}<button class="btn" onclick={() => api.openSteam()}>Open Steam</button>{/if}
+          {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
+          {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>Log out</button>{/if}
         </div>
 
         <div class="acct">
@@ -285,10 +290,10 @@
         </div>
       </section>
 
-      <section id={id('Game info')}>
-        <h4>Game info</h4>
+      <section id={id('Extra metadata')}>
+        <h4>Extra metadata</h4>
         <p class="hint">
-          How long to beat comes from IGDB. It needs a free Twitch application:
+          IGDB fills how long to beat and extra details for Steam and Epic games. It needs a free Twitch application:
           <button class="link" onclick={() => api.openTwitchConsole()}>open the Twitch developer console</button>.
         </p>
         <div class="row stack">
@@ -325,7 +330,6 @@
               <button class="btn danger" disabled={busy} onclick={removeSecret}>Remove</button>
             {/if}
           </div>
-          <small class="hint">Kept in Windows Credential Manager, not in the app's files.</small>
         </div>
         <div class="row">
           <div>
@@ -361,7 +365,7 @@
 </div>
 
 {#if connecting}
-  <SteamConnect onclose={() => (connecting = false)} onconnected={steamConnected} />
+  <SteamLogin onclose={() => (connecting = false)} onconnected={steamConnected} />
 {/if}
 
 <style>
@@ -600,10 +604,6 @@
     margin: 0;
     color: var(--text-2);
     font-size: 13px;
-  }
-
-  small.hint {
-    color: var(--text-3);
   }
 
   .link {

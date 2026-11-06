@@ -124,6 +124,19 @@ export type ConnectStep =
 export const steamConnectStart = () => invoke<string>('steam_connect_start')
 export const steamConnectPoll = () => invoke<ConnectStep>('steam_connect_poll')
 export const steamConnectCancel = () => invoke<void>('steam_connect_cancel')
+export type LoginStep =
+  | { step: 'approve' }
+  | { step: 'code'; kind: 'email' | 'app' }
+  | { step: 'connected'; account: string }
+  | { step: 'failed'; message: string }
+/** Steam login with account name and password; resolves to the first step. */
+export const steamPasswordLogin = (account: string, password: string) =>
+  invoke<LoginStep>('steam_password_login', { account, password })
+/** Sends the Steam Guard code; resolves to what happened next. */
+export const steamPasswordCode = (code: string) => invoke<LoginStep>('steam_password_code', { code })
+/** Waits for the login to finish after an Approve. */
+export const steamPasswordNext = () => invoke<LoginStep>('steam_password_next')
+export const steamLoginCancel = () => invoke<void>('steam_login_cancel')
 export const steamDisconnect = () => invoke<void>('steam_disconnect')
 export const openSteam = () => invoke<void>('open_steam')
 export const openTwitchConsole = () => invoke<void>('open_twitch_console')
