@@ -457,9 +457,14 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
         return result.map_err(|e| format!("Steam: {e}"));
     }
     let result = match action {
-        Action::Play => store.launch(game).and_then(|()| epic::executable(game)).map(|exe| {
-            state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now() });
+        Action::Play => store.launch(game).map(|()| {
             record_play(&state, &key);
+            // The game started either way; without its exe name it just isn't shown as running.
+            let exe = epic::executable(game).unwrap_or_else(|e| {
+                eprintln!("legendary list-installed {key}: {e}");
+                None
+            });
+            state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now() });
         }),
         Action::Install => {
             let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
