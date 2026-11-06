@@ -54,6 +54,10 @@
     ;(menu?.querySelector<HTMLButtonElement>('[aria-checked="true"]') ?? items?.[0])?.focus()
   }
 
+  $effect(() => {
+    if (busy || running) open = false
+  })
+
   function close(refocus: boolean) {
     open = false
     if (refocus) switcher?.focus()
@@ -82,6 +86,11 @@
     if (open && !wrap?.contains(e.target as Node)) close(false)
   }
 
+  function press(f: () => void) {
+    open = false
+    f()
+  }
+
   function choose(key: string) {
     close(true)
     onchoose(key)
@@ -90,7 +99,7 @@
 
 <svelte:window {onpointerdown} />
 
-{#if !copy.installed && !busy && copy.provider === 'epic' && downloadText(copy.key)}
+{#if !copy.installed && !busy && !running && copy.provider === 'epic' && downloadText(copy.key)}
   <span class="download">{downloadText(copy.key)}</span>
 {/if}
 
@@ -117,13 +126,13 @@
         <svg class="stroke" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
       <span class="sep"></span>
-      <button class="go" onclick={copy.installed ? onplay : oninstall}>
+      <button class="go" onclick={() => press(copy.installed ? onplay : oninstall)}>
         {@render goLabel()}
       </button>
     </div>
     {#if open}
       <div class="menu" role="menu" aria-label="Play with" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
-        <span class="label">Play with</span>
+        <span class="label" role="presentation">Play with</span>
         {#each copies as c (c.key)}
           <button role="menuitemradio" aria-checked={c.key === copy.key} tabindex="-1" onclick={() => choose(c.key)}>
             <StoreIcon provider={c.provider} size={18} />
@@ -183,6 +192,10 @@
 
   .pair button:hover:not(:disabled) {
     background: #e4e6ee;
+  }
+
+  .pair button:focus-visible {
+    outline-offset: -2px;
   }
 
   .switch {

@@ -295,7 +295,7 @@
               <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
             {:else}
-              {#if !busy}
+              {#if !busy && (copy!.installed || copy!.installDir)}
                 <div class="more-wrap">
                   <button
                     class="glass more"
