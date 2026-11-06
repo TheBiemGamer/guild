@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::cache::db;
+use crate::library::{Error, ProviderKind};
 
 /// Most screenshots kept per game.
 const MAX_SCREENSHOTS: usize = 3;
@@ -92,6 +93,29 @@ pub fn parse_epic_info(info: &Value) -> Option<GameInfo> {
     };
     let empty = parsed.description.is_empty() && parsed.developer.is_none() && parsed.released.is_none();
     (!empty).then_some(parsed)
+}
+
+/// Details JSON for every game in a `legendary list --json` answer, as `(game key, json)`.
+/// A game with nothing to show gets `null`, so it is cached as "nothing" rather than asked again.
+pub fn epic_details(list: &Value) -> Vec<(String, String)> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|g| {
+            let key = ProviderKind::Epic.key(g["app_name"].as_str()?);
+            Some((key, serde_json::to_string(&parse_epic_info(&g["metadata"])).ok()?))
+        })
+        .collect()
+}
+
+/// Caches every `(key, details json)` in one transaction.
+pub fn remember_all(conn: &Connection, all: &[(String, String)], now_secs: i64) -> Result<(), Error> {
+    let tx = conn.unchecked_transaction()?;
+    for (key, json) in all {
+        db::put_info(&tx, key, "details", json, now_secs)?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// Store markup as plain text: tags dropped, `<br>` and block ends become line breaks,
@@ -236,6 +260,31 @@ mod tests {
         .unwrap();
         assert_eq!(parse_epic_info(&item), None);
         assert_eq!(parse_epic_info(&Value::Null), None);
+    }
+
+    #[test]
+    fn one_epic_list_caches_every_game() {
+        let (conn, dir) = temp_db("info-epic-all");
+        let list = serde_json::json!([
+            {"app_name": "Pumpkin", "metadata": epic_fixture()},
+            {"app_name": "Fortnite", "metadata": {"title": "Fortnite", "description": "Fortnite"}},
+            {"app_title": "no app_name, skipped"},
+        ]);
+        let all = epic_details(&list);
+        assert_eq!(all.len(), 2);
+        remember_all(&conn, &all, 1_000).unwrap();
+
+        let shown = db::cached_info(&conn, "epic-Pumpkin", "details", 100, 1_050).unwrap().unwrap();
+        let info: Option<GameInfo> = serde_json::from_str(&shown).unwrap();
+        assert_eq!(info.unwrap().developer.as_deref(), Some("505 Games"));
+        // Nothing to show is remembered as null, so the next visit doesn't run `legendary list` again.
+        assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_050).unwrap().as_deref(), Some("null"));
+        let again = cached_or_fetch(Some(&conn), "epic-Fortnite", 100, 1_050, || panic!("must not fetch"));
+        assert_eq!(again.as_deref(), Some("null"));
+        // The 7-day lifetime still applies.
+        assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_200).unwrap(), None);
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

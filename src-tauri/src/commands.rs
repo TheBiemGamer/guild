@@ -522,6 +522,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
 
 /// Store details for the game page (description, genres, developer, screenshots).
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
+/// An Epic game the catalog says nothing about is cached as `null` like the rest of its list.
 /// Screenshots come back as local files, downloaded on first use.
 #[tauri::command]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
@@ -533,32 +534,36 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
             let conn = open_db(&state);
             let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
             let http = state.http.clone();
-            info::cached_or_fetch(conn.as_ref(), &key, INFO_MAX_AGE_SECS, now, || {
-                let details = match game.provider {
-                    ProviderKind::Steam => {
-                        let url = format!(
-                            "https://store.steampowered.com/api/appdetails?appids={}&l=english",
-                            game.external_id
-                        );
-                        let body = tauri::async_runtime::block_on(async {
-                            http.get(url).send().await?.error_for_status()?.text().await
-                        })
-                        .inspect_err(|e| eprintln!("appdetails {key}: {e}"))
-                        .ok()?;
-                        info::parse_steam_appdetails(&body, &game.external_id)
+            info::cached_or_fetch(conn.as_ref(), &key, INFO_MAX_AGE_SECS, now, || match game.provider {
+                ProviderKind::Steam => {
+                    let url = format!(
+                        "https://store.steampowered.com/api/appdetails?appids={}&l=english",
+                        game.external_id
+                    );
+                    let body = tauri::async_runtime::block_on(async {
+                        http.get(url).send().await?.error_for_status()?.text().await
+                    })
+                    .inspect_err(|e| eprintln!("appdetails {key}: {e}"))
+                    .ok()?;
+                    serde_json::to_string(&info::parse_steam_appdetails(&body, &game.external_id)?).ok()
+                }
+                // One list answers for every Epic game, so all of them are cached from it.
+                ProviderKind::Epic => {
+                    let list = epic::catalog().inspect_err(|e| eprintln!("legendary list {key}: {e}")).ok()?;
+                    let all = info::epic_details(&list);
+                    if let Some(c) = &conn
+                        && let Err(e) = info::remember_all(c, &all, now)
+                    {
+                        eprintln!("epic details cache: {e}");
                     }
-                    ProviderKind::Epic => epic::catalog_metadata(&game)
-                        .inspect_err(|e| eprintln!("legendary list {key}: {e}"))
-                        .ok()
-                        .flatten()
-                        .and_then(|meta| info::parse_epic_info(&meta)),
-                }?;
-                serde_json::to_string(&details).ok()
+                    Some(all.into_iter().find(|(k, _)| *k == key).map_or_else(|| "null".into(), |(_, json)| json))
+                }
             })
         })
         .await?
     };
-    let mut details: GameInfoView = serde_json::from_str(&json).ok()?;
+    // `null` is a cached "nothing to show".
+    let mut details: GameInfoView = serde_json::from_str::<Option<GameInfoView>>(&json).ok()??;
     let state = app.state::<AppState>();
     let dir = state.dirs.art.join(&key);
     // Downloaded side by side; awaited in order, so the screenshots keep theirs.
