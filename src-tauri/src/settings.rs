@@ -11,6 +11,8 @@ pub const SHOW_BANNER: &str = "show_banner";
 pub const AMBIENT: &str = "ambient";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
+/// Name of the signed-in Steam account. Not a secret; the refresh token is in Credential Manager.
+pub const STEAM_ACCOUNT: &str = "steam_account";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
@@ -43,6 +45,10 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), String> {
             _ => Ok(()),
         },
         IGDB_CLIENT_ID => Ok(()),
+        STEAM_ACCOUNT => match value {
+            Some(v) if v.trim().is_empty() => Err("The Steam account name can't be blank.".into()),
+            _ => Ok(()),
+        },
         "igdb_secret" => Err("The IGDB secret is saved through its own command.".into()),
         _ => Err(format!("Unknown setting: {name}")),
     }
@@ -57,6 +63,9 @@ pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), 
 
 const SERVICE: &str = "dev.noah.gamelauncher";
 const SECRET_USER: &str = "igdb-client-secret";
+// Task 4 wires the Steam token commands and removes these allows.
+#[allow(dead_code)]
+pub const STEAM_TOKEN_USER: &str = "steam-refresh-token";
 
 /// The IGDB Client Secret, if one is saved.
 pub fn secret() -> Option<String> {
@@ -66,6 +75,18 @@ pub fn secret() -> Option<String> {
 /// Saves the secret, or deletes it for `None`. Errors never include the value.
 pub fn set_secret(value: Option<&str>) -> Result<(), String> {
     write(SECRET_USER, value)
+}
+
+/// The Steam refresh token, if one is saved.
+#[allow(dead_code)]
+pub fn steam_token() -> Option<String> {
+    read(STEAM_TOKEN_USER)
+}
+
+/// Saves the Steam refresh token, or deletes it for `None`. Errors never include the value.
+#[allow(dead_code)]
+pub fn set_steam_token(value: Option<&str>) -> Result<(), String> {
+    write(STEAM_TOKEN_USER, value)
 }
 
 /// Windows Credential Manager, registered once as keyring-core's default store.
@@ -168,5 +189,15 @@ mod tests {
         assert_eq!(read(user), None);
         // Deleting what isn't there is fine.
         write(user, None).unwrap();
+    }
+
+    #[test]
+    #[ignore = "touches Windows Credential Manager"]
+    fn steam_token_round_trips() {
+        let user = "steam-refresh-token-test";
+        write(user, Some("test")).unwrap();
+        assert_eq!(read(user).as_deref(), Some("test"));
+        write(user, None).unwrap();
+        assert_eq!(read(user), None);
     }
 }
