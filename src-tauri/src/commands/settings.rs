@@ -188,13 +188,13 @@ pub fn open_steam() -> Res<()> {
 /// The page where the owner creates the Twitch application IGDB needs.
 #[tauri::command]
 pub fn open_twitch_console() -> Res<()> {
-    crate::library::open_uri("https://dev.twitch.tv/console/apps").map_err(|e| e.to_string())
+    crate::library::open_url("https://dev.twitch.tv/console/apps").map_err(|e| e.to_string())
 }
 
 /// IGDB's site, for the "Data from IGDB" credit next to how long to beat.
 #[tauri::command]
 pub fn open_igdb() -> Res<()> {
-    crate::library::open_uri("https://www.igdb.com").map_err(|e| e.to_string())
+    crate::library::open_url("https://www.igdb.com").map_err(|e| e.to_string())
 }
 
 /// One answer to the dialog's poll. Never carries the refresh token.

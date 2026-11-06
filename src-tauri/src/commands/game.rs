@@ -129,7 +129,7 @@ pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
         };
         let epic_url = epic_key.and_then(|k| igdb::epic_url(&open_db(&state)?, &k));
         let url = links::url(kind, appid, epic_url.as_deref(), &title).ok_or("This game has no page there.")?;
-        crate::library::open_uri(&url).map_err(|e| e.to_string())
+        crate::library::open_url(&url).map_err(|e| e.to_string())
     })
     .await
 }

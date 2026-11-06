@@ -114,6 +114,21 @@ pub fn open_uri(uri: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Opens an `https://` URL in the default browser. explorer.exe would open the Documents folder
+/// for anything but a registered protocol; rundll32 hands the URL straight to the shell, no cmd.exe,
+/// so `&` and `?` are safe.
+pub fn open_url(url: &str) -> Result<(), Error> {
+    use std::os::windows::process::CommandExt;
+    if !url.starts_with("https://") {
+        return Err(format!("not an https URL: {url}").into());
+    }
+    std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    Ok(())
+}
+
 /// Percent-encodes every byte except RFC 3986 unreserved characters: for a URL query value or an
 /// `x-www-form-urlencoded` body.
 pub fn percent_encode(s: &str) -> String {
@@ -149,6 +164,13 @@ fn lists_image(tasklist_csv: &str, image: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_url_refuses_non_https() {
+        for url in ["http://example.com", "steam://open/main", "file:///C:/Windows", "notepad.exe", ""] {
+            assert!(open_url(url).is_err(), "{url}");
+        }
+    }
 
     #[test]
     fn lists_image_matches_whole_name_ignoring_case() {
