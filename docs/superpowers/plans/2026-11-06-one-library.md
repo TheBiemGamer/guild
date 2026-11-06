@@ -519,3 +519,148 @@ Factor `game`'s body into `fn detail(entry: &Entry, games: &[Game], now: SystemT
   - removing the "Game Launcher (test)" device.
   - Also record the total number of launches.
 - [ ] **Step 5: Commit** the ledger, if it is tracked; otherwise just report.
+
+---
+
+## Addendum tasks (owner feedback, 2026-11-07)
+
+These implement the spec's "Addendum, 2026-11-07". Global Constraints still apply. The tasks run after the final-review fix wave. Task 11's live checks are re-run at the end as Task 18.
+
+### Task 12: Twins accept a duplicated Steam row
+
+**Files:**
+- Modify: `src-tauri/src/gamesdb.rs`.
+- Fixture: `src-tauri/tests/fixtures/gamesdb/condor.json`. Capture it once with `curl https://gamesdb.gog.com/platforms/epic/external_releases/Condor` and trim it to the fields used. It has the Steam rows `202750` and `steam_202750`.
+
+**Interfaces:**
+- `parse_steam_twin(json) -> Result<Option<u32>, String>` collects the **distinct** appids from `platform_id == "steam"` releases.
+  - It accepts an `external_id` that is all digits, or `steam_<digits>`.
+  - It returns `Some` only when exactly one distinct appid remains.
+- `TWIN` becomes `"twin2"`, so answers cached under the old rule, including the 30-day misses, are looked up again.
+
+- [ ] **Step 1: Write failing tests.**
+  - `duplicated_steam_row_is_one_twin`: the condor fixture gives `Some(202750)`.
+  - `two_different_steam_apps_are_no_twin`.
+  - The existing tests stay green.
+- [ ] **Step 2: Implement.** Then run `cargo test` and clippy.
+- [ ] **Step 3: Commit:** `fix(gamesdb): a Steam app listed twice is still one twin`.
+
+### Task 13: Links open in the browser
+
+**Files:**
+- Modify: `src-tauri/src/library/mod.rs`, plus the callers of https openers.
+
+**Interfaces:**
+- Add `pub fn open_url(url: &str) -> Result<(), Error>` for `https://` URLs. It runs `rundll32.exe url.dll,FileProtocolHandler <url>` with `CREATE_NO_WINDOW`. No cmd.exe is involved, so `&` and `?` are safe.
+  - It refuses anything that doesn't start with `https://`.
+  - `open_link`, the Twitch console, IGDB and every other https opener use it.
+  - `open_uri` stays for `steam://` and `com.epicgames.launcher://`.
+- Test: `open_url_refuses_non_https`.
+- VERIFY-LATER: each link chip opens the browser.
+
+- [ ] **Step 1: Write the failing test, implement, then run `cargo test` and clippy.**
+- [ ] **Step 2: Commit:** `fix(links): open web links in the browser, not Explorer`.
+
+### Task 14: Fuller metadata for Epic games
+
+**Files:**
+- Modify: `src-tauri/src/info.rs`, `src-tauri/src/gamesdb.rs`, `commands/game.rs` (`game_info`).
+- Fixture: `src-tauri/tests/fixtures/gamesdb/pumpkin.json`. Extend it with the GamesDB game fields used, from a fresh one-time capture.
+
+**Interfaces:**
+- `pub fn parse_gamesdb_info(json: &str) -> Option<GameInfo>` reads these fields:
+  - `game.summary` (English, through `strip_html`);
+  - `game.genres[].name` (English);
+  - the first of `game.developers[].name` and of `game.publishers[].name`;
+  - `game.first_release_date`;
+  - screenshot URLs. These are built from GamesDB's URL template; read the real fixture to find the formatter placeholder, and pick a size the existing art downloader can fetch.
+- `pub fn fill_missing(base: GameInfo, extra: GameInfo) -> GameInfo` keeps each non-empty field of `base` and fills empty ones from `extra`.
+- `game_info` for an entry with an Epic copy:
+  - Start from Legendary's info.
+  - Fill it from the Steam twin's appdetails when `entries::steam_appid` is known. Reuse the Steam path and its cache, keyed `steam-<appid>`.
+  - Otherwise fill it from GamesDB's game data. Cache that as kind `details-gamesdb`: 30 days when found, 7 days for misses.
+- Merged entries keep using the Steam copy's details first.
+- Tests: `gamesdb_info_reads_summary_genres_and_screenshots` and `fill_missing_keeps_base_and_fills_gaps`.
+
+- [ ] **Step 1: Write the failing tests, implement, then run the full suite and clippy.**
+- [ ] **Step 2: Commit:** `feat(info): fill Epic metadata from the Steam twin or GOG GamesDB`.
+
+### Task 15: Steam login window and Settings wording
+
+**Files:**
+- Modify: `commands/settings.rs`, `src/lib/Settings.svelte`, `src/lib/api.ts`.
+- Replace `src/lib/SteamConnect.svelte` with `src/lib/SteamLogin.svelte`.
+
+**Interfaces:**
+- `steam_password_login(app, account: String, password: String) -> Res<LoginStep>`.
+  - `#[serde(tag="step", rename_all="camelCase")] enum LoginStep { Approve, Code { kind: String }, Connected { account: String }, Failed { message: String } }`.
+  - It uses `steam_vent::Connection::login` with:
+    - a no-op `GuardDataStore` that stores nothing;
+    - a confirmation handler that reports Approve or Code to the UI, then waits for `steam_password_code(app, code: String) -> Res<LoginStep>` or `steam_login_cancel`;
+    - `ClientInfo` named "Game Launcher".
+  - On success it saves `connection.refresh_token()` through the same `save_login` as the QR flow, then calls `refresh_owned(app, true)`.
+  - The password and code are never stored, logged, returned, put in an error string, or held in a Debug-derived struct.
+  - Cancel follows the QR generation rule: a login that completes after cancel is not saved.
+  - Steam's error kinds map to short messages: wrong password, rate limited, code mismatch.
+- UI:
+  - **Steam row:** built like the Epic row. It has a dot, status text ("Logged in as <account>" or "Not logged in"), and a **Log in** / **Log out** button; Log out is the existing disconnect. The local "Found · persona · path" stays as a detail line.
+  - **`SteamLogin.svelte`:** a modal in the install popup's look.
+    - On the left: account name and password fields (type=password, autocomplete off) and a Sign in button, followed by the Approve or code state.
+    - On the right: the existing QR flow (start, poll every 5 s, rotate).
+    - Whichever finishes first wins. Closing the modal cancels both.
+- Wording:
+  - Remove the "Kept in Windows Credential Manager…" hint.
+  - The IGDB section heading becomes "Extra metadata". Its intro says IGDB fills how long to beat and extra details for Steam and Epic games.
+- Tests:
+  - `login_step_serializes_with_a_step_tag`;
+  - an approved-after-cancel password login is not saved (reuse `should_save`);
+  - the no-op guard store stores nothing.
+
+- [ ] **Step 1: Write the failing tests, implement, then run the full suite, clippy and `npm run check`.**
+- [ ] **Step 2: VERIFY-LATER:** password login with Steam Guard approve and with a code, and that the QR flow still works.
+- [ ] **Step 3: Commit:** `feat(settings): Steam log in window with password or QR, Epic-style row`.
+
+### Task 16: Steam download size
+
+**Files:**
+- Create: `src-tauri/src/steam_size.rs`.
+- Modify: `commands/game.rs` (`download_size`), `src/lib/PlayButton.svelte`.
+- Fixture: `src-tauri/tests/fixtures/steam/appinfo-202750.vdf`. Capture it once with an anonymous steam-vent PICS request.
+
+**Interfaces:**
+- `pub fn parse_download_size(appinfo_vdf: &str) -> Option<u64>` sums `depots.<id>.manifests.public.download`, falling back to `.size`. It counts only depots that meet all of these:
+  - `config.oslist` is absent or contains `windows`;
+  - no `dlcappid`;
+  - no `config.language`, or the language is English.
+- `pub async fn fetch_appinfo(appid: u32) -> Result<String, String>`:
+  - It opens an anonymous steam-vent connection (`Connection::anonymous`), sends `CMsgClientPICSProductInfoRequest` for the app, returns the text VDF, then drops the connection.
+  - No login or token is involved.
+- `download_size(key)` for a not-installed Steam copy uses it. The result is cached 7 days like Epic's size; failures are not cached.
+  - The Play-with menu's Steam sub-line becomes "Not installed · <size> download".
+  - A single-copy Steam game shows the size beside Install, as Epic does.
+- Tests: `download_size_sums_windows_depots` and `download_size_skips_dlc_and_other_os_depots`.
+
+- [ ] **Step 1: Write the failing tests, implement, then run the full suite and clippy.**
+- [ ] **Step 2: Commit:** `feat(steam): download size for games not installed`.
+
+### Task 17: Mouse back and forward
+
+**Files:**
+- Modify: `src/App.svelte`.
+
+**Interfaces:**
+- A window `mouseup` / `auxclick` handler, which calls preventDefault so the webview doesn't navigate on its own:
+  - **Button 3 (Back):** while a game page is open, closes it the way "← Library" does, with the same focus return.
+  - **Button 4 (Forward):** reopens the last game page closed this session, if that game still exists.
+- A pure helper in the module script decides the step: `export function navStep(button: number, open: string | null, last: string | null): { open: string | null; last: string | null } | null`.
+
+- [ ] **Step 1: Implement, then run `npm run check`.**
+- [ ] **Step 2: VERIFY-LATER:** mouse back and forward.
+- [ ] **Step 3: Commit:** `feat(app): mouse back and forward buttons navigate`.
+
+### Task 18: Re-run the live checks
+
+Repeat Task 11 Steps 2–4: release build, bench 4000 and 15000, idle, and the offline check.
+- Steam is now connected, so the bench runs with the full library.
+- If idle regresses, A/B against `c520547`.
+- Record the results in the ledger.

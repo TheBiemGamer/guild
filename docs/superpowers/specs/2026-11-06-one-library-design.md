@@ -258,3 +258,19 @@ Two new rows at the bottom of the existing **Details** panel. The page layout st
   - parsers (GamesDB response, `GetOwnedGames`, the IGDB Epic title match);
   - merge rules (merge on equal appid, no merge on title, default copy choice, summed playtime).
 - **Live checks:** steps that need the owner, such as scanning a QR code or watching the Steam client, go in a VERIFY-LATER list. At most 10 app launches per task.
+
+## Addendum, 2026-11-07: owner feedback after the first test
+
+The owner tested the build and asked for these changes. They override the parts above where they differ.
+
+1. **Twins with a duplicated Steam row.** GOG GamesDB sometimes lists the same Steam app twice. For example, Alan Wake's American Nightmare has both `202750` and `steam_202750`. A twin is the single *distinct* Steam appid. Answers cached under the old rule are looked up again.
+2. **Links open the browser.** Non-Steam-store links opened the Documents folder. Every link must open in the default browser.
+3. **Epic metadata.** Epic's own catalog data is thin: the description is often missing, and there are no genres or screenshots. Fill the missing fields from the Steam twin's store details when a twin is known, otherwise from GOG GamesDB's game data. A field only shows when some source has it.
+4. **Steam account row in Settings looks like Epic's row.** It has a status line and a **Log in** / **Log out** button. The local install line ("Found · persona · path") stays as detail.
+   - **Log in** opens a login window like Steam's own. On the left are the account name and password; on the right is the QR code.
+   - **Steam Guard** is handled in the same window, either as "Approve the login in the Steam app" or as a code field for an email or authenticator code.
+   - **The password** goes only to Steam. It is never stored, logged, or put in an error string. This was the owner's decision on 2026-11-07.
+5. **Remove the line** "Kept in Windows Credential Manager, not in the app's files." from Settings.
+6. **Rename the IGDB section** in Settings from "How long to beat" to **"Extra metadata"**. IGDB and GOG GamesDB now fill data for Epic games too.
+7. **Steam download sizes.** A not-installed Steam game shows its download size, as Epic games do. This reverses the earlier no-size call. Use Steam's public app info (PICS), cached like Epic's size.
+8. **Mouse buttons.** The mouse's Back and Forward buttons navigate. Back from a game page goes to the library. Forward reopens the game page just left.
