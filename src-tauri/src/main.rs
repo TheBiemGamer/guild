@@ -6,6 +6,7 @@ mod cache;
 mod commands;
 mod epic_login;
 mod library;
+mod settings;
 mod view;
 
 fn main() {
@@ -25,6 +26,12 @@ fn main() {
             commands::epic_log_in,
             commands::dismiss_epic_notice,
             commands::epic_log_out,
+            commands::settings_view,
+            commands::update_setting,
+            commands::set_igdb_secret,
+            commands::clear_cache,
+            commands::open_steam,
+            commands::open_twitch_console,
             commands::bench_speed,
             commands::bench_done,
         ])

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Featured, Library, Progress, Sort, Store } from './lib/api'
+  import type { Action, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
   import Grid from './lib/Grid.svelte'
   import Detail from './lib/Detail.svelte'
+  import Settings from './lib/Settings.svelte'
 
   let query = $state('')
   let store = $state<Store | null>(null)
@@ -21,6 +22,11 @@
   let open = $state<string | null>(null)
   let error = $state<string | null>(null)
   let loggingIn = $state(false)
+  let settings = $state<SettingsView | null>(null)
+  let settingsOpen = $state(false)
+  let refreshing = $state(false)
+  /** When the last full refresh finished (ms since epoch). */
+  let refreshedAt = $state<number | null>(null)
   /** The saved library has been read; until then the window stays quiet instead of saying "loading". */
   let started = $state(false)
   let benchSpeed = $state<number | null>(null)
@@ -64,9 +70,34 @@
     await reload()
   }
 
-  // shortcut: the settings panel arrives in Task 5; until then the button does the one fix it would offer.
-  function openSettings() {
-    if (lib.epic === 'loggedOut' && !loggingIn) logIn()
+  async function loadSettings() {
+    try {
+      settings = await api.settingsView()
+    } catch (e) {
+      error = `Settings: ${api.message(e)}`
+    }
+  }
+
+  async function openSettings() {
+    // Read fresh each time: the Epic state and cache size change while the panel is closed.
+    await loadSettings()
+    settingsOpen = settings !== null
+  }
+
+  /** After a setting changed: the panel, the tint and the banner follow, and a logout changes the library. */
+  async function settingsChanged() {
+    await Promise.all([loadSettings(), reload()])
+  }
+
+  async function refreshNow() {
+    refreshing = true
+    try {
+      await api.refresh(true)
+      refreshedAt = Date.now()
+    } finally {
+      refreshing = false
+    }
+    await settingsChanged()
   }
 
   function dismissNotice() {
@@ -81,7 +112,9 @@
       await api.loadCache().catch((e) => console.error('library cache', e))
       await reload()
       started = true
+      loadSettings()
       await api.refresh(true)
+      refreshedAt = Date.now()
       await reload()
       ready = true
     })()
@@ -101,7 +134,7 @@
   })
 
   const runningTitle = $derived(running ? lib.games.find((g) => g.key === running)?.title : undefined)
-  const showContinue = $derived(featured !== null && query === '')
+  const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
   const LABEL_H = 18
   const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + LABEL_H)
@@ -109,7 +142,7 @@
   const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
 </script>
 
-<Ambient hero={featured?.hero ?? null} enabled={true} />
+<Ambient hero={featured?.hero ?? null} enabled={settings?.ambient ?? true} />
 
 <main>
   <Toolbar
@@ -174,10 +207,15 @@
         <p>Legendary isn't installed, so Epic games can't be listed.</p>
         <small>Install Legendary, then refresh to add your Epic library.</small>
       </div>
-    {:else if epicEmpty && lib.epic !== 'loggedIn'}
+    {:else if epicEmpty && lib.epic === 'loggedOut'}
       <div class="empty">
         <p>Log in to Epic to see your Epic games</p>
         <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? 'Logging in…' : 'Log in to Epic'}</button>
+      </div>
+    {:else if epicEmpty && lib.epic === 'unreachable'}
+      <div class="empty">
+        <p>Can't reach Epic, showing saved games</p>
+        <small>No Epic games are saved yet. They load once Epic is reachable.</small>
       </div>
     {:else if started}
       <div class="empty">
@@ -197,6 +235,22 @@
     {/if}
   </div>
 </main>
+
+{#if settingsOpen && settings}
+  <Settings
+    view={settings}
+    {refreshedAt}
+    {refreshing}
+    {loggingIn}
+    onclose={() => (settingsOpen = false)}
+    onchange={settingsChanged}
+    onrefresh={refreshNow}
+    onlogin={async () => {
+      await logIn()
+      await loadSettings()
+    }}
+  />
+{/if}
 
 <style>
   main {

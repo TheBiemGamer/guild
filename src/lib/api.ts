@@ -27,6 +27,21 @@ export interface Detail {
   playtime: string
   lastPlayed: string
 }
+export interface SettingsView {
+  steam: { name: string | null; path: string } | null
+  epic: Login | null
+  epicGames: number
+  /** Null means Legendary's own default folder. */
+  epicInstallDir: string | null
+  igdbClientId: string | null
+  /** The secret itself never reaches the UI. */
+  igdbSecretSet: boolean
+  showBanner: boolean
+  ambient: boolean
+  appVersion: string
+  legendaryVersion: string | null
+  cacheBytes: number
+}
 export interface Progress { fraction: number; text: string }
 export interface Poll { running: string | null; progress: Record<string, Progress>; changed: boolean }
 
@@ -41,6 +56,17 @@ export const poll = () => invoke<Poll>('poll')
 export const epicLogIn = () => invoke<void>('epic_log_in')
 export const epicLogOut = () => invoke<void>('epic_log_out')
 export const dismissEpicNotice = () => invoke<void>('dismiss_epic_notice')
+export const settingsView = () => invoke<SettingsView>('settings_view')
+/** `null` resets a setting to its default. Booleans travel as "true" / "false". */
+export const updateSetting = (name: string, value: string | null) => invoke<void>('update_setting', { name, value })
+export const setIgdbSecret = (value: string | null) => invoke<void>('set_igdb_secret', { value })
+export const openSteam = () => invoke<void>('open_steam')
+export const openTwitchConsole = () => invoke<void>('open_twitch_console')
+export const clearCache = async () => {
+  await invoke<void>('clear_cache')
+  // Covers shown from now on are fetched and shrunk again.
+  covers.clear()
+}
 export const benchSpeed = () => invoke<number | null>('bench_speed')
 export const benchDone = (frameMs: number[], games: number) => invoke<void>('bench_done', { frameMs, games })
 

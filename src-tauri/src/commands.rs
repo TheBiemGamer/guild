@@ -13,7 +13,8 @@ use crate::cache::{self, Dirs};
 use crate::library::epic::{self, InstallEvent, Login};
 use crate::library::{Game, Progress, ProviderKind};
 use crate::view::{self, Sort};
-use crate::{bench, epic_login};
+use crate::library::steam;
+use crate::{bench, epic_login, settings};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
 const EPIC_START_GRACE: Duration = Duration::from_secs(30);
@@ -402,7 +403,8 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
             record_play(&state, &key);
         }),
         Action::Install => {
-            let result = epic::install(game, |event| {
+            let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
+            let result = epic::install(game, base.as_deref(), |event| {
                 let mut s = state.lock();
                 match event {
                     InstallEvent::Started(pid) => _ = s.install_pids.insert(key.clone(), pid),
@@ -536,6 +538,127 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
         Ok(())
     })
     .await
+}
+
+fn open_db(state: &AppState) -> Option<rusqlite::Connection> {
+    cache::db::open(&state.dirs.db).inspect_err(|e| eprintln!("settings db: {e}")).ok()
+}
+
+#[derive(Serialize)]
+pub struct SteamAccount {
+    name: Option<String>,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsView {
+    steam: Option<SteamAccount>,
+    epic: Option<Login>,
+    epic_games: usize,
+    epic_install_dir: Option<String>,
+    igdb_client_id: Option<String>,
+    /// Whether a secret is saved; its value never leaves Credential Manager.
+    igdb_secret_set: bool,
+    show_banner: bool,
+    ambient: bool,
+    app_version: String,
+    legendary_version: Option<String>,
+    cache_bytes: u64,
+}
+
+#[tauri::command]
+pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
+        let saved = settings::load(&conn);
+        let (epic, epic_games) = {
+            let s = state.lock();
+            (s.epic_login, s.games.iter().filter(|g| g.provider == ProviderKind::Epic).count())
+        };
+        let steam = steamlocate::SteamDir::locate().ok().map(|dir| SteamAccount {
+            name: steam::persona_name(dir.path()),
+            path: dir.path().to_string_lossy().into_owned(),
+        });
+        Ok(SettingsView {
+            steam,
+            epic,
+            epic_games,
+            epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
+            igdb_client_id: saved.igdb_client_id,
+            igdb_secret_set: settings::secret().is_some(),
+            show_banner: saved.show_banner,
+            ambient: saved.ambient,
+            app_version: app.package_info().version.to_string(),
+            legendary_version: epic::legendary_version(),
+            cache_bytes: dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art),
+        })
+    })
+    .await
+}
+
+/// Total size of the files under `dir`; a missing folder counts as empty.
+fn dir_size(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => dir_size(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+/// Sets one plain setting (`None` resets it). The IGDB secret goes through `set_igdb_secret`.
+#[tauri::command]
+pub async fn update_setting(app: AppHandle, name: String, value: Option<String>) -> Res<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
+        settings::update(&conn, &name, value.as_deref())
+    })
+    .await
+}
+
+/// Saves the IGDB Client Secret in Credential Manager, or removes it for `None`.
+#[tauri::command]
+pub async fn set_igdb_secret(value: Option<String>) -> Res<()> {
+    blocking(move || {
+        let value = value.as_deref().map(str::trim).filter(|v| !v.is_empty());
+        settings::set_secret(value)
+    })
+    .await
+}
+
+/// Deletes downloaded art and thumbnails; they come back on demand. The database stays.
+#[tauri::command]
+pub async fn clear_cache(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        let dirs = &app.state::<AppState>().dirs;
+        for dir in [&dirs.thumbs, &dirs.art] {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("Couldn't clear {}: {e}", dir.display())),
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn open_steam() -> Res<()> {
+    crate::library::open_uri("steam://open/main").map_err(|e| e.to_string())
+}
+
+/// The page where the owner creates the Twitch application IGDB needs.
+#[tauri::command]
+pub fn open_twitch_console() -> Res<()> {
+    crate::library::open_uri("https://dev.twitch.tv/console/apps").map_err(|e| e.to_string())
 }
 
 /// `LAUNCHER_BENCH=<px/s>` makes the UI scroll the full library at that speed, then report.

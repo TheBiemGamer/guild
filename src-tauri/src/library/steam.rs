@@ -1,7 +1,7 @@
 //! Installed Steam games from appmanifests, plus art from Steam's local cache and CDN.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use keyvalues_parser::{Value, Vdf};
@@ -84,24 +84,39 @@ fn download_label(done: u64, total: u64) -> String {
     format!("Downloading {:.1} of {:.1} GB ({}%)", gb(done), gb(total), done * 100 / total.max(1))
 }
 
-/// Reads the newest `userdata/<account>/config/localconfig.vdf`.
+/// The newest `userdata/<account>/config/localconfig.vdf`.
 // shortcut: with several Steam accounts on this PC it follows whoever used Steam last; read loginusers.vdf if that's wrong.
-fn play_stats(steam_root: &Path) -> PlayStats {
-    let newest = std::fs::read_dir(steam_root.join("userdata"))
+fn newest_localconfig(steam_root: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(steam_root.join("userdata"))
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path().join("config").join("localconfig.vdf"))
         .filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p)))
-        .max();
-    let Some((_, path)) = newest else { return PlayStats::new() };
-    match std::fs::read_to_string(&path) {
-        Ok(text) => parse_play_stats(&text),
-        Err(e) => {
-            eprintln!("steam {}: {e}", path.display());
-            PlayStats::new()
-        }
-    }
+        .max()
+        .map(|(_, path)| path)
+}
+
+fn read_localconfig(steam_root: &Path) -> Option<String> {
+    let path = newest_localconfig(steam_root)?;
+    std::fs::read_to_string(&path)
+        .inspect_err(|e| eprintln!("steam {}: {e}", path.display()))
+        .ok()
+}
+
+fn play_stats(steam_root: &Path) -> PlayStats {
+    read_localconfig(steam_root).map(|text| parse_play_stats(&text)).unwrap_or_default()
+}
+
+/// The Steam account name shown in Settings, from the same file as `play_stats`.
+pub fn persona_name(steam_root: &Path) -> Option<String> {
+    parse_persona_name(&read_localconfig(steam_root)?)
+}
+
+fn parse_persona_name(text: &str) -> Option<String> {
+    let vdf = Vdf::from(keyvalues_parser::parse(text).ok()?);
+    let name = child(child(&vdf.value, "friends")?, "PersonaName")?.get_str()?;
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 fn parse_play_stats(text: &str) -> PlayStats {
@@ -214,8 +229,6 @@ fn local_art(dir: &Path) -> Art {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
 
     fn fixtures() -> PathBuf {
@@ -303,6 +316,13 @@ mod tests {
         let stats = play_stats(steam.path());
         eprintln!("{} apps with play stats", stats.len());
         assert!(!stats.is_empty());
+    }
+
+    #[test]
+    fn reads_persona_name_from_newest_localconfig() {
+        assert_eq!(persona_name(&fixtures()).as_deref(), Some("fixture"));
+        assert_eq!(persona_name(&fixtures().join("nowhere")), None);
+        assert_eq!(parse_persona_name("\"UserLocalConfigStore\" { \"friends\" { } }"), None);
     }
 
     #[test]

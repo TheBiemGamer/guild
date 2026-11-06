@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 directories = "6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+keyring = { version = "4.2", default-features = false, features = ["v1", "windows-native-keyring-store"] }
 keyvalues-parser = "0.2"
 reqwest = "0.13"
 rusqlite = { version = "0.41", features = ["bundled"] }

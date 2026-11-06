@@ -48,7 +48,7 @@ impl Provider for Epic {
     }
 
     fn install(&self, game: &Game) -> Result<(), Error> {
-        install(game, |_| {})
+        install(game, None, |_| {})
     }
 
     fn uninstall(&self, game: &Game) -> Result<(), Error> {
@@ -68,9 +68,13 @@ impl Provider for Epic {
 
 /// Runs a hidden `legendary install`, reporting its pid and progress as they come.
 /// Returns once the download ends; killing the pid (see `cancel`) ends it with an error.
-// shortcut: installs to Legendary's default folder; add `--base-path` when a folder setting exists.
-pub fn install(game: &Game, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
-    let mut child = legendary(&["-y", "install", &game.external_id, "--skip-sdl"])
+/// Installs under `base_path` when given, else in Legendary's default folder.
+pub fn install(game: &Game, base_path: Option<&Path>, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+    let mut command = legendary(&["-y", "install", &game.external_id, "--skip-sdl"]);
+    if let Some(dir) = base_path {
+        command.arg("--base-path").arg(dir);
+    }
+    let mut child = command
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -151,6 +155,18 @@ pub fn login_state() -> Login {
             Login::Unreachable
         }
     }
+}
+
+/// Legendary's own version, for About.
+pub fn legendary_version() -> Option<String> {
+    let output = legendary(&["--version"]).output().ok()?;
+    parse_legendary_version(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `legendary version "0.21.1", codename "Lowlife"` -> `0.21.1`
+fn parse_legendary_version(text: &str) -> Option<String> {
+    let version = text.split('"').nth(1)?;
+    (!version.is_empty()).then(|| version.to_owned())
 }
 
 /// Hands a code from the login window to Legendary, which stores the session.
@@ -311,6 +327,14 @@ mod tests {
         // Other log lines and broken numbers are ignored.
         assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", &mut mib), None);
         assert_eq!(parse_progress("= Progress: abc%", &mut mib), None);
+    }
+
+    #[test]
+    fn parses_the_legendary_version() {
+        assert_eq!(parse_legendary_version("legendary version \"0.21.1\", codename \"Lowlife\"
+").as_deref(), Some("0.21.1"));
+        assert_eq!(parse_legendary_version("something else"), None);
+        assert_eq!(parse_legendary_version("legendary version \"\""), None);
     }
 
     #[test]
