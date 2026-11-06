@@ -15,7 +15,7 @@ use crate::library::{Game, Image, Progress, ProviderKind};
 use crate::view::{self, Sort};
 use crate::library::steam;
 use crate::igdb;
-use crate::info::{self, GameInfoView};
+use crate::info::{self, GameInfo};
 use crate::{bench, epic_login, settings};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
@@ -488,27 +488,15 @@ const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 #[tauri::command]
 pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
     let game = app.state::<AppState>().game(&key).filter(|g| g.provider == ProviderKind::Epic)?;
-    blocking(move || {
+    let bytes = blocking(move || {
         let conn = open_db(&app.state::<AppState>());
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-        let cached = conn
-            .as_ref()
-            .and_then(|c| cache::db::cached_info(c, &key, "size", SIZE_MAX_AGE_SECS, now).ok().flatten())
-            .and_then(|json| json.parse::<u64>().ok());
-        if cached.is_some() {
-            return cached;
-        }
-        let size = epic::info_json(&game)
-            .inspect_err(|e| eprintln!("legendary info {key}: {e}"))
-            .ok()
-            .and_then(|info| epic::download_size_from_info(&info))?;
-        if let Some(c) = &conn {
-            _ = cache::db::put_info(c, &key, "size", &size.to_string(), now);
-        }
-        Some(size)
+        info::cached_or_fetch(conn.as_ref(), &key, "size", SIZE_MAX_AGE_SECS, unix_now(), || {
+            let info = epic::info_json(&game).inspect_err(|e| eprintln!("legendary info {key}: {e}")).ok()?;
+            epic::download_size_from_info(&info).map(|size| size.to_string())
+        })
     })
-    .await
-    .map(view::size_label)
+    .await?;
+    bytes.parse().ok().map(view::size_label)
 }
 
 /// Store details for the game page (description, genres, developer, screenshots).
@@ -516,16 +504,16 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
 /// An Epic game the catalog says nothing about is cached as `null` like the rest of its list.
 /// Screenshots come back as local files, downloaded on first use.
 #[tauri::command]
-pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
+pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
     let game = app.state::<AppState>().game(&key)?;
     let json = {
         let (app, key, game) = (app.clone(), key.clone(), game.clone());
         blocking(move || {
             let state = app.state::<AppState>();
             let conn = open_db(&state);
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+            let now = unix_now();
             let http = state.http.clone();
-            info::cached_or_fetch(conn.as_ref(), &key, INFO_MAX_AGE_SECS, now, || match game.provider {
+            info::cached_or_fetch(conn.as_ref(), &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || match game.provider {
                 ProviderKind::Steam => {
                     let url = format!(
                         "https://store.steampowered.com/api/appdetails?appids={}&l=english",
@@ -554,7 +542,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfoView> {
         .await?
     };
     // `null` is a cached "nothing to show".
-    let mut details: GameInfoView = serde_json::from_str::<Option<GameInfoView>>(&json).ok()??;
+    let mut details: GameInfo = serde_json::from_str::<Option<GameInfo>>(&json).ok()??;
     let state = app.state::<AppState>();
     let dir = state.dirs.art.join(&key);
     // Downloaded side by side; awaited in order, so the screenshots keep theirs.
@@ -614,7 +602,7 @@ async fn look_up_time_to_beat(
 pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView> {
     let state = app.state::<AppState>();
     let game = state.game(&key).filter(|g| igdb::can_match(g.provider))?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let now = unix_now();
     let (cached, credentials) = {
         let (app, key) = (app.clone(), key.clone());
         blocking(move || {
@@ -674,12 +662,11 @@ pub async fn test_igdb(app: AppHandle) -> Res<()> {
 
 /// Remembers a launch from here, for every store, so last played survives rescans.
 fn record_play(state: &AppState, key: &str) {
-    let now = SystemTime::now();
-    let secs = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = unix_now();
     if let Some(g) = state.lock().games.iter_mut().find(|g| g.key() == key) {
-        g.last_played = Some(now);
+        g.last_played = Some(UNIX_EPOCH + Duration::from_secs(secs as u64));
     }
-    let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::record_launch(&c, key, secs as i64));
+    let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::record_launch(&c, key, secs));
     if let Err(e) = saved {
         eprintln!("record launch: {e}");
     }
@@ -785,6 +772,11 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
         Ok(())
     })
     .await
+}
+
+/// Seconds since the Unix epoch, as the database stores times; 0 if the clock is before 1970.
+fn unix_now() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
 fn open_db(state: &AppState) -> Option<rusqlite::Connection> {

@@ -24,8 +24,8 @@ pub struct GameInfo {
     pub screenshots: Vec<String>,
 }
 
-/// The same shape as sent to the UI (screenshots are local paths there).
-pub type GameInfoView = GameInfo;
+/// The `info` cache kind for a game's details.
+pub const DETAILS: &str = "details";
 
 /// Steam `appdetails` response for `appid`. `None` when the store has no page for it.
 pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
@@ -112,7 +112,7 @@ pub fn epic_details(list: &Value) -> Vec<(String, String)> {
 pub fn remember_all(conn: &Connection, all: &[(String, String)], now_secs: i64) -> Result<(), Error> {
     let tx = conn.unchecked_transaction()?;
     for (key, json) in all {
-        db::put_info(&tx, key, "details", json, now_secs)?;
+        db::put_info(&tx, key, DETAILS, json, now_secs)?;
     }
     tx.commit()?;
     Ok(())
@@ -157,28 +157,22 @@ pub fn strip_html(s: &str) -> String {
     decoded.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n")
 }
 
-/// The cached answer if there is one, else whatever `fetch` returns.
-pub fn pick(cached: Option<String>, fetch: impl FnOnce() -> Option<String>) -> Option<String> {
-    cached.or_else(fetch)
-}
-
-/// Cached JSON for `(key, "details")` when fresh, else a fetch whose result is cached.
+/// Cached JSON for `(key, kind)` when fresh, else a fetch whose result is cached.
 /// A failed fetch writes nothing, so the next visit tries again.
 pub fn cached_or_fetch(
     conn: Option<&Connection>,
     key: &str,
+    kind: &str,
     max_age_secs: i64,
     now_secs: i64,
     fetch: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    let cached = conn.and_then(|c| db::cached_info(c, key, "details", max_age_secs, now_secs).ok().flatten());
-    let mut fetched = false;
-    let json = pick(cached, || {
-        fetched = true;
-        fetch()
-    })?;
-    if let Some(c) = conn.filter(|_| fetched) {
-        _ = db::put_info(c, key, "details", &json, now_secs);
+    if let Some(cached) = conn.and_then(|c| db::cached_info(c, key, kind, max_age_secs, now_secs).ok().flatten()) {
+        return Some(cached);
+    }
+    let json = fetch()?;
+    if let Some(c) = conn {
+        _ = db::put_info(c, key, kind, &json, now_secs);
     }
     Some(json)
 }
@@ -279,7 +273,7 @@ mod tests {
         assert_eq!(info.unwrap().developer.as_deref(), Some("505 Games"));
         // Nothing to show is remembered as null, so the next visit doesn't run `legendary list` again.
         assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_050).unwrap().as_deref(), Some("null"));
-        let again = cached_or_fetch(Some(&conn), "epic-Fortnite", 100, 1_050, || panic!("must not fetch"));
+        let again = cached_or_fetch(Some(&conn), "epic-Fortnite", DETAILS, 100, 1_050, || panic!("must not fetch"));
         assert_eq!(again.as_deref(), Some("null"));
         // The 7-day lifetime still applies.
         assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_200).unwrap(), None);
@@ -300,26 +294,32 @@ mod tests {
     #[test]
     fn failed_fetch_is_not_cached() {
         let (conn, dir) = temp_db("info-failed");
-        assert_eq!(cached_or_fetch(Some(&conn), "steam-1", 100, 1_000, || None), None);
-        assert_eq!(db::cached_info(&conn, "steam-1", "details", 100, 1_000).unwrap(), None);
+        assert_eq!(cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || None), None);
+        assert_eq!(db::cached_info(&conn, "steam-1", DETAILS, 100, 1_000).unwrap(), None);
         // A successful one is.
-        let got = cached_or_fetch(Some(&conn), "steam-1", 100, 1_000, || Some("{}".into()));
+        let got = cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || Some("{}".into()));
         assert_eq!(got.as_deref(), Some("{}"));
-        assert_eq!(db::cached_info(&conn, "steam-1", "details", 100, 1_000).unwrap().as_deref(), Some("{}"));
+        assert_eq!(db::cached_info(&conn, "steam-1", DETAILS, 100, 1_000).unwrap().as_deref(), Some("{}"));
+        // Without a database it still answers, it just can't remember.
+        assert_eq!(cached_or_fetch(None, "steam-1", DETAILS, 100, 1_000, || Some("x".into())).as_deref(), Some("x"));
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn cached_info_is_used_when_fetch_fails() {
-        assert_eq!(pick(Some("cached".into()), || panic!("must not fetch")).as_deref(), Some("cached"));
-        assert_eq!(pick(None, || Some("fresh".into())).as_deref(), Some("fresh"));
-        assert_eq!(pick(None, || None), None);
-
+    fn fresh_cache_is_used_without_fetching_and_kinds_stay_apart() {
         let (conn, dir) = temp_db("info-cached");
-        db::put_info(&conn, "steam-1", "details", "old", 1_000).unwrap();
-        let got = cached_or_fetch(Some(&conn), "steam-1", 100, 1_050, || panic!("must not fetch"));
+        db::put_info(&conn, "epic-A", DETAILS, "old", 1_000).unwrap();
+        let got = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_050, || panic!("must not fetch"));
         assert_eq!(got.as_deref(), Some("old"));
+        // Another kind for the same game is its own entry (the download size).
+        let size = cached_or_fetch(Some(&conn), "epic-A", "size", 100, 1_050, || Some("42".into()));
+        assert_eq!(size.as_deref(), Some("42"));
+        assert_eq!(db::cached_info(&conn, "epic-A", "size", 100, 1_050).unwrap().as_deref(), Some("42"));
+        assert_eq!(db::cached_info(&conn, "epic-A", DETAILS, 100, 1_050).unwrap().as_deref(), Some("old"));
+        // Too old: fetched again.
+        let fresh = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_200, || Some("new".into()));
+        assert_eq!(fresh.as_deref(), Some("new"));
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
