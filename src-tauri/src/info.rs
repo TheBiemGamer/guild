@@ -66,36 +66,31 @@ pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
 
 /// Epic catalog item (the `metadata` of a `legendary list --json` entry).
 /// `None` when it carries nothing worth showing.
-// shortcut: the catalog has no genre or publisher field we could verify, so Epic games show neither.
+// shortcut: the catalog has no genres, publisher or screenshots (keyImages is box art only), so Epic games show none.
 pub fn parse_epic_info(info: &Value) -> Option<GameInfo> {
     if !info.is_object() {
         return None;
     }
     let text = |field: &str| info[field].as_str().map(strip_html).filter(|s| !s.is_empty());
+    let title = text("title");
+    // Most entries repeat the title as their description; that is no description.
+    let description = text("description").filter(|d| Some(d) != title.as_ref()).unwrap_or_default();
+    // `creationDate` is when the catalog entry was made, not a release date, so it isn't used.
     let released = info["releaseInfo"]
         .as_array()
         .and_then(|r| r.iter().find_map(|i| i["dateAdded"].as_str()))
-        .or_else(|| info["creationDate"].as_str())
         .and_then(|d| d.split('T').next())
         .filter(|d| !d.is_empty())
         .map(str::to_owned);
     let parsed = GameInfo {
-        description: text("description").or_else(|| text("longDescription")).unwrap_or_default(),
+        description,
         genres: Vec::new(),
         developer: text("developer"),
         publisher: None,
         released,
-        screenshots: info["keyImages"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|k| k["type"] == "Screenshot")
-            .filter_map(|k| k["url"].as_str())
-            .take(MAX_SCREENSHOTS)
-            .map(str::to_owned)
-            .collect(),
+        screenshots: Vec::new(),
     };
-    let empty = parsed.description.is_empty() && parsed.developer.is_none() && parsed.screenshots.is_empty();
+    let empty = parsed.description.is_empty() && parsed.developer.is_none() && parsed.released.is_none();
     (!empty).then_some(parsed)
 }
 
@@ -209,28 +204,34 @@ mod tests {
         assert!(info.genres.is_empty() && info.developer.is_none() && info.screenshots.is_empty());
     }
 
+    fn epic_fixture() -> Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legendary/list-entry.json");
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
     #[test]
     fn parses_epic_catalog_item() {
-        let item: Value = serde_json::from_str(
-            r#"{"title":"World of Goo","description":"A <b>physics</b> puzzler.","developer":"2D BOY",
-                "releaseInfo":[{"appId":"Goo","dateAdded":"2018-07-25T14:00:00.000Z"}],
-                "keyImages":[{"type":"DieselGameBox","url":"https://x/wide.jpg"},
-                  {"type":"Screenshot","url":"https://x/1.jpg"},{"type":"Screenshot","url":"https://x/2.jpg"},
-                  {"type":"Screenshot","url":"https://x/3.jpg"},{"type":"Screenshot","url":"https://x/4.jpg"}]}"#,
-        )
-        .unwrap();
+        let info = parse_epic_info(&epic_fixture()).unwrap();
+        assert!(info.description.starts_with("A deep, interactive adventure about love and loss"));
+        assert_eq!(info.developer.as_deref(), Some("505 Games"));
+        assert_eq!(info.released.as_deref(), Some("2019-06-26"));
+        // The catalog's keyImages are box art only.
+        assert!(info.screenshots.is_empty() && info.genres.is_empty() && info.publisher.is_none());
+    }
+
+    #[test]
+    fn epic_description_equal_to_title_is_empty() {
+        let mut item = epic_fixture();
+        item["description"] = item["title"].clone();
         let info = parse_epic_info(&item).unwrap();
-        assert_eq!(info.description, "A physics puzzler.");
-        assert_eq!(info.developer.as_deref(), Some("2D BOY"));
-        assert_eq!(info.released.as_deref(), Some("2018-07-25"));
-        assert_eq!(info.screenshots, vec!["https://x/1.jpg", "https://x/2.jpg", "https://x/3.jpg"]);
+        assert_eq!(info.description, "");
+        assert_eq!(info.developer.as_deref(), Some("505 Games"));
     }
 
     #[test]
     fn epic_item_without_details_is_none() {
-        // Shape of the metadata in tests/fixtures/legendary/list.json: art only.
         let item: Value = serde_json::from_str(
-            r#"{"id":"4fe","namespace":"fn","title":"Fortnite","keyImages":[{"type":"DieselGameBox","url":"https://x/w.jpg"}]}"#,
+            r#"{"id":"4fe","title":"Fortnite","description":"Fortnite","creationDate":"2020-01-01T00:00:00.000Z","keyImages":[]}"#,
         )
         .unwrap();
         assert_eq!(parse_epic_info(&item), None);
