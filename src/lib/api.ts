@@ -22,19 +22,34 @@ export interface Library {
 }
 /** The game played last; `hero` is ready for an `<img>` or CSS `url()`. */
 export interface Featured { key: string; title: string; hero: string | null }
-export interface Detail {
+/** One store's copy of a game. */
+export interface CopyView {
   key: string
-  title: string
   provider: Store
   installed: boolean
+  /** Size on disk of an installed copy, like "27.3 GB". */
+  size: string | null
+  /** Only set for an installed copy. */
+  installDir: string | null
+}
+export interface Detail {
+  /** The entry key. */
+  key: string
+  title: string
+  stores: Store[]
+  /** Any copy. */
+  installed: boolean
+  copies: CopyView[]
+  /** The copy key Play and Install use. */
+  chosen: string
   /** Playtime tile text ("15 h 3 min", Steam's "Never played"); null hides it (Epic doesn't report playtime). */
   playtimeTile: string | null
+  /** "Steam + Epic" when both copies contributed. */
+  playtimeNote: string | null
   /** Last played tile text ("12 days ago"); null when never played. */
   lastPlayedTile: string | null
-  /** Size on disk of an installed game, like "27.3 GB". */
-  size: string | null
-  /** Only set for an installed game. */
-  installDir: string | null
+  /** "on Steam" / "on Epic Games", only for a game with several copies. */
+  lastPlayedStore: string | null
 }
 export interface SettingsView {
   steam: { name: string | null; path: string } | null

@@ -123,8 +123,11 @@
     }
   })
 
+  // Temporary until the copy switcher: the copy Play and Install use.
+  const copy = $derived(game && (game.copies.find((c) => c.key === game!.chosen) ?? game.copies[0]))
+
   /** A not-installed Epic game shows its download size beside Install. */
-  const sizeKey = $derived(game && game.provider === 'epic' && !game.installed ? game.key : null)
+  const sizeKey = $derived(copy && copy.provider === 'epic' && !copy.installed ? copy.key : null)
   $effect(() => {
     const key = sizeKey
     download = undefined
@@ -147,7 +150,7 @@
     busy = labels[action]
     keepFocus(() => busyPill)
     try {
-      await api.act(action, gameKey)
+      await api.act(action, copy!.key)
     } catch (e) {
       onerror(api.message(e))
     } finally {
@@ -161,7 +164,7 @@
     busy = 'Cancelling…'
     keepFocus(() => busyPill)
     try {
-      await api.cancelInstall(gameKey)
+      await api.cancelInstall(copy!.key)
     } catch (e) {
       onerror(api.message(e))
     }
@@ -169,7 +172,7 @@
 
   // Steam asks in its own dialog; Legendary doesn't, so Epic asks here first.
   function uninstall() {
-    if (game?.provider !== 'epic') {
+    if (copy?.provider !== 'epic') {
       act('uninstall')
       return
     }
@@ -248,7 +251,7 @@
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
   const showDetails = $derived(
     !!game &&
-      (!!info?.genres.length || !!info?.developer || !!info?.publisher || !!info?.released || !!game.size || !!game.installDir),
+      (!!info?.genres.length || !!info?.developer || !!info?.publisher || !!info?.released || !!copy!.size || !!copy!.installDir),
   )
 </script>
 
@@ -269,7 +272,7 @@
           <div class="name">
             <h1>{game.title}</h1>
             <div class="meta">
-              <StoreIcon provider={game.provider} size={14} />
+              <StoreIcon provider={copy!.provider} size={14} />
               {#each meta as item}<span>{item}</span>{/each}
             </div>
             {#if progress}
@@ -293,7 +296,7 @@
             {#if busy}
               <!-- aria-disabled, not disabled: it stays focusable, so focus has somewhere to land. -->
               <button class="pill big" aria-disabled="true" bind:this={busyPill}>{busy}</button>
-              {#if game.provider === 'epic' && busy === 'Installing…'}
+              {#if copy!.provider === 'epic' && busy === 'Installing…'}
                 <button class="glass round" onclick={cancel}>Cancel</button>
               {/if}
             {:else if confirming}
@@ -316,21 +319,21 @@
                 </button>
                 {#if menuOpen}
                   <div class="menu" role="menu" aria-label="More actions" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
-                    {#if game.installDir}
-                      <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(gameKey)))}>
+                    {#if copy!.installDir}
+                      <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>
                         Open install folder
                       </button>
                     {/if}
-                    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openStorePage(gameKey)))}>
-                      Open {storeNames[game.provider]} store page
+                    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openStorePage(copy!.key)))}>
+                      Open {storeNames[copy!.provider]} store page
                     </button>
-                    {#if game.installed}
+                    {#if copy!.installed}
                       <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
                     {/if}
                   </div>
                 {/if}
               </div>
-              {#if !game.installed}
+              {#if !copy!.installed}
                 {#if sizeKey}
                   <span class="download">
                     {download === undefined ? 'Checking size…' : download === null ? '' : `${download} download`}
@@ -405,8 +408,8 @@
               {#if info?.developer}<dt>Developer</dt><dd>{info.developer}</dd>{/if}
               {#if info?.publisher}<dt>Publisher</dt><dd>{info.publisher}</dd>{/if}
               {#if info?.released}<dt>Released</dt><dd>{releaseDate(info.released)}</dd>{/if}
-              {#if game.size}<dt>Size</dt><dd>{game.size}</dd>{/if}
-              {#if game.installDir}<dt>Install folder</dt><dd class="path">{game.installDir}</dd>{/if}
+              {#if copy!.size}<dt>Size</dt><dd>{copy!.size}</dd>{/if}
+              {#if copy!.installDir}<dt>Install folder</dt><dd class="path">{copy!.installDir}</dd>{/if}
             </dl>
           </section>
         {/if}

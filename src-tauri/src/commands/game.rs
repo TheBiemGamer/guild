@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, State};
 use super::library::rescan;
 use super::{allow, blocking, open_db, unix_now, AppState, EpicWatch, Res};
 use crate::cache;
+use crate::entries::{self, Entry};
 use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent};
@@ -19,33 +20,79 @@ use crate::view;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Detail {
+    /// The entry key.
     key: String,
     title: String,
-    provider: ProviderKind,
+    stores: Vec<ProviderKind>,
+    /// Any copy.
     installed: bool,
+    copies: Vec<CopyView>,
+    /// The copy key Play and Install use.
+    chosen: String,
     /// Tile text, like `15 h 3 min`; `None` hides the tile (Epic doesn't report playtime).
     playtime_tile: Option<String>,
+    /// `Steam + Epic` when both copies contributed to the playtime.
+    playtime_note: Option<String>,
     /// Tile text, like `12 days ago`; `None` when never played.
     last_played_tile: Option<String>,
-    /// Size on disk of an installed game, like `27.3 GB`.
+    /// `on Steam` / `on Epic Games`, only for an entry with several copies.
+    last_played_store: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyView {
+    key: String,
+    provider: ProviderKind,
+    installed: bool,
+    /// Size on disk of an installed copy, like `27.3 GB`.
     size: Option<String>,
-    /// Only for an installed game (Steam knows a folder for games it hasn't installed yet).
+    /// Only for an installed copy (Steam knows a folder for games it hasn't installed yet).
     install_dir: Option<String>,
 }
 
 #[tauri::command]
 pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
-    let g = state.game(&key)?;
-    Some(Detail {
-        key,
-        size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
-        install_dir: installed_dir(&g).map(|p| p.to_string_lossy().into_owned()),
-        title: g.title,
-        provider: g.provider,
-        installed: g.installed,
-        playtime_tile: view::playtime_tile(g.provider, g.playtime_minutes),
-        last_played_tile: view::last_played_tile(g.last_played, SystemTime::now()),
-    })
+    let s = state.lock();
+    let entry = entries::find(&s.entries, &s.games, &key)?;
+    Some(detail(entry, &s.games, SystemTime::now()))
+}
+
+fn detail(entry: &Entry, games: &[Game], now: SystemTime) -> Detail {
+    let (minutes, both) = entries::playtime(entry, games);
+    // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone has no playtime to show.
+    let tile_provider = entry
+        .copies
+        .iter()
+        .map(|&i| games[i].provider)
+        .find(|&p| p == ProviderKind::Steam)
+        .unwrap_or(games[entries::default_copy(entry, games)].provider);
+    let last = entries::last_played(entry, games);
+    Detail {
+        key: entry.key.clone(),
+        title: games[entry.copies[0]].title.clone(),
+        stores: entries::stores(entry, games),
+        installed: entries::installed(entry, games),
+        copies: entry
+            .copies
+            .iter()
+            .map(|&i| {
+                let g = &games[i];
+                CopyView {
+                    key: g.key(),
+                    provider: g.provider,
+                    installed: g.installed,
+                    size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
+                    install_dir: installed_dir(g).map(|p| p.to_string_lossy().into_owned()),
+                }
+            })
+            .collect(),
+        chosen: games[entries::default_copy(entry, games)].key(),
+        playtime_tile: view::playtime_tile(tile_provider, minutes),
+        playtime_note: both.then(|| "Steam + Epic".to_string()),
+        last_played_tile: view::last_played_tile(last.map(|(t, _)| t), now),
+        last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| format!("on {}", p.name())),
+    }
 }
 
 fn installed_dir(g: &Game) -> Option<&PathBuf> {
@@ -369,6 +416,42 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<()> {
 mod tests {
     use super::*;
     use crate::view::tests::game;
+    use std::collections::HashMap;
+
+    fn pumpkin(steam_last: Option<u64>, epic_last: Option<u64>) -> Vec<Game> {
+        let steam = Game { external_id: "635320".into(), ..game("Pumpkin Jack", true, Some(120), steam_last) };
+        let epic = Game {
+            provider: ProviderKind::Epic,
+            external_id: "Pumpkin".into(),
+            ..game("Pumpkin Jack", false, None, epic_last)
+        };
+        vec![epic, steam]
+    }
+
+    fn pumpkin_detail(games: &[Game], twins: &HashMap<String, u32>) -> Detail {
+        let entries = entries::group(games, twins);
+        detail(&entries[0], games, UNIX_EPOCH + Duration::from_secs(1_000 * 86_400))
+    }
+
+    #[test]
+    fn detail_for_a_merged_entry() {
+        let games = pumpkin(None, None);
+        let d = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        assert_eq!(d.key, "steam-635320");
+        assert_eq!(d.chosen, "steam-635320");
+        assert_eq!(d.copies.len(), 2);
+        assert_eq!(d.playtime_tile.as_deref(), Some("2 h 0 min"));
+        assert_eq!(d.playtime_note, None);
+    }
+
+    #[test]
+    fn last_played_store_only_for_merged_entries() {
+        let games = pumpkin(Some(86_400), Some(2 * 86_400));
+        let merged = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        assert_eq!(merged.last_played_store.as_deref(), Some("on Epic Games"));
+        let single = pumpkin_detail(&games, &HashMap::new());
+        assert_eq!(single.last_played_store, None);
+    }
 
     #[test]
     fn store_url_links_steam_app_page() {

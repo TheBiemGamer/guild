@@ -55,7 +55,6 @@ pub fn find<'a>(entries: &'a [Entry], games: &[Game], key: &str) -> Option<&'a E
 }
 
 /// The copy Play and Install use: the only installed copy, else the one played last, else the first (Steam).
-#[cfg_attr(not(test), expect(dead_code, reason = "the game page uses it from the next task"))]
 pub fn default_copy(entry: &Entry, games: &[Game]) -> usize {
     let mut installed = entry.copies.iter().copied().filter(|&i| games[i].installed);
     if let (Some(only), None) = (installed.next(), installed.next()) {
