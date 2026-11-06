@@ -113,8 +113,6 @@ pub fn set_setting(conn: &Connection, name: &str, value: Option<&str>) -> Result
 }
 
 /// Cached JSON for `(key, kind)` if it was fetched within `max_age_secs` of `now_secs`.
-// Consumed by later tasks of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn cached_info(
     conn: &Connection,
     key: &str,
@@ -131,8 +129,6 @@ pub fn cached_info(
         .optional()?)
 }
 
-// Consumed by later tasks of the ambient redesign; drop this allow once wired up.
-#[allow(dead_code)]
 pub fn put_info(conn: &Connection, key: &str, kind: &str, json: &str, now_secs: i64) -> Result<(), Error> {
     conn.execute(
         "INSERT INTO info (key, kind, json, fetched) VALUES (?1, ?2, ?3, ?4)

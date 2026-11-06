@@ -425,6 +425,36 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
     result.map_err(|e| format!("Epic Games: {e}"))
 }
 
+/// How long an Epic download size stays good; sizes change only with game updates.
+const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// Download size in bytes of an Epic game that isn't installed, for the install popup.
+/// Asks Legendary online (slow, seconds), so the answer is cached for a week. None if unknown.
+#[tauri::command]
+pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
+    let game = app.state::<AppState>().game(&key).filter(|g| g.provider == ProviderKind::Epic)?;
+    blocking(move || {
+        let conn = open_db(&app.state::<AppState>());
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let cached = conn
+            .as_ref()
+            .and_then(|c| cache::db::cached_info(c, &key, "size", SIZE_MAX_AGE_SECS, now).ok().flatten())
+            .and_then(|json| json.parse::<u64>().ok());
+        if cached.is_some() {
+            return cached;
+        }
+        let size = epic::info_json(&game)
+            .inspect_err(|e| eprintln!("legendary info {key}: {e}"))
+            .ok()
+            .and_then(|info| epic::download_size_from_info(&info))?;
+        if let Some(c) = &conn {
+            _ = cache::db::put_info(c, &key, "size", &size.to_string(), now);
+        }
+        Some(size)
+    })
+    .await
+}
+
 /// Remembers a launch from here, for every store, so last played survives rescans.
 fn record_play(state: &AppState, key: &str) {
     let now = SystemTime::now();

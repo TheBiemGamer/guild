@@ -21,6 +21,7 @@ fn main() {
             commands::featured,
             commands::detail_art,
             commands::act,
+            commands::download_size,
             commands::cancel_install,
             commands::poll,
             commands::epic_log_in,

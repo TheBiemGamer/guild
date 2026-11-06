@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
+  import type { Action, Card, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
   import Grid from './lib/Grid.svelte'
   import Detail from './lib/Detail.svelte'
   import Settings from './lib/Settings.svelte'
+  import InstallPopup from './lib/InstallPopup.svelte'
 
   let query = $state('')
   let store = $state<Store | null>(null)
@@ -48,6 +49,16 @@
     void [query, store, sort, installedOnly]
     load()
   })
+
+  /** The Epic game whose install is being confirmed, and its cover's rectangle. */
+  let confirming = $state<{ game: Card; anchor: DOMRect } | null>(null)
+
+  /** Steam installs in its own dialog; Epic asks here first, with size and folder. */
+  function install(key: string, anchor: DOMRect) {
+    const game = lib.games.find((g) => g.key === key)
+    if (game?.provider === 'epic') confirming = { game, anchor }
+    else act('install', key)
+  }
 
   async function act(action: Action, key: string) {
     try {
@@ -172,6 +183,19 @@
     </div>
   {/if}
 
+  {#if confirming}
+    <InstallPopup
+      game={confirming.game}
+      anchor={confirming.anchor}
+      oncancel={() => (confirming = null)}
+      onconfirm={() => {
+        const { key } = confirming!.game
+        confirming = null
+        act('install', key)
+      }}
+    />
+  {/if}
+
   <div class="content">
     {#if lib.games.length > 0}
       <Grid
@@ -181,7 +205,7 @@
         {progress}
         onopen={(key) => (open = key)}
         onplay={(key) => act('play', key)}
-        oninstall={(key) => act('install', key)}
+        oninstall={install}
         benchSpeed={ready ? benchSpeed : null}
         {headerHeight}
       >

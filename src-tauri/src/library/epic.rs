@@ -121,6 +121,16 @@ fn parse_progress(line: &str, downloaded_mib: &mut f64) -> Option<Progress> {
     Some(Progress { fraction: (percent / 100.0).clamp(0.0, 1.0), text })
 }
 
+/// `legendary info <app> --json`: the game and its manifest. Slow (an online call), so cache the result.
+pub fn info_json(game: &Game) -> Result<Value, Error> {
+    json(&["info", &game.external_id, "--json"])
+}
+
+/// Bytes to download, from `manifest.download_size` of `info_json` (verified on a real capture).
+pub fn download_size_from_info(info: &Value) -> Option<u64> {
+    info["manifest"]["download_size"].as_u64()
+}
+
 /// File name of an installed game's main executable (from `list-installed`), to spot it in the process list.
 pub fn executable(game: &Game) -> Result<Option<String>, Error> {
     let installed = json(&["list-installed", "--json"])?;
@@ -327,6 +337,18 @@ mod tests {
         // Other log lines and broken numbers are ignored.
         assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", &mut mib), None);
         assert_eq!(parse_progress("= Progress: abc%", &mut mib), None);
+    }
+
+    #[test]
+    fn download_size_from_info_reads_the_fixture() {
+        // Captured from `legendary info <AppName> --json` (A Short Hike); the size is `manifest.download_size`.
+        assert_eq!(download_size_from_info(&fixture("info.json")), Some(224_976_506));
+    }
+
+    #[test]
+    fn download_size_from_info_handles_missing_fields() {
+        assert_eq!(download_size_from_info(&serde_json::json!({})), None);
+        assert_eq!(download_size_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })), None);
     }
 
     #[test]
