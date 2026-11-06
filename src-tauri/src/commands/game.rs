@@ -19,6 +19,7 @@ use crate::library::epic::{self, InstallEvent};
 use crate::library::{Game, Image, ProviderKind};
 use crate::links::{self, LinkKind};
 use crate::settings;
+use crate::steam_size;
 use crate::view;
 
 #[derive(Serialize)]
@@ -219,19 +220,76 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
 const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
-/// Download size of an Epic game that isn't installed, like `27.3 GB`, for the install popup and game page.
-/// Asks Legendary online (slow, seconds), so the bytes are cached for a week. None if unknown.
+/// Download size of a game that isn't installed, like `27.3 GB`, for the install popup and game page.
+/// Epic asks Legendary and Steam asks its servers (slow, seconds), so the bytes are cached for a week.
+/// None if unknown, or for Steam when no account is connected.
 #[tauri::command]
 pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
-    let game = app.state::<AppState>().game(&key).filter(|g| g.provider == ProviderKind::Epic)?;
-    let bytes = blocking(move || {
-        let conn = open_db(&app.state::<AppState>());
-        info::cached_or_fetch(conn.as_ref(), &key, "size", SIZE_MAX_AGE_SECS, unix_now(), || {
-            let info = epic::info_json(&game).inspect_err(|e| eprintln!("legendary info {key}: {e}")).ok()?;
-            epic::download_size_from_info(&info).map(|size| size.to_string())
-        })
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| !g.installed)?;
+    let steam_id = match game.provider {
+        ProviderKind::Epic => None,
+        ProviderKind::Steam => Some(game.external_id.parse::<u32>().ok()?),
+    };
+    let cached = blocking({
+        let (app, key) = (app.clone(), key.clone());
+        move || {
+            let conn = open_db(&app.state::<AppState>());
+            let fresh = conn.as_ref().and_then(|c| {
+                cache::db::cached_info(c, &key, "size", SIZE_MAX_AGE_SECS, unix_now())
+                    .ok()
+                    .flatten()
+            });
+            // Never connected: no reason to touch Credential Manager.
+            let token = match (&fresh, steam_id, conn.as_ref()) {
+                (None, Some(_), Some(c)) => cache::db::setting(c, settings::STEAM_ACCOUNT)
+                    .ok()
+                    .flatten()
+                    .and(settings::steam_token()),
+                _ => None,
+            };
+            (fresh, token)
+        }
     })
-    .await?;
+    .await;
+    let bytes = match (cached, steam_id) {
+        ((Some(bytes), _), _) => bytes,
+        ((None, token), Some(appid)) => {
+            let vdf = steam_size::fetch_appinfo(&token?, appid)
+                .await
+                .inspect_err(|e| eprintln!("steam size {key}: {e}"))
+                .ok()?;
+            let bytes = steam_size::parse_download_size(&vdf)?.to_string();
+            blocking(move || {
+                if let Some(c) = open_db(&app.state::<AppState>()) {
+                    _ = cache::db::put_info(&c, &key, "size", &bytes, unix_now());
+                }
+                bytes
+            })
+            .await
+        }
+        _ => {
+            blocking(move || {
+                let conn = open_db(&app.state::<AppState>());
+                info::cached_or_fetch(
+                    conn.as_ref(),
+                    &key,
+                    "size",
+                    SIZE_MAX_AGE_SECS,
+                    unix_now(),
+                    || {
+                        let info = epic::info_json(&game)
+                            .inspect_err(|e| eprintln!("legendary info {key}: {e}"))
+                            .ok()?;
+                        epic::download_size_from_info(&info).map(|size| size.to_string())
+                    },
+                )
+            })
+            .await?
+        }
+    };
     bytes.parse().ok().map(view::size_label)
 }
 

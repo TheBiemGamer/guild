@@ -185,7 +185,7 @@ fn parse_play_stats(text: &str) -> PlayStats {
 }
 
 /// Child value by key, ignoring case: Steam writes both "apps" and "Apps".
-fn child<'a>(value: &'a Value<'a>, key: &str) -> Option<&'a Value<'a>> {
+pub(crate) fn child<'a>(value: &'a Value<'a>, key: &str) -> Option<&'a Value<'a>> {
     value.get_obj()?.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(key))?.1.first()
 }
 

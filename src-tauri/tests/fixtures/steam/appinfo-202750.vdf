@@ -1,0 +1,70 @@
+"appinfo"
+{
+	"appid"		"202750"
+	"depots"
+	{
+		"202751"
+		{
+			"manifests"
+			{
+				"public"
+				{
+					"download"		"0"
+					"gid"		"8499727884355977081"
+					"size"		"28096012"
+				}
+			}
+			"systemdefined"		"1"
+		}
+		"202752"
+		{
+			"manifests"
+			{
+				"public"
+				{
+					"download"		"0"
+					"gid"		"1417488794446718668"
+					"size"		"1217681172"
+				}
+			}
+			"systemdefined"		"1"
+		}
+		"202753"
+		{
+			"manifests"
+			{
+				"public"
+				{
+					"download"		"0"
+					"gid"		"6872456980209314713"
+					"size"		"1133136180"
+				}
+			}
+			"systemdefined"		"1"
+		}
+		"202754"
+		{
+			"manifests"
+			{
+				"public"
+				{
+					"download"		"0"
+					"gid"		"5471547335244149003"
+					"size"		"108169848"
+				}
+			}
+			"systemdefined"		"1"
+		}
+		"baselanguages"		"english,french,german,italian,japanese,spanish,czech,hungarian,polish,russian"
+		"branches"
+		{
+			"public"
+			{
+				"buildid"		"7063"
+				"timebuildupdated"		"1343121457"
+			}
+		}
+		"overridescddb"		"1"
+		"privatebranches"		"1"
+	}
+}

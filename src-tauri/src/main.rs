@@ -14,6 +14,7 @@ mod links;
 mod settings;
 mod steam_login;
 mod steam_owned;
+mod steam_size;
 mod view;
 
 fn main() {

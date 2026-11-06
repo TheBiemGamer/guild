@@ -19,12 +19,12 @@
   const copy = $derived(copies.find((c) => c.key === chosen) ?? copies[0])
   const split = $derived(copies.length > 1)
 
-  // Download sizes of not-installed Epic copies. A key not in here is still being asked.
+  // Download sizes of not-installed Epic and Steam copies. A key not in here is still being asked.
   let sizes = $state<Record<string, string | null>>({})
   const asked = new Set<string>()
   $effect(() => {
     for (const c of copies) {
-      if (c.provider !== 'epic' || c.installed || asked.has(c.key)) continue
+      if ((c.provider !== 'epic' && c.provider !== 'steam') || c.installed || asked.has(c.key)) continue
       asked.add(c.key)
       const key = c.key
       api.downloadSize(key).then(
@@ -38,7 +38,7 @@
 
   function sub(c: CopyView): string {
     if (c.installed) return c.size ? `Installed · ${c.size}` : 'Installed'
-    const size = c.provider === 'epic' ? (sizes[c.key] ?? null) : null
+    const size = sizes[c.key] ?? null
     return size ? `Not installed · ${size} download` : 'Not installed'
   }
 
@@ -99,7 +99,7 @@
 
 <svelte:window {onpointerdown} />
 
-{#if !copy.installed && !busy && !running && copy.provider === 'epic' && downloadText(copy.key)}
+{#if !copy.installed && !busy && !running && (copy.provider === 'epic' || copy.provider === 'steam') && downloadText(copy.key)}
   <span class="download">{downloadText(copy.key)}</span>
 {/if}
 

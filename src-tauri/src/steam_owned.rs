@@ -84,14 +84,19 @@ pub async fn fetch(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
         .unwrap_or_else(|_| Err(OwnedError::Network("timed out".into())))
 }
 
-async fn fetch_now(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
+/// Logs on to a Steam CM with the saved token.
+pub async fn connect(token: &str) -> Result<Session, OwnedError> {
     // Errors of `RefreshToken::new` only describe the token's shape, never its content.
     let token = RefreshToken::new(token.to_owned()).map_err(|_| OwnedError::TokenRejected)?;
     if token.remaining_lifetime().is_none() {
         return Err(OwnedError::TokenRejected);
     }
     let servers = ServerList::discover().await.map_err(|e| OwnedError::Network(e.to_string()))?;
-    let session = Session::login_with_refresh_token(&servers, &token).await.map_err(from_connection)?;
+    Session::login_with_refresh_token(&servers, &token).await.map_err(from_connection)
+}
+
+async fn fetch_now(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
+    let session = connect(token).await?;
     let owned = session
         .service_method(CPlayer_GetOwnedGames_Request {
             steamid: Some(session.steam_id().into()),
