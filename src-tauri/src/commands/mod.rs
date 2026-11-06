@@ -68,6 +68,9 @@ struct Shared {
     twins: HashMap<String, u32>,
     /// A twin lookup run is in flight.
     twins_running: bool,
+    /// Every owned Steam game as a `Game`, built once per owned list so a rescan does no art lookups.
+    /// `None` until built from the cached list (or after Disconnect).
+    owned: Option<Vec<Game>>,
 }
 
 /// An Epic game launched from here, watched through its process.

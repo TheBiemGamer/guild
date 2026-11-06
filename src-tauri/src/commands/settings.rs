@@ -315,7 +315,11 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
         cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, None).map_err(|e| e.to_string())?;
         steam_owned::forget(&conn);
-        state.lock().steam_attention = false;
+        {
+            let mut s = state.lock();
+            s.steam_attention = false;
+            s.owned = None;
+        }
         rescan(&app, false);
         Ok(())
     })

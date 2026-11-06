@@ -178,7 +178,9 @@
       if (p.changed) await reload()
     }, 2000)
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.
-    const steam = setInterval(() => api.refresh(false, false).then(reload), 60_000)
+    const steam = setInterval(async () => {
+      if (await api.refresh(false, false)) await reload()
+    }, 60_000)
     const full = setInterval(backgroundRefresh, FULL_REFRESH_EVERY_MS)
     document.addEventListener('visibilitychange', returned)
     window.addEventListener('focus', returned)

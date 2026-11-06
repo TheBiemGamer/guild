@@ -4,7 +4,9 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use steam_vent::auth::RefreshToken;
-use steam_vent::{Connection as Session, ConnectionError, ConnectionTrait, EResult, NetworkError, ServerList};
+use std::time::Duration;
+
+use steam_vent::{Connection as Session, ConnectionError, ConnectionTrait, EResult, LoginError, NetworkError, ServerList};
 use steam_vent_proto_steam::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
 
 use crate::cache::db::{cached_info, put_info};
@@ -18,6 +20,9 @@ pub struct OwnedGame {
     pub appid: u32,
     pub name: String,
     pub playtime_minutes: u64,
+    /// Unix seconds of the last play Steam knows of; lists cached before this field have none.
+    #[serde(default)]
+    pub last_played: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -48,9 +53,16 @@ fn rejected(result: EResult) -> bool {
     matches!(result, EResult::AccessDenied | EResult::InvalidPassword | EResult::Expired)
 }
 
+/// Only logon errors about the token itself reject it; rate limits and server trouble are retried later.
 fn from_connection(e: ConnectionError) -> OwnedError {
     match e {
-        ConnectionError::LoginError(_) => OwnedError::TokenRejected,
+        ConnectionError::LoginError(
+            LoginError::InvalidCredentials
+            | LoginError::AccessToken(_)
+            | LoginError::NoToken
+            | LoginError::UnavailableAccount,
+        ) => OwnedError::TokenRejected,
+        ConnectionError::LoginError(LoginError::Unknown(r)) if rejected(r) => OwnedError::TokenRejected,
         e => OwnedError::Network(e.to_string()),
     }
 }
@@ -62,8 +74,17 @@ fn from_network(e: NetworkError) -> OwnedError {
     }
 }
 
+/// The whole fetch gives up after this: server discovery or a CM connect can otherwise hang.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Logs on with the saved token and lists everything the account owns. The connection is dropped on return.
 pub async fn fetch(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
+    tokio::time::timeout(FETCH_TIMEOUT, fetch_now(token))
+        .await
+        .unwrap_or_else(|_| Err(OwnedError::Network("timed out".into())))
+}
+
+async fn fetch_now(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
     // Errors of `RefreshToken::new` only describe the token's shape, never its content.
     let token = RefreshToken::new(token.to_owned()).map_err(|_| OwnedError::TokenRejected)?;
     if token.remaining_lifetime().is_none() {
@@ -83,7 +104,13 @@ pub async fn fetch(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
     Ok(owned
         .games
         .iter()
-        .map(|g| OwnedGame { appid: g.appid() as u32, name: g.name().to_owned(), playtime_minutes: g.playtime_forever() as u64 })
+        .map(|g| OwnedGame {
+            appid: g.appid() as u32,
+            name: g.name().to_owned(),
+            playtime_minutes: g.playtime_forever() as u64,
+            // 0 means never played.
+            last_played: Some(g.rtime_last_played() as u64).filter(|&t| t > 0),
+        })
         .collect())
 }
 
@@ -131,7 +158,7 @@ mod tests {
     fn owned_round_trips_through_the_info_cache() {
         let conn = db("roundtrip");
         assert_eq!(cached(&conn), None);
-        let games = vec![OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 0 }];
+        let games = vec![OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 0, last_played: Some(9) }];
         remember(&conn, &games, 1_000);
         assert_eq!(cached(&conn), Some((games.clone(), 1_000)));
         assert!(fresh(&conn, 1_000 + OWNED_MAX_AGE_SECS));
@@ -155,5 +182,36 @@ mod tests {
         assert!(matches!(from_network(NetworkError::ApiError(EResult::Busy)), OwnedError::Network(_)));
         assert!(matches!(from_network(NetworkError::Timeout), OwnedError::Network(_)));
         assert!(matches!(from_connection(ConnectionError::Aborted), OwnedError::Network(_)));
+    }
+
+    #[test]
+    fn only_token_logon_errors_reject_the_token() {
+        let login = |e| from_connection(ConnectionError::LoginError(e));
+        for e in [
+            LoginError::InvalidCredentials,
+            LoginError::AccessToken(steam_vent::auth::RefreshTokenError::Expired),
+            LoginError::NoToken,
+            LoginError::UnavailableAccount,
+            LoginError::Unknown(EResult::AccessDenied),
+            LoginError::Unknown(EResult::Expired),
+            LoginError::Unknown(EResult::InvalidPassword),
+        ] {
+            assert!(matches!(login(e), OwnedError::TokenRejected));
+        }
+        for e in [
+            LoginError::RateLimited,
+            LoginError::Unknown(EResult::TryAnotherCM),
+            LoginError::Unknown(EResult::ServiceUnavailable),
+            LoginError::Unknown(EResult::Busy),
+            LoginError::SteamGuardRequired,
+        ] {
+            assert!(matches!(login(e), OwnedError::Network(_)));
+        }
+    }
+
+    #[test]
+    fn owned_lists_cached_without_last_played_still_parse() {
+        let old: Vec<OwnedGame> = serde_json::from_str(r#"[{"appid":70,"name":"Half-Life","playtime_minutes":3}]"#).unwrap();
+        assert_eq!(old[0].last_played, None);
     }
 }

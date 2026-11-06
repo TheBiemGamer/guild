@@ -74,28 +74,41 @@ impl Provider for Steam {
     }
 }
 
-/// The installed games plus every other owned game as a not-installed entry. Owned playtime wins for every match.
-pub fn with_owned(mut installed: Vec<Game>, owned: &[OwnedGame], librarycache: &Path) -> Vec<Game> {
+/// Every owned game as a not-installed `Game` with its art. Built once per owned list: the art lookup
+/// reads the disk for every game.
+pub fn owned_games(owned: &[OwnedGame], librarycache: &Path) -> Vec<Game> {
+    owned
+        .iter()
+        .map(|o| {
+            let id = o.appid.to_string();
+            Game {
+                provider: ProviderKind::Steam,
+                title: o.name.clone(),
+                installed: false,
+                install_dir: None,
+                playtime_minutes: Some(o.playtime_minutes),
+                last_played: o.last_played.map(|s| UNIX_EPOCH + Duration::from_secs(s)),
+                size_bytes: None,
+                art: art(o.appid, &librarycache.join(&id)),
+                external_id: id,
+            }
+        })
+        .collect()
+}
+
+/// The installed games plus every other owned game (from `owned_games`). Owned playtime wins for every
+/// match; Steam's last played only fills in where the local one is missing.
+pub fn with_owned(mut installed: Vec<Game>, owned: &[Game]) -> Vec<Game> {
     let mut known: HashMap<String, usize> =
         installed.iter().enumerate().map(|(i, g)| (g.external_id.clone(), i)).collect();
     for o in owned {
-        let id = o.appid.to_string();
-        if let Some(&i) = known.get(&id) {
-            installed[i].playtime_minutes = Some(o.playtime_minutes);
+        if let Some(&i) = known.get(&o.external_id) {
+            installed[i].playtime_minutes = o.playtime_minutes;
+            installed[i].last_played = installed[i].last_played.or(o.last_played);
             continue;
         }
-        known.insert(id.clone(), installed.len());
-        installed.push(Game {
-            provider: ProviderKind::Steam,
-            title: o.name.clone(),
-            installed: false,
-            install_dir: None,
-            playtime_minutes: Some(o.playtime_minutes),
-            last_played: None,
-            size_bytes: None,
-            art: art(o.appid, &librarycache.join(&id)),
-            external_id: id,
-        });
+        known.insert(o.external_id.clone(), installed.len());
+        installed.push(o.clone());
     }
     installed
 }
@@ -275,10 +288,10 @@ mod tests {
         portal.external_id = "400".into();
         portal.title = "Portal".into();
         let owned = [
-            OwnedGame { appid: 400, name: "Portal".into(), playtime_minutes: 51 },
-            OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 0 },
+            OwnedGame { appid: 400, name: "Portal".into(), playtime_minutes: 51, last_played: None },
+            OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 0, last_played: None },
         ];
-        let all = with_owned(vec![portal], &owned, &fixtures().join("appcache/librarycache"));
+        let all = with_owned(vec![portal], &owned_games(&owned, &fixtures().join("appcache/librarycache")));
         assert_eq!(all.len(), 2);
         let (p, hl) = (&all[0], &all[1]);
         assert!(p.installed);
@@ -288,6 +301,24 @@ mod tests {
         assert_eq!(hl.install_dir, None);
         assert_eq!(hl.size_bytes, None);
         assert!(hl.art.cover.url.as_deref().unwrap().ends_with("/70/library_600x900.jpg"));
+    }
+
+    #[test]
+    fn owned_last_played_fills_only_missing_times() {
+        let at = |s| Some(UNIX_EPOCH + Duration::from_secs(s));
+        let mut local = games().remove(0);
+        local.last_played = at(500);
+        let mut unplayed = games().remove(2);
+        unplayed.last_played = None;
+        let owned = [
+            OwnedGame { appid: 10, name: "Fixture Shooter".into(), playtime_minutes: 1, last_played: Some(900) },
+            OwnedGame { appid: 30, name: "NamelessDir".into(), playtime_minutes: 1, last_played: Some(700) },
+            OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 1, last_played: Some(300) },
+            OwnedGame { appid: 80, name: "Never".into(), playtime_minutes: 0, last_played: None },
+        ];
+        let all = with_owned(vec![local, unplayed], &owned_games(&owned, &fixtures().join("appcache/librarycache")));
+        let played: Vec<_> = all.iter().map(|g| g.last_played).collect();
+        assert_eq!(played, [at(500), at(700), at(300), None]);
     }
 
     #[test]

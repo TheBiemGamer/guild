@@ -78,8 +78,8 @@ export interface Poll { running: string | null; progress: Record<string, Progres
 export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort) =>
   invoke<Library>('library', { query, store, installedOnly, sort })
 export const loadCache = () => invoke<void>('load_cache')
-/** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. */
-export const refresh = (epic: boolean, owned: boolean) => invoke<void>('refresh', { epic, owned })
+/** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */
+export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 export const act = (action: Action, key: string) => invoke<void>('act', { action, key })
 /** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */

@@ -17,6 +17,8 @@ pub const TWIN: &str = "twin";
 pub const TWIN_MAX_AGE_SECS: i64 = 30 * 24 * 60 * 60;
 /// Minimum time between two GamesDB requests.
 pub const TWIN_GAP: Duration = Duration::from_millis(500);
+/// Prefix of the errors where GamesDB couldn't be reached at all (offline): a lookup run stops there.
+pub const UNREACHABLE: &str = "gamesdb unreachable";
 
 #[derive(Deserialize)]
 struct Response {
@@ -48,7 +50,7 @@ pub fn parse_steam_twin(json: &str) -> Result<Option<u32>, String> {
 /// Asks GamesDB for the Steam twin of an Epic app name. A 404 means GamesDB doesn't know the game.
 pub async fn look_up(http: &reqwest::Client, app_name: &str) -> Result<Option<u32>, String> {
     let url = format!("{URL}/{}", percent_encode(app_name));
-    let resp = http.get(url).send().await.map_err(|e| format!("gamesdb: {e}"))?;
+    let resp = http.get(url).send().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -56,7 +58,7 @@ pub async fn look_up(http: &reqwest::Client, app_name: &str) -> Result<Option<u3
     if !status.is_success() {
         return Err(format!("gamesdb: HTTP {status}"));
     }
-    let body = resp.text().await.map_err(|e| format!("gamesdb: {e}"))?;
+    let body = resp.text().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
     parse_steam_twin(&body)
 }
 
