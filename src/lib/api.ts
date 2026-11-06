@@ -37,6 +37,7 @@ export interface Detail {
 }
 export interface SettingsView {
   steam: { name: string | null; path: string } | null
+  steamLibrary: { account: string | null; attention: boolean }
   epic: Login | null
   epicGames: number
   /** Null means Legendary's own default folder. */
@@ -91,6 +92,16 @@ export const settingsView = () => invoke<SettingsView>('settings_view')
 /** `null` resets a setting to its default. Booleans travel as "true" / "false". */
 export const updateSetting = (name: string, value: string | null) => invoke<void>('update_setting', { name, value })
 export const setIgdbSecret = (value: string | null) => invoke<void>('set_igdb_secret', { value })
+export type ConnectStep =
+  | { step: 'waiting' }
+  | { step: 'rotated'; svg: string }
+  | { step: 'scanned' }
+  | { step: 'connected'; account: string }
+/** Starts a Steam QR login; resolves to the code as an SVG. */
+export const steamConnectStart = () => invoke<string>('steam_connect_start')
+export const steamConnectPoll = () => invoke<ConnectStep>('steam_connect_poll')
+export const steamConnectCancel = () => invoke<void>('steam_connect_cancel')
+export const steamDisconnect = () => invoke<void>('steam_disconnect')
 export const openSteam = () => invoke<void>('open_steam')
 export const openTwitchConsole = () => invoke<void>('open_twitch_console')
 export const openFolder = (key: string) => invoke<void>('open_folder', { key })

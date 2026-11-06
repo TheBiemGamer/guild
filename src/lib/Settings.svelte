@@ -3,6 +3,7 @@
   import * as api from './api'
   import type { SettingsView } from './api'
   import StoreIcon from './StoreIcon.svelte'
+  import SteamConnect from './SteamConnect.svelte'
 
   let { view, refreshedAt, refreshing, loggingIn, onclose, onchange, onrefresh, onlogin }: {
     view: SettingsView
@@ -29,6 +30,7 @@
   let secret = $state('')
   let replacing = $state(false)
   let busy = $state(false)
+  let connecting = $state(false)
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -49,6 +51,13 @@
     busy = false
     await onchange()
     return ok
+  }
+
+  const disconnectSteam = () => change(() => api.steamDisconnect())
+
+  async function steamConnected() {
+    connecting = false
+    await onchange()
   }
 
   const toggle = (name: string, on: boolean) => change(() => api.updateSetting(name, String(on)))
@@ -175,7 +184,16 @@
             <b>Steam</b>
             {#if view.steam}
               <span>
-                <span class="ok">● Connected</span>{#if view.steam.name}{' · '}{view.steam.name}{/if}{' · '}{view.steam.path}
+                <span class="ok">● Found</span>{#if view.steam.name}{' · '}{view.steam.name}{/if}{' · '}{view.steam.path}
+              </span>
+              <span class="line">
+                Library:
+                {#if view.steamLibrary.account}
+                  {view.steamLibrary.account}{' · '}<button class="link" disabled={busy} onclick={disconnectSteam}>Disconnect</button>
+                {:else}
+                  <button class="link" onclick={() => (connecting = true)}>Connect</button>
+                {/if}
+                {#if view.steamLibrary.attention}<span class="warn" title="Steam needs you to connect again">●</span>{/if}
               </span>
             {:else}
               <span><span class="warn">● Not found</span> · Install Steam to list its games</span>
@@ -342,6 +360,10 @@
   </div>
 </div>
 
+{#if connecting}
+  <SteamConnect onclose={() => (connecting = false)} onconnected={steamConnected} />
+{/if}
+
 <style>
   .backdrop {
     position: fixed;
@@ -494,6 +516,19 @@
     border-radius: 10px;
     background: rgb(255 255 255 / 0.1);
     border: 1px solid rgb(255 255 255 / 0.14);
+  }
+
+  .who .line {
+    display: block;
+  }
+
+  .link {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--text);
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .btn.danger {

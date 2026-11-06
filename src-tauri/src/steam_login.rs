@@ -1,11 +1,7 @@
 //! Steam QR sign-in over Steam's public web API (`IAuthenticationService`, protobuf over HTTPS).
 //! The refresh token is returned to the caller and never logged, printed or put in an error.
 
-// Not wired to the UI yet; Task 4 uses everything here and removes this allow.
-#![allow(dead_code)]
-
 use std::fmt;
-use std::time::Duration;
 
 use protobuf::{EnumOrUnknown, Message, MessageField};
 use steam_vent_proto_steam::steammessages_auth_steamclient::{
@@ -18,7 +14,6 @@ use steam_vent_proto_steam::steammessages_auth_steamclient::{
 pub struct QrSession {
     client_id: u64,
     request_id: Vec<u8>,
-    pub interval: Duration,
     pub challenge_url: String,
 }
 
@@ -42,20 +37,26 @@ impl fmt::Debug for Approved {
     }
 }
 
+/// A throwaway session for tests elsewhere.
+#[cfg(test)]
+pub fn test_session() -> QrSession {
+    QrSession { client_id: 1, request_id: vec![1], challenge_url: "https://s.team/q/1/x".into() }
+}
+
 /// Applies one poll answer to the session.
 pub fn apply_poll(session: &mut QrSession, resp: &CAuthentication_PollAuthSessionStatus_Response) -> PollStep {
     if resp.has_new_client_id() {
         session.client_id = resp.new_client_id();
-    }
-    if resp.has_new_challenge_url() {
-        session.challenge_url = resp.new_challenge_url().to_string();
-        return PollStep::Rotated;
     }
     if !resp.refresh_token().is_empty() {
         return PollStep::Done(Approved {
             account: resp.account_name().to_string(),
             refresh_token: resp.refresh_token().to_string(),
         });
+    }
+    if resp.has_new_challenge_url() {
+        session.challenge_url = resp.new_challenge_url().to_string();
+        return PollStep::Rotated;
     }
     if resp.had_remote_interaction() { PollStep::Scanned } else { PollStep::Waiting }
 }
@@ -94,7 +95,6 @@ pub async fn begin(http: &reqwest::Client) -> Result<QrSession, String> {
     Ok(QrSession {
         client_id: resp.client_id(),
         request_id: resp.request_id().to_vec(),
-        interval: Duration::from_secs_f32(resp.interval().max(1.0)),
         challenge_url: resp.challenge_url().to_string(),
     })
 }
@@ -146,7 +146,7 @@ mod tests {
     use steam_vent_proto_steam::steammessages_auth_steamclient::CAuthentication_PollAuthSessionStatus_Response as Resp;
 
     fn session() -> QrSession {
-        QrSession { client_id: 1, request_id: vec![1, 2], interval: Duration::from_secs(5), challenge_url: "https://s.team/q/1/old".into() }
+        QrSession { client_id: 1, request_id: vec![1, 2], challenge_url: "https://s.team/q/1/old".into() }
     }
 
     #[test]
@@ -158,6 +158,20 @@ mod tests {
         assert!(matches!(apply_poll(&mut s, &r), PollStep::Rotated));
         assert_eq!(s.client_id, 7);
         assert_eq!(s.challenge_url, "https://s.team/q/1/new");
+    }
+
+    #[test]
+    fn poll_with_token_and_new_challenge_is_done() {
+        let mut s = session();
+        let resp = Resp {
+            new_client_id: Some(9),
+            new_challenge_url: Some("https://s.team/q/1/new".into()),
+            refresh_token: Some("tok".into()),
+            account_name: Some("acct".into()),
+            ..Default::default()
+        };
+        assert!(matches!(apply_poll(&mut s, &resp), PollStep::Done(a) if a.account == "acct"));
+        assert_eq!(s.client_id, 9);
     }
 
     #[test]

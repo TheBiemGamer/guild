@@ -63,8 +63,6 @@ pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), 
 
 const SERVICE: &str = "dev.noah.gamelauncher";
 const SECRET_USER: &str = "igdb-client-secret";
-// Task 4 wires the Steam token commands and removes these allows.
-#[allow(dead_code)]
 pub const STEAM_TOKEN_USER: &str = "steam-refresh-token";
 
 /// The IGDB Client Secret, if one is saved.
@@ -83,7 +81,6 @@ pub fn steam_token() -> Option<String> {
 }
 
 /// Saves the Steam refresh token, or deletes it for `None`. Errors never include the value.
-#[allow(dead_code)]
 pub fn set_steam_token(value: Option<&str>) -> Result<(), String> {
     write(STEAM_TOKEN_USER, value)
 }

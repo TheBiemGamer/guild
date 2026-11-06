@@ -106,8 +106,6 @@ pub fn remember(conn: &Connection, games: &[OwnedGame], now_secs: i64) {
     }
 }
 
-// Task 4 calls this when the owner disconnects Steam, and removes the allow.
-#[allow(dead_code)]
 pub fn forget(conn: &Connection) {
     if let Err(e) = conn.execute("DELETE FROM info WHERE key = ?1 AND kind = ?2", [OWNED_KEY, OWNED]) {
         eprintln!("steam owned forget: {e}");

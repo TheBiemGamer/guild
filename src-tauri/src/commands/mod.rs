@@ -27,6 +27,8 @@ pub struct AppState {
     cover_jobs: tokio::sync::Semaphore,
     /// Twitch app access token for IGDB. Never held across a network call.
     igdb: Mutex<igdb::TokenCache>,
+    /// The Steam QR login in progress, if any. Held across the poll call so a cancel waits for it.
+    steam_qr: tokio::sync::Mutex<Option<crate::steam_login::QrSession>>,
 }
 
 #[derive(Default)]
@@ -73,6 +75,7 @@ impl AppState {
             shared: Mutex::new(Shared { status: "Loading library…".into(), ..Shared::default() }),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
             igdb: Mutex::new(igdb::TokenCache::default()),
+            steam_qr: tokio::sync::Mutex::new(None),
         }
     }
 

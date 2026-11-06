@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use super::library::rescan;
+use super::library::{refresh_owned, rescan};
 use super::{blocking, AppState, Res};
 use crate::cache;
 use crate::epic_login;
@@ -11,6 +11,8 @@ use crate::library::epic::{self, Login};
 use crate::library::steam;
 use crate::library::ProviderKind;
 use crate::settings;
+use crate::steam_login::{self, PollStep, QrSession};
+use crate::steam_owned;
 use crate::view;
 
 /// Opens Epic's login window, hands the code to Legendary, then loads the Epic library.
@@ -43,16 +45,27 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
     .await
 }
 
+/// The Steam install found on this PC.
 #[derive(Serialize)]
-pub struct SteamAccount {
+pub struct SteamLocal {
     name: Option<String>,
     path: String,
+}
+
+/// The owned-games login, separate from the local install.
+#[derive(Serialize)]
+pub struct SteamLibrary {
+    /// The connected account; `None` when not connected.
+    account: Option<String>,
+    /// Steam rejected the saved login; connect again.
+    attention: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
-    steam: Option<SteamAccount>,
+    steam: Option<SteamLocal>,
+    steam_library: SteamLibrary,
     epic: Option<Login>,
     epic_games: usize,
     epic_install_dir: Option<String>,
@@ -79,12 +92,17 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             (s.epic_login, s.games.iter().filter(|g| g.provider == ProviderKind::Epic).count())
         };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
-        let steam = steamlocate::SteamDir::locate().ok().map(|dir| SteamAccount {
+        let steam = steamlocate::SteamDir::locate().ok().map(|dir| SteamLocal {
             name: steam::persona_name(dir.path()),
             path: dir.path().to_string_lossy().into_owned(),
         });
+        let steam_library = SteamLibrary {
+            account: cache::db::setting(&conn, settings::STEAM_ACCOUNT).ok().flatten(),
+            attention: state.lock().steam_attention,
+        };
         Ok(SettingsView {
             steam,
+            steam_library,
             epic,
             epic_games,
             epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
@@ -175,4 +193,120 @@ pub fn open_twitch_console() -> Res<()> {
 #[tauri::command]
 pub fn open_igdb() -> Res<()> {
     crate::library::open_uri("https://www.igdb.com").map_err(|e| e.to_string())
+}
+
+/// One answer to the dialog's poll. Never carries the refresh token.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(tag = "step", rename_all = "camelCase")]
+pub enum ConnectStep {
+    Waiting,
+    Rotated { svg: String },
+    Scanned,
+    Connected { account: String },
+}
+
+/// Starts a QR login, replacing any running one, and returns the code as an SVG.
+#[tauri::command]
+pub async fn steam_connect_start(app: AppHandle) -> Res<String> {
+    let state = app.state::<AppState>();
+    let session = steam_login::begin(&state.http).await?;
+    let svg = steam_login::qr_svg(&session.challenge_url)?;
+    *state.steam_qr.lock().await = Some(session);
+    Ok(svg)
+}
+
+/// Asks Steam how the login is going. When approved, saves the login and loads the owned games.
+#[tauri::command]
+pub async fn steam_connect_poll(app: AppHandle) -> Res<ConnectStep> {
+    let state = app.state::<AppState>();
+    let mut slot = state.steam_qr.lock().await;
+    let step = poll_session(&state.http, &mut slot).await?;
+    let approved = match step {
+        PollStep::Waiting => return Ok(ConnectStep::Waiting),
+        PollStep::Scanned => return Ok(ConnectStep::Scanned),
+        PollStep::Rotated => {
+            let url = slot.as_ref().ok_or("Not connecting.")?.challenge_url.clone();
+            return Ok(ConnectStep::Rotated { svg: steam_login::qr_svg(&url)? });
+        }
+        PollStep::Done(approved) => approved,
+    };
+    drop(slot);
+    let account = approved.account.clone();
+    // The token goes straight from Steam's answer into Credential Manager.
+    blocking({
+        let app = app.clone();
+        move || save_login(&app, approved)
+    })
+    .await?;
+    refresh_owned(app, true);
+    Ok(ConnectStep::Connected { account })
+}
+
+/// Stores the login and clears the "connect again" flag. The token goes nowhere else.
+fn save_login(app: &AppHandle, approved: steam_login::Approved) -> Res<()> {
+    let state = app.state::<AppState>();
+    settings::set_steam_token(Some(&approved.refresh_token))?;
+    let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
+    settings::update(&conn, settings::STEAM_ACCOUNT, Some(&approved.account))?;
+    state.lock().steam_attention = false;
+    Ok(())
+}
+
+/// Polls the session in `slot`; an approved login ends it. An empty slot is an error.
+async fn poll_session(http: &reqwest::Client, slot: &mut Option<QrSession>) -> Res<PollStep> {
+    let session = slot.as_mut().ok_or("Not connecting.")?;
+    let step = steam_login::poll(http, session).await?;
+    if matches!(step, PollStep::Done(_)) {
+        *slot = None;
+    }
+    Ok(step)
+}
+
+fn cancel_session(slot: &mut Option<QrSession>) {
+    *slot = None;
+}
+
+/// Drops the running QR login, if any.
+#[tauri::command]
+pub async fn steam_connect_cancel(app: AppHandle) {
+    cancel_session(&mut *app.state::<AppState>().steam_qr.lock().await);
+}
+
+/// Forgets the Steam login and the owned list, then rescans so only installed Steam games remain.
+#[tauri::command]
+pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        settings::set_steam_token(None)?;
+        let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
+        settings::update(&conn, settings::STEAM_ACCOUNT, None)?;
+        steam_owned::forget(&conn);
+        state.lock().steam_attention = false;
+        rescan(&app, false);
+        Ok(())
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancel_drops_the_session() {
+        let mut slot = Some(steam_login::test_session());
+        cancel_session(&mut slot);
+        assert!(slot.is_none());
+        let http = reqwest::Client::new();
+        let r = tauri::async_runtime::block_on(poll_session(&http, &mut slot));
+        assert_eq!(r.err().as_deref(), Some("Not connecting."));
+    }
+
+    #[test]
+    fn connect_step_serializes_with_a_step_tag() {
+        assert_eq!(
+            serde_json::to_string(&ConnectStep::Connected { account: "a".into() }).unwrap(),
+            r#"{"step":"connected","account":"a"}"#
+        );
+    }
 }
