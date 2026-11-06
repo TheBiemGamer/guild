@@ -143,13 +143,13 @@
 
   const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', uninstall: 'Uninstalling…' }
 
-  async function act(action: Action) {
+  async function act(action: Action, key = copy!.key) {
     confirming = false
     menuOpen = false
     busy = labels[action]
     keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
     try {
-      await api.act(action, copy!.key)
+      await api.act(action, key)
     } catch (e) {
       onerror(api.message(e))
     } finally {
@@ -351,8 +351,10 @@
                 {busy}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
-                oninstall={() =>
-                  onconfirminstall(copy!.key, game!.title, actionsEl!.getBoundingClientRect(), () => act('install'))}
+                oninstall={() => {
+                  const key = copy!.key // the copy shown when the popup opens, not when it is confirmed
+                  onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), () => act('install', key))
+                }}
               />
               {#if busy === 'Installing…' && copy!.provider === 'epic'}
                 <button class="glass round" onclick={cancel}>Cancel</button>

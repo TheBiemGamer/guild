@@ -261,11 +261,15 @@ fn owned_job(app: &AppHandle, force: bool) -> Option<(String, Running)> {
 /// Saves a fetched list only while an account is still connected: a Disconnect that ran during the
 /// fetch must not be undone. Returns whether it was saved.
 fn remember_if_connected(conn: &rusqlite::Connection, games: &[OwnedGame], now: i64) -> bool {
-    let connected = cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().is_some();
+    let connected = steam_connected(conn);
     if connected {
         steam_owned::remember(conn, games, now);
     }
     connected
+}
+
+fn steam_connected(conn: &rusqlite::Connection) -> bool {
+    cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().is_some()
 }
 
 fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
@@ -276,10 +280,12 @@ fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
             if !saved {
                 return;
             }
+            // Built before the lock: it reads the Steam library cache folder.
+            let built = build_owned(&games);
             {
                 let mut s = state.lock();
                 s.steam_attention = false;
-                s.owned = build_owned(&games);
+                s.owned = built;
             }
             rescan(app, false);
             // The next poll tells the UI to re-ask the library.
@@ -287,8 +293,7 @@ fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
         }
         // A Disconnect during the fetch must not raise the dot again.
         OwnedOutcome::KeepAndFlag => {
-            let connected = open_db(&state)
-                .is_some_and(|c| cache::db::setting(&c, settings::STEAM_ACCOUNT).ok().flatten().is_some());
+            let connected = open_db(&state).is_some_and(|c| steam_connected(&c));
             if connected {
                 state.lock().steam_attention = true;
             }
@@ -318,7 +323,10 @@ fn owned(state: &AppState) -> Option<Vec<Game>> {
     }
     let (list, _) = open_db(state).and_then(|c| steam_owned::cached(&c))?;
     let games = build_owned(&list)?;
-    state.lock().owned = Some(games.clone());
+    // A Disconnect during the build already forgot the list: don't bring it back.
+    if open_db(state).is_some_and(|c| steam_connected(&c)) {
+        state.lock().owned = Some(games.clone());
+    }
     Some(games)
 }
 
@@ -597,10 +605,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let conn = cache::db::open(&path).unwrap();
         let owned = [OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 3, last_played: None }];
+        assert!(!steam_connected(&conn));
         assert!(!remember_if_connected(&conn, &owned, 100));
         assert!(steam_owned::cached(&conn).is_none());
         cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, Some("noah")).unwrap();
         assert!(remember_if_connected(&conn, &owned, 100));
+        assert!(steam_connected(&conn));
         assert!(steam_owned::cached(&conn).is_some());
     }
 
