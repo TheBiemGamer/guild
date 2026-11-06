@@ -366,23 +366,20 @@
         <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
         <div class="tiles">
           {#if playtime}
-            <div class="tile"><h2>Playtime</h2><b>{playtime}</b></div>
+            <div class="tile"><div class="head"><h2>Playtime</h2></div><p><b>{playtime}</b></p></div>
           {/if}
           {#if lastPlayed}
-            <div class="tile"><h2>Last played</h2><b>{lastPlayed}</b></div>
+            <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>{lastPlayed}</b></p></div>
           {/if}
           {#if ttb}
             <div class="tile">
-              <h2>How long to beat</h2>
-              <p>
-                {#if beatMain}
-                  <b>{beatMain}</b>
-                  {#if beatMore.length}<small>{beatMore.join(' · ')}</small>{/if}
-                {:else}
-                  <b>{beatMore.join(' · ')}</b>
-                {/if}
+              <div class="head">
+                <h2>How long to beat</h2>
+                <button class="credit" title="Data from IGDB" aria-label="Data from IGDB" onclick={() => run(api.openIgdb)}>IGDB</button>
+              </div>
+              <p title={[beatMain && `${beatMain} normally`, ...beatMore].filter(Boolean).join(' · ')}>
+                <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && ttb.completely}<span> · {ttb.completely} all</span>{/if}
               </p>
-              <button class="credit" onclick={() => run(api.openIgdb)}>Data from IGDB</button>
             </div>
           {/if}
         </div>
@@ -654,12 +651,12 @@
     stroke-linejoin: round;
   }
 
-  /* Quick facts: three fixed slots, so a late tile never resizes the others. */
+  /* Quick facts: three fixed slots. Every tile is one head line plus one value line, so a late
+     tile is exactly as tall as the ones already there and the row never changes height. */
   .tiles {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
-    min-height: 136px;
     margin-top: 16px;
   }
 
@@ -667,6 +664,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0;
     padding: 12px 16px;
     border-radius: 12px;
     background: var(--glass);
@@ -688,20 +686,28 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .tile p {
-    margin: 0;
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 24px;
   }
 
-  .tile small {
-    display: block;
-    font-size: 12px;
+  .tile p {
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .tile p span {
     color: var(--text-2);
   }
 
   /* 24px tall: the minimum target size for dense desktop UI. */
   .credit {
-    align-self: flex-start;
-    margin-top: auto;
+    flex: none;
     min-height: 24px;
     padding: 0;
     background: transparent;
