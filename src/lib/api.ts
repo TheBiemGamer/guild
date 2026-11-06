@@ -32,6 +32,7 @@ export interface CopyView {
   /** Only set for an installed copy. */
   installDir: string | null
 }
+export type LinkKind = 'steamStore' | 'epicStore' | 'pcGamingWiki' | 'steamDb' | 'protonDb'
 export interface Detail {
   /** The entry key. */
   key: string
@@ -50,6 +51,8 @@ export interface Detail {
   lastPlayedTile: string | null
   /** "on Steam" / "on Epic Games", only for a game with several copies. */
   lastPlayedStore: string | null
+  /** Store pages first, then info sites (only with a Steam app id). */
+  links: LinkKind[]
 }
 export interface SettingsView {
   steam: { name: string | null; path: string } | null
@@ -122,7 +125,7 @@ export const steamDisconnect = () => invoke<void>('steam_disconnect')
 export const openSteam = () => invoke<void>('open_steam')
 export const openTwitchConsole = () => invoke<void>('open_twitch_console')
 export const openFolder = (key: string) => invoke<void>('open_folder', { key })
-export const openStorePage = (key: string) => invoke<void>('open_store_page', { key })
+export const openLink = (key: string, kind: LinkKind) => invoke<void>('open_link', { key, kind })
 /** The "Data from IGDB" credit. */
 export const openIgdb = () => invoke<void>('open_igdb')
 export const clearCache = async () => {

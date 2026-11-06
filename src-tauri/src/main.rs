@@ -10,6 +10,7 @@ mod gamesdb;
 mod igdb;
 mod info;
 mod library;
+mod links;
 mod settings;
 mod steam_login;
 mod steam_owned;
@@ -47,7 +48,7 @@ fn main() {
             commands::settings::steam_disconnect,
             commands::settings::open_twitch_console,
             commands::game::open_folder,
-            commands::game::open_store_page,
+            commands::game::open_link,
             commands::settings::open_igdb,
             commands::library::bench_speed,
             commands::library::bench_done,

@@ -1,5 +1,6 @@
 //! One game: its page, art, details, play/install/uninstall, download size, how long to beat.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -14,6 +15,7 @@ use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent};
 use crate::library::{Game, Image, ProviderKind};
+use crate::links::{self, LinkKind};
 use crate::settings;
 use crate::view;
 
@@ -37,6 +39,8 @@ pub struct Detail {
     last_played_tile: Option<String>,
     /// `on Steam` / `on Epic Games`, only for an entry with several copies.
     last_played_store: Option<String>,
+    /// Store pages, then info sites when the Steam app id is known.
+    links: Vec<LinkKind>,
 }
 
 #[derive(Serialize)]
@@ -55,10 +59,10 @@ pub struct CopyView {
 pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
     let s = state.lock();
     let entry = entries::find(&s.entries, &s.games, &key)?;
-    Some(detail(entry, &s.games, SystemTime::now()))
+    Some(detail(entry, &s.games, &s.twins, SystemTime::now()))
 }
 
-fn detail(entry: &Entry, games: &[Game], now: SystemTime) -> Detail {
+fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: SystemTime) -> Detail {
     let (minutes, both) = entries::playtime(entry, games);
     // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone has no playtime to show.
     let tile_provider = entry
@@ -68,10 +72,11 @@ fn detail(entry: &Entry, games: &[Game], now: SystemTime) -> Detail {
         .find(|&p| p == ProviderKind::Steam)
         .unwrap_or(games[entries::default_copy(entry, games)].provider);
     let last = entries::last_played(entry, games);
+    let stores = entries::stores(entry, games);
     Detail {
         key: entry.key.clone(),
         title: games[entry.copies[0]].title.clone(),
-        stores: entries::stores(entry, games),
+        stores: stores.clone(),
         installed: entries::installed(entry, games),
         copies: entry
             .copies
@@ -92,21 +97,12 @@ fn detail(entry: &Entry, games: &[Game], now: SystemTime) -> Detail {
         playtime_note: both.then(|| "Steam + Epic".to_string()),
         last_played_tile: view::last_played_tile(last.map(|(t, _)| t), now),
         last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| format!("on {}", p.name())),
+        links: links::kinds(&stores, entries::steam_appid(entry, games, twins)),
     }
 }
 
 fn installed_dir(g: &Game) -> Option<&PathBuf> {
     g.install_dir.as_ref().filter(|_| g.installed)
-}
-
-/// The game's store page. The Legendary catalog has no product slug, so Epic gets a store search by title.
-fn store_url(g: &Game) -> String {
-    match g.provider {
-        ProviderKind::Steam => format!("https://store.steampowered.com/app/{}", g.external_id),
-        ProviderKind::Epic => {
-            format!("https://store.epicgames.com/browse?q={}", crate::library::percent_encode(&g.title))
-        }
-    }
 }
 
 /// Opens an installed game's folder in File Explorer.
@@ -120,11 +116,22 @@ pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
     std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(|e| e.to_string())
 }
 
-/// Opens the game's store page in the default browser.
+/// Opens one of the game page's links in the default browser. The URL is built here from the kind.
 #[tauri::command]
-pub fn open_store_page(state: State<'_, AppState>, key: String) -> Res<()> {
-    let game = state.game(&key).ok_or("This game is no longer in the library.")?;
-    crate::library::open_uri(&store_url(&game)).map_err(|e| e.to_string())
+pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let (appid, title, epic_key) = {
+            let s = state.lock();
+            let entry = entries::find(&s.entries, &s.games, &key).ok_or("This game is no longer in the library.")?;
+            let epic = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Epic);
+            (entries::steam_appid(entry, &s.games, &s.twins), s.games[entry.copies[0]].title.clone(), epic.map(|g| g.key()))
+        };
+        let epic_url = epic_key.and_then(|k| igdb::epic_url(&open_db(&state)?, &k));
+        let url = links::url(kind, appid, epic_url.as_deref(), &title).ok_or("This game has no page there.")?;
+        crate::library::open_uri(&url).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[derive(Serialize, Default)]
@@ -310,6 +317,7 @@ fn time_to_beat_view(t: igdb::TimeToBeat) -> Option<TimeToBeatView> {
 /// A Steam app id matches by id; otherwise an Epic copy matches by exact title. The Epic page URL
 /// IGDB reports is remembered for the copy.
 async fn look_up_time_to_beat(
+    app: &AppHandle,
     state: &AppState,
     client_id: &str,
     secret: &str,
@@ -326,8 +334,15 @@ async fn look_up_time_to_beat(
         && let Some(m) = igdb::epic_by_title(&state.http, &token, client_id, title).await?
     {
         id = Some(m.game);
-        if let (Some(url), Some(conn)) = (m.url, open_db(state)) {
-            igdb::remember_epic_url(&conn, epic_key, &url);
+        if let Some(url) = m.url {
+            let epic_key = epic_key.to_string();
+            let app = app.clone();
+            blocking(move || {
+                if let Some(conn) = open_db(&app.state::<AppState>()) {
+                    igdb::remember_epic_url(&conn, &epic_key, &url);
+                }
+            })
+            .await;
         }
     }
     let Some(id) = id else { return Ok(None) };
@@ -370,7 +385,7 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
         return answer.and_then(time_to_beat_view);
     }
     let (client_id, secret) = credentials?;
-    let answer = match look_up_time_to_beat(&state, &client_id, &secret, appid, &title, epic_key.as_deref()).await {
+    let answer = match look_up_time_to_beat(&app, &state, &client_id, &secret, appid, &title, epic_key.as_deref()).await {
         Ok(answer) => answer,
         Err(e) => {
             eprintln!("how long to beat {key}: {e}");
@@ -439,7 +454,6 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<()> {
 mod tests {
     use super::*;
     use crate::view::tests::game;
-    use std::collections::HashMap;
 
     fn pumpkin(steam_last: Option<u64>, epic_last: Option<u64>) -> Vec<Game> {
         let steam = Game { external_id: "635320".into(), ..game("Pumpkin Jack", true, Some(120), steam_last) };
@@ -453,7 +467,7 @@ mod tests {
 
     fn pumpkin_detail(games: &[Game], twins: &HashMap<String, u32>) -> Detail {
         let entries = entries::group(games, twins);
-        detail(&entries[0], games, UNIX_EPOCH + Duration::from_secs(1_000 * 86_400))
+        detail(&entries[0], games, twins, UNIX_EPOCH + Duration::from_secs(1_000 * 86_400))
     }
 
     #[test]
@@ -465,6 +479,7 @@ mod tests {
         assert_eq!(d.copies.len(), 2);
         assert_eq!(d.playtime_tile.as_deref(), Some("2 h 0 min"));
         assert_eq!(d.playtime_note, None);
+        assert_eq!(d.links.len(), 5);
     }
 
     #[test]
@@ -474,22 +489,5 @@ mod tests {
         assert_eq!(merged.last_played_store.as_deref(), Some("on Epic Games"));
         let single = pumpkin_detail(&games, &HashMap::new());
         assert_eq!(single.last_played_store, None);
-    }
-
-    #[test]
-    fn store_url_links_steam_app_page() {
-        assert_eq!(store_url(&game("447040", true, None, None)), "https://store.steampowered.com/app/447040");
-    }
-
-    #[test]
-    fn store_url_searches_epic_store_by_encoded_title() {
-        // The Legendary catalog carries no product slug, so Epic gets a store search.
-        let mut epic_game = game("Assassin's Creed® Unity & more", false, None, None);
-        epic_game.provider = ProviderKind::Epic;
-        epic_game.external_id = "Flour".into();
-        assert_eq!(
-            store_url(&epic_game),
-            "https://store.epicgames.com/browse?q=Assassin%27s%20Creed%C2%AE%20Unity%20%26%20more"
-        );
     }
 }

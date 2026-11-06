@@ -246,7 +246,6 @@ pub fn remember_epic_url(conn: &Connection, epic_key: &str, url: &str) {
     }
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the game page uses it in a later task"))]
 pub fn epic_url(conn: &Connection, epic_key: &str) -> Option<String> {
     let json = db::cached_info(conn, epic_key, EPIC_URL, i64::MAX, 0).ok().flatten()?;
     serde_json::from_str(&json).ok()

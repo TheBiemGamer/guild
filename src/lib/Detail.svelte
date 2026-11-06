@@ -39,8 +39,9 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './api'
-  import type { Action, Detail, GameInfo, Progress, TimeToBeat } from './api'
+  import type { Action, Detail, GameInfo, LinkKind, Progress, TimeToBeat } from './api'
   import PlayButton from './PlayButton.svelte'
+  import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
   let { gameKey, running, progress, version, onback, onerror, onchanged, ontint }: {
@@ -246,11 +247,24 @@
       : [],
   )
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
-  const showDetails = $derived(
-    !!game &&
-      (!!info?.genres.length || !!info?.developer || !!info?.publisher || !!info?.released || !!copy!.size || !!copy!.installDir),
-  )
+  // Every game has a store page, so Details always has something to show.
+  const showDetails = $derived(!!game)
+  const storeLinks = $derived(game?.links.filter((k) => k === 'steamStore' || k === 'epicStore') ?? [])
+  const infoLinks = $derived(game?.links.filter((k) => k !== 'steamStore' && k !== 'epicStore') ?? [])
 </script>
+
+{#snippet chips(label: string, kinds: LinkKind[])}
+  {#if kinds.length}
+    <dt>{label}</dt>
+    <dd class="chips">
+      {#each kinds as kind (kind)}
+        <button class="chip" onclick={() => run(() => api.openLink(game!.key, kind))}>
+          <LinkIcon {kind} />{linkNames[kind]}
+        </button>
+      {/each}
+    </dd>
+  {/if}
+{/snippet}
 
 <svelte:window {onpointerdown} />
 
@@ -397,6 +411,8 @@
               {#if info?.released}<dt>Released</dt><dd>{releaseDate(info.released)}</dd>{/if}
               {#if copy!.size}<dt>Size</dt><dd>{copy!.size}</dd>{/if}
               {#if copy!.installDir}<dt>Install folder</dt><dd class="path">{copy!.installDir}</dd>{/if}
+              {@render chips('Store pages', storeLinks)}
+              {@render chips('Info', infoLinks)}
             </dl>
           </section>
         {/if}
@@ -777,6 +793,28 @@
     border-radius: 999px;
     background: var(--glass-on);
     font-size: 12px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 13px;
+    border-radius: 999px;
+    background: var(--glass-hover);
+    border: 1px solid var(--glass-line);
+  }
+
+  .chip:hover:not(:disabled) {
+    background: var(--glass-on);
   }
 
   .path {
