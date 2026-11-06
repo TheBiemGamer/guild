@@ -7,9 +7,10 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use super::{allow, blocking, open_db, AppState, Res, Shared};
+use super::{allow, blocking, open_db, regroup, AppState, Res, Shared};
 use crate::bench;
 use crate::cache;
+use crate::entries;
 use crate::library::epic::{self, Login};
 use crate::library::steam::with_owned;
 use crate::library::{Game, Progress, ProviderKind};
@@ -24,7 +25,7 @@ const EPIC_START_GRACE: Duration = Duration::from_secs(30);
 pub struct Card {
     key: String,
     title: String,
-    provider: ProviderKind,
+    stores: Vec<ProviderKind>,
     installed: bool,
 }
 
@@ -51,16 +52,21 @@ pub fn library(
     sort: Sort,
 ) -> Library {
     let s = state.lock();
-    let games = view::arrange(&s.games, &query, store, installed_only, sort)
+    let games = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort)
         .into_iter()
         .map(|i| {
-            let g = &s.games[i];
-            Card { key: g.key(), title: g.title.clone(), provider: g.provider, installed: g.installed }
+            let e = &s.entries[i];
+            Card {
+                key: e.key.clone(),
+                title: s.games[e.copies[0]].title.clone(),
+                stores: entries::stores(e, &s.games),
+                installed: entries::installed(e, &s.games),
+            }
         })
         .collect();
     Library {
         games,
-        total: s.games.len(),
+        total: s.entries.len(),
         status: s.status.clone(),
         epic: s.epic_login,
         epic_attention: s.epic_login.is_some_and(|l| l != Login::LoggedIn),
@@ -84,6 +90,7 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
             s.games = games;
         }
         s.twins = crate::gamesdb::all_cached(&conn, super::unix_now());
+        regroup(&mut s);
         drop(s);
         refresh_owned(app.clone(), false);
         fill_twins(app.clone());
@@ -115,7 +122,7 @@ impl Drop for TwinsRunning {
 
 /// Looks up the Steam twin of every Epic game without a fresh cached answer, one request per
 /// `TWIN_GAP`, in the background. Answers are cached; errors are skipped and retried on a later run.
-/// Only one run at a time. Task 6 regroups the library when twins arrive.
+/// Only one run at a time. Each new twin regroups the library and tells the next poll.
 pub(crate) fn fill_twins(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
@@ -147,7 +154,10 @@ pub(crate) fn fill_twins(app: AppHandle) {
                     None => todo.push(app_name),
                 }
             }
-            state.lock().twins.extend(known);
+            let mut s = state.lock();
+            s.twins.extend(known);
+            regroup(&mut s);
+            drop(s);
             todo
         };
         for (i, app_name) in pending.iter().enumerate() {
@@ -161,7 +171,11 @@ pub(crate) fn fill_twins(app: AppHandle) {
                         crate::gamesdb::remember(&conn, &key, twin, super::unix_now());
                     }
                     if let Some(id) = twin {
-                        state.lock().twins.insert(key, id);
+                        let mut s = state.lock();
+                        s.twins.insert(key, id);
+                        regroup(&mut s);
+                        // The next poll tells the UI to re-ask the library.
+                        s.library_changed = true;
                     }
                 }
                 Err(e) => eprintln!("{e}"),
@@ -285,6 +299,7 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) {
         .collect();
     s.tracked.extend(unfinished);
     s.games = merged.games.clone();
+    regroup(&mut s);
     drop(s);
     let saved = cache::db::open(&state.dirs.db)
         .and_then(|mut conn| merged.scanned.iter().try_for_each(|&p| cache::db::replace(&mut conn, p, &merged.games)));
@@ -401,7 +416,9 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
 pub async fn cover(app: AppHandle, key: String) -> Option<String> {
     let state = app.state::<AppState>();
     let _job = state.cover_jobs.acquire().await.ok()?;
-    let game = state.game(&key)?;
+    // The cover comes from the first copy, cached under that copy's key.
+    let game = state.entry(&key)?.1.swap_remove(0);
+    let key = game.key();
     let art_dir = state.dirs.art.join(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {
         let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else { continue };
@@ -426,9 +443,12 @@ pub struct Featured {
 #[tauri::command]
 pub async fn featured(app: AppHandle) -> Option<Featured> {
     let state = app.state::<AppState>();
-    let game = view::featured(&state.lock().games)?.clone();
-    let key = game.key();
-    let dir = state.dirs.art.join(&key);
+    let (key, game) = {
+        let s = state.lock();
+        let e = view::featured(&s.games, &s.entries)?;
+        (e.key.clone(), s.games[e.copies[0]].clone())
+    };
+    let dir = state.dirs.art.join(game.key());
     let mut hero = None;
     for (slot, image) in [("hero", &game.art.hero), ("cover", &game.art.cover)] {
         if let Some(path) = cache::resolve(image, &state.http, dir.join(slot)).await {

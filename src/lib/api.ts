@@ -6,7 +6,8 @@ export type Sort = 'title' | 'lastPlayed' | 'playtime'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type Action = 'play' | 'install' | 'uninstall'
 
-export interface Card { key: string; title: string; provider: Store; installed: boolean }
+/** `stores`: every store this game is in, the one `key` belongs to first. */
+export interface Card { key: string; title: string; stores: Store[]; installed: boolean }
 export interface Library {
   games: Card[]
   total: number

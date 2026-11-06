@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use crate::cache::{self, Dirs};
+use crate::entries::{self, Entry};
 use crate::igdb;
 use crate::library::epic::Login;
 use crate::library::{Game, Progress};
@@ -39,6 +40,8 @@ pub struct AppState {
 struct Shared {
     /// Sorted by title.
     games: Vec<Game>,
+    /// One per game across stores, in title order. Rebuilt by `regroup` whenever `games` or `twins` change.
+    entries: Vec<Entry>,
     /// Shown when nothing is listed.
     status: String,
     epic_login: Option<Login>,
@@ -96,6 +99,19 @@ impl AppState {
     fn game(&self, key: &str) -> Option<Game> {
         self.lock().games.iter().find(|g| g.key() == key).cloned()
     }
+
+    /// The entry with this key or a copy with this key, and clones of its copies in copy order.
+    fn entry(&self, key: &str) -> Option<(Entry, Vec<Game>)> {
+        let s = self.lock();
+        let entry = entries::find(&s.entries, &s.games, key)?.clone();
+        let copies = entry.copies.iter().map(|&i| s.games[i].clone()).collect();
+        Some((entry, copies))
+    }
+}
+
+/// Rebuilds the entries. Call after every change to `games` or `twins`.
+fn regroup(s: &mut Shared) {
+    s.entries = entries::group(&s.games, &s.twins);
 }
 
 type Res<T> = Result<T, String>;

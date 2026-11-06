@@ -48,7 +48,11 @@
     {/if}
   </button>
 
-  <span class="logo"><img src={logoFile[game.provider]} alt={storeNames[game.provider]} width="15" height="15" /></span>
+  <span class="logos">
+    {#each game.stores as store (store)}
+      <span class="logo"><img src={logoFile[store]} alt={storeNames[store]} width="15" height="15" /></span>
+    {/each}
+  </span>
 
   {#if running}
     <span class="badge">Playing</span>
@@ -157,10 +161,18 @@
     filter: saturate(0.5) brightness(0.75);
   }
 
-  .logo {
+  /* One glass circle per store, stacked down from the corner. */
+  .logos {
     position: absolute;
     top: 8px;
     right: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    pointer-events: none;
+  }
+
+  .logo {
     width: 26px;
     height: 26px;
     display: grid;

@@ -70,7 +70,7 @@
   /** Steam installs in its own dialog; Epic asks here first, with size and folder. */
   function install(key: string, anchor: DOMRect) {
     const game = lib.games.find((g) => g.key === key)
-    if (game?.provider === 'epic') confirming = { game, anchor }
+    if (game?.stores[0] === 'epic') confirming = { game, anchor }
     else act('install', key)
   }
 

@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
+use crate::entries::{self, Entry};
 use crate::library::{Game, ProviderKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -20,22 +21,30 @@ pub fn sort_by_title(games: &mut [Game]) {
     games.sort_by_cached_key(|g| g.title.to_lowercase());
 }
 
-/// Indices of `games` (already sorted by title) matching the search and filters, in `sort` order.
-/// `store: None` means every store. Stable sorts keep title order among ties; games without stats go last.
-pub fn arrange(games: &[Game], query: &str, store: Option<ProviderKind>, installed_only: bool, sort: Sort) -> Vec<usize> {
+/// Indices of `entries` (in title order) matching the search and filters, in `sort` order. `store: None`
+/// means every store; the store filter matches any copy and installed means any copy. Stable sorts keep
+/// title order among ties; entries without stats go last.
+pub fn arrange(
+    games: &[Game],
+    entries: &[Entry],
+    query: &str,
+    store: Option<ProviderKind>,
+    installed_only: bool,
+    sort: Sort,
+) -> Vec<usize> {
     let query = query.trim().to_lowercase();
-    let mut shown: Vec<usize> = (0..games.len())
+    let mut shown: Vec<usize> = (0..entries.len())
         .filter(|&i| {
-            let g = &games[i];
-            store.is_none_or(|s| s == g.provider)
-                && (g.installed || !installed_only)
-                && (query.is_empty() || g.title.to_lowercase().contains(&query))
+            let e = &entries[i];
+            store.is_none_or(|s| e.copies.iter().any(|&c| games[c].provider == s))
+                && (!installed_only || entries::installed(e, games))
+                && (query.is_empty() || games[e.copies[0]].title.to_lowercase().contains(&query))
         })
         .collect();
     match sort {
         Sort::Title => {}
-        Sort::LastPlayed => shown.sort_by_key(|&i| Reverse(games[i].last_played)),
-        Sort::Playtime => shown.sort_by_key(|&i| Reverse(games[i].playtime_minutes)),
+        Sort::LastPlayed => shown.sort_by_key(|&i| Reverse(entries::last_played(&entries[i], games).map(|(t, _)| t))),
+        Sort::Playtime => shown.sort_by_key(|&i| Reverse(entries::playtime(&entries[i], games).0)),
     }
     shown
 }
@@ -92,9 +101,14 @@ pub fn merge_last_played(games: &mut [Game], launches: &HashMap<String, i64>) {
     }
 }
 
-/// The installed game played most recently.
-pub fn featured(games: &[Game]) -> Option<&Game> {
-    games.iter().filter(|g| g.installed && g.last_played.is_some()).max_by_key(|g| g.last_played)
+/// The installed entry played most recently.
+pub fn featured<'a>(games: &[Game], entries: &'a [Entry]) -> Option<&'a Entry> {
+    entries
+        .iter()
+        .filter(|e| entries::installed(e, games))
+        .filter_map(|e| Some((e, entries::last_played(e, games)?.0)))
+        .max_by_key(|&(_, t)| t)
+        .map(|(e, _)| e)
 }
 
 #[cfg(test)]
@@ -136,24 +150,39 @@ pub(crate) mod tests {
     #[test]
     fn arrange_searches_case_insensitively() {
         let g = library();
-        assert_eq!(titles(&g, arrange(&g, " BETA ", None, false, Sort::Title)), ["beta", "Gamma Beta"]);
-        assert!(arrange(&g, "zzz", None, false, Sort::Title).is_empty());
+        let e = entries::group(&g, &HashMap::new());
+        assert_eq!(titles(&g, arrange(&g, &e, " BETA ", None, false, Sort::Title)), ["beta", "Gamma Beta"]);
+        assert!(arrange(&g, &e, "zzz", None, false, Sort::Title).is_empty());
     }
 
     #[test]
     fn arrange_filters_installed_and_store() {
         let g = library();
-        assert_eq!(titles(&g, arrange(&g, "", None, true, Sort::Title)), ["beta", "delta", "Gamma Beta"]);
-        assert_eq!(titles(&g, arrange(&g, "", Some(ProviderKind::Epic), false, Sort::Title)), ["delta"]);
-        assert_eq!(arrange(&g, "", Some(ProviderKind::Steam), false, Sort::Title).len(), 3);
+        let e = entries::group(&g, &HashMap::new());
+        assert_eq!(titles(&g, arrange(&g, &e, "", None, true, Sort::Title)), ["beta", "delta", "Gamma Beta"]);
+        assert_eq!(titles(&g, arrange(&g, &e, "", Some(ProviderKind::Epic), false, Sort::Title)), ["delta"]);
+        assert_eq!(arrange(&g, &e, "", Some(ProviderKind::Steam), false, Sort::Title).len(), 3);
     }
 
     #[test]
     fn arrange_sorts_with_missing_stats_last_and_title_ties() {
         let g = library();
-        assert_eq!(titles(&g, arrange(&g, "", None, false, Sort::LastPlayed)), ["beta", "Gamma Beta", "Alpha", "delta"]);
+        let e = entries::group(&g, &HashMap::new());
+        assert_eq!(titles(&g, arrange(&g, &e, "", None, false, Sort::LastPlayed)), ["beta", "Gamma Beta", "Alpha", "delta"]);
         // beta and delta tie on playtime: title order decides.
-        assert_eq!(titles(&g, arrange(&g, "", None, false, Sort::Playtime)), ["Gamma Beta", "beta", "delta", "Alpha"]);
+        assert_eq!(titles(&g, arrange(&g, &e, "", None, false, Sort::Playtime)), ["Gamma Beta", "beta", "delta", "Alpha"]);
+    }
+
+    #[test]
+    fn store_filter_matches_any_copy() {
+        let mut epic = game("Pumpkin", false, None, None);
+        epic.provider = ProviderKind::Epic;
+        let games = vec![epic, game("635320", false, None, None)];
+        let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        assert_eq!(entries.len(), 1);
+        for store in [ProviderKind::Steam, ProviderKind::Epic] {
+            assert_eq!(arrange(&games, &entries, "", Some(store), false, Sort::Title), [0], "{store:?}");
+        }
     }
 
     #[test]
@@ -215,7 +244,9 @@ pub(crate) mod tests {
     fn featured_ignores_uninstalled_and_unplayed() {
         let games =
             vec![game("old", true, None, Some(10)), game("gone", false, None, Some(99)), game("never", true, None, None)];
-        assert_eq!(featured(&games).map(|g| g.title.as_str()), Some("old"));
-        assert!(featured(&[game("never", true, None, None)]).is_none());
+        let entries = entries::group(&games, &HashMap::new());
+        assert_eq!(featured(&games, &entries).map(|e| games[e.copies[0]].title.as_str()), Some("old"));
+        let never = [game("never", true, None, None)];
+        assert!(featured(&never, &entries::group(&never, &HashMap::new())).is_none());
     }
 }
