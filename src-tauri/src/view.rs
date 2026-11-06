@@ -40,26 +40,29 @@ pub fn arrange(games: &[Game], query: &str, store: Option<ProviderKind>, install
     shown
 }
 
-pub fn playtime_label(minutes: Option<u64>) -> String {
-    match minutes.unwrap_or(0) {
+/// The game page's Playtime tile: `15 h 3 min`, `45 min`, or Steam's `Never played`.
+/// `None` for Epic, whose playtime Legendary doesn't report: unknown, so the tile hides.
+pub fn playtime_tile(provider: ProviderKind, minutes: Option<u64>) -> Option<String> {
+    Some(match minutes.unwrap_or(0) {
+        0 if provider == ProviderKind::Epic => return None,
         0 => "Never played".into(),
-        m if m < 60 => format!("Played {m} min"),
-        m => format!("Played {} h {} min", m / 60, m % 60),
-    }
+        m if m < 60 => format!("{m} min"),
+        m => format!("{} h {} min", m / 60, m % 60),
+    })
 }
 
-/// Coarse relative time; months and years are 30 and 365 days.
-pub fn last_played_label(last: Option<SystemTime>, now: SystemTime) -> String {
-    let Some(last) = last else { return String::new() };
-    let days = now.duration_since(last).unwrap_or_default().as_secs() / 86_400;
-    let ago = |n: u64, unit: &str| format!("Last played {n} {unit}{} ago", if n == 1 { "" } else { "s" });
-    match days {
-        0 => "Last played today".into(),
-        1 => "Last played yesterday".into(),
+/// The game page's Last played tile, as coarse relative time (`Today`, `12 days ago`); months and
+/// years are 30 and 365 days. `None` when never played.
+pub fn last_played_tile(last: Option<SystemTime>, now: SystemTime) -> Option<String> {
+    let days = now.duration_since(last?).unwrap_or_default().as_secs() / 86_400;
+    let ago = |n: u64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
+    Some(match days {
+        0 => "Today".into(),
+        1 => "Yesterday".into(),
         d if d < 30 => ago(d, "day"),
         d if d < 365 => ago(d / 30, "month"),
         d => ago(d / 365, "year"),
-    }
+    })
 }
 
 /// Install size: `27.3 GB` (GB = 1024^3), or whole megabytes under 1 GB.
@@ -148,25 +151,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn playtime_labels() {
-        assert_eq!(playtime_label(None), "Never played");
-        assert_eq!(playtime_label(Some(0)), "Never played");
-        assert_eq!(playtime_label(Some(45)), "Played 45 min");
-        assert_eq!(playtime_label(Some(903)), "Played 15 h 3 min");
+    fn playtime_tiles() {
+        let steam = ProviderKind::Steam;
+        // Steam's zero is a fact.
+        assert_eq!(playtime_tile(steam, None).as_deref(), Some("Never played"));
+        assert_eq!(playtime_tile(steam, Some(0)).as_deref(), Some("Never played"));
+        assert_eq!(playtime_tile(steam, Some(45)).as_deref(), Some("45 min"));
+        assert_eq!(playtime_tile(steam, Some(903)).as_deref(), Some("15 h 3 min"));
+        // Legendary reports no playtime, so for Epic it is unknown and the tile hides.
+        assert_eq!(playtime_tile(ProviderKind::Epic, None), None);
+        assert_eq!(playtime_tile(ProviderKind::Epic, Some(0)), None);
     }
 
     #[test]
-    fn last_played_labels() {
+    fn last_played_tiles() {
         let now = UNIX_EPOCH + Duration::from_secs(1_000 * 86_400);
         let days_ago = |d: u64| Some(now - Duration::from_secs(d * 86_400));
-        assert_eq!(last_played_label(None, now), "");
-        assert_eq!(last_played_label(days_ago(0), now), "Last played today");
-        assert_eq!(last_played_label(days_ago(1), now), "Last played yesterday");
-        assert_eq!(last_played_label(days_ago(12), now), "Last played 12 days ago");
-        assert_eq!(last_played_label(days_ago(31), now), "Last played 1 month ago");
-        assert_eq!(last_played_label(days_ago(800), now), "Last played 2 years ago");
+        let tile = |last| last_played_tile(last, now);
+        assert_eq!(tile(None), None);
+        assert_eq!(tile(days_ago(0)).as_deref(), Some("Today"));
+        assert_eq!(tile(days_ago(1)).as_deref(), Some("Yesterday"));
+        assert_eq!(tile(days_ago(12)).as_deref(), Some("12 days ago"));
+        assert_eq!(tile(days_ago(31)).as_deref(), Some("1 month ago"));
+        assert_eq!(tile(days_ago(800)).as_deref(), Some("2 years ago"));
         // Clock moved backwards: treat as today rather than panic.
-        assert_eq!(last_played_label(Some(now + Duration::from_secs(60)), now), "Last played today");
+        assert_eq!(tile(Some(now + Duration::from_secs(60))).as_deref(), Some("Today"));
     }
 
     #[test]

@@ -343,8 +343,10 @@ pub struct Detail {
     title: String,
     provider: ProviderKind,
     installed: bool,
-    playtime: String,
-    last_played: String,
+    /// Tile text, like `15 h 3 min`; `None` hides the tile (Epic doesn't report playtime).
+    playtime_tile: Option<String>,
+    /// Tile text, like `12 days ago`; `None` when never played.
+    last_played_tile: Option<String>,
     /// Size on disk of an installed game, like `27.3 GB`.
     size: Option<String>,
     /// Only for an installed game (Steam knows a folder for games it hasn't installed yet).
@@ -363,8 +365,8 @@ pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
         title: g.title,
         provider: g.provider,
         installed: g.installed,
-        playtime: view::playtime_label(g.playtime_minutes),
-        last_played: view::last_played_label(g.last_played, SystemTime::now()),
+        playtime_tile: view::playtime_tile(g.provider, g.playtime_minutes),
+        last_played_tile: view::last_played_tile(g.last_played, SystemTime::now()),
     })
 }
 

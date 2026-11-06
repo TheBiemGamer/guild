@@ -24,8 +24,10 @@ export interface Detail {
   title: string
   provider: Store
   installed: boolean
-  playtime: string
-  lastPlayed: string
+  /** Playtime tile text ("15 h 3 min", Steam's "Never played"); null hides it (Epic doesn't report playtime). */
+  playtimeTile: string | null
+  /** Last played tile text ("12 days ago"); null when never played. */
+  lastPlayedTile: string | null
   /** Size on disk of an installed game, like "27.3 GB". */
   size: string | null
   /** Only set for an installed game. */

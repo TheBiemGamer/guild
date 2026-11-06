@@ -226,14 +226,9 @@
     closeMenu(false)
   }
 
-  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-
-  // Steam's playtime is a fact even at zero ("Never played"). Legendary reports none, so for Epic
-  // "Never played" means unknown and the tile hides.
-  const playtime = $derived(
-    !game ? null : game.provider === 'epic' && game.playtime === 'Never played' ? null : game.playtime.replace(/^Played /, ''),
-  )
-  const lastPlayed = $derived(game?.lastPlayed ? capitalize(game.lastPlayed.replace(/^Last played /, '')) : null)
+  // Tile text comes ready from Rust; null hides the tile (Epic's unknown playtime, never played).
+  const playtime = $derived(game?.playtimeTile ?? null)
+  const lastPlayed = $derived(game?.lastPlayedTile ?? null)
   const beatMain = $derived(ttb ? (ttb.normally ?? null) : null)
   const beatMore = $derived(
     ttb
