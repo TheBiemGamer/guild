@@ -13,7 +13,7 @@ use crate::library::percent_encode;
 const URL: &str = "https://gamesdb.gog.com/platforms/epic/external_releases";
 
 /// `info` table kind of a cached answer.
-pub const TWIN: &str = "twin";
+pub const TWIN: &str = "twin2";
 pub const TWIN_MAX_AGE_SECS: i64 = 30 * 24 * 60 * 60;
 /// Minimum time between two GamesDB requests.
 pub const TWIN_GAP: Duration = Duration::from_millis(500);
@@ -37,14 +37,18 @@ struct Release {
     external_id: String,
 }
 
-/// The Steam app id when the game has exactly one Steam release with a numeric id.
+/// The Steam app id when the game's Steam releases (`123` or `steam_123`) are all one app.
 pub fn parse_steam_twin(json: &str) -> Result<Option<u32>, String> {
     let r: Response = serde_json::from_str(json).map_err(|e| format!("gamesdb: {e}"))?;
-    let mut steam = r.game.releases.iter().filter(|r| r.platform_id == "steam");
-    Ok(match (steam.next(), steam.next()) {
-        (Some(one), None) => one.external_id.parse().ok(),
-        _ => None,
-    })
+    let mut ids = std::collections::BTreeSet::new();
+    for rel in r.game.releases.iter().filter(|r| r.platform_id == "steam") {
+        let id = rel.external_id.strip_prefix("steam_").unwrap_or(&rel.external_id);
+        match id.parse::<u32>() {
+            Ok(n) if id.bytes().all(|b| b.is_ascii_digit()) => ids.insert(n),
+            _ => continue,
+        };
+    }
+    Ok(if ids.len() == 1 { ids.pop_first() } else { None })
 }
 
 /// Asks GamesDB for the Steam twin of an Epic app name. A 404 means GamesDB doesn't know the game.
@@ -129,6 +133,17 @@ mod tests {
     #[test]
     fn two_steam_releases_mean_no_twin() {
         assert_eq!(parse_steam_twin(&releases(&[("steam", "1"), ("steam", "2")])).unwrap(), None);
+    }
+
+    #[test]
+    fn duplicated_steam_row_is_one_twin() {
+        assert_eq!(parse_steam_twin(&fixture("condor.json")).unwrap(), Some(202750));
+    }
+
+    #[test]
+    fn two_different_steam_apps_are_no_twin() {
+        assert_eq!(parse_steam_twin(&releases(&[("steam", "1"), ("steam", "steam_2")])).unwrap(), None);
+        assert_eq!(parse_steam_twin(&releases(&[("steam", "1"), ("steam", "steam_1"), ("steam", "2")])).unwrap(), None);
     }
 
     #[test]
