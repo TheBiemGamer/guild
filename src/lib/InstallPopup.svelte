@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { downloadSize, settingsView, sizeLabel, type Card } from './api'
+  import { downloadSize, sizeLabel, type Card } from './api'
 
-  let { game, anchor, onconfirm, oncancel }: {
+  let { game, anchor, folder, onconfirm, oncancel }: {
     game: Card
     /** The cover's rectangle; the popup opens beside it. */
     anchor: DOMRect
+    /** The saved install folder; null means Legendary's own, undefined that settings aren't read yet. */
+    folder: string | null | undefined
     onconfirm: () => void
     oncancel: () => void
   } = $props()
@@ -18,8 +20,6 @@
   let height = $state(0)
   /** undefined while Legendary is looking it up, null when it couldn't tell. */
   let size = $state<number | null | undefined>(undefined)
-  /** undefined until settings are read; null means Legendary's own folder. */
-  let folder = $state<string | null | undefined>(undefined)
 
   // Right of the cover, or left when the window's edge is in the way; kept inside the window.
   const x = $derived(
@@ -33,7 +33,6 @@
     // Answers arriving after the popup is gone are dropped.
     let alive = true
     downloadSize(game.key).then((bytes) => alive && (size = bytes), () => alive && (size = null))
-    settingsView().then((s) => alive && (folder = s.epicInstallDir), () => alive && (folder = null))
 
     // The grid scrolls under a fixed popup, so a scroll anywhere closes it.
     const onscroll = () => oncancel()

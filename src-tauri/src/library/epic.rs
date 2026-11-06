@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader, ErrorKind};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use serde_json::Value;
 
@@ -173,10 +174,15 @@ pub fn login_state() -> Login {
     }
 }
 
-/// Legendary's own version, for About.
+/// Legendary's own version, for About. Asked once per app run; Settings reads it on every open.
 pub fn legendary_version() -> Option<String> {
-    let output = legendary(&["--version"]).output().ok()?;
-    parse_legendary_version(&String::from_utf8_lossy(&output.stdout))
+    static VERSION: OnceLock<Option<String>> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            let output = legendary(&["--version"]).output().ok()?;
+            parse_legendary_version(&String::from_utf8_lossy(&output.stdout))
+        })
+        .clone()
 }
 
 /// `legendary version "0.21.1", codename "Lowlife"` -> `0.21.1`

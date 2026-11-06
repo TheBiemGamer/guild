@@ -210,6 +210,7 @@
     <InstallPopup
       game={confirming.game}
       anchor={confirming.anchor}
+      folder={settings?.epicInstallDir}
       oncancel={() => (confirming = null)}
       onconfirm={() => {
         const { key } = confirming!.game
