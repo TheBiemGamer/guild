@@ -22,6 +22,7 @@ impl Dirs {
     pub fn new() -> Self {
         let dirs = directories::ProjectDirs::from("", "", "launcher").expect("Windows always has a home dir");
         Self {
+            // Holds settings and launch history too: a new name loses them unless they are carried over (see `db::SCHEMA`).
             db: dirs.data_local_dir().join("library-v3.sqlite"),
             art: dirs.cache_dir().join("art"),
             thumbs: dirs.cache_dir().join("thumbs"),

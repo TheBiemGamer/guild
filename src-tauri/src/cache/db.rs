@@ -1,4 +1,5 @@
-//! SQLite library cache so startup can render before the stores are scanned.
+//! SQLite library cache so startup can render before the stores are scanned. The same file keeps
+//! user data that is not a cache: settings and launch history.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,9 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::library::{Art, Error, Game, Image, ProviderKind};
 
-// shortcut: no migrations; bump the file name in `Dirs` (library-v3.sqlite) if the schema changes before there's data worth keeping.
+// shortcut: no migrations. The file also holds the user's settings and launch history, so bumping
+// its name in `Dirs` (library-v3.sqlite) wipes them; the next schema change must copy `settings`
+// and `launches` over from the old file (or add real migrations) instead of just bumping.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS games (
     provider TEXT NOT NULL,
