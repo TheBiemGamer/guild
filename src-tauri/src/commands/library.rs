@@ -109,6 +109,7 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         s.twin_lists = twin_lists;
         regroup(&mut s);
         drop(s);
+        super::game::restore_queue(&app, &conn);
         refresh_owned(app.clone(), false);
         fill_twins(app.clone());
         Ok(())
@@ -565,6 +566,8 @@ pub struct Poll {
     progress: HashMap<String, Progress>,
     /// The library changed (a Steam download finished), so the UI should re-ask `library`.
     changed: bool,
+    /// The Epic download queue.
+    queue: crate::downloads::QueueView,
 }
 
 #[tauri::command]
@@ -599,11 +602,12 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     if finished {
         rescan(app, false);
     }
-    let (progress, changed) = {
+    let (progress, changed, queue) = {
         let mut s = state.lock();
-        (s.progress.clone(), take_changed(&mut s, finished))
+        let queue = super::queue_view(&s);
+        (s.progress.clone(), take_changed(&mut s, finished), queue)
     };
-    Poll { running: steam_running.or(epic_running), progress, changed }
+    Poll { running: steam_running.or(epic_running), progress, changed, queue }
 }
 
 /// Records polled Steam progress. Returns whether a download that was showing progress just ended.

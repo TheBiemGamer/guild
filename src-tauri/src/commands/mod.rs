@@ -1,5 +1,5 @@
 //! Everything the UI can call. Store work runs on the blocking pool; shared state sits behind one mutex.
-//! The UI polls `poll` every 2 s and re-asks `library` when something changed.
+//! The UI polls `poll` every 2 s (progress, running game, download queue) and re-asks `library` when something changed.
 
 pub mod game;
 pub mod library;
@@ -61,10 +61,20 @@ struct Shared {
     tracked: HashSet<String>,
     /// Steam (polled) and Epic (streamed) download progress by game key.
     progress: HashMap<String, Progress>,
-    /// Legendary's pid per running Epic install, for cancelling.
+    /// Legendary's pid per running Epic job, for cancelling and pausing.
     install_pids: HashMap<String, u32>,
-    /// Installs the user cancelled; their failure isn't an error.
+    /// Queued jobs the user cancelled while they ran; their failure isn't an error.
     cancelled: HashSet<String>,
+    /// Epic installs, updates and verifies, run one at a time (`game::start_queue`).
+    queue: crate::downloads::Queue,
+    /// A runner is working through `queue`.
+    queue_running: bool,
+    /// The stored queue was read at start.
+    queue_loaded: bool,
+    /// Pause stopped the active job's Legendary; its failure isn't an error and it stays at the head.
+    interrupted: bool,
+    /// The `act` call waiting for a queued job's outcome, by copy key.
+    waiters: HashMap<String, std::sync::mpsc::Sender<Res<()>>>,
     epic_watch: Option<EpicWatch>,
     /// Steam rejected the saved token; the Settings dot asks the owner to connect again.
     steam_attention: bool,
@@ -141,6 +151,11 @@ fn regroup(s: &mut Shared) {
 }
 
 type Res<T> = Result<T, String>;
+
+/// The download queue as the UI shows it, with titles.
+fn queue_view(s: &Shared) -> crate::downloads::QueueView {
+    crate::downloads::view(&s.queue, |key| s.games.iter().find(|g| g.key() == key).map(|g| g.title.clone()))
+}
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     tauri::async_runtime::spawn_blocking(f).await.expect("blocking task panicked")

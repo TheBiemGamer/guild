@@ -3,7 +3,7 @@
   import FilterPopover from './FilterPopover.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
   import { filterChips, removeChip, type Filter } from './filters'
-  import type { Card, Progress, Sort, Store } from './api'
+  import type { Card, Progress, QueueView, Sort, Store } from './api'
 
   let {
     query = $bindable(),
@@ -15,9 +15,13 @@
     total,
     attention,
     progress,
+    queue,
     games,
     modal,
     oncancel,
+    onpause,
+    onresume,
+    onmove,
     onsettings,
   }: {
     query: string
@@ -31,12 +35,17 @@
     total: number
     /** Something in settings needs a look (Epic logged out, Legendary missing…). */
     attention: boolean
-    /** `poll`'s map, by copy key: the Downloads chip shows while it has anything. */
+    /** `poll`'s map, by copy key: the Downloads chip shows while it has anything, or the queue does. */
     progress: Record<string, Progress>
+    /** The Epic download queue, active, waiting or paused. */
+    queue: QueueView
     games: Card[]
     /** A modal (Settings) is open: Ctrl K leaves focus where it is. */
     modal: boolean
     oncancel: (key: string) => void
+    onpause: () => void
+    onresume: () => void
+    onmove: (key: string, up: boolean) => void
     onsettings: () => void
   } = $props()
 
@@ -52,8 +61,12 @@
   })
 
   const jobs = $derived(Object.values(progress))
-  const downloading = $derived(jobs.length > 0)
-  const fraction = $derived(jobs.length ? jobs.reduce((sum, p) => sum + p.fraction, 0) / jobs.length : 0)
+  const downloading = $derived(jobs.length > 0 || queue.jobs.length > 0)
+  // The active Epic job's progress, else the average.
+  const activeProgress = $derived(queue.active ? progress[queue.active] : undefined)
+  const fraction = $derived(
+    activeProgress ? activeProgress.fraction : jobs.length ? jobs.reduce((sum, p) => sum + p.fraction, 0) / jobs.length : 0,
+  )
   // The last download ended while its popover was open.
   $effect(() => {
     if (!downloading && open === 'downloads') open = null
@@ -159,7 +172,7 @@
         <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       </button>
       {#if open === 'downloads'}
-        <DownloadsPopover {progress} {games} anchor={downloadsChip} onclose={close} {oncancel} />
+        <DownloadsPopover {progress} {queue} {games} anchor={downloadsChip} onclose={close} {oncancel} {onpause} {onresume} {onmove} />
       {/if}
     </div>
   {/if}

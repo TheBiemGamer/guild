@@ -1,18 +1,22 @@
 <script lang="ts">
   import * as api from './api'
-  import type { Card, Progress } from './api'
+  import type { Card, Progress, QueuedAction, QueueView } from './api'
   import { popover } from './popover'
   import StoreIcon from './StoreIcon.svelte'
 
-  // shortcut: the installs and updates running now, from `poll`; Task 24's queue adds Pause and "Up next".
-  let { progress, games, anchor, onclose, oncancel }: {
+  let { progress, queue, games, anchor, onclose, oncancel, onpause, onresume, onmove }: {
     /** `poll`'s map, by copy key. */
     progress: Record<string, Progress>
+    /** The Epic download queue; its first job is the active one. */
+    queue: QueueView
     /** The library as loaded, for titles; a game hidden by the search is asked for once. */
     games: Card[]
     anchor: HTMLElement | undefined
     onclose: (refocus: boolean) => void
     oncancel: (key: string) => void
+    onpause: () => void
+    onresume: () => void
+    onmove: (key: string, up: boolean) => void
   } = $props()
 
   let asked = $state<Record<string, string>>({})
@@ -29,35 +33,89 @@
     }
   })
 
-  const title = (key: string) => known.get(key) || asked[key] || 'A game'
+  const queued = $derived(new Map(queue.jobs.map((j) => [j.key, j.title] as const)))
+  const title = (key: string) => known.get(key) || queued.get(key) || asked[key] || 'A game'
+  const active = $derived(queue.jobs[0])
+  const next = $derived(queue.jobs.slice(1))
   const jobs = $derived(Object.entries(progress))
-  // Legendary's installs are ours to cancel; Steam's run in Steam.
-  const ours = $derived(jobs.filter(([k]) => k.startsWith('epic-')))
+  // Epic jobs outside the queue (Move) show their progress only; Steam's run in Steam.
+  const other = $derived(jobs.filter(([k]) => k.startsWith('epic-') && k !== active?.key))
   const steam = $derived(jobs.filter(([k]) => !k.startsWith('epic-')))
+  const running: Record<QueuedAction, string> = { install: 'Installing…', update: 'Updating…', verify: 'Verifying…' }
+  const actionName: Record<QueuedAction, string> = { install: 'Install', update: 'Update', verify: 'Verify' }
+
+  function activeText(p: Progress | undefined): string {
+    if (queue.paused) return p ? `Paused · ${Math.round(p.fraction * 100)}%` : 'Paused'
+    return p?.text ?? running[active.action]
+  }
 </script>
 
-{#snippet job(key: string, p: Progress, cancel: boolean)}
+{#snippet bar(key: string, p: Progress | undefined)}
+  <div class="bar" role="progressbar" aria-label="{title(key)} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((p?.fraction ?? 0) * 100)}>
+    <span style="width: {(p?.fraction ?? 0) * 100}%"></span>
+  </div>
+{/snippet}
+
+{#snippet job(key: string, p: Progress, inSteam: boolean)}
   <div class="job">
-    <StoreIcon provider={key.startsWith('epic-') ? 'epic' : 'steam'} size={16} />
+    <StoreIcon provider={inSteam ? 'steam' : 'epic'} size={16} />
     <div class="what">
       <b>{title(key)}</b>
-      <small>{cancel ? p.text : `In Steam · ${p.text}`}</small>
-      <div class="bar" role="progressbar" aria-label="{title(key)} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(p.fraction * 100)}>
-        <span style="width: {p.fraction * 100}%"></span>
-      </div>
+      <small>{inSteam ? `In Steam · ${p.text}` : p.text}</small>
+      {@render bar(key, p)}
     </div>
-    {#if cancel}<button class="glass" onclick={() => oncancel(key)}>Cancel</button>{/if}
   </div>
 {/snippet}
 
 <div class="pop" role="dialog" aria-label="Downloads" tabindex="-1" use:popover={{ anchor, close: onclose }}>
-  {#if ours.length}
+  {#if active || other.length}
     <h3>Downloading</h3>
-    {#each ours as [key, p] (key)}{@render job(key, p, true)}{/each}
+    {#if active}
+      <div class="job">
+        <StoreIcon provider="epic" size={16} />
+        <div class="what">
+          <b>{title(active.key)}</b>
+          <small>{activeText(progress[active.key])}</small>
+          {@render bar(active.key, progress[active.key])}
+        </div>
+        {#if queue.paused}
+          <button class="glass icon" aria-label="Resume" title="Resume" onclick={onresume}>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
+          </button>
+        {:else}
+          <button class="glass icon" aria-label="Pause" title="Pause" onclick={onpause}>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+          </button>
+        {/if}
+        <button class="glass" onclick={() => oncancel(active.key)}>Cancel</button>
+      </div>
+    {/if}
+    {#each other as [key, p] (key)}{@render job(key, p, false)}{/each}
+  {/if}
+  {#if next.length}
+    <h3>Up next</h3>
+    {#each next as j, i (`${j.key}|${j.action}`)}
+      <div class="job">
+        <StoreIcon provider="epic" size={16} />
+        <div class="what">
+          <b>{title(j.key)}</b>
+          <small>{actionName[j.action]}</small>
+        </div>
+        <button class="glass icon" aria-label="Move {title(j.key)} up" disabled={i === 0} onclick={() => onmove(j.key, true)}>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+        </button>
+        <button class="glass icon" aria-label="Move {title(j.key)} down" disabled={i === next.length - 1} onclick={() => onmove(j.key, false)}>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+        </button>
+        <button class="glass icon" aria-label="Remove {title(j.key)} from queue" onclick={() => oncancel(j.key)}>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+    {/each}
   {/if}
   {#if steam.length}
     <h3>In Steam</h3>
-    {#each steam as [key, p] (key)}{@render job(key, p, false)}{/each}
+    {#each steam as [key, p] (key)}{@render job(key, p, true)}{/each}
   {/if}
 </div>
 
@@ -138,5 +196,25 @@
     height: 32px;
     padding: 0 14px;
     border-radius: 999px;
+  }
+
+  .glass.icon {
+    width: 32px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+  }
+
+  svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .solid {
+    fill: currentColor;
+    stroke: none;
   }
 </style>

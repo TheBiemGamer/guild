@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use super::library::rescan;
-use super::{allow, blocking, open_db, unix_now, AppState, EpicWatch, Res};
+use super::{allow, blocking, open_db, queue_view, unix_now, AppState, EpicWatch, Res, Shared};
 use crate::cache;
+use crate::downloads::{Job, Queue, QueueView, QueuedAction, DOWNLOAD_QUEUE};
 use crate::entries::{self, Entry};
 use crate::gamesdb;
 use crate::igdb;
@@ -245,6 +246,23 @@ fn act_blocking(
         };
         return result.map(|()| None).map_err(|e| format!("Steam: {e}"));
     }
+    let queued = match action {
+        Action::Install => Some(QueuedAction::Install),
+        Action::Update => Some(QueuedAction::Update),
+        Action::Verify => Some(QueuedAction::Verify),
+        _ => None,
+    };
+    if let Some(queued) = queued {
+        let dest = (queued == QueuedAction::Install)
+            .then(|| open_db(&state).and_then(|c| settings::load(&c).epic_install_dir))
+            .flatten()
+            .map(|p| p.to_string_lossy().into_owned());
+        let job = Job { dlc: dlc.map(str::to_string), with_dlc, dest, ..Job::new(&key, queued) };
+        return enqueue(app, job).map(|()| None);
+    }
+    if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
+        return Err("This game is in the download queue. Cancel its download first.".into());
+    }
     let result = match action {
         Action::Play | Action::PlayOutdated => {
             let upload = match saves_before_play(&state, game, keep) {
@@ -262,38 +280,181 @@ fn act_blocking(
                 state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), upload });
             })
         }
-        Action::Install | Action::Update | Action::Verify | Action::Move => {
-            let on_event = |event| {
-                let mut s = state.lock();
-                match event {
-                    InstallEvent::Started(pid) => _ = s.install_pids.insert(key.clone(), pid),
-                    InstallEvent::Progress(p) => _ = s.progress.insert(key.clone(), p),
-                }
-            };
-            let result = match action {
-                Action::Update => epic::update(&game.external_id, on_event),
-                Action::Verify => epic::verify(&game.external_id, on_event),
-                Action::Move => match dest {
-                    Some(dest) => epic::move_to(&game.external_id, game.install_dir.as_deref(), dest, on_event),
-                    None => Err("Pick a folder to move the game to.".into()),
-                },
-                _ => {
-                    let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
-                    epic::install(dlc.unwrap_or(&game.external_id), with_dlc, base.as_deref(), on_event)
-                }
+        // Not cancellable: stopped halfway, Legendary's record and the folder disagree.
+        Action::Move => {
+            let on_event = |event| _ = record_event(&mut state.lock(), &key, event);
+            let result = match dest {
+                Some(dest) => epic::move_to(&game.external_id, game.install_dir.as_deref(), dest, on_event),
+                None => Err("Pick a folder to move the game to.".into()),
             };
             let mut s = state.lock();
             s.install_pids.remove(&key);
             s.progress.remove(&key);
-            // A cancelled install fails by design; don't report it.
-            if s.cancelled.remove(&key) { Ok(()) } else { result }
+            result
         }
         Action::Uninstall => epic::uninstall(dlc.unwrap_or(&game.external_id)),
+        Action::Install | Action::Update | Action::Verify => unreachable!("queued above"),
     };
     if !matches!(action, Action::Play | Action::PlayOutdated) {
         rescan(app, true);
     }
     result.map(|()| None).map_err(|e| format!("Epic Games: {e}"))
+}
+
+/// Records a Legendary job's pid or progress under its copy key. Returns the pid of a queued job that
+/// must stop at once: it was cancelled or the queue paused before its process started.
+fn record_event(s: &mut Shared, key: &str, event: InstallEvent) -> Option<u32> {
+    match event {
+        InstallEvent::Started(pid) => {
+            s.install_pids.insert(key.to_string(), pid);
+            let stop = s.queue.is_head(key) && s.queue_running && (s.cancelled.contains(key) || s.queue.paused);
+            s.interrupted |= stop && !s.cancelled.contains(key);
+            stop.then_some(pid)
+        }
+        InstallEvent::Progress(p) => {
+            s.progress.insert(key.to_string(), p);
+            None
+        }
+    }
+}
+
+fn save_queue(state: &AppState, queue: &Queue) {
+    let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::set_setting(&c, DOWNLOAD_QUEUE, Some(&queue.to_json())));
+    if let Err(e) = saved {
+        eprintln!("download queue: {e}");
+    }
+}
+
+/// Gives the `act` waiting for `key` its outcome; a job nobody waits for (restored at start) only logs a failure.
+fn report(s: &mut Shared, key: &str, outcome: Res<()>) {
+    match s.waiters.remove(key) {
+        Some(waiter) => _ = waiter.send(outcome),
+        None => {
+            if let Err(e) = outcome {
+                eprintln!("download {key}: {e}");
+            }
+        }
+    }
+}
+
+/// Queues an Epic job and waits until it leaves the queue: done, failed, cancelled or removed.
+fn enqueue(app: &AppHandle, job: Job) -> Res<()> {
+    let state = app.state::<AppState>();
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let mut s = state.lock();
+        let key = job.key.clone();
+        if !s.queue.push(job) {
+            return Ok(());
+        }
+        s.waiters.insert(key, tx);
+        save_queue(&state, &s.queue);
+    }
+    start_queue(app);
+    // A waiter replaced by a later one for the same game gets no answer; the queue shows the rest.
+    rx.recv().unwrap_or(Ok(()))
+}
+
+/// Reads the stored queue once, after the cached library is loaded, without the jobs whose games are gone,
+/// and starts its head unless it was paused.
+pub(super) fn restore_queue(app: &AppHandle, conn: &Connection) {
+    let state = app.state::<AppState>();
+    {
+        let mut s = state.lock();
+        if std::mem::replace(&mut s.queue_loaded, true) {
+            return;
+        }
+        let stored = cache::db::setting(conn, DOWNLOAD_QUEUE).ok().flatten();
+        let keys: std::collections::HashSet<String> = s.games.iter().map(Game::key).collect();
+        let restored = Queue::restore(stored.as_deref(), |k| keys.contains(k));
+        // A job queued before this (none normally) keeps its place ahead of the stored ones.
+        s.queue.paused |= restored.paused;
+        for job in restored.jobs {
+            s.queue.push(job);
+        }
+        save_queue(&state, &s.queue);
+    }
+    start_queue(app);
+}
+
+/// Works through the queue on a blocking thread unless a runner already is, the queue is paused or empty.
+fn start_queue(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.lock();
+        if s.queue_running || s.queue.next().is_none() {
+            return;
+        }
+        s.queue_running = true;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || run_queue(&app));
+}
+
+/// Runs the head job, then the next, until the queue is empty or paused. A failed job leaves the queue;
+/// one stopped by Pause stays at the head.
+fn run_queue(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    loop {
+        let job = {
+            let mut s = state.lock();
+            match s.queue.next().cloned() {
+                Some(job) => job,
+                None => {
+                    s.queue_running = false;
+                    return;
+                }
+            }
+        };
+        let key = job.key.clone();
+        let result = match state.game(&key) {
+            Some(game) => run_job(&state, &game, &job),
+            None => Err("This game is no longer in the library.".into()),
+        };
+        let paused = {
+            let mut s = state.lock();
+            s.install_pids.remove(&key);
+            let paused = std::mem::take(&mut s.interrupted) && result.is_err() && !s.cancelled.contains(&key);
+            if paused {
+                save_queue(&state, &s.queue);
+            }
+            paused
+        };
+        // The progress stays for "Paused · 42%".
+        if paused {
+            continue;
+        }
+        rescan(app, true);
+        let mut s = state.lock();
+        s.progress.remove(&key);
+        // A cancelled job fails by design; don't report it.
+        let outcome = if s.cancelled.remove(&key) { Ok(()) } else { result.map_err(|e| format!("Epic Games: {e}")) };
+        s.queue.finish(&key);
+        save_queue(&state, &s.queue);
+        report(&mut s, &key, outcome);
+        s.library_changed = true;
+    }
+}
+
+fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::library::Error> {
+    let on_event = |event| {
+        let stop = record_event(&mut state.lock(), &job.key, event);
+        if let Some(pid) = stop
+            && let Err(e) = epic::cancel(pid)
+        {
+            eprintln!("stop download {}: {e}", job.key);
+        }
+    };
+    match job.action {
+        QueuedAction::Update => epic::update(&game.external_id, on_event),
+        QueuedAction::Verify => epic::verify(&game.external_id, on_event),
+        QueuedAction::Install => epic::install(
+            job.dlc.as_deref().unwrap_or(&game.external_id),
+            job.with_dlc,
+            job.dest.as_deref().map(std::path::Path::new),
+            on_event,
+        ),
+    }
 }
 
 /// Info cache kind for an Epic copy's own cloud save choice, `on` or `off`; anything else follows the setting.
@@ -930,17 +1091,78 @@ fn record_play(state: &AppState, key: &str) {
     }
 }
 
-/// Stops a running Epic install; Legendary resumes it next time.
+/// Cancels a game's queued Epic job: the active one is stopped (Legendary resumes it next time) and
+/// leaves the queue when its process ends; a waiting or paused one leaves the queue at once.
+/// Returns the queue as it is now.
 #[tauri::command]
-pub async fn cancel_install(app: AppHandle, key: String) -> Res<()> {
+pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
     let pid = {
         let state = app.state::<AppState>();
         let mut s = state.lock();
-        let pid = *s.install_pids.get(&key).ok_or("No install is running for this game.")?;
-        s.cancelled.insert(key);
+        if !s.queue.contains(&key) {
+            return Err("This game isn't in the download queue.".into());
+        }
+        if s.queue.is_head(&key) && s.queue_running {
+            s.cancelled.insert(key.clone());
+            // None: its process hasn't started yet, and is stopped when it does.
+            s.install_pids.get(&key).copied()
+        } else {
+            s.queue.remove(&key);
+            s.progress.remove(&key);
+            save_queue(&state, &s.queue);
+            report(&mut s, &key, Ok(()));
+            None
+        }
+    };
+    start_queue(&app);
+    if let Some(pid) = pid {
+        blocking(move || epic::cancel(pid).map_err(|e| format!("Couldn't cancel the install: {e}"))).await?;
+    }
+    Ok(queue_view(&app.state::<AppState>().lock()))
+}
+
+/// Pauses the whole queue: the active job's Legendary is stopped (it resumes partial downloads) and the
+/// job stays at the head.
+#[tauri::command]
+pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
+    let pid = {
+        let state = app.state::<AppState>();
+        let mut s = state.lock();
+        s.queue.pause();
+        save_queue(&state, &s.queue);
+        let head = s.queue.jobs.first().map(|j| j.key.clone()).filter(|_| s.queue_running);
+        let pid = head.and_then(|k| s.install_pids.get(&k).copied());
+        s.interrupted |= pid.is_some();
         pid
     };
-    blocking(move || epic::cancel(pid).map_err(|e| format!("Couldn't cancel the install: {e}"))).await
+    if let Some(pid) = pid {
+        blocking(move || epic::cancel(pid).map_err(|e| format!("Couldn't pause the download: {e}"))).await?;
+    }
+    Ok(queue_view(&app.state::<AppState>().lock()))
+}
+
+/// Starts the head job again with the same command.
+#[tauri::command]
+pub fn resume_downloads(app: AppHandle) -> QueueView {
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.lock();
+        s.queue.resume();
+        save_queue(&state, &s.queue);
+    }
+    start_queue(&app);
+    queue_view(&app.state::<AppState>().lock())
+}
+
+/// Moves a waiting job one place up or down; the active job stays first.
+#[tauri::command]
+pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> QueueView {
+    let mut s = state.lock();
+    let moved = if up { s.queue.move_up(&key) } else { s.queue.move_down(&key) };
+    if moved {
+        save_queue(&state, &s.queue);
+    }
+    queue_view(&s)
 }
 
 #[cfg(test)]

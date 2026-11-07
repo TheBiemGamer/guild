@@ -1,20 +1,28 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { logoFile, storeNames } from './StoreIcon.svelte'
-  import { cover, prefetch, type Card, type Cover, type Progress } from './api'
+  import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
 
-  let { game, index, running, progress, onopen, onplay, oninstall }: {
+  let { game, index, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume }: {
     game: Card
     /** Place in the grid; covers are asked in this order. */
     index: number
     running: boolean
     progress: Progress | undefined
+    /** Where this game is in the Epic download queue; null when it isn't. */
+    queued: QueueState | null
     onopen: (key: string) => void
     /** Gets the chosen copy's key, like `oninstall`. */
     onplay: (key: string) => void
     /** `anchor` is the cover's rectangle, for a popup next to it. */
     oninstall: (key: string, anchor: DOMRect) => void
+    /** Takes the waiting copy (its key) out of the queue. */
+    oncancel: (key: string) => void
+    onresume: () => void
   } = $props()
+
+  /** Waiting in the queue, or first but paused: the hover shows the busy pill with Cancel or Resume. */
+  const waiting = $derived(queued && queued.state !== 'active' ? queued : null)
 
   let el: HTMLDivElement
   // undefined: still asking. null: no art, so the title shows.
@@ -90,10 +98,19 @@
     </span>
   {/if}
 
-  {#if !running && !progress}
+  {#if !running && (!progress || waiting)}
     <div class="hover">
       <b>{game.title}</b>
-      {#if game.installed}
+      {#if waiting}
+        <span class="btns">
+          <button class="pill small" aria-disabled="true">{waiting.state === 'paused' ? 'Paused' : 'Queued'}</button>
+          {#if waiting.state === 'paused'}
+            <button class="glass small" onclick={onresume}>Resume</button>
+          {:else}
+            <button class="glass small" onclick={() => oncancel(waiting.key)}>Cancel</button>
+          {/if}
+        </span>
+      {:else if game.installed}
         <button class="pill small" onclick={() => onplay(game.chosen)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
           Play
@@ -296,8 +313,20 @@
     text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
   }
 
-  .hover .pill {
+  .hover .pill,
+  .hover .glass {
     pointer-events: auto;
+  }
+
+  .btns {
+    display: flex;
+    gap: 6px;
+  }
+
+  .glass.small {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
   }
 
   .strip {

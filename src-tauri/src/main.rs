@@ -4,6 +4,7 @@
 mod bench;
 mod cache;
 mod commands;
+mod downloads;
 mod entries;
 mod epic_login;
 mod gamesdb;
@@ -46,6 +47,9 @@ fn main() {
             commands::game::time_to_beat,
             commands::game::test_igdb,
             commands::game::cancel_install,
+            commands::game::pause_downloads,
+            commands::game::resume_downloads,
+            commands::game::move_download,
             commands::game::saves,
             commands::game::set_saves,
             commands::game::sync_saves_now,

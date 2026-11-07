@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Featured, Library, Progress, SettingsView, Sort, Store } from './lib/api'
+  import type { Action, Featured, Library, Progress, QueueView, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -47,6 +47,7 @@
   let version = $state(0)
   let running = $state<string | null>(null)
   let progress = $state<Record<string, Progress>>({})
+  let queue = $state<QueueView>(api.emptyQueue)
   let open = $state<string | null>(null)
   /** The open game's art for the tint; undefined until it's known, so the library's tint stays meanwhile. */
   let tint = $state<string | null | undefined>(undefined)
@@ -214,6 +215,7 @@
       const p = await api.poll()
       running = p.running
       progress = p.progress
+      queue = p.queue
       if (p.changed) await reload()
     }, 2000)
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.
@@ -281,13 +283,18 @@
     return lib.games.filter((g) => matches(g, filters, p))
   })
 
-  async function cancelDownload(key: string) {
+  /** Queue changes answer with the queue as it is now, so it shows before the next poll. Resolves to whether it worked. */
+  async function changeQueue(f: () => Promise<QueueView>) {
     try {
-      await api.cancelInstall(key)
+      queue = await f()
+      return true
     } catch (e) {
       error = api.message(e)
+      return false
     }
   }
+  const cancelDownload = (key: string) => changeQueue(() => api.cancelInstall(key))
+  const resumeDownloads = () => changeQueue(api.resumeDownloads)
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
   const runningTitle = $derived(running ? lib.games.find((g) => g.copyKeys.includes(running!))?.title : undefined)
@@ -314,9 +321,13 @@
     total={lib.total}
     attention={lib.epicAttention || lib.steamAttention}
     {progress}
+    {queue}
     games={lib.games}
     modal={settingsOpen}
     oncancel={cancelDownload}
+    onpause={() => changeQueue(api.pauseDownloads)}
+    onresume={resumeDownloads}
+    onmove={(key, up) => changeQueue(() => api.moveDownload(key, up))}
     onsettings={openSettings}
   />
 
@@ -363,9 +374,12 @@
         resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
         {running}
         {progress}
+        {queue}
         onopen={openGame}
         onplay={(key) => act('play', key)}
         oninstall={install}
+        oncancel={cancelDownload}
+        onresume={resumeDownloads}
         benchSpeed={ready ? benchSpeed : null}
         {headerHeight}
       >
@@ -412,6 +426,9 @@
         gameKey={open}
         runningKey={running}
         progressByKey={progress}
+        {queue}
+        oncancel={cancelDownload}
+        onresume={resumeDownloads}
         {version}
         onback={closeGame}
         onerror={(m) => (error = m)}

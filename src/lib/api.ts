@@ -85,7 +85,19 @@ export interface SettingsView {
   cacheSize: string
 }
 export interface Progress { fraction: number; text: string }
-export interface Poll { running: string | null; progress: Record<string, Progress>; changed: boolean }
+export type QueuedAction = 'install' | 'update' | 'verify'
+/** The Epic download queue in order. `active` is the first job's key, also while `paused`. */
+export interface QueueView { jobs: { key: string; action: QueuedAction; title: string }[]; paused: boolean; active: string | null }
+export interface Poll { running: string | null; progress: Record<string, Progress>; changed: boolean; queue: QueueView }
+export const emptyQueue: QueueView = { jobs: [], paused: false, active: null }
+/** Where one of `keys` (a game's copy keys) is in the queue: running, paused at the head, or waiting; null when not queued. */
+export interface QueueState { key: string; action: QueuedAction; state: 'active' | 'paused' | 'queued' }
+export function queueState(queue: QueueView, keys: string[]): QueueState | null {
+  const at = queue.jobs.findIndex((j) => keys.includes(j.key))
+  if (at < 0) return null
+  const { key, action } = queue.jobs[at]
+  return { key, action, state: at > 0 ? 'queued' : queue.paused ? 'paused' : 'active' }
+}
 
 export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort) =>
   invoke<Library>('library', { query, store, installedOnly, sort })
@@ -175,7 +187,14 @@ export function prefetch(card: Card) {
 }
 /** Settings "Test": resolves when Twitch and IGDB accept the saved credentials, else rejects with the reason. */
 export const testIgdb = () => invoke<void>('test_igdb')
-export const cancelInstall = (key: string) => invoke<void>('cancel_install', { key })
+// These resolve to the queue as it is now, so the UI needn't wait for the next poll.
+/** Stops a game's active download, or takes a waiting or paused one out of the queue. */
+export const cancelInstall = (key: string) => invoke<QueueView>('cancel_install', { key })
+/** Pause stops the active Legendary job and keeps it first; Resume starts it again. */
+export const pauseDownloads = () => invoke<QueueView>('pause_downloads')
+export const resumeDownloads = () => invoke<QueueView>('resume_downloads')
+/** One place up or down; the active job stays first. */
+export const moveDownload = (key: string, up: boolean) => invoke<QueueView>('move_download', { key, up })
 export const poll = () => invoke<Poll>('poll')
 export const epicLogIn = () => invoke<void>('epic_log_in')
 export const epicLogOut = () => invoke<void>('epic_log_out')

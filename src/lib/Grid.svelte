@@ -1,18 +1,22 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import CardView from './Card.svelte'
-  import { benchDone, type Card, type Progress } from './api'
+  import { benchDone, queueState, type Card, type Progress, type QueueView } from './api'
 
-  let { games, resetKey, running, progress, onopen, onplay, oninstall, benchSpeed, header, headerHeight = 0 }: {
+  let { games, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, benchSpeed, header, headerHeight = 0 }: {
     games: Card[]
     /** Changes when search, filters or sort change; background reloads keep the scroll position. */
     resetKey: string
     /** Copy keys, as `poll` reports them. */
     running: string | null
     progress: Record<string, Progress>
+    queue: QueueView
     onopen: (key: string) => void
     onplay: (key: string) => void
     oninstall: (key: string, anchor: DOMRect) => void
+    /** Takes a waiting game out of the download queue, by copy key. */
+    oncancel: (key: string) => void
+    onresume: () => void
     /** px/s; when set, scroll to the bottom once and report frame times (LAUNCHER_BENCH). */
     benchSpeed: number | null
     /** Scrolls with the covers, above them, as wide as the columns. */
@@ -92,9 +96,12 @@
           {index}
           running={running !== null && game.copyKeys.includes(running)}
           progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
+          queued={queue.jobs.length ? queueState(queue, game.copyKeys) : null}
           {onopen}
           {onplay}
           {oninstall}
+          {oncancel}
+          {onresume}
         />
       </div>
     {/each}

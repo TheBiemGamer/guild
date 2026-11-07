@@ -39,16 +39,21 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './api'
-  import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LinkKind, Progress, SavesView, TimeToBeat } from './api'
+  import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LinkKind, Progress, QueueView, SavesView, TimeToBeat } from './api'
   import PlayButton from './PlayButton.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
-  let { gameKey, runningKey, progressByKey, version, onback, onerror, onchanged, ontint, onconfirminstall, conflict = null }: {
+  let { gameKey, runningKey, progressByKey, queue, oncancel, onresume, version, onback, onerror, onchanged, ontint, onconfirminstall, conflict = null }: {
     gameKey: string
     /** Copy keys, as `poll` reports them. */
     runningKey: string | null
     progressByKey: Record<string, Progress>
+    /** The Epic download queue; this game's job in it decides the busy pill. */
+    queue: QueueView
+    /** Stops or removes a queued job, by copy key; resolves to whether it worked. */
+    oncancel: (key: string) => Promise<boolean>
+    onresume: () => void
     /** Bumped whenever the library reloads, so installed state and stats stay current. */
     version: number
     onback: () => void
@@ -228,8 +233,25 @@
     verify: 'Verifying…',
     move: 'Moving…',
   }
-  /** Epic runs these in Legendary, so they can be cancelled. Not Move: stopped halfway, Legendary's record and the folder disagree. */
-  const cancellable = ['Installing…', 'Updating…', 'Verifying…']
+  /** This game's Epic job in the download queue. */
+  const job = $derived(api.queueState(queue, copyKeys))
+  /** The job Cancel was pressed for, until it leaves the queue. */
+  let cancelling = $state<string | null>(null)
+  $effect(() => {
+    if (cancelling && job?.key !== cancelling) cancelling = null
+  })
+  // A queued job's state wins over the local busy text (the `act` waiting for it says "Installing…").
+  const shown = $derived(
+    job
+      ? cancelling === job.key
+        ? 'Cancelling…'
+        : job.state === 'queued'
+          ? 'Queued'
+          : job.state === 'paused'
+            ? 'Paused'
+            : labels[job.action]
+      : busy,
+  )
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false
@@ -248,14 +270,12 @@
     }
   }
 
+  /** Epic's queued jobs run in Legendary, so they can be cancelled. Not Move: stopped halfway, Legendary's record and the folder disagree. */
   async function cancel() {
-    busy = 'Cancelling…'
+    const key = job!.key
+    cancelling = key
     keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
-    try {
-      await api.cancelInstall(copy!.key)
-    } catch (e) {
-      onerror(api.message(e))
-    }
+    if (!(await oncancel(key))) cancelling = null
   }
 
   /** Epic moves into a picked folder; Steam opens its own storage manager. */
@@ -452,7 +472,7 @@
                 >
                   <span style="width: {progress.fraction * 100}%"></span>
                 </div>
-                <small>{progress.text}</small>
+                <small>{job?.state === 'paused' ? `Paused · ${Math.round(progress.fraction * 100)}%` : progress.text}</small>
               </div>
             {/if}
           </div>
@@ -469,7 +489,7 @@
               <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
             {:else}
-              {#if !busy && (copy!.installed || copy!.installDir)}
+              {#if !shown && (copy!.installed || copy!.installDir)}
                 <div class="more-wrap">
                   <button
                     class="glass more"
@@ -501,7 +521,7 @@
                 copies={game.copies}
                 chosen={chosenKey}
                 {running}
-                {busy}
+                busy={shown}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
                 onupdate={() => act('update')}
@@ -512,7 +532,10 @@
                   )
                 }}
               />
-              {#if busy && cancellable.includes(busy) && copy!.provider === 'epic'}
+              {#if job?.state === 'paused'}
+                <button class="glass round" onclick={onresume}>Resume</button>
+              {/if}
+              {#if job && !cancelling}
                 <button class="glass round" onclick={cancel}>Cancel</button>
               {/if}
             {/if}
@@ -562,7 +585,7 @@
                 {:else}
                   <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
                   <!-- Legendary adds a DLC to an installed game only. -->
-                  {#if d.copy && !busy && game.copies.find((c) => c.key === d.copy)?.installed}
+                  {#if d.copy && !shown && game.copies.find((c) => c.key === d.copy)?.installed}
                     <button
                       class="chip"
                       class:danger={d.installed}
@@ -595,7 +618,7 @@
           </div>
           <div class="row">
             <div class="what">Sync now<small>The newer save wins.</small></div>
-            <button class="chip" disabled={!!busy || running || syncing} onclick={syncNow}>{syncing ? 'Syncing…' : 'Sync now'}</button>
+            <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}>{syncing ? 'Syncing…' : 'Sync now'}</button>
           </div>
         </section>
       {:else if current === 'installation'}
@@ -610,8 +633,8 @@
           {#if copy!.updateAvailable}
             <div class="row">
               <div class="what">Update available<small>A newer version is ready to download.</small></div>
-              <button class="chip" disabled={!!busy || running} onclick={() => act('update')}>Update</button>
-              <button class="chip" disabled={!!busy || running} onclick={() => act('playOutdated')}>Play without updating</button>
+              <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>Update</button>
+              <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
             </div>
           {/if}
           {#if copy!.installed}
@@ -619,13 +642,13 @@
               <div class="what">
                 Verify files<small>{copy!.provider === 'steam' ? 'Steam checks the files in its own window.' : 'Checks every file and repairs bad or missing ones.'}</small>
               </div>
-              <button class="chip" disabled={!!busy || running} onclick={() => act('verify')}>Verify files</button>
+              <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>Verify files</button>
             </div>
             <div class="row">
               <div class="what">
                 Move<small>{copy!.provider === 'steam' ? 'Opens Steam’s storage manager.' : 'Moves the game folder into another folder on the same drive.'}</small>
               </div>
-              <button class="chip" disabled={!!busy || running} onclick={move}>Move…</button>
+              <button class="chip" disabled={!!shown || running} onclick={move}>Move…</button>
             </div>
             <div class="row">
               <div class="what">
@@ -634,7 +657,7 @@
               <!-- The Epic confirm is in the hero; this chip stays, so focus is moved there by hand. -->
               <button
                 class="chip danger"
-                disabled={!!busy || running}
+                disabled={!!shown || running}
                 onclick={() => {
                   uninstall()
                   tick().then(() => confirmCancel?.focus())
