@@ -5,6 +5,7 @@ use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use jiff::{civil::Date, tz::TimeZone, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::entries::{self, Entry};
@@ -120,17 +121,16 @@ const PLAYTIME_BUCKETS: [&str; 7] =
 const TTB_BUCKETS: [&str; 6] = ["beat0h", "beat5h", "beat15h", "beat40h", "beat100h", "unknown"];
 const TTB_LONGEST: [&str; 6] = ["beat100h", "beat40h", "beat15h", "beat5h", "beat0h", "unknown"];
 
-/// The calendar day of `t` in a time zone `utc_offset_secs` east of UTC.
-fn local_day(t: SystemTime, utc_offset_secs: i64) -> i64 {
-    let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-    (secs + utc_offset_secs).div_euclid(86_400)
+/// The calendar day of `t` in `tz`.
+fn local_day(t: SystemTime, tz: &TimeZone) -> Date {
+    tz.to_datetime(Timestamp::try_from(t).unwrap_or(Timestamp::UNIX_EPOCH)).date()
 }
 
 /// Index into `RECENT_BUCKETS`, by local calendar days before today: none, 1–6 (the rest of the last
 /// 7 days), 7–29 (the rest of the last 30), more. A time after now counts as today.
-fn recent_bucket(last: Option<SystemTime>, now: SystemTime, utc_offset_secs: i64) -> usize {
+fn recent_bucket(last: Option<SystemTime>, now: SystemTime, tz: &TimeZone) -> usize {
     let Some(last) = last else { return 4 };
-    match local_day(now, utc_offset_secs) - local_day(last, utc_offset_secs) {
+    match local_day(last, tz).until(local_day(now, tz)).map_or(0, |days| days.get_days()) {
         ..=0 => 0,
         1..=6 => 1,
         7..=29 => 2,
@@ -165,7 +165,7 @@ fn ttb_bucket(secs: Option<u64>) -> usize {
 
 /// `shown` (from `arrange`) split into groups (by id) by its sort, in bucket order, each keeping
 /// `shown`'s order. Empty groups are left out; Title is one list, so no groups. Recently played counts
-/// local calendar days: `now` in a time zone `utc_offset_secs` east of UTC.
+/// calendar days in `tz`.
 pub fn group(
     shown: &[usize],
     entries: &[Entry],
@@ -173,7 +173,7 @@ pub fn group(
     ttb: &HashMap<String, u64>,
     sort: Sort,
     now: SystemTime,
-    utc_offset_secs: i64,
+    tz: &TimeZone,
 ) -> Vec<(&'static str, Vec<usize>)> {
     let ids: &[&'static str] = match sort {
         Sort::Title => return Vec::new(),
@@ -186,7 +186,7 @@ pub fn group(
     for &i in shown {
         let e = &entries[i];
         let bucket = match sort {
-            Sort::LastPlayed => recent_bucket(entries::last_played(e, games).map(|(t, _)| t), now, utc_offset_secs),
+            Sort::LastPlayed => recent_bucket(entries::last_played(e, games).map(|(t, _)| t), now, tz),
             Sort::MostPlayed => playtime_bucket(entries::playtime(e, games).0),
             Sort::LongestToBeat => match ttb_bucket(ttb_secs(e, games, ttb)) {
                 5 => 5,
@@ -373,25 +373,22 @@ pub(crate) mod tests {
 
     #[test]
     fn recent_buckets_count_local_calendar_days() {
-        // 1000 days after the epoch, 10:00 local time two hours east of UTC.
-        let offset = 2 * 3600;
-        let day = 86_400;
-        let now = UNIX_EPOCH + Duration::from_secs(1_000 * day + 8 * 3600);
-        let at = |secs: u64| RECENT_BUCKETS[recent_bucket(Some(UNIX_EPOCH + Duration::from_secs(secs)), now, offset)];
-        let days_ago = |d: u64| at(1_000 * day + 8 * 3600 - d * day);
-        assert_eq!(RECENT_BUCKETS[recent_bucket(None, now, offset)], "neverPlayed");
-        assert_eq!(days_ago(0), "today");
-        // 00:30 local today is 22:30 UTC yesterday: still today.
-        assert_eq!(at(1_000 * day - 3600 - 1800), "today");
-        // 23:30 local yesterday: the week, though under a day ago.
-        assert_eq!(at(1_000 * day - 2 * 3600 - 1800), "thisWeek");
-        assert_eq!(days_ago(1), "thisWeek");
-        assert_eq!(days_ago(6), "thisWeek");
-        assert_eq!(days_ago(7), "thisMonth");
-        assert_eq!(days_ago(29), "thisMonth");
-        assert_eq!(days_ago(30), "earlier");
+        let tz = TimeZone::get("Europe/Amsterdam").unwrap();
+        let at = |s: &str| SystemTime::from(format!("{s}[Europe/Amsterdam]").parse::<jiff::Zoned>().unwrap().timestamp());
+        // 10:00 on the Monday after summer time ended.
+        let now = at("2024-10-28T10:00");
+        let bucket = |s: &str| RECENT_BUCKETS[recent_bucket(Some(at(s)), now, &tz)];
+        assert_eq!(RECENT_BUCKETS[recent_bucket(None, now, &tz)], "neverPlayed");
+        assert_eq!(bucket("2024-10-28T00:30"), "today");
+        // Yesterday at 23:30, under a day ago: the week.
+        assert_eq!(bucket("2024-10-27T23:30"), "thisWeek");
+        // Six days ago at 00:30 summer time, which today's offset would put on the day before.
+        assert_eq!(bucket("2024-10-22T00:30"), "thisWeek");
+        assert_eq!(bucket("2024-10-21T23:59"), "thisMonth");
+        assert_eq!(bucket("2024-09-29T00:00"), "thisMonth");
+        assert_eq!(bucket("2024-09-28T23:59"), "earlier");
         // A clock that went backwards: today.
-        assert_eq!(at(1_000 * day + 9 * 3600), "today");
+        assert_eq!(bucket("2024-10-28T11:00"), "today");
     }
 
     fn named<'a>(g: &'a [Game], e: &[Entry], groups: Vec<(&'static str, Vec<usize>)>) -> Vec<(&'static str, Vec<&'a str>)> {
@@ -401,7 +398,7 @@ pub(crate) mod tests {
     /// Groups `library()` the way the `library` command does: `arrange` in `sort` order, then `group`.
     fn grouped(g: &[Game], e: &[Entry], sort: Sort, ttb: &HashMap<String, u64>, now: u64) -> Vec<(&'static str, Vec<usize>)> {
         let shown = arrange(g, e, "", None, false, sort, ttb);
-        group(&shown, e, g, ttb, sort, UNIX_EPOCH + Duration::from_secs(now), 0)
+        group(&shown, e, g, ttb, sort, UNIX_EPOCH + Duration::from_secs(now), &TimeZone::UTC)
     }
 
     #[test]
@@ -423,7 +420,7 @@ pub(crate) mod tests {
             named(&g, &e, grouped(&g, &e, Sort::LongestToBeat, &ttb, 0)),
             [("beat100h", vec!["delta"]), ("beat15h", vec!["beta"]), ("unknown", vec!["Alpha", "Gamma Beta"])]
         );
-        assert!(group(&[], &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, 0).is_empty());
+        assert!(group(&[], &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, &TimeZone::UTC).is_empty());
     }
 
     #[test]
@@ -575,7 +572,7 @@ pub(crate) mod tests {
         let g = library();
         let e = entries::group(&g, &HashMap::new());
         let shown = arrange(&g, &e, "", None, false, Sort::MostPlayed, &no_ttb());
-        let groups = group(&shown, &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, 0);
+        let groups = group(&shown, &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, &TimeZone::UTC);
         // Alpha was alone in Never played, so that group goes.
         let lists = lists_of(&["steam-beta", "steam-Alpha"], &[]);
         assert_eq!(

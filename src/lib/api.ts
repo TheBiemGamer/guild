@@ -36,12 +36,9 @@ export function queueState(queue: QueueView, keys: string[]): QueueState | null 
   return { key, action, state: at > 0 ? 'queued' : queue.paused ? 'paused' : 'active' }
 }
 
-/**
- * Recently played groups by local calendar day, so it sends the time zone's offset east of UTC. `lists`: the Lists
- * filters that are on; Hidden brings hidden games back, and favorites go on top unless Favorites is the only one.
- */
+/** `lists`: the Lists filters that are on; Hidden brings hidden games back, and favorites go on top unless Favorites is the only one. */
 export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort, lists: ListFilter[]) =>
-  commands.library(query, store, installedOnly, sort, lists, -new Date().getTimezoneOffset())
+  commands.library(query, store, installedOnly, sort, lists)
 /**
  * `withDlc`: an Epic or GOG install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the copy `key`.
  * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic, GOG or Amazon Move goes to.

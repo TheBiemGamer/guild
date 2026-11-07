@@ -52,14 +52,20 @@ export function playtimeLabel(minutes: number): string {
   return minutes === 0 ? t('playtime.never') : hoursMinutes(minutes)
 }
 
-/** Last played tile, by whole 24 h periods since `at` (months 30 days, years 365): "Today", "Yesterday", "12 days ago". */
+/** Last played tile, by local calendar days, then calendar months: "Today", "Yesterday", "12 days ago", "2 months ago". */
 export function lastPlayedLabel(at: number, now = Date.now() / 1000): string {
-  const days = Math.floor(Math.max(0, now - at) / 86_400)
+  const then = new Date(Math.min(at, now) * 1000)
+  const today = new Date(now * 1000)
+  // Each local date as a UTC midnight, so a 23 or 25 hour day still counts as one.
+  const date = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  const days = (date(today) - date(then)) / 86_400_000
   if (days === 0) return t('lastPlayed.today')
   if (days === 1) return t('lastPlayed.yesterday')
   if (days < 30) return t('lastPlayed.days', { n: days })
-  if (days < 365) return t('lastPlayed.months', { n: Math.floor(days / 30) })
-  return t('lastPlayed.years', { n: Math.floor(days / 365) })
+  const months =
+    (today.getFullYear() - then.getFullYear()) * 12 + today.getMonth() - then.getMonth() - (today.getDate() < then.getDate() ? 1 : 0)
+  if (months < 12) return t('lastPlayed.months', { n: Math.max(1, months) })
+  return t('lastPlayed.years', { n: Math.floor(months / 12) })
 }
 
 /** Saves tab: "Synced just now", "Synced 5 min ago", "Synced 3 h ago", "Synced 2 days ago", or "Not synced yet". */

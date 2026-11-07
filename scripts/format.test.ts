@@ -73,20 +73,29 @@ test('playtime tile', () => {
   assert.equal(playtimeLabel(903), '15 h 3 min')
 })
 
-test('last played counts whole days since, months of 30 and years of 365', () => {
-  const now = 1_000 * 86_400
-  const daysAgo = (d: number) => lastPlayedLabel(now - d * 86_400, now)
-  assert.equal(daysAgo(0), 'Today')
-  assert.equal(lastPlayedLabel(now - 86_399, now), 'Today')
-  assert.equal(daysAgo(1), 'Yesterday')
-  assert.equal(daysAgo(2), '2 days ago')
-  assert.equal(daysAgo(29), '29 days ago')
-  assert.equal(daysAgo(30), '1 month ago')
-  assert.equal(daysAgo(65), '2 months ago')
-  assert.equal(daysAgo(365), '1 year ago')
-  assert.equal(daysAgo(800), '2 years ago')
+test('last played counts local calendar days, then calendar months', () => {
+  process.env.TZ = 'Europe/Amsterdam'
+  const at = (local: string) => new Date(local).getTime() / 1000
+  // 10:00 on the Monday after summer time ended.
+  const now = at('2024-10-28T10:00')
+  const label = (local: string) => lastPlayedLabel(at(local), now)
+  assert.equal(label('2024-10-28T00:30'), 'Today')
+  // Under a day ago, but yesterday.
+  assert.equal(label('2024-10-27T23:30'), 'Yesterday')
+  // The day summer time ended had 25 hours.
+  assert.equal(label('2024-10-26T00:00'), '2 days ago')
+  assert.equal(label('2024-10-21T23:59'), '7 days ago')
+  assert.equal(label('2024-09-29T00:00'), '29 days ago')
+  assert.equal(label('2024-09-28T23:59'), '1 month ago')
+  assert.equal(label('2024-08-29T12:00'), '1 month ago')
+  assert.equal(label('2024-08-28T12:00'), '2 months ago')
+  assert.equal(label('2023-10-29T12:00'), '11 months ago')
+  assert.equal(label('2023-10-28T12:00'), '1 year ago')
+  assert.equal(label('2022-10-28T12:00'), '2 years ago')
+  // Across the start of summer time: 31 March had 23 hours.
+  assert.equal(lastPlayedLabel(at('2024-03-30T23:00'), at('2024-04-01T00:30')), '2 days ago')
   // A clock that went backwards: today.
-  assert.equal(lastPlayedLabel(now + 60, now), 'Today')
+  assert.equal(label('2024-10-28T11:00'), 'Today')
 })
 
 test('saves sync time', () => {

@@ -9,7 +9,7 @@ export const commands = {
 	 *  them, like its other filters. Here, Hidden brings hidden games back, and favorites go on top unless
 	 *  Favorites is the only one.
 	 */
-	library: (query: string, store: Store | null, installedOnly: boolean, sort: Sort, lists: string[], utcOffsetMin: number) => __TAURI_INVOKE<Library>("library", { query, store, installedOnly, sort, lists, utcOffsetMin }),
+	library: (query: string, store: Store | null, installedOnly: boolean, sort: Sort, lists: string[]) => __TAURI_INVOKE<Library>("library", { query, store, installedOnly, sort, lists }),
 	/**
 	 *  Fills the library from SQLite so the UI renders before the stores are scanned. Answers the saved
 	 *  sort, so the first `library` call already uses it.

@@ -115,12 +115,11 @@ pub fn library(
     installed_only: bool,
     sort: Sort,
     lists: Vec<String>,
-    utc_offset_min: i64,
 ) -> Library {
     let s = state.lock();
     let mut shown = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort, &s.ttb);
     view::hide(&mut shown, &s.entries, &s.games, &s.lists, lists.iter().any(|f| f == "hidden"));
-    let mut groups = view::group(&shown, &s.entries, &s.games, &s.ttb, sort, SystemTime::now(), utc_offset_min * 60);
+    let mut groups = view::group(&shown, &s.entries, &s.games, &s.ttb, sort, SystemTime::now(), &jiff::tz::TimeZone::system());
     if lists != ["favorites"] {
         groups = view::favorites_first(&shown, groups, &s.entries, &s.games, &s.lists);
     }
