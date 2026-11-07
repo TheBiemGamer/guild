@@ -20,7 +20,13 @@ A Windows launcher that shows your Steam and Epic Games libraries as one library
 - [Legendary](https://github.com/derrod/legendary/releases), for Epic games. Put `legendary.exe` on your `PATH` or in `%LOCALAPPDATA%\Programs\legendary`.
 - Optional, for how long to beat: a free Twitch developer application (see below)
 
-There are no downloads yet. For now you build it from source: see [DEVELOPMENT.md](DEVELOPMENT.md).
+## Install
+
+Download the `x64-setup.exe` file from the [latest release](https://github.com/TheBiemGamer/game-launcher/releases/latest) and run it. It installs for your Windows user only, so it doesn't ask for admin rights.
+
+The app isn't code-signed, so Windows SmartScreen may warn you the first time. Click **More info**, then **Run anyway**.
+
+Updates download and install themselves. To build it yourself, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Getting started
 

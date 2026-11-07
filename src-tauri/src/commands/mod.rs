@@ -4,6 +4,7 @@
 pub mod game;
 pub mod library;
 pub mod settings;
+pub mod update;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -45,6 +46,8 @@ pub struct AppState {
     steam_pw_codes: Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
     /// What the password login asks next.
     steam_pw_steps: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<settings::LoginStep>>>,
+    /// The update found by the last check. Held across a check, so checks never stack.
+    update: tokio::sync::Mutex<Option<tauri_plugin_updater::Update>>,
 }
 
 #[derive(Default)]
@@ -131,6 +134,7 @@ impl AppState {
             steam_session_gen: std::sync::atomic::AtomicU64::new(0),
             steam_pw_codes: Mutex::new(None),
             steam_pw_steps: tokio::sync::Mutex::new(None),
+            update: tokio::sync::Mutex::new(None),
         }
     }
 

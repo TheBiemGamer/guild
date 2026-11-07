@@ -26,6 +26,7 @@ mod view;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(commands::AppState::new())
         .setup(|app| {
             log::init(&cache::Dirs::new().logs);
@@ -90,6 +91,8 @@ fn main() {
             commands::settings::report_problem,
             commands::library::bench_speed,
             commands::library::bench_done,
+            commands::update::check_update,
+            commands::update::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
