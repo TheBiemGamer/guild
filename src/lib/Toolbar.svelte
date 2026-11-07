@@ -4,7 +4,7 @@
   import DownloadsPopover from './DownloadsPopover.svelte'
   import UpdatePopover from './UpdatePopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
-  import { filterChips, removeChip, type Collection, type Filter } from './filters'
+  import { filterChips, removeChip, storeSegments, type Collection, type Filter } from './filters'
   import { t } from './i18n'
   import { onMount } from 'svelte'
   import { onOpenDownloads, type Card, type Progress, type QueueView, type Sort, type Store, type UpdateInfo } from './api'
@@ -21,6 +21,7 @@
     progress,
     queue,
     games,
+    storesInUse,
     modal,
     oncancel,
     onpause,
@@ -53,6 +54,8 @@
     /** The Epic download queue, active, waiting or paused. */
     queue: QueueView
     games: Card[]
+    /** The stores the whole library uses (`Library::stores`), not just what the search shows. */
+    storesInUse: Store[]
     /** A modal (Settings, Add a game) is open: Ctrl K leaves focus where it is. */
     modal: boolean
     oncancel: (key: string) => void
@@ -74,8 +77,8 @@
     oninstall: () => void
   } = $props()
 
-  /** The store segments, in order; null is All. */
-  const stores: (Store | null)[] = [null, 'steam', 'epic', 'gog', 'amazon']
+  /** The store segments, in order; null is All. Empty (no control) with fewer than two stores. */
+  const stores = $derived(storeSegments(storesInUse))
   const storeIndex = $derived(stores.indexOf(store))
   let segments = $state<HTMLButtonElement[]>([])
   const chips = $derived(filterChips(filters, collections))
@@ -159,24 +162,26 @@
   </label>
 
   <div class="chips" role="group" aria-label={t('toolbar.filter')}>
-    <div class="seg" role="radiogroup" aria-label={t('toolbar.store')} style="--at: {storeIndex}">
-      <span class="thumb" aria-hidden="true"></span>
-      {#each stores as s, i (s ?? 'all')}
-        {@const name = s === null ? undefined : storeNames[s]}
-        <button
-          role="radio"
-          aria-checked={store === s}
-          aria-label={name}
-          title={name}
-          tabindex={store === s ? 0 : -1}
-          bind:this={segments[i]}
-          onclick={() => (store = s)}
-          onkeydown={onSegmentKey}
-        >
-          {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
-        </button>
-      {/each}
-    </div>
+    {#if stores.length}
+      <div class="seg" role="radiogroup" aria-label={t('toolbar.store')} style="--at: {storeIndex}">
+        <span class="thumb" aria-hidden="true"></span>
+        {#each stores as s, i (s ?? 'all')}
+          {@const name = s === null ? undefined : storeNames[s]}
+          <button
+            role="radio"
+            aria-checked={store === s}
+            aria-label={name}
+            title={name}
+            tabindex={store === s ? 0 : -1}
+            bind:this={segments[i]}
+            onclick={() => (store = s)}
+            onkeydown={onSegmentKey}
+          >
+            {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
     <button class="chip" aria-pressed={installedOnly} onclick={() => (installedOnly = !installedOnly)}>
       {t('play.installed')}
     </button>
@@ -200,7 +205,7 @@
         {t('filters.title')}
       </button>
       {#if open === 'filters'}
-        <FilterPopover bind:filters {collections} anchor={filtersChip} onclose={close} onchanged={oncollections} />
+        <FilterPopover bind:filters {collections} multiStore={storesInUse.length > 1} anchor={filtersChip} onclose={close} onchanged={oncollections} />
       {/if}
     </div>
   </div>

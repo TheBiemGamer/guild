@@ -1,13 +1,13 @@
 // node --test scripts/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collectionFilter, filterChips, filterGroups, isList, matches, removeChip, toggleFilter, type Filter } from '../src/lib/filters.ts'
+import { collectionFilter, filterChips, filterGroups, isList, matches, removeChip, storeSegments, toggleFilter, type Filter } from '../src/lib/filters.ts'
 
 test('chips follow the popover order, one per filter that is on', () => {
   assert.deepEqual(filterChips([]), [])
   assert.deepEqual(filterChips(['bothStores', 'notInstalled']), [
     { filter: 'notInstalled', label: 'Not installed' },
-    { filter: 'bothStores', label: 'On both stores' },
+    { filter: 'bothStores', label: 'On more than one store' },
   ])
 })
 
@@ -82,7 +82,7 @@ test('the new groups widen inside and narrow across', () => {
   assert.ok(matches(played(30, 3), ['neverPlayed', 'under10h'], {}))
   assert.ok(!matches(played(30, 3), ['under10h', 'ttb5to15h'], {}))
   assert.ok(matches(played(30, 3), ['under10h', 'ttb5to15h', 'ttbUnder5h'], {}))
-  assert.deepEqual(filterChips(['ttb100hPlus', 'neverPlayed', 'bothStores']).map((c) => c.label), ['Never played', '100 h+', 'On both stores'])
+  assert.deepEqual(filterChips(['ttb100hPlus', 'neverPlayed', 'bothStores']).map((c) => c.label), ['Never played', '100 h+', 'On more than one store'])
 })
 
 const collections = [
@@ -99,7 +99,7 @@ test('Lists come after Status: Favorites, each collection, then Hidden', () => {
 
 test('list chips are named after the list and come after Status', () => {
   const on: Filter[] = ['bothStores', 'hidden', collectionFilter(7), 'notInstalled', 'favorites']
-  assert.deepEqual(filterChips(on, collections).map((c) => c.label), ['Not installed', 'Favorites', 'Co-op', 'Hidden', 'On both stores'])
+  assert.deepEqual(filterChips(on, collections).map((c) => c.label), ['Not installed', 'Favorites', 'Co-op', 'Hidden', 'On more than one store'])
   const left = removeChip(on, filterChips(on, collections)[2])
   assert.deepEqual(left, ['bothStores', 'hidden', 'notInstalled', 'favorites'])
   assert.ok(isList('collection-7') && isList('hidden') && !isList('update'))
@@ -117,4 +117,24 @@ test('lists widen each other and narrow the other groups', () => {
   assert.ok(!matches(game, ['hidden'], {}))
   assert.ok(matches(hidden, ['hidden', 'notInstalled'], {}))
   assert.ok(!matches(fav, ['favorites', 'notInstalled'], {}))
+})
+
+test('more than one store means two or more, of any stores', () => {
+  assert.ok(!matches(game, ['bothStores'], {}))
+  assert.ok(matches({ ...game, stores: ['gog', 'amazon'] }, ['bothStores'], {}))
+  assert.ok(matches({ ...game, stores: ['steam', 'epic', 'gog'] }, ['bothStores'], {}))
+})
+
+test('the Has group shows only with more than one store in use', () => {
+  const ids = (multi: boolean) => filterGroups([], multi).flatMap((g) => g.filters)
+  assert.ok(ids(true).includes('bothStores'))
+  assert.ok(!ids(false).includes('bothStores'))
+  assert.equal(filterGroups([], false).length, filterGroups([]).length - 1)
+})
+
+test('store segments: All plus the stores in use, none for a single store', () => {
+  assert.deepEqual(storeSegments([]), [])
+  assert.deepEqual(storeSegments(['steam']), [])
+  assert.deepEqual(storeSegments(['steam', 'epic']), [null, 'steam', 'epic'])
+  assert.deepEqual(storeSegments(['steam', 'epic', 'gog', 'amazon']), [null, 'steam', 'epic', 'gog', 'amazon'])
 })

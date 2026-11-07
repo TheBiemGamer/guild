@@ -66,6 +66,8 @@ export interface Library {
   amazon: AmazonLogin | null
   /** Amazon's state is known and it isn't logged in: the settings button carries a dot. */
   amazonAttention: boolean
+  /** The stores the whole library has a game from, in toolbar order; games the owner added don't count. */
+  stores: Store[]
 }
 /** The game played last; `hero` is ready for an `<img>` or CSS `url()`. `chosen` and `copyKeys` as on `Card`. */
 export interface Featured { key: string; chosen: string; copyKeys: string[]; title: string; hero: string | null }

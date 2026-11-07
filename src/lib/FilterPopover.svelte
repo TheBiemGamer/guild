@@ -5,9 +5,11 @@
   import { popover } from './popover'
   import { t } from './i18n'
 
-  let { filters = $bindable(), collections, anchor, onclose, onchanged }: {
+  let { filters = $bindable(), collections, multiStore, anchor, onclose, onchanged }: {
     filters: Filter[]
     collections: Collection[]
+    /** The library uses more than one store: the Has group shows. */
+    multiStore: boolean
     /** The Filters chip: clicks on it toggle instead of closing from outside. */
     anchor: HTMLElement | undefined
     onclose: (refocus: boolean) => void
@@ -15,7 +17,7 @@
     onchanged: () => void
   } = $props()
 
-  const groups = $derived(filterGroups(collections))
+  const groups = $derived(filterGroups(collections, multiStore))
 
   let managing = $state(false)
   let manageButton = $state<HTMLButtonElement>()

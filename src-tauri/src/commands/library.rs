@@ -99,6 +99,8 @@ pub struct Library {
     amazon: Option<amazon::Login>,
     /// The same for Amazon.
     amazon_attention: bool,
+    /// The stores the whole library has a game from, in toolbar order; games the owner added don't count.
+    stores: Vec<ProviderKind>,
 }
 
 /// `lists` are the Lists filters that are on ("favorites", "hidden", "collection-<id>"); the UI applies
@@ -136,7 +138,16 @@ pub fn library(
         gog_attention,
         amazon: s.amazon_login,
         amazon_attention,
+        stores: stores_in_use(&s.games),
     }
+}
+
+/// The stores with at least one game in `games`, in `ProviderKind::ALL` order, without `Custom`.
+fn stores_in_use(games: &[Game]) -> Vec<ProviderKind> {
+    ProviderKind::ALL
+        .into_iter()
+        .filter(|&p| p != ProviderKind::Custom && games.iter().any(|g| g.provider == p))
+        .collect()
 }
 
 /// Whether a store's state raises the Settings dot: only when it was set up here and broke. Unreachable means a login
@@ -1041,6 +1052,14 @@ mod tests {
             assert_eq!(merged.games, vec![epic_game.clone()]);
             assert!(merged.scanned.is_empty());
         }
+    }
+
+    #[test]
+    fn stores_in_use_follow_toolbar_order_without_custom() {
+        let copy = |provider| Game { provider, ..game("A", false, None, None) };
+        assert_eq!(stores_in_use(&[]), []);
+        let games = [copy(ProviderKind::Custom), copy(ProviderKind::Amazon), copy(ProviderKind::Steam), copy(ProviderKind::Amazon)];
+        assert_eq!(stores_in_use(&games), [ProviderKind::Steam, ProviderKind::Amazon]);
     }
 
     #[test]

@@ -48,7 +48,7 @@
   let popoverOpen = $state(false)
   let collections = $state<Collection[]>([])
 
-  let lib = $state<Library>({ games: [], groups: [], total: 0, status: [], epic: null, epicAttention: false, steamAttention: false, epicNotice: false, gog: null, gogAttention: false, amazon: null, amazonAttention: false })
+  let lib = $state<Library>({ games: [], groups: [], total: 0, status: [], epic: null, epicAttention: false, steamAttention: false, epicNotice: false, gog: null, gogAttention: false, amazon: null, amazonAttention: false, stores: [] })
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
@@ -112,6 +112,10 @@
     // Rust needs the Lists filters: Hidden brings hidden games back, and they decide whether favorites go on top.
     lib = await api.library(query, store, installedOnly, sort, filters.filter(isList))
     version++
+    // A store the toolbar no longer offers (logged out, or the only one left) stops filtering; so does Has.
+    const multi = lib.stores.length > 1
+    if (store && (!multi || !lib.stores.includes(store))) store = null
+    if (!multi && filters.includes('bothStores')) filters = filters.filter((f) => f !== 'bothStores')
   }
 
   /** Library, the last-played game and the collections together, so the banner and the tint arrive with the grid. */
@@ -450,6 +454,7 @@
     {progress}
     {queue}
     games={lib.games}
+    storesInUse={lib.stores}
     modal={settingsOpen || adding !== null}
     oncancel={cancelDownload}
     onpause={() => changeQueue(api.pauseDownloads)}

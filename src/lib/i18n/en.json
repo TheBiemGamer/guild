@@ -262,7 +262,7 @@
   "filters.ttb15to40h": "15–40 h",
   "filters.ttb40to100h": "40–100 h",
   "filters.ttb100hPlus": "100 h+",
-  "filters.bothStores": "On both stores",
+  "filters.bothStores": "On more than one store",
   "filters.favorites": "Favorites",
   "filters.hidden": "Hidden",
   "common.delete": "Delete",
