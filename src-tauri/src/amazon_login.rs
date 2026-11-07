@@ -15,12 +15,12 @@ pub fn sign_in_page(url: &str) -> Option<Url> {
 
 /// Opens the login window on Nile's `url` and waits (call from a blocking thread) until it yields a code or the user
 /// closes it (`Ok(None)`).
-pub fn run(app: &AppHandle, url: &str) -> Result<Option<String>, String> {
-    let url = sign_in_page(url).ok_or("Nile gave an unexpected login page.")?;
+pub fn run(app: &AppHandle, url: &str) -> Result<Option<String>, crate::msg::Msg> {
+    let url = sign_in_page(url).ok_or(msg!(nileOddLoginPage))?;
     let (tx, rx) = mpsc::channel();
     let closed = tx.clone();
     let window = WebviewWindowBuilder::new(app, "amazon-login", WebviewUrl::External(url))
-        .title("Log in to Amazon")
+        .title(crate::msg::native("logInAmazonTitle"))
         .inner_size(520.0, 760.0)
         // Fresh cookies every time, so the user picks the account.
         .incognito(true)
@@ -32,7 +32,7 @@ pub fn run(app: &AppHandle, url: &str) -> Result<Option<String>, String> {
             None => true,
         })
         .build()
-        .map_err(|e| format!("can't open the login window: {e}"))?;
+        .map_err(|e| msg!(cantOpenLoginWindow, detail = e.to_string()))?;
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             let _ = closed.send(None);

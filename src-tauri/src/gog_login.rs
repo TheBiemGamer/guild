@@ -9,12 +9,12 @@ use crate::library::gog::LOGIN_URL;
 
 /// Opens the login window and waits (call from a blocking thread) until it yields a code
 /// or the user closes it (`Ok(None)`).
-pub fn run(app: &AppHandle) -> Result<Option<String>, String> {
+pub fn run(app: &AppHandle) -> Result<Option<String>, crate::msg::Msg> {
     let (tx, rx) = mpsc::channel();
     let closed = tx.clone();
     let url = Url::parse(LOGIN_URL).expect("valid constant URL");
     let window = WebviewWindowBuilder::new(app, "gog-login", WebviewUrl::External(url))
-        .title("Log in to GOG")
+        .title(crate::msg::native("logInGogTitle"))
         .inner_size(520.0, 760.0)
         // Fresh cookies every time, so the user picks the account.
         .incognito(true)
@@ -26,7 +26,7 @@ pub fn run(app: &AppHandle) -> Result<Option<String>, String> {
             None => true,
         })
         .build()
-        .map_err(|e| format!("can't open the login window: {e}"))?;
+        .map_err(|e| msg!(cantOpenLoginWindow, detail = e.to_string()))?;
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             let _ = closed.send(None);

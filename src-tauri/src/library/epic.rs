@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::msg::Msg;
+
 use super::{Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
 
 /// What a running install reports back.
@@ -119,13 +121,12 @@ pub fn launch_args(app_name: &str, options: &LaunchOptions, skip_version_check: 
 /// `exe` (absolute, or relative to `install_dir`) as a path relative to `install_dir`, only when it is an
 /// existing file inside it.
 pub fn override_exe(install_dir: &Path, exe: &str) -> Result<String, Error> {
-    const OUTSIDE: &str = "The executable must be a file inside the game's install folder.";
-    let dir = install_dir.canonicalize().map_err(|_| "The game's install folder is missing.")?;
+    let dir = install_dir.canonicalize().map_err(|_| msg!(installFolderGone))?;
     // Both canonical, so `..`, links and other drives can't slip past the prefix check.
-    let file = install_dir.join(exe).canonicalize().map_err(|_| OUTSIDE)?;
+    let file = install_dir.join(exe).canonicalize().map_err(|_| msg!(exeOutsideInstallFolder))?;
     match file.strip_prefix(&dir) {
         Ok(relative) if file.is_file() => Ok(relative.to_string_lossy().into_owned()),
-        _ => Err(OUTSIDE.into()),
+        _ => Err(msg!(exeOutsideInstallFolder).into()),
     }
 }
 
@@ -162,8 +163,8 @@ pub enum SyncOutcome {
     CloudNewer,
     /// GOG: both sides changed since the last sync, so nothing changed. Asked like `CloudNewer`.
     Conflict,
-    /// Legendary's last message.
-    Failed(String),
+    /// Why: often the tool's last message, as `system`.
+    Failed(Msg),
 }
 
 /// Flags from `legendary sync-saves --help` (0.21.1).
@@ -192,8 +193,8 @@ pub(super) const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
     match run_with_timeout(legendary(&sync_args(app_name, sync)), SYNC_ANSWERS, SYNC_TIMEOUT) {
         Ok(Some((success, _, log))) => parse_sync(success, &log),
-        Ok(None) => SyncOutcome::Failed("Cloud saves timed out.".into()),
-        Err(e) => SyncOutcome::Failed(e.to_string()),
+        Ok(None) => SyncOutcome::Failed(msg!(savesTimedOut)),
+        Err(e) => SyncOutcome::Failed(Msg::system(e)),
     }
 }
 
@@ -241,11 +242,11 @@ fn parse_sync(success: bool, log: &str) -> SyncOutcome {
         let last = log.lines().rev().map(str::trim).find(|l| !l.is_empty());
         // `[cli] ERROR: Login failed!` -> `Login failed!`
         let message = last.map(|l| l.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(l, |(_, m)| m));
-        return SyncOutcome::Failed(message.unwrap_or("Legendary gave no reason.").to_owned());
+        return SyncOutcome::Failed(message.map_or(msg!(legendaryNoReason), Msg::system));
     }
     let has = |text: &str| log.contains(text);
     if has("Empty input, skipping...") || has("skipping due to --yes") {
-        SyncOutcome::Failed("Legendary can't tell where this game keeps its saves.".into())
+        SyncOutcome::Failed(msg!(legendaryNoSaveFolder))
     } else if has("Save game uploading is disabled") && !has("- Cloud save date: N/A") {
         SyncOutcome::LocalNewer
     } else if has("Save game downloading is disabled") && !has("- Local save date: N/A") {
@@ -347,7 +348,7 @@ pub fn verify(app_name: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<
 /// Legendary 0.21 renames the folder, so another drive is refused before it runs.
 pub fn move_to(app_name: &str, from: Option<&Path>, dest: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
     if from.is_some_and(|from| !same_drive(from, Path::new(dest))) {
-        return Err("Moving to another drive isn't supported yet. Pick a folder on the same drive.".into());
+        return Err(msg!(otherDriveMove).into());
     }
     let (success, log) = run_logged(legendary(&move_args(app_name, dest)), on_event)?;
     Ok(log_outcome(success, &log, Some("Finished."))?)
@@ -373,8 +374,8 @@ pub fn import(app_name: &str, path: &str) -> Result<(), Error> {
     Ok(log_outcome(success, &log, Some("has been imported."))?)
 }
 
-fn import_requires_existing_folder(path: &Path) -> Result<(), String> {
-    if path.is_dir() { Ok(()) } else { Err(format!("Not a folder: {}", path.display())) }
+fn import_requires_existing_folder(path: &Path) -> Result<(), Msg> {
+    if path.is_dir() { Ok(()) } else { Err(msg!(notAFolder, path = path.display().to_string())) }
 }
 
 /// Imports the games the Epic Games Launcher installed.
@@ -426,7 +427,7 @@ fn parse_verify_progress(line: &str) -> Option<Progress> {
 }
 
 /// Reads `verify`'s log (`verify_game` in 0.21's `cli.py`), which exits 0 whatever it found.
-fn parse_verify(success: bool, log: &str) -> Result<Verify, String> {
+fn parse_verify(success: bool, log: &str) -> Result<Verify, Msg> {
     if success && log.contains("Verification finished successfully.") {
         Ok(Verify::Ok)
     } else if success && log.contains("Verification failed, ") {
@@ -438,7 +439,7 @@ fn parse_verify(success: bool, log: &str) -> Result<Verify, String> {
 
 /// Legendary 0.21 exits 0 after most failures, so the log decides: it worked when it exited 0 and logged
 /// the `done` line, or, without one, logged no error.
-fn log_outcome(success: bool, log: &str, done: Option<&str>) -> Result<(), String> {
+fn log_outcome(success: bool, log: &str, done: Option<&str>) -> Result<(), Msg> {
     let finished = match done {
         Some(done) => log.lines().any(|l| l.trim_end().ends_with(done)),
         None => !log.lines().any(is_error_line),
@@ -452,12 +453,12 @@ fn is_error_line(line: &str) -> bool {
 }
 
 /// The last error in a log, else its last line, without the `[cli] ERROR: ` head.
-fn log_error(log: &str) -> String {
+fn log_error(log: &str) -> Msg {
     let lines = || log.lines().rev().map(str::trim).filter(|l| !l.is_empty());
     let Some(line) = lines().find(|l| is_error_line(l)).or_else(|| lines().next()) else {
-        return "Legendary gave no reason.".into();
+        return msg!(legendaryNoReason);
     };
-    line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m).to_owned()
+    Msg::system(line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m))
 }
 
 fn stream(mut command: Command, action: ProgressAction, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
@@ -477,7 +478,7 @@ fn stream(mut command: Command, action: ProgressAction, mut on_event: impl FnMut
         }
     }
     let status = child.wait()?;
-    if status.success() { Ok(()) } else { Err(format!("Legendary install failed ({status}): {last_line}").into()) }
+    if status.success() { Ok(()) } else { Err(msg!(legendaryInstallFailed, status = status.to_string(), detail = last_line).into()) }
 }
 
 /// Uninstalls a game or a DLC (Legendary's app name).
@@ -600,10 +601,13 @@ fn json(args: &[&str]) -> Result<Value, Error> {
 }
 
 /// Legendary logs to stderr; its last line says what went wrong.
-fn failure(output: &std::process::Output) -> String {
+fn failure(output: &std::process::Output) -> Msg {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no output");
-    format!("Legendary failed ({}): {last}", output.status)
+    let status = output.status.to_string();
+    match stderr.lines().rev().find(|l| !l.trim().is_empty()) {
+        Some(last) => msg!(legendaryFailed, status = status, detail = last),
+        None => msg!(legendaryFailedSilent, status = status),
+    }
 }
 
 /// Whether an Epic catalog item (a `list --json` entry) has `path` among its `metadata.categories`.
@@ -1062,14 +1066,14 @@ mod tests {
 
         // Offline, or another Legendary error: its last message.
         let offline = "[cli] INFO: Logging in...\n[cli] ERROR: Login failed! Cannot continue with download process.\n";
-        assert_eq!(parse_sync(false, offline), Failed("Login failed! Cannot continue with download process.".into()));
-        assert_eq!(parse_sync(false, ""), Failed("Legendary gave no reason.".into()));
+        assert_eq!(parse_sync(false, offline), Failed(Msg::system("Login failed! Cannot continue with download process.")));
+        assert_eq!(parse_sync(false, ""), Failed(msg!(legendaryNoReason)));
         // A save folder with variables Legendary can't fill in: the empty answer skips the game.
         let no_folder = log(&[
             r#"Computed save path: "{AppData}/Goo""#,
             "Empty input, skipping...",
         ]);
-        assert_eq!(parse_sync(true, &no_folder), Failed("Legendary can't tell where this game keeps its saves.".into()));
+        assert_eq!(parse_sync(true, &no_folder), Failed(msg!(legendaryNoSaveFolder)));
     }
 
     #[test]
@@ -1113,7 +1117,7 @@ mod tests {
         // Refused before Legendary runs, so no process starts.
         let mut started = false;
         let refused = move_to("Goo", Some(Path::new(r"C:\Games\Goo")), r"D:\Games", |_| started = true);
-        assert_eq!(refused.unwrap_err().to_string(), "Moving to another drive isn't supported yet. Pick a folder on the same drive.");
+        assert_eq!(Msg::from(refused.unwrap_err()), msg!(otherDriveMove));
         assert!(!started);
     }
 
@@ -1140,8 +1144,8 @@ mod tests {
         assert_eq!(parse_verify(true, broken), Ok(Verify::Repair));
         let gone = "[cli] INFO: Loading installed manifest for \"Goo\"\n\
                     [cli] ERROR: Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.\n";
-        assert_eq!(parse_verify(true, gone), Err("Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.".into()));
-        assert_eq!(parse_verify(false, ""), Err("Legendary gave no reason.".into()));
+        assert_eq!(parse_verify(true, gone), Err(Msg::system("Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.")));
+        assert_eq!(parse_verify(false, ""), Err(msg!(legendaryNoReason)));
     }
 
     #[test]
@@ -1159,19 +1163,19 @@ mod tests {
         assert_eq!(log_outcome(true, moved, Some("Finished.")), Ok(()));
         let other_drive = "[cli] INFO: Moving \"Goo\" from \"C:/Games\" to \"D:\\Games\"\n\
                            [cli] ERROR: Moving to a different drive is not supported.\n";
-        assert_eq!(log_outcome(true, other_drive, Some("Finished.")), Err("Moving to a different drive is not supported.".into()));
+        assert_eq!(log_outcome(true, other_drive, Some("Finished.")), Err(Msg::system("Moving to a different drive is not supported.")));
         // A DLC that fails to import doesn't undo the game's import.
         let imported = "[cli] ERROR: No files belonging to DLC \"Hat\" (Hat) found in the specified location.\n\
                         [cli] INFO: Game \"Goo\" has been imported.\n";
         assert_eq!(log_outcome(true, imported, Some("has been imported.")), Ok(()));
         let wrong = "[cli] CRITICAL: Did not find game \"Goo\" on account.\n";
-        assert_eq!(log_outcome(true, wrong, Some("has been imported.")), Err("Did not find game \"Goo\" on account.".into()));
+        assert_eq!(log_outcome(true, wrong, Some("has been imported.")), Err(Msg::system("Did not find game \"Goo\" on account.")));
         // egl-sync has no closing line: any error fails it.
         assert_eq!(log_outcome(true, "[cli] INFO: Reading EGL game manifests...\n", None), Ok(()));
         let no_meta = "[cli] ERROR: Legendary is missing game metadata, please login.\n";
-        assert_eq!(log_outcome(true, no_meta, None), Err("Legendary is missing game metadata, please login.".into()));
+        assert_eq!(log_outcome(true, no_meta, None), Err(Msg::system("Legendary is missing game metadata, please login.")));
         // A prompt that read the closed stdin crashes with a traceback.
-        assert_eq!(log_outcome(false, "Traceback...\nEOFError: EOF when reading a line\n", None), Err("EOFError: EOF when reading a line".into()));
+        assert_eq!(log_outcome(false, "Traceback...\nEOFError: EOF when reading a line\n", None), Err(Msg::system("EOFError: EOF when reading a line")));
     }
 
     #[test]
@@ -1201,6 +1205,6 @@ mod tests {
             stdout: Vec::new(),
             stderr: b"[cli] INFO: Logging in...\n[cli] ERROR: Login failed, cannot continue!\n\n".to_vec(),
         };
-        assert_eq!(failure(&output), "Legendary failed (exit code: 1): [cli] ERROR: Login failed, cannot continue!");
+        assert_eq!(failure(&output), msg!(legendaryFailed, status = "exit code: 1", detail = "[cli] ERROR: Login failed, cannot continue!"));
     }
 }

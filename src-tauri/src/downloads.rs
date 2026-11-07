@@ -137,12 +137,12 @@ impl Queue {
 
 /// The toast for a job that worked; `repaired` says a verify went on to repair files.
 pub fn done_message(action: QueuedAction, repaired: bool) -> &'static str {
-    match action {
-        QueuedAction::Install => "Ready to play",
-        QueuedAction::Update => "Updated",
-        QueuedAction::Verify if repaired => "Repaired",
-        QueuedAction::Verify => "Files verified",
-    }
+    crate::msg::native(match action {
+        QueuedAction::Install => "readyToPlay",
+        QueuedAction::Update => "updated",
+        QueuedAction::Verify if repaired => "repaired",
+        QueuedAction::Verify => "filesVerified",
+    })
 }
 
 /// One queued job as `poll` reports it.

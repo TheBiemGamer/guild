@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use super::epic::{InstallEvent, LaunchOptions, SaveSync, SyncOutcome, split_args};
 use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
 use crate::cache::{Dirs, db};
+use crate::msg::Msg;
 use crate::tools;
 
 /// GOG Galaxy's client id: gogdl's default, and the key of the main login in `auth.json`.
@@ -179,7 +180,7 @@ pub fn log_in(code: &str) -> Result<(), Error> {
             *cached = Some(creds);
             Ok(())
         }
-        None => Err("GOG didn't accept the login. Try again.".into()),
+        None => Err(msg!(gogLoginRejected).into()),
     }
 }
 
@@ -188,7 +189,7 @@ pub fn log_out() -> Result<(), Error> {
     let mut cached = lock_auth();
     *cached = None;
     match std::fs::remove_file(auth_file()) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("Couldn't log out of GOG: {e}").into()),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(msg!(cantLogOutGog, detail = e.to_string()).into()),
         _ => Ok(()),
     }
 }
@@ -235,24 +236,26 @@ fn id_text(v: &Value) -> Option<String> {
 pub struct Gog;
 
 /// Listed by `list`, which knows the app's folders and HTTP client; installed and uninstalled through `commands::game`.
-const NOT_HERE: &str = "GOG games go through the download queue.";
+fn not_here() -> Error {
+    msg!(gogNotHere).into()
+}
 
 impl Provider for Gog {
     fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn launch(&self, game: &Game) -> Result<(), Error> {
-        let dir = game.install_dir.as_deref().filter(|_| game.installed).ok_or("This game isn't installed.")?;
+        let dir = game.install_dir.as_deref().filter(|_| game.installed).ok_or(msg!(notInstalled))?;
         launch(&game.external_id, dir, &LaunchOptions::default()).map(drop)
     }
 
     fn install(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn uninstall(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn running_game(&self) -> Option<String> {
@@ -477,9 +480,6 @@ const INSTALL_INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const SAVE_TS: &str = "gog-save-ts";
 /// gogdl retries forever without a connection, so a job that sends no progress this long is stopped.
 const STALL: Duration = Duration::from_secs(5 * 60);
-const STALLED: &str = "No progress for 5 minutes, so the download was stopped. Check your connection and try again.";
-const UNREACHABLE: &str = "Can't reach GOG. Try again later.";
-const NO_MANIFEST: &str = "Imported games can't be verified.";
 const DEFAULT_LANG: &str = "en-US";
 
 /// Which DLC a job installs; a DLC left out of `Only` is deleted by an update.
@@ -523,9 +523,9 @@ fn json_line(stdout: &[u8]) -> Option<Value> {
 fn ensure_login() -> Result<(), Error> {
     match login().0 {
         Login::LoggedIn => Ok(()),
-        Login::NoGogdl => Err("Install gogdl in Settings first.".into()),
-        Login::LoggedOut => Err("Log in to GOG in Settings first.".into()),
-        Login::Unreachable => Err(UNREACHABLE.into()),
+        Login::NoGogdl => Err(msg!(installGogdlFirst).into()),
+        Login::LoggedOut => Err(msg!(logInGogFirst).into()),
+        Login::Unreachable => Err(msg!(cantReachGog).into()),
     }
 }
 
@@ -730,7 +730,7 @@ fn run(args: Vec<OsString>, mut action: ProgressAction, mut on_event: impl FnMut
             _ = child.kill();
         }
         _ = child.wait();
-        return Err(STALLED.into());
+        return Err(msg!(gogStalled).into());
     }
     let status = child.wait()?;
     Ok(Run { success: status.success(), stdout: out.join().unwrap_or_default(), log })
@@ -740,15 +740,15 @@ fn run(args: Vec<OsString>, mut action: ProgressAction, mut on_event: impl FnMut
 /// info file in its folder (`done`).
 fn outcome(run: &Run, done: bool) -> Result<(), Error> {
     if run.stdout.contains("Not enough disk space") {
-        return Err("There isn't enough disk space.".into());
+        return Err(msg!(noDiskSpace).into());
     }
     if run.log.contains("doesn't support content system api") {
         // Also what an invalid login looks like.
         let unreachable = run.log.contains("Failed to refresh credentials");
-        return Err(if unreachable { UNREACHABLE } else { "GOG doesn't offer this game for download here." }.into());
+        return Err(if unreachable { msg!(cantReachGog) } else { msg!(gogNotOffered) }.into());
     }
     if run.log.contains("No manifest stored locally") {
-        return Err(NO_MANIFEST.into());
+        return Err(msg!(gogNoManifest).into());
     }
     if run.success && done && !run.log.contains("CRITICAL:") {
         return Ok(());
@@ -757,13 +757,13 @@ fn outcome(run: &Run, done: bool) -> Result<(), Error> {
 }
 
 /// The last error in gogdl's log without its `[NAME] LEVEL: ` head, else its last line.
-fn last_error(log: &str) -> String {
+fn last_error(log: &str) -> Msg {
     let lines = || log.lines().rev().map(str::trim).filter(|l| !l.is_empty());
     let is_error = |l: &&str| l.contains("] ERROR: ") || l.contains("] CRITICAL: ");
     let Some(line) = lines().find(is_error).or_else(|| lines().next()) else {
-        return "gogdl stopped without saying why.".into();
+        return msg!(gogdlNoReason);
     };
-    line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m).to_owned()
+    Msg::system(line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m))
 }
 
 /// Downloads a game into a folder named after it inside `base`, with its owned DLC or none. Returns that folder.
@@ -775,8 +775,8 @@ pub fn install(
     on_event: impl FnMut(InstallEvent),
 ) -> Result<PathBuf, Error> {
     ensure_login()?;
-    let info = install_info(conn, id).ok_or(UNREACHABLE)?;
-    let folder = info["folder_name"].as_str().filter(|f| !f.is_empty()).ok_or("GOG didn't name the game's folder.")?;
+    let info = install_info(conn, id).ok_or(msg!(cantReachGog))?;
+    let folder = info["folder_name"].as_str().filter(|f| !f.is_empty()).ok_or(msg!(gogNoFolderName))?;
     std::fs::create_dir_all(base)?;
     let dlcs = if with_dlc { Dlcs::All } else { Dlcs::Only(Vec::new()) };
     let run = run(job_args("download", id, base, &pick_lang(&info), &dlcs), ProgressAction::Install, on_event)?;
@@ -820,7 +820,7 @@ pub fn change_dlc(id: &str, dir: &Path, dlc: &str, add: bool, on_event: impl FnM
 /// Checks an installed game's files against its manifest and downloads the bad or missing ones.
 pub fn verify(id: &str, dir: &Path, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
     if !manifest(id).is_file() {
-        return Err(NO_MANIFEST.into());
+        return Err(msg!(gogNoManifest).into());
     }
     ensure_login()?;
     let Local { lang, dlcs } = local(dir, id);
@@ -843,7 +843,7 @@ pub fn record_install(conn: &Connection, id: &str, dir: &Path) -> Result<(), Err
 // shortcut: GOG's uninstaller (unins000.exe) doesn't run, so registry keys from its setup stay behind.
 pub fn uninstall(conn: &Connection, id: &str, dir: &Path) -> Result<(), Error> {
     if !has_info(dir, id) {
-        return Err(format!("{} doesn't hold this game, so nothing was deleted.", dir.display()).into());
+        return Err(msg!(folderNotThisGame, path = dir.display().to_string()).into());
     }
     std::fs::remove_dir_all(dir)?;
     _ = std::fs::remove_file(manifest(id));
@@ -857,14 +857,14 @@ pub fn uninstall(conn: &Connection, id: &str, dir: &Path) -> Result<(), Error> {
 /// Reads an existing install at `path` with gogdl. Returns the game's product id.
 pub fn import(path: &Path) -> Result<String, Error> {
     if !path.is_dir() {
-        return Err(format!("Not a folder: {}", path.display()).into());
+        return Err(msg!(notAFolder, path = path.display().to_string()).into());
     }
     let output = gogdl([OsStr::new("import"), path.as_os_str()]).output()?;
     match json_line(&output.stdout).and_then(|v| id_text(&v["appName"])) {
         Some(id) => Ok(id),
         None => {
             log!("gogdl import: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
-            Err(format!("No GOG game found in {}.", path.display()).into())
+            Err(msg!(noGogGameIn, path = path.display().to_string()).into())
         }
     }
 }
@@ -872,11 +872,11 @@ pub fn import(path: &Path) -> Result<String, Error> {
 /// Moves an installed game's folder into `dest` and updates its record. A rename, so only on the same drive.
 pub fn move_to(conn: &Connection, id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
     if !super::epic::same_drive(from, dest) {
-        return Err("Moving to another drive isn't supported yet. Pick a folder on the same drive.".into());
+        return Err(msg!(otherDriveMove).into());
     }
-    let to = dest.join(from.file_name().ok_or("The game's folder has no name.")?);
+    let to = dest.join(from.file_name().ok_or(msg!(folderHasNoName))?);
     if to.exists() {
-        return Err(format!("{} already exists.", to.display()).into());
+        return Err(msg!(alreadyExists, path = to.display().to_string()).into());
     }
     std::fs::rename(from, &to)?;
     if let Err(e) = db::set_gog_install(conn, &ProviderKind::Gog.key(id), Some(&to)) {
@@ -930,12 +930,12 @@ fn launch_command(dir: &Path, task: &Task, options: &LaunchOptions) -> Command {
 
 /// Starts an installed game without waiting for it. Returns its program's file name, to watch its process.
 pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, Error> {
-    let info = read_json(&dir.join(format!("goggame-{id}.info"))).ok_or("The game's files are missing. Verify or reinstall it.")?;
-    let task = play_task(&info).ok_or("GOG doesn't say how to start this game.")?;
+    let info = read_json(&dir.join(format!("goggame-{id}.info"))).ok_or(msg!(gameFilesMissingVerify))?;
+    let task = play_task(&info).ok_or(msg!(gogNoPlayTask))?;
     let mut command = launch_command(dir, &task, options);
     let exe = PathBuf::from(command.get_program());
     if !exe.is_file() {
-        return Err(format!("The game's program is missing: {}", exe.display()).into());
+        return Err(msg!(gameProgramMissing, path = exe.display().to_string()).into());
     }
     command.spawn()?;
     Ok(exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
@@ -1139,15 +1139,15 @@ fn keep_stamp(stamps: &mut HashMap<String, String>, name: &str, outcome: &SyncOu
 /// Never fails: a failure is an outcome.
 pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSync) -> SyncOutcome {
     let key = ProviderKind::Gog.key(id);
-    let Some(client) = client_id(dir, id) else { return SyncOutcome::Failed("The game's files are missing.".into()) };
+    let Some(client) = client_id(dir, id) else { return SyncOutcome::Failed(msg!(gameFilesMissing)) };
     let cached = conn.and_then(|c| db::cached_info(c, &key, SAVES, i64::MAX / 2, 0).ok().flatten());
     let locations = cached.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or(Value::Null);
     let folders = save_folders(&locations, &client, dir);
     if folders.is_empty() {
-        return SyncOutcome::Failed("Can't tell where this game keeps its saves.".into());
+        return SyncOutcome::Failed(msg!(noSaveFolder));
     }
     if let Err(e) = ensure_login() {
-        return SyncOutcome::Failed(e.to_string());
+        return SyncOutcome::Failed(e.into());
     }
     // gogdl writes the game's own token into `auth.json`, so no other gogdl auth may run meanwhile. Held over the
     // timestamps too, so two syncs of one game (Sync now while the upload after play runs) don't undo each other's.
@@ -1165,8 +1165,8 @@ pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSyn
                     keep_stamp(&mut stamps, name, &outcome, &stdout);
                     outcome
                 }
-                Ok(None) => SyncOutcome::Failed("Cloud saves timed out.".into()),
-                Err(e) => SyncOutcome::Failed(e.to_string()),
+                Ok(None) => SyncOutcome::Failed(msg!(savesTimedOut)),
+                Err(e) => SyncOutcome::Failed(Msg::system(e)),
             }
         })
         .collect();
@@ -1447,15 +1447,15 @@ mod tests {
             said(outcome(&ran(false, "", "[V2] INFO: start\n[DOWNLOAD] ERROR: Connection reset\nTraceback (most recent call last):\n"), true)),
             "Connection reset"
         );
-        assert_eq!(said(outcome(&ran(false, "", ""), false)), "gogdl stopped without saying why.");
+        assert_eq!(said(outcome(&ran(false, "", ""), false)), "gogdlNoReason");
         let full = "Download size: 1.00 GiB\nUnable to proceed, Not enough disk space\n";
-        assert_eq!(said(outcome(&ran(false, full, ""), false)), "There isn't enough disk space.");
+        assert_eq!(said(outcome(&ran(false, full, ""), false)), "noDiskSpace");
         let unsupported = "[GENERIC DOWNLOAD_MANAGER] ERROR: Game doesn't support content system api, unable to proceed\n";
-        assert_eq!(said(outcome(&ran(true, "", unsupported), false)), "GOG doesn't offer this game for download here.");
+        assert_eq!(said(outcome(&ran(true, "", unsupported), false)), "gogNotOffered");
         let offline = format!("[AUTH] ERROR: Failed to refresh credentials\n{unsupported}");
-        assert_eq!(said(outcome(&ran(true, "", &offline), false)), UNREACHABLE);
+        assert_eq!(said(outcome(&ran(true, "", &offline), false)), "cantReachGog");
         let imported = "Traceback (most recent call last):\nException: No manifest stored locally, unable to verify\n";
-        assert_eq!(said(outcome(&ran(false, "", imported), true)), NO_MANIFEST);
+        assert_eq!(said(outcome(&ran(false, "", imported), true)), "gogNoManifest");
     }
 
     #[test]
@@ -1558,7 +1558,7 @@ mod tests {
         store_save_stamps(&conn, "gog-0", &HashMap::from([("saves".to_string(), "1.5".to_string()), ("__default".to_string(), "2".to_string())]));
         assert_eq!(save_stamps(&conn, "gog-0").len(), 2);
         // Another game's folder (a wrong record) is refused and kept.
-        assert!(uninstall(&conn, "1", &dir).unwrap_err().to_string().contains("nothing was deleted"));
+        assert!(uninstall(&conn, "1", &dir).unwrap_err().to_string().contains("folderNotThisGame"));
         assert!(dir.is_dir());
         uninstall(&conn, "0", &dir).unwrap();
         assert!(!dir.exists());
@@ -1583,9 +1583,9 @@ mod tests {
         assert_eq!(db::gog_installs(&conn).unwrap()["gog-1441974651"], to);
         // Something there already, or another drive: refused before anything moves.
         std::fs::create_dir_all(root.join("c").join("Prison Architect")).unwrap();
-        assert!(move_to(&conn, "1441974651", &to, &root.join("c")).unwrap_err().to_string().contains("already exists"));
+        assert!(move_to(&conn, "1441974651", &to, &root.join("c")).unwrap_err().to_string().contains("alreadyExists"));
         let drive = if to.to_string_lossy().starts_with('Z') { r"Y:\Games" } else { r"Z:\Games" };
-        assert!(move_to(&conn, "1441974651", &to, Path::new(drive)).unwrap_err().to_string().contains("another drive"));
+        assert!(move_to(&conn, "1441974651", &to, Path::new(drive)).unwrap_err().to_string().contains("otherDriveMove"));
         assert!(to.is_dir());
         drop(conn);
         std::fs::remove_dir_all(&root).unwrap();
@@ -1625,7 +1625,7 @@ mod tests {
         assert_eq!(play_task(&json!({"playTasks": [{"isPrimary": true, "type": "URLTask", "link": "https://gog.com"}]})), None);
         assert_eq!(play_task(&json!({})), None);
         // The program missing from the folder: refused before anything starts.
-        assert!(launch("1441974651", &dir, &LaunchOptions::default()).unwrap_err().to_string().contains("missing"));
+        assert!(launch("1441974651", &dir, &LaunchOptions::default()).unwrap_err().to_string().contains("gameProgramMissing"));
         assert!(launch("1", &dir, &LaunchOptions::default()).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1677,11 +1677,11 @@ mod tests {
         assert_eq!(sync_outcome(true, "[SAVES] WARNING: Refused to download files, newer files locally\n"), LocalNewer);
         assert_eq!(sync_outcome(true, "[SAVES] WARNING: Refused to upload files, newer files in the cloud\n"), CloudNewer);
         assert_eq!(sync_outcome(true, "[SAVES] WARNING: Files in conflict force downloading or uploading of files\n"), Conflict);
-        assert_eq!(sync_outcome(false, "[SAVES] ERROR: Failed to get credentials\nTraceback\n"), Failed("Failed to get credentials".into()));
+        assert_eq!(sync_outcome(false, "[SAVES] ERROR: Failed to get credentials\nTraceback\n"), Failed(Msg::system("Failed to get credentials")));
         // A question wins over a failure, a failure over a sync.
-        assert_eq!(first_to_report(vec![Synced, Failed("x".into()), CloudNewer]), CloudNewer);
+        assert_eq!(first_to_report(vec![Synced, Failed(Msg::system("x")), CloudNewer]), CloudNewer);
         assert_eq!(first_to_report(vec![LocalNewer, Conflict]), Conflict);
-        assert_eq!(first_to_report(vec![Synced, Failed("x".into())]), Failed("x".into()));
+        assert_eq!(first_to_report(vec![Synced, Failed(Msg::system("x"))]), Failed(Msg::system("x")));
         assert_eq!(first_to_report(vec![]), Synced);
     }
 
@@ -1690,7 +1690,7 @@ mod tests {
         let mut stamps = HashMap::from([("saves".to_string(), "100.5".to_string())]);
         keep_stamp(&mut stamps, "saves", &SyncOutcome::Conflict, "200.0");
         keep_stamp(&mut stamps, "saves", &SyncOutcome::LocalNewer, "200.0\n");
-        keep_stamp(&mut stamps, "saves", &SyncOutcome::Failed("x".into()), "200.0");
+        keep_stamp(&mut stamps, "saves", &SyncOutcome::Failed(Msg::system("x")), "200.0");
         assert_eq!(stamps["saves"], "100.5");
         // gogdl may print no newline; junk isn't a timestamp.
         keep_stamp(&mut stamps, "saves", &SyncOutcome::Synced, "Traceback");

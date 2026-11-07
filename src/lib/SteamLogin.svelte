@@ -36,11 +36,11 @@
 
   /** Follows one answer of the password login. */
   async function follow(answer: Promise<LoginStep>) {
-    let step: LoginStep
+    let step: LoginStep | { step: 'failed'; message: unknown }
     try {
       step = await answer
     } catch (e) {
-      step = { step: 'failed', message: api.message(e) }
+      step = { step: 'failed', message: e }
     }
     if (!alive) return
     switch (step.step) {
@@ -48,7 +48,7 @@
         return finish()
       case 'failed':
         phase = 'form'
-        error = step.message
+        error = api.message(step.message)
         return
       case 'approve':
         phase = 'approve'
@@ -95,7 +95,7 @@
         failures = 0
         if (step.step === 'connected') return finish()
         if (step.step === 'failed') {
-          qrFailure = step.message
+          qrFailure = api.message(step.message)
           return
         }
         if (step.step === 'rotated') svg = step.svg

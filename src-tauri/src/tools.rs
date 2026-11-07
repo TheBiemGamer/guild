@@ -13,6 +13,8 @@ use std::time::Duration;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::msg::Msg;
+
 pub struct Tool {
     pub name: &'static str,
     pub title: &'static str,
@@ -61,7 +63,6 @@ pub const ALL: [&Tool; 3] = [&LEGENDARY, &GOGDL, &NILE];
 /// The whole download, not each read: a 17 MB file on a slow line takes minutes.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
-const MISMATCH: &str = "The download didn't match. Nothing was installed.";
 
 pub fn find(name: &str) -> Option<&'static Tool> {
     ALL.into_iter().find(|t| t.name == name)
@@ -171,8 +172,8 @@ impl Drop for Installing {
 
 /// Downloads the pinned build next to its final place, checks its hash, then renames it into place.
 /// `on_percent` hears each new whole percent when the size is known.
-pub async fn install(http: &reqwest::Client, tool: &'static Tool, on_percent: impl FnMut(u8)) -> Result<(), String> {
-    let _installing = Installing::start(tool.name).ok_or_else(|| format!("{} is already installing.", tool.title))?;
+pub async fn install(http: &reqwest::Client, tool: &'static Tool, on_percent: impl FnMut(u8)) -> Result<(), Msg> {
+    let _installing = Installing::start(tool.name).ok_or_else(|| msg!(toolAlreadyInstalling, tool = tool.title))?;
     let dest = tool.managed(root());
     let part = dest.with_extension("exe.part");
     let digest = match download(http, tool, &part, on_percent).await {
@@ -180,7 +181,7 @@ pub async fn install(http: &reqwest::Client, tool: &'static Tool, on_percent: im
         Err(e) => {
             log!("install {}: {e}", tool.name);
             let _ = fs::remove_file(&part);
-            return Err(format!("Couldn't download {}.", tool.title));
+            return Err(msg!(cantDownloadTool, tool = tool.title));
         }
     };
     place(&part, &dest, &digest, tool.sha256).inspect_err(|e| log!("install {}: {e}", tool.name))?;
@@ -220,9 +221,9 @@ async fn download(
 
 /// `install` into another tools folder, for tests that must not touch the owner's.
 #[cfg(test)]
-pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Result<(), String> {
+pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Result<(), Msg> {
     let (part, dest) = (tool.managed(root).with_extension("exe.part"), tool.managed(root));
-    let digest = download(http, tool, &part, |_| {}).await.map_err(|e| e.to_string())?;
+    let digest = download(http, tool, &part, |_| {}).await.map_err(Msg::system)?;
     place(&part, &dest, &digest, tool.sha256)
 }
 
@@ -231,16 +232,16 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Moves a verified download into place; one that doesn't match `expected` is deleted and the old copy kept.
-fn place(part: &Path, dest: &Path, digest: &str, expected: &str) -> Result<(), String> {
+fn place(part: &Path, dest: &Path, digest: &str, expected: &str) -> Result<(), Msg> {
     if digest != expected {
         let _ = fs::remove_file(part);
-        return Err(MISMATCH.into());
+        return Err(msg!(downloadMismatch));
     }
     fs::rename(part, dest).map_err(|e| {
         let _ = fs::remove_file(part);
         log!("install {}: {e}", dest.display());
         // Windows refuses to replace a program that is running.
-        "Couldn't put the new version in place. Close anything using it and try again.".to_string()
+        msg!(cantReplaceTool)
     })
 }
 
@@ -290,7 +291,7 @@ mod tests {
         fs::write(&part, "tampered").unwrap();
         fs::write(&dest, "old").unwrap();
         let digest = hex(&Sha256::digest(b"tampered"));
-        assert_eq!(place(&part, &dest, &digest, LEGENDARY.sha256), Err(MISMATCH.to_string()));
+        assert_eq!(place(&part, &dest, &digest, LEGENDARY.sha256), Err(msg!(downloadMismatch)));
         assert!(!part.exists());
         assert_eq!(fs::read_to_string(&dest).unwrap(), "old");
         fs::remove_dir_all(&dir).unwrap();

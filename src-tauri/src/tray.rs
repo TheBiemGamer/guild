@@ -4,6 +4,8 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
+use crate::msg::native;
+
 /// The argument the Windows startup entry passes: the window stays in the tray.
 pub const MINIMIZED: &str = "--minimized";
 
@@ -25,14 +27,14 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "open", "Open", true, None::<&str>)?,
-            &MenuItem::with_id(app, "downloads", "Downloads", true, None::<&str>)?,
+            &MenuItem::with_id(app, "open", native("trayOpen"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "downloads", native("trayDownloads"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
+            &MenuItem::with_id(app, "quit", native("trayQuit"), true, None::<&str>)?,
         ],
     )?;
     let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("Game Launcher")
+        .tooltip(native("appName"))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {

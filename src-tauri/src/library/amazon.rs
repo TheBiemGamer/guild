@@ -24,6 +24,7 @@ use super::epic::{InstallEvent, LaunchOptions, split_args};
 use super::gog::{Fed, feed, inside, parse_progress};
 use super::{Art, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
 use crate::cache::{Dirs, db};
+use crate::msg::Msg;
 use crate::info::{self, GameInfo};
 use crate::tools;
 
@@ -54,8 +55,6 @@ const INFO_TIMEOUT: Duration = Duration::from_secs(60);
 const UNINSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-const UNREACHABLE: &str = "Can't reach Amazon. Try again later.";
-const BUSY: &str = "An Amazon download is running. Try again when it's done.";
 
 fn lock() -> MutexGuard<'static, ()> {
     NILE.lock().unwrap_or_else(|e| e.into_inner())
@@ -76,7 +75,7 @@ fn lock_between_downloads() -> Result<MutexGuard<'static, ()>, Error> {
             return Ok(guard);
         }
         if DOWNLOADING.load(Ordering::SeqCst) {
-            return Err(BUSY.into());
+            return Err(msg!(amazonBusy).into());
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -247,12 +246,12 @@ pub fn sign_in() -> Result<SignIn, Error> {
         log_out()?;
     }
     let _nile = lock_between_downloads()?;
-    let output = run_short(nile(["auth", "--login", "--non-interactive"]), SYNC_TIMEOUT).ok_or(UNREACHABLE)?;
+    let output = run_short(nile(["auth", "--login", "--non-interactive"]), SYNC_TIMEOUT).ok_or(msg!(cantReachAmazon))?;
     // stdout carries the verifier: parsed, never logged.
     parse_sign_in(&output.stdout).ok_or_else(|| {
         let log = String::from_utf8_lossy(&output.stderr);
         log!("nile auth --login: {}", last_error(&log).unwrap_or("no login page"));
-        "Couldn't start the Amazon login. Try again.".into()
+        msg!(cantStartAmazonLogin).into()
     })
 }
 
@@ -271,14 +270,14 @@ pub fn register(sign_in: &SignIn, code: &str) -> Result<(), Error> {
         "--serial",
         &sign_in.serial,
     ];
-    let output = run_short(nile(args), SYNC_TIMEOUT).ok_or(UNREACHABLE)?;
+    let output = run_short(nile(args), SYNC_TIMEOUT).ok_or(msg!(cantReachAmazon))?;
     // Sic: nile's own spelling.
     if String::from_utf8_lossy(&output.stderr).contains("Succesfully registered a device") {
         set_synced(Login::LoggedIn);
         Ok(())
     } else {
         log!("nile register: the device wasn't registered ({})", output.status);
-        Err("Amazon didn't accept the login. Try again.".into())
+        Err(msg!(amazonLoginRejected).into())
     }
 }
 
@@ -289,7 +288,7 @@ pub fn log_out() -> Result<(), Error> {
     if run_short(nile(["auth", "--logout"]), LOGOUT_TIMEOUT).is_none() {
         log!("nile auth --logout: no answer");
     }
-    forget_login(&cfg()).map_err(|e| format!("Couldn't log out of Amazon Games: {e}"))?;
+    forget_login(&cfg()).map_err(|e| msg!(cantLogOutAmazon, detail = e.to_string()))?;
     set_synced(Login::LoggedOut);
     Ok(())
 }
@@ -318,23 +317,25 @@ fn forget_login(cfg: &Path) -> std::io::Result<()> {
 pub struct Amazon;
 
 /// Listed by `list`; installs and launches come through `commands::game`.
-const NOT_HERE: &str = "Amazon games go through the download queue.";
+fn not_here() -> Error {
+    msg!(amazonNotHere).into()
+}
 
 impl Provider for Amazon {
     fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn launch(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn install(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn uninstall(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn running_game(&self) -> Option<String> {
@@ -496,22 +497,15 @@ const UPDATES_MAX_AGE_SECS: i64 = 6 * 60 * 60;
 const FOREVER: i64 = i64::MAX / 2;
 /// nile prints progress every second even when nothing moves, so a stall is no new bytes for this long.
 const STALL: Duration = Duration::from_secs(10 * 60);
-const STALLED: &str = "No progress for 10 minutes, so the download was stopped. Check your connection and try again.";
-const INCOMPLETE: &str = "Some files didn't download. Try again.";
 const NO_SPACE_LINE: &str = "Not enough space available";
-const NO_SPACE: &str = "There isn't enough disk space.";
-const NO_SPACE_VERIFY: &str = "There isn't enough disk space. Verifying needs as much free space as the game takes.";
-const NOT_RECORDED: &str = "Nile didn't record the game as installed. Try again.";
-const STOPPED: &str = "Nile stopped without saying why.";
-const UPDATE_FIRST: &str = "Update first, then verify.";
 
 /// A job needs Nile and an account; nile would fail on its own without them, but less clearly.
 fn ensure_login() -> Result<(), Error> {
     if tools::version(&tools::NILE).is_none() {
-        return Err("Install Nile in Settings first.".into());
+        return Err(msg!(installNileFirst).into());
     }
     if !has_user(&cfg()) {
-        return Err("Log in to Amazon Games in Settings first.".into());
+        return Err(msg!(logInAmazonFirst).into());
     }
     Ok(())
 }
@@ -675,7 +669,7 @@ fn run(args: Vec<OsString>, action: ProgressAction, mut on_event: impl FnMut(Ins
             _ = child.kill();
         }
         _ = child.wait();
-        return Err(STALLED.into());
+        return Err(msg!(amazonStalled).into());
     }
     let status = child.wait()?;
     Ok(Run { success: status.success(), stdout: out.join().unwrap_or_default(), log })
@@ -685,33 +679,33 @@ fn traceback(log: &str) -> bool {
     log.contains("Traceback (most recent call last)") || log.contains("unhandled exception")
 }
 
-/// What a failed nile run says: a crash on the network is `UNREACHABLE`, else the last error.
-fn failure(log: &str) -> String {
+/// What a failed nile run says: a crash on the network is `cantReachAmazon`, else the last error.
+fn failure(log: &str) -> Msg {
     let offline = ["ConnectionError", "Max retries", "NameResolution", "Timeout", "Failed to refresh the token"];
     if traceback(log) && offline.iter().any(|w| log.contains(w)) {
-        return UNREACHABLE.into();
+        return msg!(cantReachAmazon);
     }
-    last_error(log).unwrap_or(STOPPED).into()
+    last_error(log).map_or(msg!(nileNoReason), Msg::system)
 }
 
 /// Whether a job worked, from what nile printed (`run`), whether a download left a `.patch` file behind (`leftovers`)
 /// and whether `installed.json` has the game in its folder (`recorded`). A killed job (Cancel, Pause) exits 1.
 fn outcome(run: &Run, action: ProgressAction, leftovers: bool, recorded: bool) -> Result<(), Error> {
     if run.stdout.contains("Checksum error for") {
-        return Err(INCOMPLETE.into());
+        return Err(msg!(amazonIncomplete).into());
     }
     if run.log.contains(NO_SPACE_LINE) {
-        return Err(if action == ProgressAction::Verify { NO_SPACE_VERIFY } else { NO_SPACE }.into());
+        return Err(if action == ProgressAction::Verify { msg!(noDiskSpaceVerify) } else { msg!(noDiskSpace) }.into());
     }
     let error = run.log.lines().rev().find_map(|l| l.split_once("]:\t").filter(|(head, _)| head.starts_with("ERROR [")));
     if traceback(&run.log) || error.is_some() || !run.success {
         return Err(failure(&run.log).into());
     }
     if leftovers {
-        return Err(INCOMPLETE.into());
+        return Err(msg!(amazonIncomplete).into());
     }
     if !recorded {
-        return Err(NOT_RECORDED.into());
+        return Err(msg!(nileNotRecorded).into());
     }
     Ok(())
 }
@@ -736,7 +730,7 @@ pub fn install(id: &str, base: &Path, on_event: impl FnMut(InstallEvent)) -> Res
         _ = std::fs::remove_dir(&folder);
     }
     result?;
-    let dir = recorded.ok_or(NOT_RECORDED)?;
+    let dir = recorded.ok_or(msg!(nileNotRecorded))?;
     let steps = read_fuel(&dir).and_then(|f| f["PostInstall"].as_array().map(Vec::len)).unwrap_or(0);
     if steps > 0 {
         log!("amazon {id}: {steps} setup step(s) skipped");
@@ -770,8 +764,8 @@ pub fn verify(conn: Option<&Connection>, id: &str, dir: &Path, on_event: impl Fn
 /// Whether a fresh update answer lets the game be verified.
 fn up_to_date(updates: Option<Vec<String>>, id: &str) -> Result<(), Error> {
     match updates {
-        None => Err(UNREACHABLE.into()),
-        Some(ids) if ids.iter().any(|u| u == id) => Err(UPDATE_FIRST.into()),
+        None => Err(msg!(cantReachAmazon).into()),
+        Some(ids) if ids.iter().any(|u| u == id) => Err(msg!(updateFirst).into()),
         Some(_) => Ok(()),
     }
 }
@@ -786,7 +780,7 @@ fn said(log: &[u8], done: &str) -> Result<(), Error> {
 /// stay, and so does its folder then.
 pub fn uninstall(conn: Option<&Connection>, id: &str) -> Result<(), Error> {
     let _nile = lock_between_downloads()?;
-    let output = run_short(nile(["uninstall", id]), UNINSTALL_TIMEOUT).ok_or(STOPPED)?;
+    let output = run_short(nile(["uninstall", id]), UNINSTALL_TIMEOUT).ok_or(msg!(nileNoReason))?;
     said(&output.stderr, "Game removed successfully")?;
     forget_updates(conn);
     Ok(())
@@ -796,10 +790,10 @@ pub fn uninstall(conn: Option<&Connection>, id: &str) -> Result<(), Error> {
 pub fn import(conn: Option<&Connection>, id: &str, path: &Path) -> Result<(), Error> {
     ensure_login()?;
     if !path.is_dir() {
-        return Err(format!("Not a folder: {}", path.display()).into());
+        return Err(msg!(notAFolder, path = path.display().to_string()).into());
     }
     let _nile = lock_between_downloads()?;
-    let output = run_short(nile(job_args("import", "--path", path, id)), IMPORT_TIMEOUT).ok_or(UNREACHABLE)?;
+    let output = run_short(nile(job_args("import", "--path", path, id)), IMPORT_TIMEOUT).ok_or(msg!(cantReachAmazon))?;
     said(&output.stderr, "[IMPORT]:\t Imported ")?;
     forget_updates(conn);
     Ok(())
@@ -808,17 +802,17 @@ pub fn import(conn: Option<&Connection>, id: &str, path: &Path) -> Result<(), Er
 /// Moves an installed game's folder into `dest` and points nile's record at it. A rename, so only on the same drive.
 pub fn move_to(id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
     if !super::epic::same_drive(from, dest) {
-        return Err("Moving to another drive isn't supported yet. Pick a folder on the same drive.".into());
+        return Err(msg!(otherDriveMove).into());
     }
-    let to = dest.join(from.file_name().ok_or("The game's folder has no name.")?);
+    let to = dest.join(from.file_name().ok_or(msg!(folderHasNoName))?);
     if to.exists() {
-        return Err(format!("{} already exists.", to.display()).into());
+        return Err(msg!(alreadyExists, path = to.display().to_string()).into());
     }
     let _nile = lock_between_downloads()?;
     std::fs::rename(from, &to)?;
     if let Err(e) = set_installed_path(&cfg().join("installed.json"), id, &to) {
         _ = std::fs::rename(&to, from);
-        return Err(format!("Couldn't update Nile's record of the game: {e}").into());
+        return Err(msg!(cantUpdateNileRecord, reason = Msg::from(e)).into());
     }
     Ok(())
 }
@@ -826,7 +820,7 @@ pub fn move_to(id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
 /// Sets the game's `path` in `installed.json`, keeping every other field, through a temp file renamed into place.
 fn set_installed_path(file: &Path, id: &str, path: &Path) -> Result<(), Error> {
     let mut entries: Vec<Value> = serde_json::from_slice(&std::fs::read(file)?)?;
-    let entry = entries.iter_mut().find(|e| e["id"] == id).ok_or("Nile has no record of this game.")?;
+    let entry = entries.iter_mut().find(|e| e["id"] == id).ok_or(msg!(nileNoRecord))?;
     entry["path"] = Value::from(path.to_string_lossy().into_owned());
     let temp = file.with_extension("json.tmp");
     std::fs::write(&temp, serde_json::to_vec(&entries)?)?;
@@ -956,11 +950,11 @@ fn check_sdk(cfg: &Path) {
 
 /// Starts an installed game without waiting for it. Returns its program's file name, to watch its process.
 pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, Error> {
-    let fuel = read_fuel(dir).as_ref().and_then(fuel_main).ok_or("This game has no launch file. Verify it.")?;
+    let fuel = read_fuel(dir).as_ref().and_then(fuel_main).ok_or(msg!(noLaunchFile))?;
     let mut command = launch_command(dir, &fuel, options);
     let exe = PathBuf::from(command.get_program());
     if !exe.is_file() {
-        return Err(format!("The game's program is missing: {}", exe.display()).into());
+        return Err(msg!(gameProgramMissing, path = exe.display().to_string()).into());
     }
     let cfg = cfg();
     check_sdk(&cfg);
@@ -1212,21 +1206,21 @@ mod tests {
         assert_eq!(install(&ran(true, "", &text("nile-install-up-to-date-stderr.txt")), false, true), "ok");
         // Exit 0 every time below: nile's failures are silent.
         let ok_log = text("nile-install-ok-stderr.txt");
-        assert_eq!(install(&ran(true, &text("nile-install-checksum-stdout.txt"), &ok_log), false, true), INCOMPLETE);
-        assert_eq!(install(&ran(true, "", &ok_log), true, true), INCOMPLETE);
-        assert_eq!(install(&ran(true, "", &ok_log), false, false), NOT_RECORDED);
+        assert_eq!(install(&ran(true, &text("nile-install-checksum-stdout.txt"), &ok_log), false, true), "amazonIncomplete");
+        assert_eq!(install(&ran(true, "", &ok_log), true, true), "amazonIncomplete");
+        assert_eq!(install(&ran(true, "", &ok_log), false, false), "nileNotRecorded");
         let full = ran(true, "", &text("nile-install-no-space-stderr.txt"));
-        assert_eq!(install(&full, false, false), NO_SPACE);
-        assert_eq!(told(outcome(&full, ProgressAction::Verify, false, true)), NO_SPACE_VERIFY);
+        assert_eq!(install(&full, false, false), "noDiskSpace");
+        assert_eq!(told(outcome(&full, ProgressAction::Verify, false, true)), "noDiskSpaceVerify");
         let missing = ran(true, "", "INFO [CLI]:\t Searching\nERROR [CLI]:\t Couldn't find what you are looking for\n");
         assert_eq!(install(&missing, false, false), "Couldn't find what you are looking for");
         // A crash on the network, and another crash.
         let offline = ran(false, "", &text("nile-sync-offline-stderr.txt"));
-        assert_eq!(install(&offline, false, true), UNREACHABLE);
+        assert_eq!(install(&offline, false, true), "cantReachAmazon");
         let crash = ran(false, "", "Traceback (most recent call last):\n  File \"x\"\nKeyError: 'manifest'\n[PYI-1:ERROR] Failed to execute script 'cli' due to unhandled exception!\n");
         assert_eq!(install(&crash, false, true), "KeyError: 'manifest'");
         // Stopped by Cancel or Pause: exit 1 with nothing said.
-        assert_eq!(install(&ran(false, "", &ok_log), false, true), STOPPED);
+        assert_eq!(install(&ran(false, "", &ok_log), false, true), "nileNoReason");
     }
 
     #[test]
@@ -1238,15 +1232,15 @@ mod tests {
             told(said(&fixture("nile-import-failed-stderr.txt"), "[IMPORT]:\t Imported ")),
             "There are missing or corrupted files for Last Day of June. Failed import."
         );
-        assert_eq!(told(said(b"", "Game removed successfully")), STOPPED);
+        assert_eq!(told(said(b"", "Game removed successfully")), "nileNoReason");
     }
 
     #[test]
     fn verify_is_refused_while_an_update_is_pending() {
         let id = "amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633";
-        assert_eq!(told(up_to_date(parse_updates(&fixture("nile-list-updates-stdout.txt")), id)), UPDATE_FIRST);
+        assert_eq!(told(up_to_date(parse_updates(&fixture("nile-list-updates-stdout.txt")), id)), "updateFirst");
         assert_eq!(told(up_to_date(Some(vec!["amzn1.other".into()]), id)), "ok");
-        assert_eq!(told(up_to_date(None, id)), UNREACHABLE);
+        assert_eq!(told(up_to_date(None, id)), "cantReachAmazon");
     }
 
     #[test]
@@ -1346,9 +1340,9 @@ mod tests {
     fn play_needs_the_launch_file_and_its_program() {
         let dir = temp_dir("play");
         let refused = |dir: &Path| launch("x", dir, &LaunchOptions::default()).unwrap_err().to_string();
-        assert_eq!(refused(&dir), "This game has no launch file. Verify it.");
+        assert_eq!(refused(&dir), "noLaunchFile");
         std::fs::write(dir.join("fuel.json"), fixture("sample-fuel.json")).unwrap();
-        assert!(refused(&dir).starts_with("The game's program is missing"), "{}", refused(&dir));
+        assert!(refused(&dir).starts_with("gameProgramMissing"), "{}", refused(&dir));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1385,7 +1379,7 @@ mod tests {
     #[test]
     fn a_download_makes_other_nile_runs_refuse() {
         let job = Downloading::start();
-        assert_eq!(lock_between_downloads().err().map(|e| e.to_string()).as_deref(), Some(BUSY));
+        assert_eq!(lock_between_downloads().err().map(|e| e.to_string()).as_deref(), Some("amazonBusy"));
         drop(job);
         assert!(lock_between_downloads().is_ok());
     }

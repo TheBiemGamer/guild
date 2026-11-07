@@ -20,6 +20,7 @@ use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutc
 use crate::library::{amazon, gog};
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
 use crate::links::{self, LinkKind};
+use crate::msg::{Msg, Param};
 use crate::platform::kill_tree;
 use crate::settings;
 use crate::steam_size;
@@ -139,12 +140,12 @@ fn installed_dir(g: &Game) -> Option<&PathBuf> {
 /// Opens an installed game's folder in File Explorer.
 #[tauri::command]
 pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
-    let game = state.game(&key).ok_or("This game is no longer in the library.")?;
-    let dir = installed_dir(&game).ok_or("This game has no install folder.")?;
+    let game = state.game(&key).ok_or(msg!(gameNotInLibrary))?;
+    let dir = installed_dir(&game).ok_or(msg!(noInstallFolder))?;
     if !dir.is_dir() {
-        return Err(format!("The install folder is missing: {}", dir.display()));
+        return Err(msg!(installFolderMissing, path = dir.display().to_string()));
     }
-    std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(|e| e.to_string())
+    std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(Msg::system)
 }
 
 /// Opens one of the game page's links in the default browser. The URL is built here from the kind.
@@ -154,13 +155,13 @@ pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
         let state = app.state::<AppState>();
         let (appid, title, epic_key) = {
             let s = state.lock();
-            let entry = entries::find(&s.entries, &s.games, &key).ok_or("This game is no longer in the library.")?;
+            let entry = entries::find(&s.entries, &s.games, &key).ok_or(msg!(gameNotInLibrary))?;
             let epic = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Epic);
             (entries::steam_appid(entry, &s.games, &s.twins), s.games[entry.copies[0]].title.clone(), epic.map(|g| g.key()))
         };
         let epic_url = epic_key.and_then(|k| igdb::epic_url(&open_db(&state)?, &k));
-        let url = links::url(kind, appid, epic_url.as_deref(), &title).ok_or("This game has no page there.")?;
-        crate::library::open_url(&url).map_err(|e| e.to_string())
+        let url = links::url(kind, appid, epic_url.as_deref(), &title).ok_or(msg!(noPageThere))?;
+        crate::library::open_url(&url).map_err(Msg::from)
     })
     .await
 }
@@ -227,11 +228,11 @@ pub async fn act(
     keep: Option<Keep>,
     dest: Option<String>,
 ) -> Res<Option<Conflict>> {
-    let game = app.state::<AppState>().game(&key).ok_or("This game is no longer in the library.")?;
+    let game = app.state::<AppState>().game(&key).ok_or(msg!(gameNotInLibrary))?;
     if let Some(id) = &dlc
         && (matches!(action, Action::Play | Action::PlayOutdated) || !game.dlc.iter().any(|d| &d.id == id))
     {
-        return Err("This DLC is no longer in the library.".into());
+        return Err(msg!(dlcNotInLibrary));
     }
     // A DLC install is just that DLC.
     let with_dlc = if dlc.is_some() { None } else { Some(with_dlc.unwrap_or(true)) };
@@ -257,12 +258,12 @@ fn act_blocking(
         let result = match action {
             Action::Play | Action::PlayOutdated => store.launch(game).inspect(|()| record_play(&state, &key)),
             Action::Install => store.install(game),
-            Action::Update => Err("Steam updates its games itself.".into()),
+            Action::Update => Err(msg!(steamUpdatesItself).into()),
             Action::Uninstall => store.uninstall(game),
             Action::Verify => crate::library::open_uri(&format!("steam://validate/{}", game.external_id)),
             Action::Move => crate::library::open_uri("steam://open/storage"),
         };
-        return result.map(|()| None).map_err(|e| format!("Steam: {e}"));
+        return result.map(|()| None).map_err(|e| store_error(ProviderKind::Steam, e));
     }
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
@@ -273,13 +274,12 @@ fn act_blocking(
         Action::Verify => Some(QueuedAction::Verify),
         _ => None,
     };
-    let name = game.provider.name();
     if matches!(game.provider, ProviderKind::Gog | ProviderKind::Amazon) && action == Action::Install && dlc.is_none() && game.installed {
-        return Err(format!("{name}: This game is already installed."));
+        return Err(store_error(game.provider, msg!(alreadyInstalled)));
     }
     // The job checks again with a fresh answer.
     if game.provider == ProviderKind::Amazon && action == Action::Verify && game.update_available {
-        return Err(format!("{name}: Update first, then verify."));
+        return Err(store_error(game.provider, msg!(updateFirst)));
     }
     if let Some(queued) = queued {
         let dest = (queued == QueuedAction::Install).then(|| install_base(&state, game.provider)).flatten();
@@ -287,7 +287,7 @@ fn act_blocking(
         return enqueue(app, job).map(|()| None);
     }
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
-        return Err("This game is in the download queue. Cancel its download first.".into());
+        return Err(msg!(cancelDownloadFirst));
     }
     if game.provider == ProviderKind::Gog && matches!(action, Action::Play | Action::PlayOutdated) {
         let upload = match saves_before_play(&state, game, keep) {
@@ -295,8 +295,8 @@ fn act_blocking(
             Err(conflict) => return Ok(Some(conflict)),
         };
         let options = checked_launch_options(open_db(&state).as_ref(), game)?;
-        let dir = installed_dir(game).ok_or("GOG: This game isn't installed.")?;
-        let exe = gog::launch(&game.external_id, dir, &options).map_err(|e| format!("GOG: {e}"))?;
+        let dir = installed_dir(game).ok_or_else(|| store_error(ProviderKind::Gog, msg!(notInstalled)))?;
+        let exe = gog::launch(&game.external_id, dir, &options).map_err(|e| store_error(ProviderKind::Gog, e))?;
         record_play(&state, &key);
         state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload });
         return Ok(None);
@@ -304,14 +304,14 @@ fn act_blocking(
     if game.provider == ProviderKind::Gog {
         let result = act_gog(&state, action, game, dlc, dest);
         rescan(app, true);
-        return result.map(|()| None).map_err(|e| format!("GOG: {e}"));
+        return result.map(|()| None).map_err(|e| store_error(ProviderKind::Gog, e));
     }
     if game.provider == ProviderKind::Amazon {
         let result = act_amazon(&state, action, game, dest);
         if !matches!(action, Action::Play | Action::PlayOutdated) {
             rescan(app, true);
         }
-        return result.map(|()| None).map_err(|e| format!("{name}: {e}"));
+        return result.map(|()| None).map_err(|e| store_error(ProviderKind::Amazon, e));
     }
     let result = match action {
         Action::Play | Action::PlayOutdated => {
@@ -340,7 +340,7 @@ fn act_blocking(
             let on_event = |event| _ = record_event(&mut state.lock(), &key, event);
             let result = match dest {
                 Some(dest) => epic::move_to(&game.external_id, game.install_dir.as_deref(), dest, on_event),
-                None => Err("Pick a folder to move the game to.".into()),
+                None => Err(msg!(pickMoveFolder).into()),
             };
             let mut s = state.lock();
             s.install_pids.remove(&key);
@@ -353,7 +353,12 @@ fn act_blocking(
     if !matches!(action, Action::Play | Action::PlayOutdated) {
         rescan(app, true);
     }
-    result.map(|()| None).map_err(|e| format!("Epic Games: {e}"))
+    result.map(|()| None).map_err(|e| store_error(ProviderKind::Epic, e))
+}
+
+/// `{store}: {reason}`, like "GOG: Close the game first."
+fn store_error(store: ProviderKind, reason: impl Into<Msg>) -> Msg {
+    msg!(storeError, store = store.name(), reason = reason.into())
 }
 
 /// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
@@ -372,11 +377,11 @@ fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
 /// A GOG copy's actions outside the queue, but Play. A DLC uninstall is an update without it, so it reports progress like Move.
 fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, dest: Option<&str>) -> Result<(), crate::library::Error> {
     let key = game.key();
-    let dir = installed_dir(game).ok_or("This game isn't installed.")?;
+    let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
     let conn = cache::db::open(&state.dirs.db)?;
     match (action, dlc) {
         (Action::Play | Action::PlayOutdated, _) => unreachable!("played in act_blocking"),
-        (Action::Move, _) => gog::move_to(&conn, &game.external_id, dir, std::path::Path::new(dest.ok_or("Pick a folder to move the game to.")?)),
+        (Action::Move, _) => gog::move_to(&conn, &game.external_id, dir, std::path::Path::new(dest.ok_or(msg!(pickMoveFolder))?)),
         (Action::Uninstall, None) => gog::uninstall(&conn, &game.external_id, dir),
         (Action::Uninstall, Some(dlc)) => {
             let on_event = |event| _ = record_event(&mut state.lock(), &key, event);
@@ -394,7 +399,7 @@ fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, des
 /// Amazon keeps no playtime and has no cloud saves. Play without updating is Play.
 fn act_amazon(state: &AppState, action: Action, game: &Game, dest: Option<&str>) -> Result<(), crate::library::Error> {
     let key = game.key();
-    let dir = installed_dir(game).ok_or("This game isn't installed.")?;
+    let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
     match action {
         Action::Play | Action::PlayOutdated => {
             let options = checked_launch_options(open_db(state).as_ref(), game)?;
@@ -403,7 +408,7 @@ fn act_amazon(state: &AppState, action: Action, game: &Game, dest: Option<&str>)
             state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload: None });
             Ok(())
         }
-        Action::Move => amazon::move_to(&game.external_id, dir, std::path::Path::new(dest.ok_or("Pick a folder to move the game to.")?)),
+        Action::Move => amazon::move_to(&game.external_id, dir, std::path::Path::new(dest.ok_or(msg!(pickMoveFolder))?)),
         Action::Uninstall => amazon::uninstall(open_db(state).as_ref(), &game.external_id),
         Action::Install | Action::Update | Action::Verify => unreachable!("queued"),
     }
@@ -414,10 +419,8 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
     let store = game.provider.provider();
     let result = match action {
         Action::Play | Action::PlayOutdated => {
-            let conn = open_db(state).ok_or("The settings database can't be opened.")?;
-            let row = cache::db::custom_game(&conn, &game.external_id)
-                .map_err(|e| e.to_string())?
-                .ok_or("This game is no longer in the library.")?;
+            let conn = open_db(state).ok_or(msg!(noDb))?;
+            let row = cache::db::custom_game(&conn, &game.external_id).map_err(Msg::from)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
             crate::library::custom::launch(&row).map(|exe| {
                 record_play(state, &key);
@@ -426,9 +429,9 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
         }
         Action::Install => store.install(game),
         Action::Uninstall => store.uninstall(game),
-        Action::Update | Action::Verify | Action::Move => Err("Games you added can only be played.".into()),
+        Action::Update | Action::Verify | Action::Move => Err(msg!(addedGamesOnlyPlay).into()),
     };
-    result.map_err(|e| e.to_string())
+    result.map_err(Msg::from)
 }
 
 /// Records a Legendary or gogdl job's pid or progress under its copy key. Returns the pid of a queued job that
@@ -540,9 +543,9 @@ fn run_queue(app: &AppHandle) {
         let game = state.game(&key);
         let result = match &game {
             Some(game) => run_job(&state, game, &job),
-            None => Err("This game is no longer in the library.".into()),
+            None => Err(msg!(gameNotInLibrary).into()),
         };
-        let store = game.map_or(ProviderKind::Epic, |g| g.provider).name();
+        let store = game.map_or(ProviderKind::Epic, |g| g.provider);
         let paused = {
             let mut s = state.lock();
             s.install_pids.remove(&key);
@@ -565,7 +568,7 @@ fn run_queue(app: &AppHandle) {
         let toast = (result.is_ok() && !cancelled)
             .then(|| s.games.iter().find(|g| g.key() == key).map(|g| g.title.clone()))
             .flatten();
-        let outcome = if cancelled { Ok(()) } else { result.map_err(|e| format!("{store}: {e}")) };
+        let outcome = if cancelled { Ok(()) } else { result.map_err(|e| store_error(store, e)) };
         s.queue.finish(&key);
         save_queue(&state, &s.queue);
         report(&mut s, &key, outcome);
@@ -607,10 +610,10 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
 /// A queued GOG job. Each makes sure of the login first; an install writes the game's record once its files are in.
 fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(InstallEvent)) -> Result<(), crate::library::Error> {
     let id = &game.external_id;
-    let dir = || installed_dir(game).ok_or("This game isn't installed.");
+    let dir = || installed_dir(game).ok_or(msg!(notInstalled));
     match (job.action, &job.dlc) {
         (QueuedAction::Install, None) => {
-            let base = job.dest.as_deref().map(PathBuf::from).ok_or("There's no folder to install into.")?;
+            let base = job.dest.as_deref().map(PathBuf::from).ok_or(msg!(noInstallBase))?;
             let dir = gog::install(open_db(state).as_ref(), id, &base, job.with_dlc != Some(false), on_event)?;
             gog::record_install(&cache::db::open(&state.dirs.db)?, id, &dir)
         }
@@ -623,10 +626,10 @@ fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(In
 /// A queued Amazon job; each holds nile for its whole run.
 fn run_amazon_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(InstallEvent)) -> Result<(), crate::library::Error> {
     let id = &game.external_id;
-    let dir = || installed_dir(game).ok_or("This game isn't installed.");
+    let dir = || installed_dir(game).ok_or(msg!(notInstalled));
     match job.action {
         QueuedAction::Install => {
-            let base = job.dest.as_deref().map(PathBuf::from).ok_or("There's no folder to install into.")?;
+            let base = job.dest.as_deref().map(PathBuf::from).ok_or(msg!(noInstallBase))?;
             amazon::install(id, &base, on_event).map(drop)
         }
         QueuedAction::Update => amazon::update(open_db(state).as_ref(), id, dir()?, on_event),
@@ -645,7 +648,7 @@ fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
 
 fn store_launch_options(conn: &Connection, key: &str, options: &LaunchOptions) -> Res<()> {
     let json = (*options != LaunchOptions::default()).then(|| serde_json::to_string(options).unwrap_or_default());
-    cache::db::set_pref(conn, key, LAUNCH_OPTIONS, json.as_deref()).map_err(|e| e.to_string())
+    cache::db::set_pref(conn, key, LAUNCH_OPTIONS, json.as_deref()).map_err(Msg::from)
 }
 
 /// An installed copy's launch options, with the alternative executable checked again: the folder
@@ -653,8 +656,8 @@ fn store_launch_options(conn: &Connection, key: &str, options: &LaunchOptions) -
 fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchOptions> {
     let mut options = conn.map(|c| launch_options_of(c, &game.key())).unwrap_or_default();
     if let Some(exe) = &options.exe {
-        let dir = installed_dir(game).ok_or("This game has no install folder.")?;
-        options.exe = Some(epic::override_exe(dir, exe).map_err(|e| format!("Alternative executable: {e}"))?);
+        let dir = installed_dir(game).ok_or(msg!(noInstallFolder))?;
+        options.exe = Some(epic::override_exe(dir, exe).map_err(|e| msg!(alternativeExe, reason = Msg::from(e)))?);
     }
     Ok(options)
 }
@@ -679,13 +682,13 @@ pub async fn set_launch_options(app: AppHandle, key: String, mut options: Launch
         .state::<AppState>()
         .game(&key)
         .filter(has_launch_options)
-        .ok_or("This game isn't installed from Epic, GOG or Amazon Games.")?;
+        .ok_or(msg!(noLaunchOptionsHere))?;
     blocking(move || {
         if let Some(exe) = &options.exe {
-            let dir = installed_dir(&game).ok_or("This game has no install folder.")?;
-            options.exe = Some(epic::override_exe(dir, exe).map_err(|e| e.to_string())?);
+            let dir = installed_dir(&game).ok_or(msg!(noInstallFolder))?;
+            options.exe = Some(epic::override_exe(dir, exe).map_err(Msg::from)?);
         }
-        let conn = open_db(&app.state::<AppState>()).ok_or("The settings database can't be opened.")?;
+        let conn = open_db(&app.state::<AppState>()).ok_or(msg!(noDb))?;
         store_launch_options(&conn, &key, &options)?;
         Ok(options)
     })
@@ -695,8 +698,8 @@ pub async fn set_launch_options(app: AppHandle, key: String, mut options: Launch
 /// Opens a Steam copy's properties in Steam, where its launch options live.
 #[tauri::command]
 pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()> {
-    let game = state.game(&key).filter(|g| g.provider == ProviderKind::Steam).ok_or("This game isn't from Steam.")?;
-    crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id)).map_err(|e| e.to_string())
+    let game = state.game(&key).filter(|g| g.provider == ProviderKind::Steam).ok_or(msg!(notFromSteam))?;
+    crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id)).map_err(Msg::from)
 }
 
 /// `game_prefs` name for an Epic or GOG copy's own cloud save choice, `on` or `off`; none follows its store's setting.
@@ -710,9 +713,9 @@ const FOREVER: i64 = i64::MAX / 2;
 struct SyncRecord {
     /// Unix seconds.
     at: i64,
-    /// What went wrong; nothing synced.
+    /// What went wrong; nothing synced. A `Msg`, or plain English stored before message codes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    error: Option<Param>,
     /// After the game, the cloud save was newer, so the local one wasn't uploaded. The next Play asks first.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     cloud_newer: bool,
@@ -737,7 +740,7 @@ fn sync_record(outcome: &SyncOutcome, at: i64) -> Option<SyncRecord> {
         SyncOutcome::Synced => SyncRecord { at, error: None, cloud_newer: false },
         // A GOG conflict changed nothing either: the next Play asks.
         SyncOutcome::CloudNewer | SyncOutcome::Conflict => SyncRecord { at, error: None, cloud_newer: true },
-        SyncOutcome::Failed(e) => SyncRecord { at, error: Some(e.clone()), cloud_newer: false },
+        SyncOutcome::Failed(e) => SyncRecord { at, error: Some(e.clone().into()), cloud_newer: false },
         SyncOutcome::LocalNewer => return None,
     })
 }
@@ -771,7 +774,7 @@ fn pre_launch_sync(keep: Option<Keep>, cloud_newer: bool) -> Result<Option<SaveS
 fn sync_copy(conn: Option<&Connection>, game: &Game, sync: SaveSync) -> SyncOutcome {
     match (game.provider, installed_dir(game)) {
         (ProviderKind::Gog, Some(dir)) => gog::sync_saves(conn, &game.external_id, dir, sync),
-        (ProviderKind::Gog, None) => SyncOutcome::Failed("This game isn't installed.".into()),
+        (ProviderKind::Gog, None) => SyncOutcome::Failed(msg!(notInstalled)),
         _ => epic::sync_saves(&game.external_id, sync),
     }
 }
@@ -826,16 +829,14 @@ pub struct SavesView {
     /// Unix seconds of the last sync that worked; `None` when never synced or `error` is set.
     synced_at: Option<i64>,
     /// What went wrong with the last sync; the Overview repeats it.
-    error: Option<String>,
+    error: Option<Msg>,
 }
 
 fn saves_view(choice: Option<bool>, last: Option<SyncRecord>) -> SavesView {
     let (synced_at, error) = match last {
         None => (None, None),
-        Some(SyncRecord { error: Some(e), .. }) => (None, Some(format!("Cloud saves didn't sync: {e}"))),
-        Some(SyncRecord { cloud_newer: true, .. }) => {
-            (None, Some("The cloud save is newer, so this PC's save wasn't uploaded.".to_string()))
-        }
+        Some(SyncRecord { error: Some(e), .. }) => (None, Some(msg!(savesDidntSync, reason = e))),
+        Some(SyncRecord { cloud_newer: true, .. }) => (None, Some(msg!(cloudSaveNewer))),
         Some(r) => (Some(r.at), None),
     };
     SavesView { choice, synced_at, error }
@@ -855,11 +856,11 @@ pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
 /// Sets an Epic or GOG copy's own cloud save choice; `None` follows its store's setting again.
 #[tauri::command]
 pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res<()> {
-    app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or("This game has no cloud saves.")?;
+    app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or(msg!(noCloudSaves))?;
     blocking(move || {
-        let conn = open_db(&app.state::<AppState>()).ok_or("The settings database can't be opened.")?;
+        let conn = open_db(&app.state::<AppState>()).ok_or(msg!(noDb))?;
         let value = choice.map(|on| if on { "on" } else { "off" });
-        cache::db::set_pref(&conn, &key, SAVES_CHOICE, value).map_err(|e| e.to_string())
+        cache::db::set_pref(&conn, &key, SAVES_CHOICE, value).map_err(Msg::from)
     })
     .await
 }
@@ -871,7 +872,7 @@ pub async fn sync_saves_now(app: AppHandle, key: String) -> Res<()> {
         .state::<AppState>()
         .game(&key)
         .filter(|g| g.installed && g.cloud_saves)
-        .ok_or("This game has no cloud saves.")?;
+        .ok_or(msg!(noCloudSaves))?;
     blocking(move || {
         let conn = open_db(&app.state::<AppState>());
         let outcome = sync_copy(conn.as_ref(), &game, SaveSync::Both);
@@ -1381,10 +1382,10 @@ pub async fn test_igdb(app: AppHandle) -> Res<()> {
     let (client_id, secret) = {
         let app = app.clone();
         blocking(move || {
-            let conn = cache::db::open(&app.state::<AppState>().dirs.db).map_err(|e| e.to_string())?;
-            let client_id = settings::load(&conn).igdb_client_id.ok_or("Enter the Client ID first.")?;
-            let secret = settings::secret().ok_or("Save the Client Secret first.")?;
-            Ok::<_, String>((client_id, secret))
+            let conn = cache::db::open(&app.state::<AppState>().dirs.db).map_err(Msg::from)?;
+            let client_id = settings::load(&conn).igdb_client_id.ok_or(msg!(enterClientId))?;
+            let secret = settings::secret().ok_or(msg!(saveClientSecret))?;
+            Ok::<_, Msg>((client_id, secret))
         })
         .await?
     };
@@ -1415,7 +1416,7 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
         let state = app.state::<AppState>();
         let mut s = state.lock();
         if !s.queue.contains(&key) {
-            return Err("This game isn't in the download queue.".into());
+            return Err(msg!(notInQueue));
         }
         if s.queue.is_head(&key) && s.queue_running {
             s.cancelled.insert(key.clone());
@@ -1431,7 +1432,7 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
     };
     start_queue(&app);
     if let Some(pid) = pid {
-        blocking(move || kill_tree(pid).map_err(|e| format!("Couldn't cancel the install: {e}"))).await?;
+        blocking(move || kill_tree(pid).map_err(|e| msg!(cantCancelInstall, detail = e.to_string()))).await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
 }
@@ -1448,7 +1449,7 @@ pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
         pid
     };
     if let Some(pid) = pid {
-        blocking(move || kill_tree(pid).map_err(|e| format!("Couldn't pause the download: {e}"))).await?;
+        blocking(move || kill_tree(pid).map_err(|e| msg!(cantPauseDownload, detail = e.to_string()))).await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
 }
@@ -1622,7 +1623,15 @@ mod tests {
     fn sync_records_show_in_the_saves_tab() {
         let shown = |outcome: SyncOutcome| saves_view(None, sync_record(&outcome, 1_000));
         assert_eq!(shown(SyncOutcome::Synced), SavesView { choice: None, synced_at: Some(1_000), error: None });
-        assert_eq!(shown(SyncOutcome::Failed("Login failed!".into())).error.as_deref(), Some("Cloud saves didn't sync: Login failed!"));
+        let failed = shown(SyncOutcome::Failed(Msg::system("Login failed!"))).error;
+        assert_eq!(failed, Some(msg!(savesDidntSync, reason = Msg::system("Login failed!"))));
+        // Stored with its code, so it is shown in the app's language.
+        let json = serde_json::to_string(&sync_record(&SyncOutcome::Failed(msg!(savesTimedOut)), 7).unwrap()).unwrap();
+        assert_eq!(json, r#"{"at":7,"error":{"code":"savesTimedOut","params":{}}}"#);
+        assert_eq!(serde_json::from_str::<SyncRecord>(&json).unwrap().error, Some(Param::Msg(msg!(savesTimedOut))));
+        // A row stored before message codes holds English; it is shown as is.
+        let old: SyncRecord = serde_json::from_str(r#"{"at":7,"error":"Login failed!"}"#).unwrap();
+        assert_eq!(saves_view(None, Some(old)).error, Some(msg!(savesDidntSync, reason = "Login failed!")));
         assert!(shown(SyncOutcome::CloudNewer).error.is_some());
         assert_eq!(sync_record(&SyncOutcome::LocalNewer, 1_000), None);
         // A GOG conflict changed nothing: the next Play asks, as after a newer cloud save.

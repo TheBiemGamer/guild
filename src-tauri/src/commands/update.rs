@@ -24,7 +24,7 @@ pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Opt
     let checked = async { app.updater_builder().timeout(Duration::from_secs(30)).build()?.check().await };
     let update = checked.await.map_err(|e: tauri_plugin_updater::Error| {
         log!("update check: {e}");
-        "Couldn't check for updates.".to_string()
+        msg!(cantCheckUpdates)
     })?;
     let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone().unwrap_or_default() });
     *pending = update;
@@ -35,19 +35,19 @@ pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Opt
 /// exits the app and starts the new version.
 #[tauri::command]
 pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
-    let mut update = state.update.lock().await.clone().ok_or("No update to install.")?;
+    let mut update = state.update.lock().await.clone().ok_or(msg!(noUpdate))?;
     // The check's 30 s limit would cut off a slow download.
     update.timeout = None;
     if game_running(&app).await {
-        return Err("Close the game first.".into());
+        return Err(msg!(closeGameFirst));
     }
     // Verifies the signature.
     let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| {
         log!("update download: {e}");
-        "Couldn't download the update.".to_string()
+        msg!(cantDownloadUpdate)
     })?;
     if game_running(&app).await {
-        return Err("Close the game first.".into());
+        return Err(msg!(closeGameFirst));
     }
     let was_paused = blocking({
         let app = app.clone();
@@ -69,7 +69,7 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<(
         if !was_paused {
             super::game::resume_downloads(app);
         }
-        return Err("Couldn't install the update.".into());
+        return Err(msg!(cantInstallUpdate));
     }
     Ok(())
 }

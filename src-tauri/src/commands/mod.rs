@@ -59,7 +59,7 @@ struct Shared {
     /// One per game across stores, in title order. Rebuilt by `regroup` whenever `games` or `twin_lists` change.
     entries: Vec<Entry>,
     /// Shown when nothing is listed.
-    status: String,
+    status: Vec<crate::msg::Msg>,
     epic_login: Option<Login>,
     gog_login: Option<crate::library::gog::Login>,
     amazon_login: Option<crate::library::amazon::Login>,
@@ -135,7 +135,7 @@ impl AppState {
                 .timeout(Duration::from_secs(15))
                 .build()
                 .expect("default TLS backend is available"),
-            shared: Mutex::new(Shared { status: "Loading library…".into(), ..Shared::default() }),
+            shared: Mutex::new(Shared { status: vec![msg!(loadingLibrary)], ..Shared::default() }),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
             steam_size: tokio::sync::Mutex::new(()),
             igdb: Mutex::new(igdb::TokenCache::default()),
@@ -176,7 +176,7 @@ fn regroup(s: &mut Shared) {
     s.entries = entries::group(&s.games, &s.twins);
 }
 
-type Res<T> = Result<T, String>;
+type Res<T> = Result<T, crate::msg::Msg>;
 
 /// The download queue as the UI shows it, with titles.
 fn queue_view(s: &Shared) -> crate::downloads::QueueView {

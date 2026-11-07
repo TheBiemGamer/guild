@@ -16,6 +16,7 @@ use crate::library::epic::{self, Login};
 use crate::library::{amazon, gog};
 use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
+use crate::msg::Msg;
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
 use crate::view::{self, Lists, Sort};
@@ -84,7 +85,8 @@ pub struct Library {
     groups: Vec<Section>,
     /// Games in the library, hidden ones left out.
     total: usize,
-    status: String,
+    /// Shown when nothing is listed: one line each.
+    status: Vec<Msg>,
     epic: Option<Login>,
     /// Epic was set up here and broke (`attention`).
     epic_attention: bool,
@@ -195,14 +197,14 @@ pub struct ViewPrefs {
 pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
-        let mut games = cache::db::load(&conn).map_err(|e| e.to_string())?;
-        view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(|e| e.to_string())?);
+        let conn = cache::db::open(&state.dirs.db).map_err(Msg::system)?;
+        let mut games = cache::db::load(&conn).map_err(Msg::system)?;
+        view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(Msg::system)?);
         epic_playtime::merge(&conn, &mut games);
         view::sort_by_title(&mut games);
         let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
         let ttb = crate::igdb::all_normally(&conn);
-        let lists = cache::db::lists(&conn).map_err(|e| e.to_string())?;
+        let lists = cache::db::lists(&conn).map_err(Msg::system)?;
         let mut s = state.lock();
         s.ttb = ttb;
         s.lists = lists;
@@ -526,7 +528,7 @@ fn take_changed(s: &mut Shared, finished: bool) -> bool {
     std::mem::take(&mut s.library_changed) | finished
 }
 
-type ScanResults = Vec<(ProviderKind, Result<Vec<Game>, String>)>;
+type ScanResults = Vec<(ProviderKind, Result<Vec<Game>, Msg>)>;
 
 /// The owned games as `Game`s, or `None` when Steam can't be found.
 fn build_owned(owned: &[OwnedGame]) -> Option<Vec<Game>> {
@@ -577,7 +579,7 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
         Err(e) => log!("launch history: {e}"),
     }
     // Only a finished scan may claim the library is empty.
-    s.status = if merged.errors.is_empty() { "No games found.".into() } else { merged.errors.join("\n") };
+    s.status = if merged.errors.is_empty() { vec![msg!(noGamesFound)] } else { merged.errors };
     if merged.games == s.games {
         return false;
     }
@@ -622,25 +624,25 @@ fn scan(
     dirs: &cache::Dirs,
     http: &reqwest::Client,
 ) -> (ScanResults, Option<(Login, gog::Login, amazon::Login)>) {
-    let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string()).map(|installed| match owned {
+    let steam = ProviderKind::Steam.provider().list_games().map_err(Msg::from).map(|installed| match owned {
         Some(owned) => with_owned(installed, owned),
         None => installed,
     });
-    let custom = crate::library::custom::list(dirs).map_err(|e| e.to_string());
+    let custom = crate::library::custom::list(dirs).map_err(Msg::from);
     let mut results = vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)];
     if !online {
         return (results, None);
     }
     let login = epic::login_state();
-    let games = epic_result(login, || ProviderKind::Epic.provider().list_games().map_err(|e| e.to_string()));
+    let games = epic_result(login, || ProviderKind::Epic.provider().list_games().map_err(Msg::from));
     results.push((ProviderKind::Epic, games));
     let (gog_login, creds) = gog::login();
     let games = match creds {
-        Some(creds) => gog::list(http, dirs, &creds).map_err(|e| format!("{GOG_QUIET}: {e}")),
-        None => Err(format!("{GOG_QUIET}: {gog_login:?}")),
+        Some(creds) => gog::list(http, dirs, &creds).map_err(|e| Msg::system(format!("{GOG_QUIET}: {e}"))),
+        None => Err(Msg::system(format!("{GOG_QUIET}: {gog_login:?}"))),
     };
     results.push((ProviderKind::Gog, games));
-    let games = amazon::list(dirs).map_err(|e| format!("{AMAZON_QUIET}: {e}"));
+    let games = amazon::list(dirs).map_err(|e| Msg::system(format!("{AMAZON_QUIET}: {e}")));
     // After the list: its sync is what says whether the login still works.
     let amazon_login = amazon::login();
     results.push((ProviderKind::Amazon, games));
@@ -653,12 +655,13 @@ const GOG_QUIET: &str = "GOG unavailable";
 const AMAZON_QUIET: &str = "Amazon unavailable";
 
 /// Only a logged-in Epic is listed. Any other state is an `Err`, so `merge` keeps the cached Epic games.
-fn epic_result(login: Login, list: impl FnOnce() -> Result<Vec<Game>, String>) -> Result<Vec<Game>, String> {
+fn epic_result(login: Login, list: impl FnOnce() -> Result<Vec<Game>, Msg>) -> Result<Vec<Game>, Msg> {
+    let quiet = |why: &str| Err(Msg::system(format!("{EPIC_QUIET}: {why}")));
     match login {
         Login::LoggedIn => list(),
-        Login::LoggedOut => Err(format!("{EPIC_QUIET}: not logged in")),
-        Login::NoLegendary => Err(format!("{EPIC_QUIET}: Legendary isn't installed")),
-        Login::Unreachable => Err(format!("{EPIC_QUIET}: Legendary couldn't reach Epic")),
+        Login::LoggedOut => quiet("not logged in"),
+        Login::NoLegendary => quiet("Legendary isn't installed"),
+        Login::Unreachable => quiet("Legendary couldn't reach Epic"),
     }
 }
 
@@ -700,7 +703,7 @@ fn epic_notice(showing: bool, previous: Option<&str>, login: Login) -> bool {
 struct Merged {
     games: Vec<Game>,
     scanned: Vec<ProviderKind>,
-    errors: Vec<String>,
+    errors: Vec<Msg>,
 }
 
 /// Stores not scanned, or whose scan failed, keep what we last knew.
@@ -716,14 +719,17 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
             }
             Err(e) => {
                 log!("{}: {e}", provider.name());
+                let text = e.to_string();
                 let quiet = match provider {
-                    ProviderKind::Epic => e.starts_with(EPIC_QUIET),
-                    ProviderKind::Gog => e.starts_with(GOG_QUIET),
-                    ProviderKind::Amazon => e.starts_with(AMAZON_QUIET),
+                    ProviderKind::Epic => text.starts_with(EPIC_QUIET),
+                    ProviderKind::Gog => text.starts_with(GOG_QUIET),
+                    ProviderKind::Amazon => text.starts_with(AMAZON_QUIET),
                     _ => false,
                 };
-                if !quiet {
-                    errors.push(format!("Couldn't read the {} library: {e}", provider.name()));
+                if provider == ProviderKind::Custom {
+                    errors.push(msg!(cantReadAddedGames, reason = e));
+                } else if !quiet {
+                    errors.push(msg!(cantReadLibrary, store = provider.name(), reason = e));
                 }
                 games.extend(current.iter().filter(|g| g.provider == provider).cloned());
             }
@@ -901,7 +907,7 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         (s.progress.clone(), take_changed(&mut s, !finished.is_empty()), queue, installed)
     };
     for title in installed {
-        super::notify_done(app, &title, "Ready to play");
+        super::notify_done(app, &title, crate::msg::native("readyToPlay"));
     }
     Poll { running: steam_running.or(watched), progress, changed, queue }
 }
@@ -1007,7 +1013,7 @@ mod tests {
         assert_eq!(merged.scanned, vec![ProviderKind::Steam]);
 
         // Offline: Epic's scan fails, so its last known games stay and it isn't saved over.
-        let results = vec![(ProviderKind::Steam, Ok(vec![fresh.clone()])), (ProviderKind::Epic, Err("offline".into()))];
+        let results = vec![(ProviderKind::Steam, Ok(vec![fresh.clone()])), (ProviderKind::Epic, Err(Msg::system("offline")))];
         let merged = merge(&current, results);
         assert_eq!(merged.games, vec![epic_game, fresh]);
         assert_eq!(merged.scanned, vec![ProviderKind::Steam]);
@@ -1067,7 +1073,7 @@ mod tests {
     fn failed_gog_scans_keep_the_cache_quietly() {
         let mut gog_game = game("Last Day of June", false, None, None);
         gog_game.provider = ProviderKind::Gog;
-        let results = vec![(ProviderKind::Gog, Err(format!("{GOG_QUIET}: offline")))];
+        let results = vec![(ProviderKind::Gog, Err(Msg::system(format!("{GOG_QUIET}: offline"))))];
         let merged = merge(&[gog_game.clone()], results);
         assert!(merged.errors.is_empty());
         assert_eq!(merged.games, vec![gog_game.clone()]);
@@ -1083,7 +1089,7 @@ mod tests {
         let mut amazon_game = game("Last Day of June", false, None, None);
         amazon_game.provider = ProviderKind::Amazon;
         for e in ["busy", "Unreachable", "not logged in"] {
-            let merged = merge(&[amazon_game.clone()], vec![(ProviderKind::Amazon, Err(format!("{AMAZON_QUIET}: {e}")))]);
+            let merged = merge(&[amazon_game.clone()], vec![(ProviderKind::Amazon, Err(Msg::system(format!("{AMAZON_QUIET}: {e}"))))]);
             assert!(merged.errors.is_empty());
             assert_eq!(merged.games, vec![amazon_game.clone()]);
             assert!(merged.scanned.is_empty());

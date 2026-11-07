@@ -400,7 +400,8 @@
         )
       : [],
   )
-  const savesLine = $derived(saves ? (saves.error ?? syncedLabel(saves.syncedAt)) : null)
+  const savesError = $derived(saves?.error ? api.message(saves.error) : null)
+  const savesLine = $derived(saves ? (savesError ?? syncedLabel(saves.syncedAt)) : null)
   // Decided from `game` alone, never from how long to beat, so a row that appeared never collapses.
   // A Steam game always has its Playtime tile, so its row is never empty; the free slot waits for a time to beat.
   const showTiles = $derived(!!playtime || !!lastPlayed)
@@ -758,8 +759,8 @@
           {/if}
         </section>
       {:else}
-      {#if saves?.error}
-        <p class="sync-note" title={saves.error}>{saves.error}</p>
+      {#if savesError}
+        <p class="sync-note" title={savesError}>{savesError}</p>
       {/if}
       {#if showTiles}
         <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->

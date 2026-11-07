@@ -4,6 +4,9 @@ import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { GroupId, Progress } from './format'
 import type { Collection, ListFilter } from './filters'
+import { render, type Msg } from './messages'
+
+export type { Msg }
 
 // Rust sends numbers and ids; `format.ts` turns them into labels.
 export type { Collection, GroupId, Progress }
@@ -47,7 +50,8 @@ export interface Library {
   groups: Section[]
   /** Games in the library, hidden ones left out. */
   total: number
-  status: string
+  /** Shown when nothing is listed, one line each. */
+  status: Msg[]
   epic: Login | null
   /** Epic's state is known and it isn't logged in: the settings button carries a dot. */
   epicAttention: boolean
@@ -206,7 +210,7 @@ export const act = (action: Action, key: string, options: ActOptions = {}) =>
  * An Epic or GOG copy's Saves tab. `choice`: its own On/Off, null follows Settings. `syncedAt`: unix seconds of the last
  * sync that worked, null when never or when `error` says what went wrong with the last one.
  */
-export interface SavesView { choice: boolean | null; syncedAt: number | null; error: string | null }
+export interface SavesView { choice: boolean | null; syncedAt: number | null; error: Msg | null }
 export const saves = (key: string) => invoke<SavesView | null>('saves', { key })
 export const setSaves = (key: string, choice: boolean | null) => invoke<void>('set_saves', { key, choice })
 /** The newer save wins; the outcome shows in `saves`. */
@@ -380,7 +384,7 @@ export type ConnectStep =
   | { step: 'rotated'; svg: string }
   | { step: 'scanned' }
   | { step: 'connected'; account: string }
-  | { step: 'failed'; message: string }
+  | { step: 'failed'; message: Msg }
 /** Starts a Steam QR login; resolves to the code as an SVG. */
 export const steamConnectStart = () => invoke<string>('steam_connect_start')
 export const steamConnectPoll = () => invoke<ConnectStep>('steam_connect_poll')
@@ -389,7 +393,7 @@ export type LoginStep =
   | { step: 'approve'; email: boolean }
   | { step: 'code'; kind: 'email' | 'app' }
   | { step: 'connected'; account: string }
-  | { step: 'failed'; message: string }
+  | { step: 'failed'; message: Msg }
 /** Steam login with account name and password; resolves to the first step. */
 export const steamPasswordLogin = (account: string, password: string) =>
   invoke<LoginStep>('steam_password_login', { account, password })
@@ -483,5 +487,5 @@ export const detailArt = async (key: string) => {
   return { hero: url(art.hero) }
 }
 
-/** Command errors arrive as plain strings. */
-export const message = (e: unknown) => (typeof e === 'string' ? e : String(e))
+/** A command error or other `Msg` from Rust in words (`messages.ts`). */
+export const message = render

@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::db;
+use crate::msg::Msg;
 use crate::library::percent_encode;
 
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
@@ -83,8 +84,8 @@ struct TokenResponse {
     expires_in: u64,
 }
 
-pub fn parse_token(body: &str, now: Instant) -> Result<Token, String> {
-    let t: TokenResponse = serde_json::from_str(body).map_err(|_| "Twitch sent an answer this app can't read.")?;
+pub fn parse_token(body: &str, now: Instant) -> Result<Token, Msg> {
+    let t: TokenResponse = serde_json::from_str(body).map_err(|_| msg!(twitchAnswerUnreadable))?;
     Ok(Token { value: t.access_token, expires_at: now + Duration::from_secs(t.expires_in) })
 }
 
@@ -94,33 +95,33 @@ struct ExternalGame {
 }
 
 /// IGDB's game id from an `external_games` answer; `None` when IGDB doesn't know the store ID.
-pub fn parse_game_id(body: &str) -> Result<Option<u64>, String> {
-    let rows: Vec<ExternalGame> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
+pub fn parse_game_id(body: &str) -> Result<Option<u64>, Msg> {
+    let rows: Vec<ExternalGame> = serde_json::from_str(body).map_err(|_| msg!(igdbAnswerUnreadable))?;
     Ok(rows.into_iter().find_map(|r| r.game))
 }
 
 /// The first `game_time_to_beats` row with at least one value.
-pub fn parse_time_to_beat(body: &str) -> Result<Option<TimeToBeat>, String> {
-    let rows: Vec<TimeToBeat> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
+pub fn parse_time_to_beat(body: &str) -> Result<Option<TimeToBeat>, Msg> {
+    let rows: Vec<TimeToBeat> = serde_json::from_str(body).map_err(|_| msg!(igdbAnswerUnreadable))?;
     Ok(rows.into_iter().find(|t| t.hastily.is_some() || t.normally.is_some() || t.completely.is_some()))
 }
 
 /// What Twitch said was wrong, e.g. "invalid client secret". Never contains `secret`.
-fn token_failure(status: u16, body: &str, secret: &str) -> String {
+fn token_failure(status: u16, body: &str, secret: &str) -> Msg {
     #[derive(Deserialize)]
     struct Failure {
         message: String,
     }
     let said = serde_json::from_str::<Failure>(body).map(|f| f.message).unwrap_or_default();
     if said.is_empty() || (!secret.is_empty() && said.contains(secret)) {
-        format!("Twitch refused the credentials (HTTP {status}).")
+        msg!(twitchRefused, status = status.to_string())
     } else {
-        format!("Twitch refused the credentials: {said} (HTTP {status}).")
+        msg!(twitchRefusedSaid, said = said, status = status.to_string())
     }
 }
 
 /// Asks Twitch for an app access token (client-credentials flow).
-pub async fn token(http: &reqwest::Client, client_id: &str, secret: &str) -> Result<Token, String> {
+pub async fn token(http: &reqwest::Client, client_id: &str, secret: &str) -> Result<Token, Msg> {
     let body = format!(
         "client_id={}&client_secret={}&grant_type=client_credentials",
         percent_encode(client_id),
@@ -132,9 +133,9 @@ pub async fn token(http: &reqwest::Client, client_id: &str, secret: &str) -> Res
         .body(body)
         .send()
         .await
-        .map_err(|_| "Couldn't reach Twitch.".to_string())?;
+        .map_err(|_| msg!(cantReachTwitch))?;
     let status = response.status();
-    let text = response.text().await.map_err(|_| "Couldn't read Twitch's answer.".to_string())?;
+    let text = response.text().await.map_err(|_| msg!(cantReadTwitchAnswer))?;
     if !status.is_success() {
         return Err(token_failure(status.as_u16(), &text, secret));
     }
@@ -148,7 +149,7 @@ pub async fn cached_token(
     http: &reqwest::Client,
     client_id: &str,
     secret: &str,
-) -> Result<Token, String> {
+) -> Result<Token, Msg> {
     {
         let c = cache.lock().expect("token cache lock poisoned");
         let now = Instant::now();
@@ -156,7 +157,7 @@ pub async fn cached_token(
             return Ok(token);
         }
         if c.backing_off(now) {
-            return Err("Twitch refused the credentials a moment ago; waiting a few minutes before retrying.".into());
+            return Err(msg!(twitchBackingOff));
         }
     }
     let result = token(http, client_id, secret).await;
@@ -174,7 +175,7 @@ async fn post(
     client_id: &str,
     endpoint: &str,
     query: String,
-) -> Result<String, String> {
+) -> Result<String, Msg> {
     let response = http
         .post(format!("{API_URL}/{endpoint}"))
         .header("Client-ID", client_id)
@@ -182,12 +183,12 @@ async fn post(
         .body(query)
         .send()
         .await
-        .map_err(|_| "Couldn't reach IGDB.".to_string())?;
+        .map_err(|_| msg!(cantReachIgdb))?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("IGDB answered HTTP {}.", status.as_u16()));
+        return Err(msg!(igdbHttp, status = status.as_u16().to_string()));
     }
-    response.text().await.map_err(|_| "Couldn't read IGDB's answer.".to_string())
+    response.text().await.map_err(|_| msg!(cantReadIgdbAnswer))
 }
 
 /// IGDB's id for a Steam game, matched on its app id. `Ok(None)` when IGDB doesn't know it.
@@ -196,7 +197,7 @@ pub async fn game_id_for_steam(
     token: &Token,
     client_id: &str,
     appid: u32,
-) -> Result<Option<u64>, String> {
+) -> Result<Option<u64>, Msg> {
     let query = format!("fields game; where external_game_source = {STEAM_SOURCE} & uid = \"{appid}\"; limit 1;");
     parse_game_id(&post(http, token, client_id, "external_games", query).await?)
 }
@@ -221,8 +222,8 @@ struct EpicRow {
 
 /// The IGDB game when there is at least one row and every row names the same game; a title
 /// shared by different games is a guess, so it matches nothing.
-pub fn parse_epic_title_match(body: &str) -> Result<Option<EpicMatch>, String> {
-    let rows: Vec<EpicRow> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
+pub fn parse_epic_title_match(body: &str) -> Result<Option<EpicMatch>, Msg> {
+    let rows: Vec<EpicRow> = serde_json::from_str(body).map_err(|_| msg!(igdbAnswerUnreadable))?;
     let Some(game) = rows.first().and_then(|r| r.game) else { return Ok(None) };
     if rows.iter().any(|r| r.game != Some(game)) {
         return Ok(None);
@@ -236,8 +237,8 @@ fn store_url(rows: Vec<EpicRow>) -> Option<String> {
 }
 
 /// The Epic store page among an IGDB game's Epic rows.
-pub fn parse_epic_store_url(body: &str) -> Result<Option<String>, String> {
-    let rows: Vec<EpicRow> = serde_json::from_str(body).map_err(|_| "IGDB sent an answer we don't understand.")?;
+pub fn parse_epic_store_url(body: &str) -> Result<Option<String>, Msg> {
+    let rows: Vec<EpicRow> = serde_json::from_str(body).map_err(|_| msg!(igdbAnswerUnreadable))?;
     Ok(store_url(rows))
 }
 
@@ -247,7 +248,7 @@ pub async fn epic_url_for_game(
     token: &Token,
     client_id: &str,
     game_id: u64,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, Msg> {
     let query = format!("fields url; where game = {game_id} & external_game_source = {EPIC_SOURCE}; limit 10;");
     parse_epic_store_url(&post(http, token, client_id, "external_games", query).await?)
 }
@@ -257,7 +258,7 @@ pub async fn epic_by_title(
     token: &Token,
     client_id: &str,
     title: &str,
-) -> Result<Option<EpicMatch>, String> {
+) -> Result<Option<EpicMatch>, Msg> {
     parse_epic_title_match(&post(http, token, client_id, "external_games", epic_title_query(title)).await?)
 }
 
@@ -278,7 +279,7 @@ pub async fn time_to_beat(
     token: &Token,
     client_id: &str,
     game_id: u64,
-) -> Result<Option<TimeToBeat>, String> {
+) -> Result<Option<TimeToBeat>, Msg> {
     let query = format!("fields hastily,normally,completely; where game_id = {game_id}; limit 1;");
     parse_time_to_beat(&post(http, token, client_id, "game_time_to_beats", query).await?)
 }
@@ -435,10 +436,10 @@ mod tests {
     #[test]
     fn token_failure_never_repeats_the_secret() {
         let said = token_failure(400, r#"{"status":400,"message":"invalid client secret"}"#, "hunter2");
-        assert_eq!(said, "Twitch refused the credentials: invalid client secret (HTTP 400).");
+        assert_eq!(said, msg!(twitchRefusedSaid, said = "invalid client secret", status = "400"));
         let echoed = token_failure(400, r#"{"message":"bad hunter2"}"#, "hunter2");
-        assert!(!echoed.contains("hunter2"));
-        assert_eq!(token_failure(500, "<html>", "hunter2"), "Twitch refused the credentials (HTTP 500).");
+        assert!(!serde_json::to_string(&echoed).unwrap().contains("hunter2"));
+        assert_eq!(token_failure(500, "<html>", "hunter2"), msg!(twitchRefused, status = "500"));
     }
 
     fn temp_db(name: &str) -> Connection {

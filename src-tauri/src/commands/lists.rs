@@ -8,8 +8,8 @@ use tauri::{AppHandle, Manager};
 use super::{blocking, open_db, AppState, Res};
 use crate::cache;
 use crate::entries;
+use crate::msg::Msg;
 
-const NO_DB: &str = "The settings database can't be opened.";
 
 #[derive(Serialize)]
 pub struct Collection {
@@ -22,16 +22,16 @@ pub struct Collection {
 /// Every copy key of the game with this key.
 fn copy_keys(state: &AppState, key: &str) -> Res<Vec<String>> {
     let s = state.lock();
-    let entry = entries::find(&s.entries, &s.games, key).ok_or("This game is no longer in the library.")?;
+    let entry = entries::find(&s.entries, &s.games, key).ok_or(msg!(gameNotInLibrary))?;
     Ok(entry.copies.iter().map(|&i| s.games[i].key()).collect())
 }
 
 /// Runs a change on the database, then reads the lists again for the library.
-fn change<T>(app: &AppHandle, f: impl FnOnce(&mut rusqlite::Connection) -> Result<T, String>) -> Res<T> {
+fn change<T>(app: &AppHandle, f: impl FnOnce(&mut rusqlite::Connection) -> Res<T>) -> Res<T> {
     let state = app.state::<AppState>();
-    let mut conn = open_db(&state).ok_or(NO_DB)?;
+    let mut conn = open_db(&state).ok_or(msg!(noDb))?;
     let out = f(&mut conn)?;
-    let lists = cache::db::lists(&conn).map_err(|e| e.to_string())?;
+    let lists = cache::db::lists(&conn).map_err(Msg::system)?;
     state.lock().lists = lists;
     Ok(out)
 }
@@ -40,7 +40,7 @@ async fn set_flag(app: AppHandle, key: String, name: &'static str, on: bool) -> 
     blocking(move || {
         let keys = copy_keys(&app.state::<AppState>(), &key)?;
         change(&app, |conn| {
-            keys.iter().try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1"))).map_err(|e| e.to_string())
+            keys.iter().try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1"))).map_err(Msg::system)
         })
     })
     .await
@@ -61,7 +61,7 @@ pub async fn set_hidden(app: AppHandle, key: String, on: bool) -> Res<()> {
 pub async fn collections(app: AppHandle) -> Res<Vec<Collection>> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let list = collections_in(&open_db(&state).ok_or(NO_DB)?)?;
+        let list = collections_in(&open_db(&state).ok_or(msg!(noDb))?)?;
         let s = state.lock();
         let mut counts: HashMap<i64, usize> = HashMap::new();
         for e in &s.entries {
@@ -78,17 +78,17 @@ pub async fn collections(app: AppHandle) -> Res<Vec<Collection>> {
 fn check_name(name: &str, taken: &[(i64, String)], except: Option<i64>) -> Res<String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err("Give the collection a name.".into());
+        return Err(msg!(nameTheCollection));
     }
     let lower = name.to_lowercase();
     if taken.iter().any(|(id, n)| Some(*id) != except && n.to_lowercase() == lower) {
-        return Err(format!("There's already a collection named {name}."));
+        return Err(msg!(collectionExists, name = name));
     }
     Ok(name.to_string())
 }
 
 fn collections_in(conn: &rusqlite::Connection) -> Res<Vec<(i64, String)>> {
-    cache::db::collections(conn).map_err(|e| e.to_string())
+    cache::db::collections(conn).map_err(Msg::system)
 }
 
 /// Returns the new collection's id.
@@ -97,7 +97,7 @@ pub async fn create_collection(app: AppHandle, name: String) -> Res<i64> {
     blocking(move || {
         change(&app, |conn| {
             let name = check_name(&name, &collections_in(conn)?, None)?;
-            cache::db::create_collection(conn, &name).map_err(|e| e.to_string())
+            cache::db::create_collection(conn, &name).map_err(Msg::system)
         })
     })
     .await
@@ -108,7 +108,7 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
     blocking(move || {
         change(&app, |conn| {
             let name = check_name(&name, &collections_in(conn)?, Some(id))?;
-            cache::db::rename_collection(conn, id, &name).map_err(|e| e.to_string())
+            cache::db::rename_collection(conn, id, &name).map_err(Msg::system)
         })
     })
     .await
@@ -117,7 +117,7 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
 /// The games stay in the library.
 #[tauri::command]
 pub async fn delete_collection(app: AppHandle, id: i64) -> Res<()> {
-    blocking(move || change(&app, |conn| cache::db::delete_collection(conn, id).map_err(|e| e.to_string()))).await
+    blocking(move || change(&app, |conn| cache::db::delete_collection(conn, id).map_err(Msg::system))).await
 }
 
 #[tauri::command]
@@ -126,9 +126,9 @@ pub async fn set_in_collection(app: AppHandle, key: String, id: i64, on: bool) -
         let keys = copy_keys(&app.state::<AppState>(), &key)?;
         change(&app, |conn| {
             if !collections_in(conn)?.iter().any(|(c, _)| *c == id) {
-                return Err("That collection no longer exists.".into());
+                return Err(msg!(collectionGone));
             }
-            cache::db::set_in_collection(conn, id, &keys, on).map_err(|e| e.to_string())
+            cache::db::set_in_collection(conn, id, &keys, on).map_err(Msg::system)
         })
     })
     .await

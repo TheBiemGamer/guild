@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use crate::msg::Msg;
+
 use protobuf::{EnumOrUnknown, Message, MessageField};
 use steam_vent_proto_steam::steammessages_auth_steamclient::{
     CAuthentication_BeginAuthSessionViaQR_Request, CAuthentication_BeginAuthSessionViaQR_Response,
@@ -62,16 +64,16 @@ pub fn apply_poll(session: &mut QrSession, resp: &CAuthentication_PollAuthSessio
 }
 
 /// Steam answers with its result code in the `x-eresult` header; only 1 is success.
-pub fn eresult_ok(header: Option<&str>) -> Result<(), String> {
+pub fn eresult_ok(header: Option<&str>) -> Result<(), Msg> {
     match header {
         Some("1") => Ok(()),
-        other => Err(format!("Steam refused the login request (code {}).", other.unwrap_or("?"))),
+        other => Err(msg!(steamRefusedLogin, code = other.unwrap_or("?"))),
     }
 }
 
 /// The QR code as an SVG: black modules on white, with a quiet zone.
-pub fn qr_svg(url: &str) -> Result<String, String> {
-    let code = qrcode::QrCode::new(url.as_bytes()).map_err(|e| format!("Couldn't draw the QR code: {e}"))?;
+pub fn qr_svg(url: &str) -> Result<String, Msg> {
+    let code = qrcode::QrCode::new(url.as_bytes()).map_err(|e| msg!(cantDrawQr, detail = e.to_string()))?;
     Ok(code
         .render::<qrcode::render::svg::Color>()
         .quiet_zone(true)
@@ -81,7 +83,7 @@ pub fn qr_svg(url: &str) -> Result<String, String> {
         .build())
 }
 
-pub async fn begin(http: &reqwest::Client) -> Result<QrSession, String> {
+pub async fn begin(http: &reqwest::Client) -> Result<QrSession, Msg> {
     let req = CAuthentication_BeginAuthSessionViaQR_Request {
         website_id: Some("Client".into()),
         device_details: MessageField::some(CAuthentication_DeviceDetails {
@@ -99,7 +101,7 @@ pub async fn begin(http: &reqwest::Client) -> Result<QrSession, String> {
     })
 }
 
-pub async fn poll(http: &reqwest::Client, session: &mut QrSession) -> Result<PollStep, String> {
+pub async fn poll(http: &reqwest::Client, session: &mut QrSession) -> Result<PollStep, Msg> {
     let req = CAuthentication_PollAuthSessionStatus_Request {
         client_id: Some(session.client_id),
         request_id: Some(session.request_id.clone()),
@@ -110,17 +112,17 @@ pub async fn poll(http: &reqwest::Client, session: &mut QrSession) -> Result<Pol
 }
 
 /// One `IAuthenticationService` call: protobuf in (base64 form field), protobuf out.
-async fn call<Req: Message, Resp: Message>(http: &reqwest::Client, method: &str, req: &Req) -> Result<Resp, String> {
-    let body = base64(&req.write_to_bytes().map_err(|e| e.to_string())?);
+async fn call<Req: Message, Resp: Message>(http: &reqwest::Client, method: &str, req: &Req) -> Result<Resp, Msg> {
+    let body = base64(&req.write_to_bytes().map_err(Msg::system)?);
     let resp = http
         .post(format!("https://api.steampowered.com/IAuthenticationService/{method}/v1/"))
         .form(&[("input_protobuf_encoded", body)])
         .send()
         .await
-        .map_err(|e| format!("Couldn't reach Steam: {e}"))?;
+        .map_err(|e| msg!(cantReachSteamDetail, detail = e.to_string()))?;
     eresult_ok(resp.headers().get("x-eresult").and_then(|v| v.to_str().ok()))?;
-    let bytes = resp.bytes().await.map_err(|e| format!("Couldn't read Steam's answer: {e}"))?;
-    Resp::parse_from_bytes(&bytes).map_err(|_| "Steam sent an answer this app can't read.".to_string())
+    let bytes = resp.bytes().await.map_err(|e| msg!(cantReadSteamAnswer, detail = e.to_string()))?;
+    Resp::parse_from_bytes(&bytes).map_err(|_| msg!(steamAnswerUnreadable))
 }
 
 /// RFC 4648 base64 with padding.
@@ -204,7 +206,7 @@ mod tests {
     #[test]
     fn eresult_ok_only_for_1() {
         assert!(eresult_ok(Some("1")).is_ok());
-        assert!(eresult_ok(Some("84")).unwrap_err().contains("84"));
+        assert_eq!(eresult_ok(Some("84")), Err(msg!(steamRefusedLogin, code = "84")));
         assert!(eresult_ok(None).is_err());
     }
 

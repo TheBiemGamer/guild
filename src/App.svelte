@@ -46,7 +46,7 @@
   let popoverOpen = $state(false)
   let collections = $state<Collection[]>([])
 
-  let lib = $state<Library>({ games: [], groups: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false, gog: null, gogAttention: false, amazon: null, amazonAttention: false })
+  let lib = $state<Library>({ games: [], groups: [], total: 0, status: [], epic: null, epicAttention: false, steamAttention: false, epicNotice: false, gog: null, gogAttention: false, amazon: null, amazonAttention: false })
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
@@ -575,7 +575,7 @@
       </div>
     {:else if started}
       <div class="empty">
-        <p>{lib.total > 0 ? 'No games match.' : lib.status}</p>
+        <p>{lib.total > 0 ? 'No games match.' : lib.status.map(api.message).join('\n')}</p>
       </div>
     {/if}
     </div>

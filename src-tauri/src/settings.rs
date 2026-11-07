@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::cache::db;
+use crate::msg::Msg;
 use crate::view::Sort;
 
 pub const SHOW_BANNER: &str = "show_banner";
@@ -66,29 +67,29 @@ pub fn load(conn: &Connection) -> Settings {
 }
 
 /// Whether `name` may be set to `value` (`None` resets it). The secret has its own command.
-pub fn validate(name: &str, value: Option<&str>) -> Result<(), String> {
+pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
     match name {
         SHOW_BANNER | AMBIENT | CLOUD_SAVES | GOG_CLOUD_SAVES | CLOSE_TO_TRAY | NOTIFY_DOWNLOADS | START_WITH_WINDOWS => match value {
             None | Some("true" | "false") => Ok(()),
-            Some(_) => Err(format!("{name} must be true or false.")),
+            Some(_) => Err(msg!(settingNotBool, name = name)),
         },
         EPIC_INSTALL_DIR | GOG_INSTALL_DIR | AMAZON_INSTALL_DIR => match value {
-            Some(dir) if !Path::new(dir).is_dir() => Err(format!("{dir} isn't an existing folder.")),
+            Some(dir) if !Path::new(dir).is_dir() => Err(msg!(notExistingFolder, path = dir)),
             _ => Ok(()),
         },
         IGDB_CLIENT_ID => Ok(()),
-        LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => Err(format!("Unknown sort: {value:?}")),
+        LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => Err(msg!(unknownSort, value = format!("{value:?}"))),
         LIBRARY_SORT => Ok(()),
-        "igdb_secret" => Err("The IGDB secret is saved through its own command.".into()),
-        _ => Err(format!("Unknown setting: {name}")),
+        "igdb_secret" => Err(msg!(igdbSecretOwnCommand)),
+        _ => Err(msg!(unknownSetting, name = name)),
     }
 }
 
 /// Validates, then saves. Blank text clears the setting; folders and IDs are trimmed.
-pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), String> {
+pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), Msg> {
     let value = value.map(str::trim).filter(|v| !v.is_empty());
     validate(name, value)?;
-    db::set_setting(conn, name, value).map_err(|e| e.to_string())
+    db::set_setting(conn, name, value).map_err(Msg::system)
 }
 
 /// `current` when it is newer than the version that last started here, so the UI says "Updated to" once.
@@ -113,8 +114,8 @@ pub fn signed_out(conn: &Connection, store: &str) -> bool {
     db::setting(conn, &format!("signed_out_{store}")).ok().flatten().is_some()
 }
 
-pub fn set_signed_out(conn: &Connection, store: &str, on: bool) -> Result<(), String> {
-    db::set_setting(conn, &format!("signed_out_{store}"), on.then_some("true")).map_err(|e| e.to_string())
+pub fn set_signed_out(conn: &Connection, store: &str, on: bool) -> Result<(), Msg> {
+    db::set_setting(conn, &format!("signed_out_{store}"), on.then_some("true")).map_err(Msg::system)
 }
 
 const SERVICE: &str = "dev.noah.gamelauncher";
@@ -128,7 +129,7 @@ pub fn secret() -> Option<String> {
 }
 
 /// Saves the secret, or deletes it for `None`. Errors never include the value.
-pub fn set_secret(value: Option<&str>) -> Result<(), String> {
+pub fn set_secret(value: Option<&str>) -> Result<(), Msg> {
     write(SECRET_USER, value)
 }
 
@@ -138,7 +139,7 @@ pub fn grid_key() -> Option<String> {
 }
 
 /// Saves the SteamGridDB API key, or deletes it for `None`. Errors never include the value.
-pub fn set_grid_key(value: Option<&str>) -> Result<(), String> {
+pub fn set_grid_key(value: Option<&str>) -> Result<(), Msg> {
     write(GRID_KEY_USER, value)
 }
 
@@ -148,19 +149,19 @@ pub fn steam_token() -> Option<String> {
 }
 
 /// Saves the Steam refresh token, or deletes it for `None`. Errors never include the value.
-pub fn set_steam_token(value: Option<&str>) -> Result<(), String> {
+pub fn set_steam_token(value: Option<&str>) -> Result<(), Msg> {
     write(STEAM_TOKEN_USER, value)
 }
 
 /// Windows Credential Manager, registered once as keyring-core's default store.
-fn entry(user: &str) -> Result<keyring_core::Entry, String> {
+fn entry(user: &str) -> Result<keyring_core::Entry, Msg> {
     static STORE: std::sync::LazyLock<Result<(), String>> = std::sync::LazyLock::new(|| {
         let store = windows_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
         keyring_core::set_default_store(store);
         Ok(())
     });
-    STORE.clone().map_err(|e| format!("Credential Manager: {e}"))?;
-    keyring_core::Entry::new(SERVICE, user).map_err(|e| format!("Credential Manager: {e}"))
+    STORE.clone().map_err(|e| msg!(credentialManager, detail = e))?;
+    keyring_core::Entry::new(SERVICE, user).map_err(|e| msg!(credentialManager, detail = e.to_string()))
 }
 
 fn read(user: &str) -> Option<String> {
@@ -174,7 +175,7 @@ fn read(user: &str) -> Option<String> {
     }
 }
 
-fn write(user: &str, value: Option<&str>) -> Result<(), String> {
+fn write(user: &str, value: Option<&str>) -> Result<(), Msg> {
     let entry = entry(user)?;
     let result = match value {
         Some(secret) => entry.set_password(secret),
@@ -182,7 +183,7 @@ fn write(user: &str, value: Option<&str>) -> Result<(), String> {
     };
     match result {
         Err(keyring_core::Error::NoEntry) if value.is_none() => Ok(()),
-        other => other.map_err(|e| format!("Credential Manager: {e}")),
+        other => other.map_err(|e| msg!(credentialManager, detail = e.to_string())),
     }
 }
 

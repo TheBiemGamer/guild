@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{Art, Error, Game, Image, Progress, Provider, ProviderKind};
 use crate::cache::Dirs;
+use crate::msg::Msg;
 
 /// One row of `custom_games`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,15 +31,17 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
 }
 
 /// Listed by `list` and played by `commands::game::act_custom`, which know the app's folders.
-const NOT_HERE: &str = "Games you added are listed and launched by the app.";
+fn not_here() -> Error {
+    msg!(customNotHere).into()
+}
 
 impl Provider for Custom {
     fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     fn launch(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+        Err(not_here())
     }
 
     /// A not-installed added game is one whose program is gone.
@@ -47,7 +50,7 @@ impl Provider for Custom {
     }
 
     fn uninstall(&self, _game: &Game) -> Result<(), Error> {
-        Err("Remove it from your library instead; its files stay on disk.".into())
+        Err(msg!(customUninstall).into())
     }
 
     /// Watched through its process once launched from here (`commands::Watch`).
@@ -61,7 +64,7 @@ impl Provider for Custom {
 }
 
 fn missing(title: &str) -> Error {
-    format!("{title}'s program is missing. Edit the game to pick it again.").into()
+    msg!(customProgramMissing, title = title).into()
 }
 
 /// A new id: the time in hex, short and safe as a file name.
@@ -101,13 +104,13 @@ pub fn cover_file(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Only an .exe: Windows runs a .bat or .cmd through cmd.exe, and nothing here goes through a shell.
-pub fn check_exe(exe: &str) -> Result<(), String> {
+pub fn check_exe(exe: &str) -> Result<(), Msg> {
     let path = Path::new(exe);
     if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
-        return Err("Pick a program (.exe).".into());
+        return Err(msg!(pickExe));
     }
     if !path.is_file() {
-        return Err(format!("The program is missing: {exe}"));
+        return Err(msg!(programMissing, path = exe));
     }
     Ok(())
 }

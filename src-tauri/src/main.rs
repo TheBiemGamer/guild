@@ -3,6 +3,8 @@
 
 #[macro_use]
 mod log;
+#[macro_use]
+mod msg;
 
 mod amazon_login;
 mod bench;

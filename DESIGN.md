@@ -338,7 +338,7 @@ Top bar only, left to right (mockup v7): search, the store selector (All · Stea
 
 ### Do:
 - **Do** use the CSS custom properties in `src/app.css`; add a token before adding a raw value.
-- **Do** format labels from numbers (progress, sizes, times, group names) in `src/lib/format.ts`; Rust sends numbers, ids and timestamps. Error and status messages still come from Rust.
+- **Do** format labels from numbers (progress, sizes, times, group names) in `src/lib/format.ts`; Rust sends numbers, ids and timestamps. Error and status messages come from Rust as message codes, worded in `src/lib/messages.ts`.
 - **Do** keep scrolling at the benchmark level: `LAUNCHER_BENCH` 175 fps, 0 dropped frames over 613 games at 4,000 and 15,000 px/s (spec, Anti-goals).
 - **Do** reserve space for late data (covers, store details, how-long-to-beat) so nothing jumps.
 - **Do** hide a missing (unknown) fact's tile or row instead of showing a dash. A known zero is a fact, not a missing one: Steam's "Never played" shows.

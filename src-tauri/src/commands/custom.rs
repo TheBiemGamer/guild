@@ -10,6 +10,7 @@ use super::{allow, blocking, open_db, unix_now, AppState, Res};
 use crate::cache;
 use crate::library::custom::{self, CustomGame};
 use crate::library::Image;
+use crate::msg::Msg;
 use crate::settings;
 use crate::steamgriddb;
 
@@ -51,26 +52,26 @@ pub async fn save_custom_game(
 ) -> Res<String> {
     let name = name.trim().to_string();
     if name.is_empty() {
-        return Err("Give the game a name.".into());
+        return Err(msg!(nameTheGame));
     }
     custom::check_exe(&exe)?;
     let id = match &key {
-        Some(key) => custom::id_of(key).ok_or("This game is no longer in the library.")?.to_string(),
+        Some(key) => custom::id_of(key).ok_or(msg!(gameNotInLibrary))?.to_string(),
         None => custom::new_id(),
     };
     let bytes = match cover {
         None => None,
         Some(CoverPick::Url(url)) => Some(download(&app.state::<AppState>().http, &url).await?),
         Some(CoverPick::File(path)) => {
-            Some(blocking(move || std::fs::read(&path).map_err(|e| format!("Couldn't read the cover: {e}"))).await?)
+            Some(blocking(move || std::fs::read(&path).map_err(|e| msg!(cantReadCover, detail = e.to_string()))).await?)
         }
     };
     blocking(move || {
         let state = app.state::<AppState>();
-        let conn = open_db(&state).ok_or("The settings database can't be opened.")?;
-        let existing = cache::db::custom_game(&conn, &id).map_err(|e| e.to_string())?;
+        let conn = open_db(&state).ok_or(msg!(noDb))?;
+        let existing = cache::db::custom_game(&conn, &id).map_err(Msg::system)?;
         if key.is_some() && existing.is_none() {
-            return Err("This game is no longer in the library.".into());
+            return Err(msg!(gameNotInLibrary));
         }
         let dir = state.dirs.custom.join(&id);
         if let Some(bytes) = &bytes {
@@ -82,7 +83,7 @@ pub async fn save_custom_game(
             if existing.is_none() {
                 _ = std::fs::remove_dir_all(&dir);
             }
-            return Err(e.to_string());
+            return Err(Msg::system(e));
         }
         rescan(&app, false);
         Ok(row_key(&id))
@@ -99,9 +100,9 @@ fn row_key(id: &str) -> String {
 pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let id = custom::id_of(&key).ok_or("This game isn't one you added.")?;
-        let conn = open_db(&state).ok_or("The settings database can't be opened.")?;
-        cache::db::delete_custom_game(&conn, id).map_err(|e| e.to_string())?;
+        let id = custom::id_of(&key).ok_or(msg!(notAddedGame))?;
+        let conn = open_db(&state).ok_or(msg!(noDb))?;
+        cache::db::delete_custom_game(&conn, id).map_err(Msg::system)?;
         match std::fs::remove_dir_all(state.dirs.custom.join(id)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => log!("remove cover {key}: {e}"),
             _ => {}
@@ -116,7 +117,7 @@ pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
 /// Downloads a picked SteamGridDB image.
 async fn download(http: &reqwest::Client, url: &str) -> Res<Vec<u8>> {
     if !url.starts_with("https://") {
-        return Err("Pick a cover from the list.".into());
+        return Err(msg!(pickCoverFromList));
     }
     let bytes = match http.get(url).send().await.and_then(|r| r.error_for_status()) {
         Ok(response) => response.bytes().await,
@@ -124,7 +125,7 @@ async fn download(http: &reqwest::Client, url: &str) -> Res<Vec<u8>> {
     };
     bytes.map(|b| b.to_vec()).map_err(|e| {
         log!("cover download: {e}");
-        "Couldn't download the cover. Try again, or use a file.".into()
+        msg!(cantDownloadCover)
     })
 }
 
@@ -134,7 +135,7 @@ fn store_cover(dir: &Path, bytes: &[u8]) -> Res<()> {
     let ext = match image::guess_format(bytes) {
         Ok(image::ImageFormat::Png) => "png",
         Ok(image::ImageFormat::Jpeg) => "jpg",
-        _ => return Err("The cover must be a PNG or JPEG image.".into()),
+        _ => return Err(msg!(coverNotImage)),
     };
     let write = || -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
@@ -146,7 +147,7 @@ fn store_cover(dir: &Path, bytes: &[u8]) -> Res<()> {
         }
         std::fs::rename(&tmp, dir.join(format!("cover.{ext}")))
     };
-    write().map_err(|e| format!("Couldn't save the cover: {e}"))
+    write().map_err(|e| msg!(cantSaveCover, detail = e.to_string()))
 }
 
 /// Deletes the game's cached thumbnails, so the card shows the new cover.
