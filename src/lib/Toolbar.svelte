@@ -2,6 +2,7 @@
   import StoreIcon from './StoreIcon.svelte'
   import FilterPopover from './FilterPopover.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
+  import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, type Filter } from './filters'
   import type { Card, Group, Progress, QueueView, Sort, Store } from './api'
 
@@ -61,10 +62,28 @@
   const stores: Store[] = ['steam', 'epic']
   const chips = $derived(filterChips(filters))
 
-  let open = $state<'filters' | 'downloads' | null>(null)
+  const groups: { value: Group; label: string; hint?: string }[] = [
+    { value: 'none', label: 'None' },
+    { value: 'store', label: 'Store' },
+    { value: 'playtime', label: 'Your playtime', hint: '0–10 h, 10–20 h…' },
+    { value: 'timeToBeat', label: 'How long to beat', hint: 'short → endless' },
+  ]
+  const sorts: { value: Sort; label: string }[] = [
+    { value: 'lastPlayed', label: 'Recently played' },
+    { value: 'mostPlayed', label: 'Most played' },
+    { value: 'longestToBeat', label: 'Longest to beat' },
+    { value: 'shortestToBeat', label: 'Shortest to beat' },
+    { value: 'title', label: 'Title' },
+  ]
+  const groupName = $derived(groups.find((g) => g.value === group)?.label)
+  const sortName = $derived(sorts.find((s) => s.value === sort)?.label)
+
+  let open = $state<'filters' | 'downloads' | 'group' | 'sort' | null>(null)
   let search = $state<HTMLInputElement>()
   let filtersChip = $state<HTMLButtonElement>()
   let downloadsChip = $state<HTMLButtonElement>()
+  let groupChip = $state<HTMLButtonElement>()
+  let sortChip = $state<HTMLButtonElement>()
   $effect(() => {
     popoverOpen = open !== null
   })
@@ -82,7 +101,7 @@
   })
 
   function close(refocus: boolean) {
-    const chip = open === 'filters' ? filtersChip : downloadsChip
+    const chip = { filters: filtersChip, downloads: downloadsChip, group: groupChip, sort: sortChip }[open ?? 'filters']
     open = null
     if (refocus) chip?.focus()
   }
@@ -157,27 +176,38 @@
 
   <span class="spacer"></span>
 
-  <label class="sort">
-    <span class="prefix" aria-hidden="true">Group:</span>
-    <select bind:value={group} aria-label="Group by">
-      <option value="none">None</option>
-      <option value="store">Store</option>
-      <option value="playtime">Your playtime</option>
-      <option value="timeToBeat">How long to beat</option>
-    </select>
-    <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-  </label>
+  <div class="dd">
+    <button
+      class="chip"
+      bind:this={groupChip}
+      aria-haspopup="menu"
+      aria-expanded={open === 'group'}
+      onclick={() => (open = open === 'group' ? null : 'group')}
+    >
+      Group: {groupName}
+      <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+    </button>
+    {#if open === 'group'}
+      <ChoiceMenu bind:value={group} options={groups} label="Group by" anchor={groupChip} onclose={close} />
+    {/if}
+  </div>
 
-  <label class="sort">
-    <select bind:value={sort} aria-label="Sort by">
-      <option value="lastPlayed">Recently played</option>
-      <option value="mostPlayed">Most played</option>
-      <option value="longestToBeat">Longest to beat</option>
-      <option value="shortestToBeat">Shortest to beat</option>
-      <option value="title">Title</option>
-    </select>
-    <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-  </label>
+  <div class="dd">
+    <button
+      class="chip"
+      bind:this={sortChip}
+      aria-haspopup="menu"
+      aria-expanded={open === 'sort'}
+      aria-label="Sort: {sortName}"
+      onclick={() => (open = open === 'sort' ? null : 'sort')}
+    >
+      {sortName}
+      <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+    </button>
+    {#if open === 'sort'}
+      <ChoiceMenu bind:value={sort} options={sorts} label="Sort by" anchor={sortChip} onclose={close} />
+    {/if}
+  </div>
 
   {#if runningKey}
     {@const label = `Playing ${runningTitle ?? 'a game'}`}
@@ -352,61 +382,6 @@
 
   .spacer {
     flex: 1;
-  }
-
-  .sort {
-    position: relative;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    border-radius: 10px;
-    background: var(--glass);
-    border: 1px solid var(--glass-line);
-    color: var(--text-2);
-  }
-
-  .sort:hover {
-    background: var(--glass-hover);
-  }
-
-  .sort select {
-    appearance: none;
-    height: 100%;
-    padding: 0 30px 0 12px;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-  }
-
-  /* "Group:" before the chosen grouping, as one chip. */
-  .sort .prefix {
-    padding-left: 12px;
-    color: var(--text-2);
-    pointer-events: none;
-  }
-
-  .prefix + select {
-    padding-left: 4px;
-  }
-
-  .sort select:focus-visible {
-    outline: none;
-  }
-
-  .sort:focus-within {
-    outline: 2px solid var(--focus);
-    outline-offset: 2px;
-  }
-
-  .sort option {
-    background: var(--surface);
-  }
-
-  .sort .line {
-    position: absolute;
-    right: 10px;
-    pointer-events: none;
   }
 
   /* The running game: a pulsing green dot and its title. */
