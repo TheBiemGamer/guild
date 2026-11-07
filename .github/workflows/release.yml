@@ -13,6 +13,8 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    # The signing key lives in this environment, which only v* tags may use.
+    environment: release
     steps:
       - uses: actions/checkout@v7
 
