@@ -35,9 +35,10 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 - **UI** follows `DESIGN.md` (tokens, components, motion). Update it whenever the UI changes.
 - **UI text** only through `t()` with a key in `src/lib/i18n/en.json` (backend codes as `msg.<code>`), never hard-coded.
 - **Dependencies:** ask the owner before adding a crate or npm package.
-- **Always run both skills on every change.**
+- **Always run both skills on every change**, also when you write it yourself instead of a worker, and load them before you start, not after the owner asks.
   - [ponytail](https://github.com/DietrichGebert/ponytail) for code: take the smallest change that fully solves the task, and use `ponytail-review` before calling it done.
-  - [antislop](https://github.com/miqdadbadjuber/anti-slop) for anything users see (`antislop-ui` for UI and copy). Leave out decorative hints, labels that repeat each other, filler copy, and dots or animations that mark no real state.
+  - [antislop](https://github.com/miqdadbadjuber/anti-slop) for anything users see: app UI and copy (`antislop-ui`), and README, docs, CHANGELOG notes, release text and issue templates (`antislop-copywriting`). Leave out decorative hints, labels that repeat each other, filler copy, and dots or animations that mark no real state.
+  - Icons, logos and mockups go through a design skill (`impeccable`) as well as antislop: look at how comparable products do it first, and check the result at the sizes it ships at.
 - **Commit messages** are conventional and never carry Co-Authored-By, Claude-Session or "Generated with" lines.
 - **Running the app:**
   - Never drive it with simulated mouse or keyboard input while the owner may be using the PC. Capture it with PrintWindow instead.
