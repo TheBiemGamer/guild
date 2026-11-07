@@ -20,17 +20,27 @@ mod view;
 fn main() {
     tauri::Builder::default()
         .manage(commands::AppState::new())
+        .setup(|app| {
+            let app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(commands::library::SHOW_BY).await;
+                commands::library::show_window(&app, "safety net");
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::library::library,
             commands::library::load_cache,
             commands::library::refresh,
             commands::library::cover,
+            commands::library::ready,
             commands::game::game,
             commands::library::featured,
             commands::game::detail_art,
             commands::game::act,
             commands::game::download_size,
             commands::game::game_info,
+            commands::game::screenshots,
             commands::game::time_to_beat,
             commands::game::test_igdb,
             commands::game::cancel_install,

@@ -314,7 +314,7 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 /// An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
 /// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss).
-/// Screenshots come back as local files, downloaded on first use.
+/// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
     let game = app.state::<AppState>().game(&key)?;
@@ -323,7 +323,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
         let s = state.lock();
         entries::find(&s.entries, &s.games, &key).and_then(|e| entries::steam_appid(e, &s.games, &s.twins))
     };
-    let mut details = {
+    let details = {
         let (app, key, game) = (app.clone(), key.clone(), game.clone());
         blocking(move || {
             let state = app.state::<AppState>();
@@ -364,16 +364,28 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
         })
         .await?
     };
+    Some(details)
+}
+
+/// Local files for `game_info`'s screenshot URLs, downloaded on first use; the ones that fail are left out.
+/// Separate from `game_info` so the page's text never waits for images.
+#[tauri::command]
+pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<String> {
     let state = app.state::<AppState>();
+    // The key names the art folder, so it must be a real game.
+    if state.game(&key).is_none() {
+        return Vec::new();
+    }
     let dir = state.dirs.art.join(&key);
     // Downloaded side by side; awaited in order, so the screenshots keep theirs.
-    let downloads: Vec<_> = details
-        .screenshots
-        .iter()
+    let downloads: Vec<_> = urls
+        .into_iter()
+        .filter(|u| u.starts_with("https://"))
+        .take(info::MAX_SCREENSHOTS)
         .enumerate()
-        .map(|(n, shot)| {
+        .map(|(n, url)| {
             let (http, dest) = (state.http.clone(), dir.join(format!("shot{n}")));
-            let image = Image { path: None, url: Some(shot.clone()) };
+            let image = Image { path: None, url: Some(url) };
             tauri::async_runtime::spawn(async move { cache::resolve(&image, &http, dest).await })
         })
         .collect();
@@ -383,8 +395,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
             shots.extend(allow(&app, path));
         }
     }
-    details.screenshots = shots;
-    Some(details)
+    shots
 }
 
 #[derive(Serialize)]

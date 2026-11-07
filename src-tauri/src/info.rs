@@ -9,7 +9,7 @@ use crate::cache::db;
 use crate::library::{Error, ProviderKind};
 
 /// Most screenshots kept per game.
-const MAX_SCREENSHOTS: usize = 3;
+pub const MAX_SCREENSHOTS: usize = 3;
 
 /// What the game page shows. Missing facts are empty or `None` so the UI can hide them.
 /// Cached with screenshot URLs; the command swaps those for local files before returning.

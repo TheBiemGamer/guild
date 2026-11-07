@@ -72,21 +72,45 @@ pub fn open_image(path: &Path) -> ImageResult<DynamicImage> {
     ImageReader::open(path)?.with_guessed_format()?.decode()
 }
 
-/// Path of the cached JPEG thumbnail for `key`, creating it from `src` on a miss.
+/// Path of the cached JPEG thumbnail for `key`, creating it from `src` on a miss, and its average colour
+/// (`#rrggbb`, kept in `<key>.color`) for the card to paint while the image loads.
 /// Keeps the source aspect ratio. The webview decodes it, so nothing is decoded here on a hit.
 // shortcut: the cache never notices a changed source under the same key; include the source mtime in the key if stale art shows up.
-pub fn thumbnail(src: &Path, dir: &Path, key: &str) -> ImageResult<PathBuf> {
+pub fn thumbnail(src: &Path, dir: &Path, key: &str) -> ImageResult<(PathBuf, Option<String>)> {
     let cached = dir.join(format!("{key}.jpg"));
+    let color_file = dir.join(format!("{key}.color"));
     if cached.exists() {
-        return Ok(cached);
+        // Thumbnails cached before colours were stored get theirs from the JPEG, once.
+        let color = std::fs::read_to_string(&color_file).ok().or_else(|| {
+            let color = average_color(&open_image(&cached).ok()?.to_rgb8());
+            _ = std::fs::write(&color_file, &color);
+            Some(color)
+        });
+        return Ok((cached, color));
     }
     let thumb = open_image(src)?.thumbnail(THUMB_W, THUMB_H).to_rgb8();
+    let color = average_color(&thumb);
     std::fs::create_dir_all(dir)?;
+    // The colour is only a placeholder: a failed write is computed again on the next hit.
+    _ = std::fs::write(&color_file, &color);
     // Write then rename, so a cached file is always complete and the hit check above can trust it.
     let tmp = cached.with_extension("tmp");
     DynamicImage::ImageRgb8(thumb).save_with_format(&tmp, image::ImageFormat::Jpeg)?;
     std::fs::rename(&tmp, &cached)?;
-    Ok(cached)
+    Ok((cached, Some(color)))
+}
+
+/// The mean of every pixel, as `#rrggbb`.
+fn average_color(image: &image::RgbImage) -> String {
+    let mut sum = [0u64; 3];
+    for pixel in image.pixels() {
+        for (total, channel) in sum.iter_mut().zip(pixel.0) {
+            *total += u64::from(channel);
+        }
+    }
+    let n = u64::from(image.width()) * u64::from(image.height());
+    let [r, g, b] = sum.map(|total| total.checked_div(n).unwrap_or(0));
+    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 #[cfg(test)]
@@ -111,21 +135,41 @@ mod tests {
         // Downloaded art has no extension.
         let bare = dir.join("cover");
         std::fs::copy(&src, &bare).unwrap();
-        let size = |p: PathBuf| image::image_dimensions(p).unwrap();
+        let size = |p: (PathBuf, Option<String>)| image::image_dimensions(p.0).unwrap();
 
-        let first = thumbnail(&src, &dir, "a").unwrap();
+        let first = thumbnail(&src, &dir, "a").unwrap().0;
         assert_eq!(first, dir.join("a.jpg"));
-        assert_eq!(size(first), (THUMB_W, THUMB_H));
+        assert_eq!(image::image_dimensions(first).unwrap(), (THUMB_W, THUMB_H));
         // Landscape art keeps its shape instead of being stretched to 2:3.
         assert_eq!(size(thumbnail(&header, &dir, "h").unwrap()), (240, 112));
         assert_eq!(size(thumbnail(&bare, &dir, "b").unwrap()), (THUMB_W, THUMB_H));
 
         // Source gone: second call must come from the cache.
         std::fs::remove_file(&src).unwrap();
-        assert_eq!(thumbnail(&src, &dir, "a").unwrap(), dir.join("a.jpg"));
+        assert_eq!(thumbnail(&src, &dir, "a").unwrap().0, dir.join("a.jpg"));
 
         // No cache and no source is an error, not a panic.
         assert!(thumbnail(&src, &dir, "missing").is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn thumbnail_writes_average_color() {
+        let dir = temp_dir("color-test");
+        let src = dir.join("solid.png");
+        image::RgbImage::from_pixel(600, 900, image::Rgb([200, 40, 90])).save(&src).unwrap();
+        let (path, color) = thumbnail(&src, &dir, "s").unwrap();
+        assert_eq!(color.as_deref(), Some("#c8285a"));
+        assert_eq!(std::fs::read_to_string(dir.join("s.color")).unwrap(), "#c8285a");
+        // A thumbnail cached before colours were stored gets one from the JPEG (close, not exact).
+        std::fs::remove_file(dir.join("s.color")).unwrap();
+        let (again, color) = thumbnail(&src, &dir, "s").unwrap();
+        assert_eq!(again, path);
+        let rgb = u32::from_str_radix(&color.unwrap()[1..], 16).unwrap().to_be_bytes();
+        for (got, want) in rgb[1..].iter().zip([200u8, 40, 90]) {
+            assert!(got.abs_diff(want) <= 4, "{got} vs {want}");
+        }
+        assert!(dir.join("s.color").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

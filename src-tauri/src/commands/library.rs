@@ -1,6 +1,7 @@
 //! The library list, scanning and merging the stores, covers, the featured game and the 2 s poll.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -459,11 +460,47 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
     Merged { games, scanned, errors }
 }
 
+/// Shows the window, which starts hidden. The UI calls this once the first screen has its covers;
+/// `main` calls it after `SHOW_BY` as a safety net. Only the first call does anything.
+#[tauri::command]
+pub fn ready(app: AppHandle) {
+    show_window(&app, "ui");
+}
+
+/// The window is shown by then even if the UI never says it's ready.
+pub const SHOW_BY: Duration = Duration::from_secs(2);
+
+pub fn show_window(app: &AppHandle, by: &str) {
+    let state = app.state::<AppState>();
+    if !first_show(&state.shown) {
+        return;
+    }
+    // Read by the benchmark; a GUI build has no stdout, so it goes nowhere otherwise.
+    println!("window shown after {} ms by {by}", state.started.elapsed().as_millis());
+    if let Some(window) = app.get_webview_window("main")
+        && let Err(e) = window.show()
+    {
+        eprintln!("show window: {e}");
+    }
+}
+
+/// True for the first call only.
+fn first_show(shown: &AtomicBool) -> bool {
+    !shown.swap(true, Ordering::SeqCst)
+}
+
+#[derive(Serialize)]
+pub struct Cover {
+    src: String,
+    /// Average colour, `#rrggbb`, painted until the image has loaded.
+    color: Option<String>,
+}
+
 /// Thumbnail file for a card: cover first, landscape header as the fallback, each from its
 /// local file or URL. `None` means show a title card. At most `COVER_JOBS` run at once.
 // shortcut: requests for cards already scrolled away still run (queued); add cancellation if cold first scrolls feel slow.
 #[tauri::command]
-pub async fn cover(app: AppHandle, key: String) -> Option<String> {
+pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     let state = app.state::<AppState>();
     let _job = state.cover_jobs.acquire().await.ok()?;
     // The cover comes from the first copy, cached under that copy's key.
@@ -474,7 +511,7 @@ pub async fn cover(app: AppHandle, key: String) -> Option<String> {
         let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else { continue };
         let (thumbs, thumb_key) = (state.dirs.thumbs.clone(), format!("{key}-{slot}"));
         match blocking(move || cache::thumbnail(&src, &thumbs, &thumb_key)).await {
-            Ok(path) => return allow(&app, path),
+            Ok((path, color)) => return allow(&app, path).map(|src| Cover { src, color }),
             Err(e) => eprintln!("thumbnail {key}: {e}"),
         }
     }
@@ -631,6 +668,14 @@ mod tests {
         let (f, _) = featured_pick(&games, &entries).unwrap();
         assert_eq!(f.key, "steam-635320");
         assert_eq!(f.chosen, "epic-Pumpkin");
+    }
+
+    #[test]
+    fn ready_is_idempotent() {
+        let shown = AtomicBool::new(false);
+        assert!(first_show(&shown));
+        assert!(!first_show(&shown));
+        assert!(!first_show(&shown));
     }
 
     #[test]

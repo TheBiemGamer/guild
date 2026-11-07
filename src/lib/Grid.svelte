@@ -89,6 +89,7 @@
       >
         <CardView
           {game}
+          {index}
           running={running !== null && game.copyKeys.includes(running)}
           progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
           {onopen}

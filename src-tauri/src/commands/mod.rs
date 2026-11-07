@@ -22,6 +22,10 @@ use crate::library::{Game, Progress};
 const COVER_JOBS: usize = 8;
 
 pub struct AppState {
+    /// When the app started, for the "window shown after" line.
+    started: Instant,
+    /// The window has been shown (`library::ready`).
+    shown: std::sync::atomic::AtomicBool,
     dirs: Dirs,
     http: reqwest::Client,
     shared: Mutex<Shared>,
@@ -87,6 +91,8 @@ struct EpicWatch {
 impl AppState {
     pub fn new() -> Self {
         Self {
+            started: Instant::now(),
+            shown: std::sync::atomic::AtomicBool::new(false),
             dirs: Dirs::new(),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))

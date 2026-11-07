@@ -86,8 +86,8 @@ export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refre
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 export const act = (action: Action, key: string) => invoke<void>('act', { action, key })
 /** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
-export const downloadSize = (key: string) => invoke<string | null>('download_size', { key })
-/** Store details for the game page; screenshots are ready-to-use URLs. Null when the store has none. */
+export const downloadSize = (key: string) => remembered('size', key, () => invoke<string | null>('download_size', { key }))
+/** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */
 export type GameInfo = {
   description: string
   genres: string[]
@@ -96,13 +96,51 @@ export type GameInfo = {
   released: string | null
   screenshots: string[]
 }
-export const gameInfo = async (key: string) => {
-  const info = await invoke<GameInfo | null>('game_info', { key })
-  return info && { ...info, screenshots: info.screenshots.flatMap((p) => url(p) ?? []) }
-}
+export const gameInfo = (key: string) => remembered('info', key, () => invoke<GameInfo | null>('game_info', { key }))
+/** `gameInfo`'s screenshots as ready-to-use URLs, downloaded on first use; failed ones are left out. */
+export const screenshots = async (key: string, urls: string[]) =>
+  (await invoke<string[]>('screenshots', { key, urls })).flatMap((p) => url(p) ?? [])
 /** How long to beat from IGDB, as labels like "32 h". Null: no credentials, an Epic game, or IGDB doesn't know it. */
 export type TimeToBeat = { normally: string | null; hastily: string | null; completely: string | null }
-export const timeToBeat = (key: string) => invoke<TimeToBeat | null>('time_to_beat', { key })
+export const timeToBeat = (key: string) => remembered('ttb', key, () => invoke<TimeToBeat | null>('time_to_beat', { key }))
+
+/** Game page answers by game key, then by command; the 20 keys used last are kept. */
+const answers = new Map<string, Map<string, Promise<unknown>>>()
+const ANSWERS_KEPT = 20
+
+/** `ask`'s answer, shared with earlier askers. Nulls and errors aren't kept, so they are asked again. */
+function remembered<T>(command: string, key: string, ask: () => Promise<T | null>): Promise<T | null> {
+  const byCommand = answers.get(key) ?? new Map<string, Promise<unknown>>()
+  // Newest last, so the first key is the one used longest ago.
+  answers.delete(key)
+  answers.set(key, byCommand)
+  if (answers.size > ANSWERS_KEPT) answers.delete(answers.keys().next().value!)
+  let found = byCommand.get(command) as Promise<T | null> | undefined
+  if (!found) {
+    const forget = () => byCommand.delete(command)
+    found = ask().then(
+      (answer) => {
+        if (answer === null) forget()
+        return answer
+      },
+      (e) => {
+        forget()
+        throw e
+      },
+    )
+    byCommand.set(command, found)
+  }
+  return found
+}
+
+/** Asks for what the game page shows, so opening it usually finds the answers ready. */
+export function prefetch(card: Card) {
+  const quiet = () => {}
+  gameInfo(card.key).catch(quiet)
+  timeToBeat(card.key).catch(quiet)
+  // The game page's Play button shows the chosen copy's download size.
+  if (!card.installed) downloadSize(card.chosen).catch(quiet)
+}
 /** Settings "Test": resolves when Twitch and IGDB accept the saved credentials, else rejects with the reason. */
 export const testIgdb = () => invoke<void>('test_igdb')
 export const cancelInstall = (key: string) => invoke<void>('cancel_install', { key })
@@ -149,25 +187,47 @@ export const clearCache = async () => {
   // Covers shown from now on are fetched and shrunk again.
   covers.clear()
 }
+/** Shows the window (it starts hidden); only the first call counts. */
+export const ready = () => invoke<void>('ready')
 export const benchSpeed = () => invoke<number | null>('bench_speed')
 export const benchDone = (frameMs: number[], games: number) => invoke<void>('bench_done', { frameMs, games })
 
 /** Local files come back as paths; the webview loads them through the asset protocol. */
 const url = (path: string | null) => (path ? convertFileSrc(path) : null)
 
+/** `src` is ready for an `<img>`; `color` (`#rrggbb`) is the image's average, to paint while it loads. */
+export interface Cover { src: string; color: string | null }
+
 // Remounted cards (virtual scrolling) reuse the answer instead of asking again.
 // "No art" isn't kept, so a later rescan that finds art can still show it.
-const covers = new Map<string, Promise<string | null>>()
-export const cover = (key: string) => {
+const covers = new Map<string, Promise<Cover | null>>()
+/** Asked in this task, sent lowest `order` first; Rust then works through them in that order. */
+let batch: { key: string; order: number; send: (cover: Promise<Cover | null>) => void }[] = []
+
+/** `order` is the card's place in the grid, so covers load top to bottom, left to right; -1 goes first. */
+export const cover = (key: string, order = -1) => {
   let found = covers.get(key)
   if (!found) {
-    found = invoke<string | null>('cover', { key }).then((path) => {
-      if (!path) covers.delete(key)
-      return url(path)
+    found = new Promise((send) => {
+      if (batch.length === 0) queueMicrotask(sendBatch)
+      batch.push({ key, order, send })
     })
     covers.set(key, found)
   }
   return found
+}
+
+function sendBatch() {
+  const now = batch.sort((a, b) => a.order - b.order)
+  batch = []
+  for (const { key, send } of now) {
+    send(
+      invoke<Cover | null>('cover', { key }).then((c) => {
+        if (!c) covers.delete(key)
+        return c && { src: convertFileSrc(c.src), color: c.color }
+      }),
+    )
+  }
 }
 
 export const featured = async (): Promise<Featured | null> => {

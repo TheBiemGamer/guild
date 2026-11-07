@@ -1,9 +1,12 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { logoFile, storeNames } from './StoreIcon.svelte'
-  import { cover, type Card, type Progress } from './api'
+  import { cover, prefetch, type Card, type Cover, type Progress } from './api'
 
-  let { game, running, progress, onopen, onplay, oninstall }: {
+  let { game, index, running, progress, onopen, onplay, oninstall }: {
     game: Card
+    /** Place in the grid; covers are asked in this order. */
+    index: number
     running: boolean
     progress: Progress | undefined
     onopen: (key: string) => void
@@ -14,28 +17,42 @@
   } = $props()
 
   let el: HTMLDivElement
-  let src = $state<string | null>(null)
+  // undefined: still asking. null: no art, so the title shows.
+  let art = $state<Cover | null | undefined>(undefined)
   let loaded = $state(false)
   let portrait = $state(false)
 
   $effect(() => {
     const key = game.key
-    src = null
+    art = undefined
     loaded = false
     // A card recycled for another game must not show the old game's cover.
-    cover(key).then((url) => {
-      if (game.key === key) src = url
+    cover(key, untrack(() => index)).then((c) => {
+      if (game.key === key) art = c
     })
   })
+
+  /** The game page's data is asked once the pointer rests here this long. */
+  const REST_MS = 150
+  let resting: ReturnType<typeof setTimeout> | undefined
 </script>
 
 <div class="card" class:running class:out={!game.installed} bind:this={el}>
-  <button class="open" onclick={() => onopen(game.key)} title={game.title}>
-    <span class="name">{game.title}</span>
-    {#if src}
+  <button
+    class="open"
+    style:background={art?.color}
+    onclick={() => onopen(game.key)}
+    onpointerenter={() => (resting = setTimeout(() => prefetch(game), REST_MS))}
+    onpointerleave={() => clearTimeout(resting)}
+    onfocus={() => prefetch(game)}
+    title={game.title}
+  >
+    {#if art === null}
+      <span class="name">{game.title}</span>
+    {:else if art}
       <!-- Portrait art (Steam 2:3, Epic 3:4) fills the card; landscape headers stay whole. -->
       <img
-        {src}
+        src={art.src}
         alt=""
         decoding="async"
         class:loaded
@@ -45,6 +62,7 @@
           portrait = img.naturalHeight > img.naturalWidth
           loaded = true
         }}
+        onerror={() => (art = null)}
       />
     {/if}
   </button>
@@ -111,11 +129,12 @@
     padding: 0;
     overflow: hidden;
     border-radius: inherit;
-    background: linear-gradient(160deg, var(--surface-2), var(--surface));
+    /* Until the cover's own colour is known. */
+    background: var(--surface-2);
   }
 
   .open:hover:not(:disabled) {
-    background: linear-gradient(160deg, var(--surface-2), var(--surface));
+    background: var(--surface-2);
   }
 
   .open:active:not(:disabled) {
@@ -146,7 +165,7 @@
     height: 100%;
     object-fit: contain;
     opacity: 0;
-    transition: opacity 200ms;
+    transition: opacity 150ms ease-out;
   }
 
   .open img.loaded {

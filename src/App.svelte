@@ -167,6 +167,16 @@
     api.dismissEpicNotice()
   }
 
+  /** Waits, at most 300 ms, for the covers of the cards on screen at start, so the window opens on a filled grid. */
+  async function firstCovers() {
+    // The grid's card pitch (180 px card + 16 px gap, rows 286 px); measured from the window, since the
+    // hidden window may not lay out yet. A few extra covers are harmless.
+    const cols = Math.max(1, Math.floor((window.innerWidth - 16) / 196))
+    const rows = Math.ceil(window.innerHeight / 286)
+    const covers = lib.games.slice(0, cols * rows).map((g, i) => api.cover(g.key, i))
+    await Promise.race([Promise.allSettled(covers), new Promise((done) => setTimeout(done, 300))])
+  }
+
   onMount(() => {
     // Saved library first, then a quiet rescan: Steam is quick, Legendary can take a while.
     ;(async () => {
@@ -174,6 +184,8 @@
       await api.loadCache().catch((e) => console.error('library cache', e))
       await reload()
       started = true
+      await firstCovers()
+      api.ready()
       loadSettings()
       // Holds the flag so a focus event during startup doesn't start a second full refresh.
       refreshing = true

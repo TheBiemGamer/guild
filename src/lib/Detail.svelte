@@ -65,6 +65,8 @@
   let art = $state<{ hero: string | null }>({ hero: null })
   let heroLoaded = $state(false)
   let info = $state<GameInfo | null | undefined>(undefined)
+  /** Local screenshot URLs; undefined while downloading, when their slots stay reserved. */
+  let shots = $state<string[] | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
   let busy = $state<string | null>(null)
   let confirming = $state(false)
@@ -105,16 +107,25 @@
     art = { hero: null }
     heroLoaded = false
     info = undefined
+    shots = undefined
     ttb = undefined
     api.detailArt(key).then((a) => {
       if (!alive) return
       art = a
       if (a.hero) ontint(a.hero)
       // No wide art: the cover still gives the page its colour.
-      else api.cover(key).then((c) => alive && ontint(c))
+      else api.cover(key).then((c) => alive && ontint(c?.src ?? null))
     })
     api.gameInfo(key).then(
-      (i) => alive && (info = i),
+      (i) => {
+        if (!alive) return
+        info = i
+        if (i?.screenshots.length)
+          api.screenshots(key, i.screenshots).then(
+            (s) => alive && (shots = s),
+            () => alive && (shots = []),
+          )
+      },
       () => alive && (info = null),
     )
     api.timeToBeat(key).then(
@@ -395,15 +406,25 @@
       {/if}
 
       <div class="cols">
-        {#if showAbout && info}
+        <!-- Skeleton lines hold the panels' places while the store details load. -->
+        {#if info === undefined}
+          <section class="panel about" aria-labelledby="about-heading" aria-busy="true">
+            <h2 id="about-heading">About</h2>
+            <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          </section>
+        {:else if showAbout && info}
           <section class="panel about" aria-labelledby="about-heading">
             <h2 id="about-heading">About</h2>
             {#if info.description}<p class="text">{info.description}</p>{/if}
-            {#if info.screenshots.length}
+            {#if info.screenshots.length && shots?.length !== 0}
               <div class="shots">
-                {#each info.screenshots as shot, i (i)}
-                  <img src={shot} alt="Screenshot {i + 1} of {game.title}" loading="lazy" />
-                {/each}
+                {#if shots}
+                  {#each shots as shot, i (i)}
+                    <img src={shot} alt="Screenshot {i + 1} of {game.title}" loading="lazy" />
+                  {/each}
+                {:else}
+                  {#each info.screenshots as _, i (i)}<div class="shot" aria-hidden="true"></div>{/each}
+                {/if}
               </div>
             {/if}
           </section>
@@ -412,6 +433,11 @@
           <section class="panel details" class:solo={info !== undefined && !showAbout} aria-labelledby="details-heading">
             <h2 id="details-heading">Details</h2>
             <dl>
+              {#if info === undefined}
+                {#each ['Genres', 'Developer', 'Publisher', 'Released'] as term (term)}
+                  <dt>{term}</dt><dd class="skeleton" aria-hidden="true"><span></span></dd>
+                {/each}
+              {/if}
               {#if info?.genres.length}
                 <dt>Genres</dt>
                 <dd class="tags">{#each info.genres as genre}<span>{genre}</span>{/each}</dd>
@@ -768,13 +794,37 @@
     margin-top: 12px;
   }
 
-  .shots img {
+  .shots img,
+  .shot {
     display: block;
     width: 100%;
     aspect-ratio: 16 / 9;
     object-fit: cover;
     border-radius: 8px;
     background: var(--surface);
+  }
+
+  /* Lines as tall as the text they stand in for, in a quiet glass tone. Flex, so margins don't collapse. */
+  .skeleton {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .skeleton span {
+    display: block;
+    height: 10px;
+    margin: 6px 0;
+    border-radius: 5px;
+    background: var(--glass-hover);
+  }
+
+  .skeleton span:last-child:not(:first-child) {
+    width: 60%;
+  }
+
+  dd.skeleton span {
+    width: 70%;
+    margin: 5px 0;
   }
 
   dl {
