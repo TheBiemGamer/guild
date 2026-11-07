@@ -658,7 +658,7 @@
         <!-- The chosen Epic copy's cloud saves; the global default is in Settings → Library. -->
         <section class="panel rows" aria-label="Saves">
           <div class="row">
-            <div class="what">Sync cloud saves<small>Downloads before you play and uploads after. Default follows Settings.</small></div>
+            <div class="what">Sync cloud saves<small>Default follows Settings.</small></div>
             <div class="chips" role="group" aria-label="Sync cloud saves">
               {#each [{ value: null, label: 'Default' }, { value: true, label: 'On' }, { value: false, label: 'Off' }] as option (option.label)}
                 <button class="chip" aria-pressed={saves !== null && saves.choice === option.value} onclick={() => setSaves(option.value)}>
@@ -685,7 +685,7 @@
             </div>
           {:else if launch}
             <div class="row">
-              <label class="what" for="launch-args">Extra arguments<small>Passed to the game. Quotes keep words together.</small></label>
+              <label class="what" for="launch-args">Extra arguments<small>Quotes keep words together.</small></label>
               {#if argsSaved}<span class="saved-note" role="status">Saved</span>{/if}
               <input
                 id="launch-args"
@@ -705,7 +705,7 @@
               </button>
             </div>
             <div class="row">
-              <div class="what" id="launch-skip">Skip version check<small>Starts without asking Epic for updates first.</small></div>
+              <div class="what" id="launch-skip">Skip version check</div>
               <button
                 class="chip"
                 aria-pressed={launch.skipVersionCheck}
@@ -733,7 +733,7 @@
           {/if}
           {#if copy!.updateAvailable}
             <div class="row">
-              <div class="what">Update available<small>A newer version is ready to download.</small></div>
+              <div class="what">Update available</div>
               <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>Update</button>
               <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
             </div>
@@ -741,19 +741,19 @@
           {#if copy!.installed}
             <div class="row">
               <div class="what">
-                Verify files<small>{copy!.provider === 'steam' ? 'Steam checks the files in its own window.' : 'Checks every file and repairs bad or missing ones.'}</small>
+                Verify files<small>{copy!.provider === 'steam' ? 'Opens in Steam.' : 'Repairs bad or missing files.'}</small>
               </div>
               <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>Verify files</button>
             </div>
             <div class="row">
               <div class="what">
-                Move<small>{copy!.provider === 'steam' ? 'Opens Steam’s storage manager.' : 'Moves the game folder into another folder on the same drive.'}</small>
+                Move<small>{copy!.provider === 'steam' ? 'Opens in Steam.' : 'Same drive only.'}</small>
               </div>
               <button class="chip" disabled={!!shown || running} onclick={move}>Move…</button>
             </div>
             <div class="row">
               <div class="what">
-                Uninstall<small>Removes the {storeNames[copy!.provider]} copy{copy!.provider === 'steam' ? ' in Steam’s own dialog' : ' and deletes its files'}.</small>
+                Uninstall{#if copy!.provider === 'steam'}<small>Opens in Steam.</small>{/if}
               </div>
               <!-- The Epic confirm is in the hero; this chip stays, so focus is moved there by hand. -->
               <button

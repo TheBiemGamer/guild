@@ -173,7 +173,7 @@
             <label for="steam-password">Password</label>
             <input id="steam-password" type="password" autocomplete="off" bind:value={password} />
             <button class="pill" disabled={phase === 'busy' || !account.trim() || !password}>
-              {phase === 'busy' ? 'Signing in…' : 'Sign in'}
+              {phase === 'busy' ? 'Logging in…' : 'Log in'}
             </button>
           </form>
         {/if}
@@ -187,7 +187,7 @@
           <div class="qr" aria-hidden="true">
             {#if svg}{@html svg}{/if}
           </div>
-          <p>{scanned ? 'Approve the login in the Steam app' : 'Or scan with the Steam app → Steam Guard.'}</p>
+          <p>{scanned ? 'Approve the login in the Steam app.' : 'Or scan with the Steam app → Steam Guard.'}</p>
         {/if}
       </div>
     </div>

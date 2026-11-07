@@ -166,27 +166,30 @@
     return `Last refreshed ${Math.floor(mins / 60)} hour${mins < 120 ? '' : 's'} ago.`
   }
 
+  const games = (n: number) => `${n} game${n === 1 ? '' : 's'}`
+
   /** What the Steam row says; built like the Epic row. */
   const steam = $derived.by(() => {
     const account = view.steamLibrary.account
-    if (!account) return { tone: 'warn', text: 'Not logged in', detail: '', fix: 'Log in', logout: false }
-    if (view.steamLibrary.attention)
-      return { tone: 'warn', text: `Logged in as ${account}`, detail: 'Steam needs you to log in again', fix: 'Log in', logout: true }
-    return { tone: 'ok', text: `Logged in as ${account}`, detail: '', fix: null, logout: true }
+    const n = games(view.steamGames)
+    if (!view.steam) return { tone: 'warn', text: "Steam isn't installed", detail: '', fix: null, logout: !!account }
+    if (!account || view.steamLibrary.attention)
+      return { tone: 'warn', text: 'Not logged in', detail: `${n} saved`, fix: 'Log in', logout: false }
+    return { tone: 'ok', text: `Logged in as ${account}`, detail: n, fix: null, logout: true }
   })
 
   /** What the Epic row says, and which fix it offers. */
   const epic = $derived.by(() => {
-    const games = `${view.epicGames} game${view.epicGames === 1 ? '' : 's'}`
+    const n = games(view.epicGames)
     switch (view.epic) {
       case 'loggedIn':
-        return { tone: 'ok', text: 'Logged in', detail: games, fix: 'Reconnect', logout: true }
+        return { tone: 'ok', text: view.epicAccount ? `Logged in as ${view.epicAccount}` : 'Logged in', detail: n, fix: null, logout: true }
       case 'loggedOut':
-        return { tone: 'warn', text: 'Not logged in', detail: view.epicGames ? `${games} saved` : '', fix: 'Log in', logout: false }
+        return { tone: 'warn', text: 'Not logged in', detail: `${n} saved`, fix: 'Log in', logout: false }
       case 'unreachable':
-        return { tone: 'warn', text: "Can't reach Epic", detail: `${games} saved`, fix: 'Reconnect', logout: false }
+        return { tone: 'warn', text: "Can't reach Epic", detail: `${n} saved`, fix: 'Reconnect', logout: false }
       case 'noLegendary':
-        return { tone: 'warn', text: "Legendary isn't installed", detail: 'Install it to list Epic games', fix: null, logout: false }
+        return { tone: 'warn', text: "Legendary isn't installed", detail: '', fix: null, logout: false }
       default:
         return { tone: 'idle', text: 'Checking…', detail: '', fix: null, logout: false }
     }
@@ -245,13 +248,6 @@
             <span>
               <span class={steam.tone}>● {steam.text}</span>{#if steam.detail}{' · '}{steam.detail}{/if}
             </span>
-            <span class="line">
-              {#if view.steam}
-                Found{#if view.steam.name}{' · '}{view.steam.name}{/if}{' · '}{view.steam.path}
-              {:else}
-                Not found on this PC · Install Steam to play its games
-              {/if}
-            </span>
           </div>
           {#if view.steam}<button class="btn" onclick={() => api.openSteam()}>Open Steam</button>{/if}
           {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
@@ -278,7 +274,7 @@
       <section id={id('Library')}>
         <h4>Library</h4>
         <div class="row">
-          <div>Refresh library now<span>Rescans Steam and Epic. {ago(refreshedAt, now)}</span></div>
+          <div>Refresh library<span>{ago(refreshedAt, now)}</span></div>
           <button class="btn" disabled={refreshing} onclick={onrefresh}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
         </div>
         <div class="row">
@@ -292,7 +288,7 @@
           ></button>
         </div>
         <div class="row">
-          <div id="saves-label">Sync cloud saves<span>Epic games download their cloud saves before you play and upload them after.</span></div>
+          <div id="saves-label">Sync cloud saves<span>Epic games only.</span></div>
           <button
             class="toggle"
             role="switch"
@@ -302,7 +298,7 @@
           ></button>
         </div>
         <div class="row">
-          <div>Import an existing install<span>An Epic game already on this PC. Pick its folder, then which game it is.</span></div>
+          <div>Import an existing install<span>An Epic game already on this PC.</span></div>
           <button class="btn" disabled={managing !== null || importing !== null} onclick={pickImport}>Import…</button>
         </div>
         {#if importing}
@@ -319,7 +315,7 @@
         {/if}
         {#if importNote}<p class="note" title={importNote}>{importNote}</p>{/if}
         <div class="row">
-          <div>Sync with Epic Games Launcher<span>Adds the games it installed. Nothing is sent to it.</span></div>
+          <div>Sync with Epic Games Launcher<span>Adds the games it installed.</span></div>
           <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? 'Syncing…' : 'Sync'}</button>
         </div>
         {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
@@ -328,15 +324,12 @@
       <section id={id('Downloads')}>
         <h4>Downloads</h4>
         <div class="row stack">
-          <label for="epic-folder">
-            Epic install folder
-            <span>Where new Epic games install. Empty uses Legendary's default (~/Games).</span>
-          </label>
+          <label for="epic-folder">Epic install folder</label>
           <div class="field">
             <input
               id="epic-folder"
               type="text"
-              placeholder="Legendary's default"
+              placeholder="Default (~/Games)"
               spellcheck="false"
               bind:value={folder}
               onblur={saveFolder}
@@ -361,7 +354,7 @@
         <h4>Appearance</h4>
         <div class="row">
           <div id="ambient-label">
-            Ambient color from your last-played game<span>Off uses a neutral dark gradient.</span>
+            Ambient color from your last-played game
           </div>
           <button
             class="toggle"
@@ -376,7 +369,7 @@
       <section id={id('Extra metadata')}>
         <h4>Extra metadata</h4>
         <p class="hint">
-          IGDB fills how long to beat and extra details for Steam and Epic games. It needs a free Twitch application:
+          IGDB fills how long to beat and extra details. It needs a free Twitch application:
           <button class="link" onclick={() => api.openTwitchConsole()}>open the Twitch developer console</button>.
         </p>
         <div class="row stack">
@@ -417,9 +410,7 @@
         <div class="row">
           <div>
             Test the credentials
-            <span class:ok={testPassed}>
-              {testPassed ? 'OK: Twitch and IGDB accepted them.' : 'Checks that Twitch accepts them.'}
-            </span>
+            {#if testPassed}<span class="ok">Twitch and IGDB accepted them.</span>{/if}
           </div>
           <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
             {testing ? 'Testing…' : 'Test'}
@@ -430,7 +421,7 @@
       <section id={id('Storage')}>
         <h4>Storage</h4>
         <div class="row">
-          <div>Cached covers and art<span>{view.cacheSize}. They download again when needed.</span></div>
+          <div>Cached covers and art<span>{view.cacheSize}</span></div>
           <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>Clear cache</button>
         </div>
       </section>
@@ -605,10 +596,6 @@
     border: 1px solid rgb(255 255 255 / 0.14);
   }
 
-  .who .line {
-    display: block;
-  }
-
   .link {
     padding: 0;
     background: none;
@@ -637,8 +624,7 @@
     gap: 8px;
   }
 
-  .row > div > span,
-  .row > label > span {
+  .row > div > span {
     display: block;
     margin-top: 2px;
     color: var(--text-2);

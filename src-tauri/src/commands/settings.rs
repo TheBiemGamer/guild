@@ -124,7 +124,11 @@ pub struct SteamLibrary {
 pub struct SettingsView {
     steam: Option<SteamLocal>,
     steam_library: SteamLibrary,
+    /// Steam copies in the library.
+    steam_games: usize,
     epic: Option<Login>,
+    /// The logged-in Epic account's display name, when Legendary's session file has one.
+    epic_account: Option<String>,
     epic_games: usize,
     epic_install_dir: Option<String>,
     igdb_client_id: Option<String>,
@@ -146,10 +150,12 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
         let saved = settings::load(&conn);
-        let (epic, epic_games) = {
+        let (epic, steam_games, epic_games) = {
             let s = state.lock();
-            (s.epic_login, s.games.iter().filter(|g| g.provider == ProviderKind::Epic).count())
+            let count = |kind| s.games.iter().filter(|g| g.provider == kind).count();
+            (s.epic_login, count(ProviderKind::Steam), count(ProviderKind::Epic))
         };
+        let epic_account = if epic == Some(Login::LoggedIn) { crate::epic_playtime::account_name() } else { None };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
         let steam = steamlocate::SteamDir::locate().ok().map(|dir| SteamLocal {
             name: steam::persona_name(dir.path()),
@@ -162,7 +168,9 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         Ok(SettingsView {
             steam,
             steam_library,
+            steam_games,
             epic,
+            epic_account,
             epic_games,
             epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,

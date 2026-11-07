@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use reqwest::StatusCode;
 use rusqlite::Connection;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::cache::db;
@@ -42,9 +43,25 @@ struct Session {
     account_id: String,
 }
 
-/// Legendary's session from `user.json` in its config folder: `LEGENDARY_CONFIG_PATH`, else
-/// `$XDG_CONFIG_HOME/legendary`, else `~/.config/legendary`, as Legendary's `lfs/lgndry.py` picks it.
+/// The Epic account's display name, for Settings.
+#[derive(Deserialize)]
+struct Account {
+    #[serde(rename = "displayName")]
+    display_name: String,
+}
+
+/// The logged-in Epic account's display name from Legendary's session file.
+pub fn account_name() -> Option<String> {
+    user_json::<Account>().map(|a| a.display_name)
+}
+
 fn session() -> Option<Session> {
+    user_json()
+}
+
+/// Reads `user.json` in Legendary's config folder: `LEGENDARY_CONFIG_PATH`, else
+/// `$XDG_CONFIG_HOME/legendary`, else `~/.config/legendary`, as Legendary's `lfs/lgndry.py` picks it.
+fn user_json<T: DeserializeOwned>() -> Option<T> {
     let dir = match (std::env::var_os("LEGENDARY_CONFIG_PATH"), std::env::var_os("XDG_CONFIG_HOME")) {
         (Some(dir), _) => PathBuf::from(dir),
         (None, Some(config)) => PathBuf::from(config).join("legendary"),

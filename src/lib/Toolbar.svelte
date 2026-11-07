@@ -14,7 +14,6 @@
     sort = $bindable(),
     group = $bindable(),
     popoverOpen = $bindable(),
-    total,
     attention,
     progress,
     queue,
@@ -35,7 +34,6 @@
     group: Group
     /** A popover is open; App ignores mouse Back/Forward meanwhile, as for Settings. */
     popoverOpen: boolean
-    total: number
     /** Something in settings needs a look (Epic logged out, Legendary missing…). */
     attention: boolean
     /** `poll`'s map, by copy key: the Downloads chip shows while it has anything, or the queue does. */
@@ -119,7 +117,7 @@
     </svg>
     <input
       type="search"
-      placeholder={total ? `Search ${total} games` : 'Search games'}
+      placeholder="Search games"
       aria-keyshortcuts="Control+K"
       bind:this={search}
       bind:value={query}

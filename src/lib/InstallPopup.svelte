@@ -71,7 +71,7 @@
 >
   <h4>Install {game.title}?</h4>
   <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${size} download`}</p>
-  <p class="folder">{folder === undefined ? '' : `To ${folder ?? "Legendary's default folder"}`}</p>
+  <p class="folder">{folder === undefined ? '' : `To ${folder ?? "the default folder"}`}</p>
   <label class="dlc"><input type="checkbox" bind:checked={withDlc} />Include DLC</label>
   <div class="buttons">
     <button class="pill" bind:this={installButton} onclick={() => onconfirm(withDlc)}>Install</button>

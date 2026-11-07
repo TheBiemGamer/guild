@@ -62,8 +62,7 @@ pub fn ttb_hours(secs: u64) -> u64 {
 }
 
 const PLAYTIME_BUCKETS: [&str; 7] = ["500 h+", "100–500 h", "50–100 h", "20–50 h", "10–20 h", "0–10 h", "Never played"];
-const TTB_BUCKETS: [&str; 6] =
-    ["Short · under 5 h", "Medium · 5–15 h", "Long · 15–40 h", "Very long · 40–100 h", "Endless · 100 h+", "Unknown"];
+const TTB_BUCKETS: [&str; 6] = ["Under 5 h", "5–15 h", "15–40 h", "40–100 h", "100 h+", "Unknown"];
 const STORE_BUCKETS: [&str; 3] = ["Steam + Epic", "Steam", "Epic Games"];
 
 /// Index into `PLAYTIME_BUCKETS`. Unknown playtime counts as never played.
@@ -333,17 +332,17 @@ pub(crate) mod tests {
         let h = |h: u64| Some(h * 3600);
         assert_eq!(bucket(None), "Unknown");
         // Ten minutes shows as 1 h.
-        assert_eq!(bucket(Some(600)), "Short · under 5 h");
-        assert_eq!(bucket(h(4)), "Short · under 5 h");
-        // On the shown (rounded) hours: 4 h 40 min shows as 5 h, so medium.
-        assert_eq!(bucket(Some(4 * 3600 + 40 * 60)), "Medium · 5–15 h");
-        assert_eq!(bucket(h(5)), "Medium · 5–15 h");
-        assert_eq!(bucket(h(14)), "Medium · 5–15 h");
-        assert_eq!(bucket(h(15)), "Long · 15–40 h");
-        assert_eq!(bucket(h(39)), "Long · 15–40 h");
-        assert_eq!(bucket(h(40)), "Very long · 40–100 h");
-        assert_eq!(bucket(h(99)), "Very long · 40–100 h");
-        assert_eq!(bucket(h(100)), "Endless · 100 h+");
+        assert_eq!(bucket(Some(600)), "Under 5 h");
+        assert_eq!(bucket(h(4)), "Under 5 h");
+        // On the shown (rounded) hours: 4 h 40 min shows as 5 h, so 5–15 h.
+        assert_eq!(bucket(Some(4 * 3600 + 40 * 60)), "5–15 h");
+        assert_eq!(bucket(h(5)), "5–15 h");
+        assert_eq!(bucket(h(14)), "5–15 h");
+        assert_eq!(bucket(h(15)), "15–40 h");
+        assert_eq!(bucket(h(39)), "15–40 h");
+        assert_eq!(bucket(h(40)), "40–100 h");
+        assert_eq!(bucket(h(99)), "40–100 h");
+        assert_eq!(bucket(h(100)), "100 h+");
     }
 
     #[test]
@@ -370,7 +369,7 @@ pub(crate) mod tests {
         let ttb = HashMap::from([("steam-beta".to_string(), 20 * 3600)]);
         assert_eq!(
             named(group(&shown, &e, &g, &ttb, Group::TimeToBeat)),
-            [(label("Long · 15–40 h"), vec!["beta"]), (label("Unknown"), vec!["Gamma Beta", "delta", "Alpha"])]
+            [(label("15–40 h"), vec!["beta"]), (label("Unknown"), vec!["Gamma Beta", "delta", "Alpha"])]
         );
         assert_eq!(group(&shown, &e, &g, &no_ttb(), Group::None), [(String::new(), shown.clone())]);
         assert!(group(&[], &e, &g, &no_ttb(), Group::Playtime).is_empty());

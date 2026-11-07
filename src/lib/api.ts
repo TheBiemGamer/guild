@@ -84,7 +84,11 @@ export interface Detail {
 export interface SettingsView {
   steam: { name: string | null; path: string } | null
   steamLibrary: { account: string | null; attention: boolean }
+  /** Steam copies in the library. */
+  steamGames: number
   epic: Login | null
+  /** The logged-in Epic account's display name, if Legendary's session has one. */
+  epicAccount: string | null
   epicGames: number
   /** Null means Legendary's own default folder. */
   epicInstallDir: string | null

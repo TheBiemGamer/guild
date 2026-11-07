@@ -84,7 +84,7 @@ struct TokenResponse {
 }
 
 pub fn parse_token(body: &str, now: Instant) -> Result<Token, String> {
-    let t: TokenResponse = serde_json::from_str(body).map_err(|_| "Twitch sent an answer we don't understand.")?;
+    let t: TokenResponse = serde_json::from_str(body).map_err(|_| "Twitch sent an answer this app can't read.")?;
     Ok(Token { value: t.access_token, expires_at: now + Duration::from_secs(t.expires_in) })
 }
 

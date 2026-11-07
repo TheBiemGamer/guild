@@ -358,7 +358,6 @@
     bind:sort
     bind:group
     bind:popoverOpen
-    total={lib.total}
     attention={lib.epicAttention || lib.steamAttention}
     {progress}
     {queue}
@@ -443,18 +442,18 @@
       </Grid>
     {:else if epicEmpty && lib.epic === 'noLegendary'}
       <div class="empty">
-        <p>Legendary isn't installed, so Epic games can't be listed.</p>
-        <small>Install Legendary, then refresh to add your Epic library.</small>
+        <p>Legendary isn't installed.</p>
+        <small>Install it, then refresh.</small>
       </div>
     {:else if epicEmpty && lib.epic === 'loggedOut'}
       <div class="empty">
-        <p>Log in to Epic to see your Epic games</p>
+        <p>Your Epic games show after you log in.</p>
         <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? 'Logging in…' : 'Log in to Epic'}</button>
       </div>
     {:else if epicEmpty && lib.epic === 'unreachable'}
       <div class="empty">
-        <p>Can't reach Epic, showing saved games</p>
-        <small>No Epic games are saved yet. They load once Epic is reachable.</small>
+        <p>Can't reach Epic.</p>
+        <small>Your Epic games load once it's reachable.</small>
       </div>
     {:else if started}
       <div class="empty">

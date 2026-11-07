@@ -61,7 +61,7 @@
     <StoreIcon provider={inSteam ? 'steam' : 'epic'} size={16} />
     <div class="what">
       <b>{title(key)}</b>
-      <small>{inSteam ? `In Steam · ${p.text}` : p.text}</small>
+      <small>{p.text}</small>
       {@render bar(key, p)}
     </div>
   </div>
