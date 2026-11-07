@@ -955,3 +955,53 @@ The direction stays in DESIGN.md's "Afterglow": quiet dark glass, chips, colour 
 - [ ] **Step 3:** VERIFY-LATER: the Filters popover, active chips, the Downloads chip appearing only during downloads, the tabs and their keyboard behaviour.
 - [ ] **Step 4:** Update DESIGN.md: the toolbar, filter popover, downloads chip and game page tabs.
 - [ ] **Step 5: Commit:** `feat(ui): library toolbar with filters, downloads chip and game page tabs`.
+
+### Task 29: Database v4: migrations, WAL, and user data apart from cache
+
+Owner request, 2026-11-07. **Order:** run this after Task 24 and before Tasks 25–26, so launch options and self-tracked playtime are written to their own tables from the start.
+
+**Why:**
+- The database has no migrations: `user_version` is 0, and the version lives in the file name (`library-v3.sqlite`). Any schema change today risks the owner's `settings` and `launches`.
+- 43 call sites open their own connections while background jobs write. With no WAL and no `busy_timeout`, a collision fails a write, and the failure is only logged.
+- `Game.dlc`, `update_available` and `cloud_saves` aren't stored, so they're empty after a restart until the Epic scan finishes. Each is marked with a `shortcut:`.
+- Per-game user choices (the cloud-saves on/off setting) sit in the cache `info` table.
+
+**Files:**
+- Modify `src-tauri/src/cache/db.rs` and `src-tauri/src/cache/mod.rs` (the file name stays `library-v3.sqlite`).
+- Update the callers of the `cloud-saves` info kind (`commands/game.rs`).
+- Update `CLAUDE.md`.
+
+**Interfaces:**
+- **Migrations.** `pub fn open(path) -> Result<Connection, Error>` sets `PRAGMA journal_mode=WAL` and `busy_timeout = 5000`. It then runs every migration step whose number is above `PRAGMA user_version`, each in its own transaction, and sets `user_version` after each step.
+  - **Step 1** is today's schema, as `CREATE TABLE IF NOT EXISTS`, so an existing v3 file needs no work.
+  - **Step 2** is v4:
+    - add `games.dlc TEXT` (JSON of `Vec<Dlc>`), `games.update_available INTEGER NOT NULL DEFAULT 0` and `games.cloud_saves INTEGER NOT NULL DEFAULT 0`;
+    - drop the unused `logo` and `logo_url` columns, using `ALTER TABLE … DROP COLUMN` (SQLite 3.35+ is bundled);
+    - `CREATE TABLE game_prefs (key TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (key, name))` for per-game choices;
+    - `CREATE TABLE playtime (key TEXT NOT NULL, started INTEGER NOT NULL, seconds INTEGER NOT NULL)` for Task 26;
+    - move `info` rows of kind `cloud-saves` into `game_prefs` (name `cloud_saves`);
+    - delete the stale `info` rows of kind `twin`, which were replaced by `twin2`.
+- **`load` and `replace`** read and write the new `games` columns. The three `shortcut:` notes about not saving them go away.
+- **Per-game choices:**
+  - `pub fn pref(conn, key, name) -> Result<Option<String>, Error>` and `pub fn set_pref(conn, key, name, value: Option<&str>) -> Result<(), Error>`.
+  - The cloud-saves choice uses them.
+  - Task 25 (launch options) and Task 26 (`playtime`) must use these tables, not `info`.
+- **The `info` table** stays cache only. Nothing the owner chose or built up lives there.
+- **CLAUDE.md:** the database rule becomes "schema changes are new migration steps; never change the file name". Note the user-data tables.
+
+**Tests:**
+- `migrates_v3_file_keeping_settings_and_launches`:
+  - build a v3-shaped file with settings, launches, games rows, a `cloud-saves` info row and a `twin` info row;
+  - open it;
+  - assert `user_version` is 2, settings and launches are unchanged, the `cloud-saves` row moved to `game_prefs`, `twin` rows are gone, and `games` rows are kept with the new columns defaulted.
+- `fresh_file_gets_latest_schema`.
+- `open_twice_is_a_no_op` (the migrations are idempotent).
+- `games_round_trip_dlc_update_and_cloud_saves`.
+
+- [ ] **Steps:**
+  1. Write the failing tests.
+  2. Implement.
+  3. Run the full suite, clippy and `npm run check`.
+  4. Open the owner's real database read-only to check its shape (don't write to it).
+  5. VERIFY-LATER: after the first start on v4, settings, launch history and cloud-save choices are intact.
+- **Commit:** `feat(db): migrations in place, WAL, user data apart from cache`.
