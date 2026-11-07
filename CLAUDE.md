@@ -6,12 +6,14 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 - Frontend:
   - `npm run check` (svelte-check + tsc)
   - `npm test` (node tests in `scripts/`)
+  - `npx prettier --write .` (with `prettier-plugin-svelte`) before committing frontend changes
 - Rust, run from `src-tauri/`:
+  - `cargo fmt` before committing Rust changes
   - `cargo test`
   - `cargo clippy --all-targets -- -D warnings`
 - Release build: `npm run tauri build -- --no-bundle`. The exe is `src-tauri/target/release/Guild.exe`.
 - Scroll benchmark: `pwsh scripts/bench.ps1 4000` and `15000`, run against the release build. The bar is 0–2 frames slower than 1.5× the median.
-- Every commit must pass check, test, cargo test and clippy.
+- Every commit must pass check, test, cargo test and clippy, and be formatted (`cargo fmt --check`, `npx prettier --check .`).
 
 ## Rules that aren't obvious from the code
 - **Secrets** live only in Windows Credential Manager (service `cloud.biem.guild`): the Steam refresh token, the IGDB secret and the SteamGridDB API key.
