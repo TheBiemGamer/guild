@@ -228,8 +228,8 @@
     verify: 'Verifying…',
     move: 'Moving…',
   }
-  /** Epic runs these in Legendary, so they can be cancelled. */
-  const cancellable = ['Installing…', 'Updating…', 'Verifying…', 'Moving…']
+  /** Epic runs these in Legendary, so they can be cancelled. Not Move: stopped halfway, Legendary's record and the folder disagree. */
+  const cancellable = ['Installing…', 'Updating…', 'Verifying…']
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false

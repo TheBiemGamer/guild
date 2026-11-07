@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -275,11 +275,27 @@ pub fn verify(app_name: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<
     }
 }
 
-/// Moves an installed game's folder into `dest`, with the same events and cancel as `install`.
-/// Legendary 0.21 renames the folder, so another drive fails with its message.
-pub fn move_to(app_name: &str, dest: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+/// Moves an installed game's folder (at `from`, when known) into `dest`, with the same events as `install`.
+/// Legendary 0.21 renames the folder, so another drive is refused before it runs.
+pub fn move_to(app_name: &str, from: Option<&Path>, dest: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+    if from.is_some_and(|from| !same_drive(from, Path::new(dest))) {
+        return Err("Moving to another drive isn't supported yet. Pick a folder on the same drive.".into());
+    }
     let (success, log) = run_logged(legendary(&move_args(app_name, dest)), on_event)?;
     Ok(log_outcome(success, &log, Some("Finished."))?)
+}
+
+/// Whether two paths are on the same drive (or network share).
+// shortcut: compares path prefixes only; a folder mounted from another disk counts as the same drive.
+fn same_drive(a: &Path, b: &Path) -> bool {
+    let volume = |path: &Path| match path.components().next()? {
+        Component::Prefix(p) => Some(match p.kind() {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => d.to_ascii_uppercase().to_string(),
+            _ => p.as_os_str().to_string_lossy().to_lowercase(),
+        }),
+        _ => None,
+    };
+    volume(a) == volume(b)
 }
 
 /// Makes Legendary take an existing install of an owned game at `path`.
@@ -940,6 +956,20 @@ mod tests {
         assert_eq!(import_args("Goo", r"D:\Games\Goo"), ["import", "--with-dlcs", "Goo", r"D:\Games\Goo"]);
         // Import only: nothing is exported to the Epic Games Launcher, and automatic sync isn't switched on.
         assert_eq!(egl_sync_args(), ["-y", "egl-sync", "--import-only", "--one-shot"]);
+    }
+
+    #[test]
+    fn moves_stay_on_the_same_drive() {
+        assert!(same_drive(Path::new(r"C:\Games\Goo"), Path::new(r"c:\Other")));
+        assert!(same_drive(Path::new(r"C:\Games\Goo"), Path::new(r"\\?\C:\Other")));
+        assert!(!same_drive(Path::new(r"C:\Games\Goo"), Path::new(r"D:\Games")));
+        assert!(same_drive(Path::new(r"\\nas\games\Goo"), Path::new(r"\\NAS\Games\Other")));
+        assert!(!same_drive(Path::new(r"\\nas\games\Goo"), Path::new(r"C:\Games")));
+        // Refused before Legendary runs, so no process starts.
+        let mut started = false;
+        let refused = move_to("Goo", Some(Path::new(r"C:\Games\Goo")), r"D:\Games", |_| started = true);
+        assert_eq!(refused.unwrap_err().to_string(), "Moving to another drive isn't supported yet. Pick a folder on the same drive.");
+        assert!(!started);
     }
 
     #[test]

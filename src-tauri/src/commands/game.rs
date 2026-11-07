@@ -274,7 +274,7 @@ fn act_blocking(
                 Action::Update => epic::update(&game.external_id, on_event),
                 Action::Verify => epic::verify(&game.external_id, on_event),
                 Action::Move => match dest {
-                    Some(dest) => epic::move_to(&game.external_id, dest, on_event),
+                    Some(dest) => epic::move_to(&game.external_id, game.install_dir.as_deref(), dest, on_event),
                     None => Err("Pick a folder to move the game to.".into()),
                 },
                 _ => {
