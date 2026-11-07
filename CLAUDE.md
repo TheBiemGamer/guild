@@ -30,7 +30,9 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
 - **New OS-specific code** goes behind `src-tauri/src/platform.rs` with `#[cfg(windows)]`. Linux may come later.
 - **UI** follows `DESIGN.md` (tokens, components, motion). Update it whenever the UI changes.
 - **Dependencies:** ask the owner before adding a crate or npm package.
-- **Style:** take the smallest change that fully solves the task (ponytail).
+- **Always run both skills on every change.**
+  - [ponytail](https://github.com/DietrichGebert/ponytail) for code: take the smallest change that fully solves the task, and use `ponytail-review` before calling it done.
+  - [antislop](https://github.com/miqdadbadjuber/anti-slop) for anything users see (`antislop-ui` for UI and copy). Leave out decorative hints, labels that repeat each other, filler copy, and dots or animations that mark no real state.
 - **Commit messages** are conventional and never carry Co-Authored-By, Claude-Session or "Generated with" lines.
 - **Running the app:**
   - Never drive it with simulated mouse or keyboard input while the owner may be using the PC. Capture it with PrintWindow instead.
