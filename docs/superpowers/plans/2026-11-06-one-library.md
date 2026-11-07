@@ -967,11 +967,16 @@ Owner request, 2026-11-07. **Order:** run this after Task 24 and before Tasks 25
 - Per-game user choices (the cloud-saves on/off setting) sit in the cache `info` table.
 
 **Files:**
-- Modify `src-tauri/src/cache/db.rs` and `src-tauri/src/cache/mod.rs` (the file name stays `library-v3.sqlite`).
+- Modify `src-tauri/src/cache/db.rs` and `src-tauri/src/cache/mod.rs`. `Dirs::db` becomes `library.sqlite`, with no version in the name.
 - Update the callers of the `cloud-saves` info kind (`commands/game.rs`).
 - Update `CLAUDE.md`.
 
 **Interfaces:**
+- **File name** (owner decision, 2026-11-07). The version no longer lives in the name; the file is `library.sqlite`.
+  - On start, if `library.sqlite` doesn't exist and `library-v3.sqlite` does, rename the old file, plus any `-journal`, `-wal` or `-shm` sidecar, before opening it.
+  - If the rename fails, copy instead. Never delete the old file unless the rename succeeded.
+  - If both files exist, `library.sqlite` wins and the v3 file is left alone.
+  - From then on the name never changes.
 - **Migrations.** `pub fn open(path) -> Result<Connection, Error>` sets `PRAGMA journal_mode=WAL` and `busy_timeout = 5000`. It then runs every migration step whose number is above `PRAGMA user_version`, each in its own transaction, and sets `user_version` after each step.
   - **Step 1** is today's schema, as `CREATE TABLE IF NOT EXISTS`, so an existing v3 file needs no work.
   - **Step 2** is v4:
@@ -987,7 +992,7 @@ Owner request, 2026-11-07. **Order:** run this after Task 24 and before Tasks 25
   - The cloud-saves choice uses them.
   - Task 25 (launch options) and Task 26 (`playtime`) must use these tables, not `info`.
 - **The `info` table** stays cache only. Nothing the owner chose or built up lives there.
-- **CLAUDE.md:** the database rule becomes "schema changes are new migration steps; never change the file name". Note the user-data tables.
+- **CLAUDE.md:** the database rule becomes "the file is `library.sqlite`; schema changes are new migration steps; never change the file name". Note the user-data tables.
 
 **Tests:**
 - `migrates_v3_file_keeping_settings_and_launches`:
@@ -995,6 +1000,9 @@ Owner request, 2026-11-07. **Order:** run this after Task 24 and before Tasks 25
   - open it;
   - assert `user_version` is 2, settings and launches are unchanged, the `cloud-saves` row moved to `game_prefs`, `twin` rows are gone, and `games` rows are kept with the new columns defaulted.
 - `fresh_file_gets_latest_schema`.
+- `old_v3_file_is_renamed_and_kept`:
+  - with only `library-v3.sqlite` (holding settings) in a temp folder, after start `library.sqlite` exists with the same settings and the v3 file is gone;
+  - with both files present, `library.sqlite` wins and the v3 file is left alone.
 - `open_twice_is_a_no_op` (the migrations are idempotent).
 - `games_round_trip_dlc_update_and_cloud_saves`.
 
