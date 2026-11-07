@@ -243,15 +243,23 @@
     if (back?.isConnected) back.focus({ preventScroll: true })
   }
 
-  function mouseNav(e: MouseEvent) {
+  async function mouseNav(e: MouseEvent) {
     if (e.button !== 3 && e.button !== 4) return
     e.preventDefault()
-    // mouseup and auxclick both arrive for one press; only mouseup acts.
-    if (e.type !== 'mouseup') return
+    // mouseup and auxclick both arrive for one press; only mouseup acts. Settings (and the Steam log in
+    // inside it) is modal: the page behind it stays put and focus stays in the dialog.
+    if (e.type !== 'mouseup' || settingsOpen) return
     const step = navStep(e.button, open, lastClosed)
     if (!step) return
-    if (step.open === null) closeGame()
-    else if (lib.games.some((g) => g.copyKeys.includes(step.open!) || g.chosen === step.open)) openGame(step.open)
+    if (step.open === null) {
+      closeGame()
+      return
+    }
+    // Reopens even when a filter hides the game now; a game gone from the library is forgotten.
+    const key = step.open
+    const still = await api.game(key).catch(() => null)
+    if (!still) lastClosed = null
+    else if (open === null && !settingsOpen) openGame(key)
   }
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
