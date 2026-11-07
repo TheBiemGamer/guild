@@ -903,17 +903,15 @@ Owner request, 2026-11-07. Approved look: mockup v7 in the brainstorm companion 
 - [ ] **Step 3:** VERIFY-LATER: each grouping and sort works on the full library.
 - [ ] **Step 4: Commit:** `feat(library): group and sort by playtime and how long to beat`.
 
-### Task 28: Library toolbar and game page tabs (layout v5/v7)
+### Task 28: Library toolbar and game page tabs (layout v7)
 
-Owner request, 2026-11-07. The owner approved the layout direction in two mockups:
-- `docs/superpowers/specs/2026-11-07-layout-mockup-v5.html`
-- `docs/superpowers/specs/2026-11-07-grouping-mockup.html` (v7)
+Owner request, 2026-11-07. The current approved mockup is **v7**: `docs/superpowers/specs/2026-11-07-grouping-mockup.html`. It covers the library: the toolbar, Filters, Group, Sort and the Downloads chip. v7 doesn't draw the game page or Settings, so their look comes from the earlier v5 mockup, `docs/superpowers/specs/2026-11-07-layout-mockup-v5.html` (game page tabs, Settings modal). Wherever v5 differs from v7 (its Home page, sidebar, list toggle), v7 wins.
 
 The direction stays in DESIGN.md's "Afterglow": quiet dark glass, chips, colour only from the art, and the white pill as the one bright thing. There is no Home page and no sidebar. The library stays the start page, with the Continue-playing banner unchanged.
 
 **Order:** run this task before Tasks 20b–25 where possible, so their UI lands in the tabs and the toolbar. If some of those tasks already landed, move their UI into the tabs here.
 
-**Files:** `src/lib/Toolbar.svelte`, `src/App.svelte`, `src/lib/Grid.svelte`, `src/lib/Detail.svelte`, and a new `src/lib/FilterPopover.svelte`, `src/lib/LibraryList.svelte` and `src/lib/DownloadsPopover.svelte` (or Task 24's panel), plus `DESIGN.md`.
+**Files:** `src/lib/Toolbar.svelte`, `src/App.svelte`, `src/lib/Grid.svelte`, `src/lib/Detail.svelte`, and a new `src/lib/FilterPopover.svelte` and `src/lib/DownloadsPopover.svelte` (or Task 24's panel), plus `DESIGN.md`.
 
 **Interfaces and look (match the mockups; DESIGN.md tokens win on values):**
 - **Toolbar, left to right:**
@@ -923,7 +921,6 @@ The direction stays in DESIGN.md's "Afterglow": quiet dark glass, chips, colour 
   - a **Filters** chip;
   - a spacer;
   - Group (from Task 27) and Sort;
-  - a list/grid toggle chip;
   - a **Downloads** chip;
   - the Settings gear with its attention dot, as today.
 - **Filters chip:** opens a glass popover (`surface-2`, radius 12, the same shadow as the ⋯ menu) with groups of toggle chips:
@@ -935,9 +932,6 @@ The direction stays in DESIGN.md's "Afterglow": quiet dark glass, chips, colour 
   - The popover footer has **Clear**.
   - Collections and "Save as collection" are left for later; leave the footer slot for them.
   - The popover closes on Escape and on a click outside, and keeps keyboard focus inside while open.
-- **List view:** a dense table with Name, Stores (logos), Size, Playtime, How long to beat, Last played and Status. Rows open the game page.
-  - It must stay virtualised for about 1,300 rows.
-  - The choice of list or grid is kept in settings.
 - **Downloads chip:**
   - It shows **only while something is downloading, updating or queued**, as a 36px icon chip with a progress ring (accent-2) around the icon.
   - Clicking it opens a glass popover: the active job with its progress, size and time left, Pause and Cancel; then "Up next" with reorder and remove; then Steam downloads, read-only, as "in Steam".
@@ -957,7 +951,7 @@ The direction stays in DESIGN.md's "Afterglow": quiet dark glass, chips, colour 
 - the Rust side is unchanged, apart from any sort or group fields from Task 27.
 
 - [ ] **Step 1:** Implement, then run `npm run check`, `cargo test` and clippy.
-- [ ] **Step 2:** Benchmark 4000 and 15000 in grid view, and in list view with 1,300 entries: 0 slow frames.
-- [ ] **Step 3:** VERIFY-LATER: the Filters popover, active chips, list view, the Downloads chip appearing only during downloads, the tabs and their keyboard behaviour.
-- [ ] **Step 4:** Update DESIGN.md: the toolbar, filter popover, downloads chip, list view and game page tabs.
-- [ ] **Step 5: Commit:** `feat(ui): library toolbar with filters, list view, downloads chip and game page tabs`.
+- [ ] **Step 2:** Benchmark 4000 and 15000 with about 1,300 entries: 0 slow frames.
+- [ ] **Step 3:** VERIFY-LATER: the Filters popover, active chips, the Downloads chip appearing only during downloads, the tabs and their keyboard behaviour.
+- [ ] **Step 4:** Update DESIGN.md: the toolbar, filter popover, downloads chip and game page tabs.
+- [ ] **Step 5: Commit:** `feat(ui): library toolbar with filters, downloads chip and game page tabs`.
