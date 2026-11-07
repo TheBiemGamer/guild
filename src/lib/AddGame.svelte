@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import * as api from './api'
-  import type { CustomGame, GridCover } from './api'
+  import type { CustomGame, GridCover } from './bindings'
   import { nameFromExe } from './format'
   import { popover } from './popover'
   import { around, t } from './i18n'

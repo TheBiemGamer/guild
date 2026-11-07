@@ -32,6 +32,7 @@ use crate::tools;
 
 /// Opens Epic's login window, hands the code to Legendary, then loads the Epic library.
 #[tauri::command]
+#[specta::specta]
 pub async fn epic_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
         let code = epic_login::run(&app)?.ok_or(msg!(loginWindowClosed))?;
@@ -43,12 +44,14 @@ pub async fn epic_log_in(app: AppHandle) -> Res<()> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn dismiss_epic_notice(state: State<'_, AppState>) {
     state.lock().epic_notice = false;
 }
 
 /// Forgets the Epic login in Legendary, then rescans Epic. Cached Epic games stay.
 #[tauri::command]
+#[specta::specta]
 pub async fn epic_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         epic::log_out().map_err(Msg::from)?;
@@ -63,6 +66,7 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
 
 /// Opens GOG's login window, hands the code to gogdl, then loads the GOG library.
 #[tauri::command]
+#[specta::specta]
 pub async fn gog_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
         let code = gog_login::run(&app)?.ok_or(msg!(loginWindowClosed))?;
@@ -76,6 +80,7 @@ pub async fn gog_log_in(app: AppHandle) -> Res<()> {
 
 /// Forgets the GOG login, then rescans. Cached GOG games stay.
 #[tauri::command]
+#[specta::specta]
 pub async fn gog_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         gog::log_out().map_err(Msg::from)?;
@@ -89,6 +94,7 @@ pub async fn gog_log_out(app: AppHandle) -> Res<()> {
 /// Starts Nile's device login, opens Amazon's login window on it, hands the code back to Nile, then loads the
 /// Amazon library.
 #[tauri::command]
+#[specta::specta]
 pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
         let sign_in = amazon::sign_in().map_err(Msg::from)?;
@@ -105,6 +111,7 @@ pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
 
 /// Deregisters this PC from the Amazon account and forgets the login, then rescans. Cached Amazon games stay.
 #[tauri::command]
+#[specta::specta]
 pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         amazon::log_out().map_err(Msg::from)?;
@@ -125,7 +132,7 @@ fn note_signed_out(app: &AppHandle, store: &str) {
 }
 
 /// An owned Epic game that isn't installed, for "Import an existing install".
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct Importable {
     key: String,
     title: String,
@@ -146,12 +153,14 @@ fn importable(state: &AppState, provider: ProviderKind) -> Vec<Importable> {
 
 /// Owned Epic games that aren't installed, by title.
 #[tauri::command]
+#[specta::specta]
 pub fn epic_importable(state: State<'_, AppState>) -> Vec<Importable> {
     importable(&state, ProviderKind::Epic)
 }
 
 /// Owned Amazon games that aren't installed, by title.
 #[tauri::command]
+#[specta::specta]
 pub fn amazon_importable(state: State<'_, AppState>) -> Vec<Importable> {
     importable(&state, ProviderKind::Amazon)
 }
@@ -159,6 +168,7 @@ pub fn amazon_importable(state: State<'_, AppState>) -> Vec<Importable> {
 /// Makes Nile take an existing install of an owned Amazon game (`key`) at `path`, then rescans. Nile checks every
 /// file first, so this can take minutes.
 #[tauri::command]
+#[specta::specta]
 pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()> {
     let game = app
         .state::<AppState>()
@@ -176,6 +186,7 @@ pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()>
 
 /// Makes Legendary take an existing install of an owned Epic game (`key`) at `path`, then rescans Epic.
 #[tauri::command]
+#[specta::specta]
 pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
     let game = app
         .state::<AppState>()
@@ -192,6 +203,7 @@ pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
 
 /// Imports the games the Epic Games Launcher installed, then rescans Epic.
 #[tauri::command]
+#[specta::specta]
 pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     blocking(move || {
         let result = epic::egl_sync().map_err(Msg::from);
@@ -204,6 +216,7 @@ pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
 /// Takes an existing install of an owned GOG game at `path` (gogdl reads which game it is), then rescans GOG.
 /// Resolves to the game's title.
 #[tauri::command]
+#[specta::specta]
 pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -221,6 +234,7 @@ pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
 /// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then it reads just that store's
 /// login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.
 #[tauri::command]
+#[specta::specta]
 pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>) -> Res<()> {
     let tool = tools::find(&name).ok_or(msg!(unknownTool))?;
     let http = app.state::<AppState>().http.clone();
@@ -251,7 +265,7 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
 }
 
 /// The owned-games login, separate from the local install.
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct SteamLibrary {
     /// The connected account; `None` when not connected.
     account: Option<String>,
@@ -259,7 +273,7 @@ pub struct SteamLibrary {
     attention: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
     /// The Language setting as saved: "system", "en" or "nl".
@@ -300,6 +314,7 @@ pub struct SettingsView {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -365,6 +380,7 @@ fn dir_size(dir: &std::path::Path) -> u64 {
 
 /// Sets one plain setting (`None` resets it). The IGDB secret goes through `set_igdb_secret`.
 #[tauri::command]
+#[specta::specta]
 pub async fn update_setting(app: AppHandle, name: String, value: Option<String>) -> Res<()> {
     blocking(move || {
         if name == settings::START_WITH_WINDOWS {
@@ -390,6 +406,7 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
 
 /// Saves the IGDB Client Secret in Credential Manager, or removes it for `None`.
 #[tauri::command]
+#[specta::specta]
 pub async fn set_igdb_secret(app: AppHandle, value: Option<String>) -> Res<()> {
     blocking(move || {
         let value = value.as_deref().map(str::trim).filter(|v| !v.is_empty());
@@ -403,18 +420,21 @@ pub async fn set_igdb_secret(app: AppHandle, value: Option<String>) -> Res<()> {
 
 /// Saves the SteamGridDB API key in Credential Manager, or removes it for `None`.
 #[tauri::command]
+#[specta::specta]
 pub async fn set_steamgriddb_key(value: Option<String>) -> Res<()> {
     blocking(move || settings::set_grid_key(value.as_deref().map(str::trim).filter(|v| !v.is_empty()))).await
 }
 
 /// SteamGridDB's API key page, where the owner gets a free key.
 #[tauri::command]
+#[specta::specta]
 pub fn open_steamgriddb() -> Res<()> {
     crate::library::open_url("https://www.steamgriddb.com/profile/preferences/api").map_err(Msg::from)
 }
 
 /// Deletes downloaded art and thumbnails; they come back on demand. The database stays.
 #[tauri::command]
+#[specta::specta]
 pub async fn clear_cache(app: AppHandle) -> Res<()> {
     blocking(move || {
         let dirs = &app.state::<AppState>().dirs;
@@ -432,18 +452,21 @@ pub async fn clear_cache(app: AppHandle) -> Res<()> {
 
 /// The page where the owner creates the Twitch application IGDB needs.
 #[tauri::command]
+#[specta::specta]
 pub fn open_twitch_console() -> Res<()> {
     crate::library::open_url("https://dev.twitch.tv/console/apps").map_err(Msg::from)
 }
 
 /// IGDB's site, for the "Data from IGDB" credit next to how long to beat.
 #[tauri::command]
+#[specta::specta]
 pub fn open_igdb() -> Res<()> {
     crate::library::open_url("https://www.igdb.com").map_err(Msg::from)
 }
 
 /// Opens the folder with launcher.log in File Explorer.
 #[tauri::command]
+#[specta::specta]
 pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
     let dir = &state.dirs.logs;
     std::fs::create_dir_all(dir).map_err(Msg::system)?;
@@ -452,6 +475,7 @@ pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
 
 /// Opens a new GitHub bug report with the app and Windows versions filled in.
 #[tauri::command]
+#[specta::specta]
 pub fn report_problem(app: AppHandle) -> Res<()> {
     use crate::library::percent_encode;
     let version = app.package_info().version.to_string();
@@ -465,7 +489,7 @@ pub fn report_problem(app: AppHandle) -> Res<()> {
 }
 
 /// One answer to the dialog's poll. Never carries the refresh token.
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, PartialEq, Eq, specta::Type)]
 #[serde(tag = "step", rename_all = "camelCase")]
 pub enum ConnectStep {
     Waiting,
@@ -478,6 +502,7 @@ pub enum ConnectStep {
 
 /// Starts a QR login, replacing any running one, and returns the code as an SVG.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_connect_start(app: AppHandle) -> Res<String> {
     let state = app.state::<AppState>();
     let generation = state.steam_gen.fetch_add(1, Ordering::SeqCst) + 1;
@@ -495,6 +520,7 @@ pub async fn steam_connect_start(app: AppHandle) -> Res<String> {
 
 /// Asks Steam how the login is going. When approved, saves the login and loads the owned games.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_connect_poll(app: AppHandle) -> Res<ConnectStep> {
     let state = app.state::<AppState>();
     let mut slot = state.steam_qr.lock().await;
@@ -566,6 +592,7 @@ fn cancel_session(slot: &mut Option<QrSession>) {
 
 /// Drops the running QR login, if any.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_connect_cancel(app: AppHandle) {
     let state = app.state::<AppState>();
     // Before waiting for the lock, so a poll already in flight sees it when Steam answers.
@@ -575,6 +602,7 @@ pub async fn steam_connect_cancel(app: AppHandle) {
 
 /// Forgets the Steam login and the owned list, then rescans so only installed Steam games remain.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -594,7 +622,7 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
 }
 
 /// One answer to the password login. Never carries the password, the code or the token.
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(tag = "step", rename_all = "camelCase")]
 pub enum LoginStep {
     /// Approve the login: in the Steam app, or (`email`) with the link Steam emailed.
@@ -607,6 +635,7 @@ pub enum LoginStep {
 
 /// Logs in with account name and password. Returns the first step: Approve, Code, or the end.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_password_login(app: AppHandle, account: String, password: String) -> Res<LoginStep> {
     let account = account.trim().to_owned();
     if account.is_empty() || password.is_empty() {
@@ -632,6 +661,7 @@ pub async fn steam_password_login(app: AppHandle, account: String, password: Str
 
 /// Sends the Steam Guard code and returns what happened next.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_password_code(app: AppHandle, code: String) -> Res<LoginStep> {
     let state = app.state::<AppState>();
     let sent = {
@@ -646,12 +676,14 @@ pub async fn steam_password_code(app: AppHandle, code: String) -> Res<LoginStep>
 
 /// Waits for the next step, like the end of an Approve.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_password_next(app: AppHandle) -> Res<LoginStep> {
     next_step(&app).await
 }
 
 /// Stops the password login; one that completes anyway is not saved.
 #[tauri::command]
+#[specta::specta]
 pub fn steam_login_cancel(app: AppHandle) {
     let state = app.state::<AppState>();
     cancel_password(&state.steam_gen, &state.steam_pw_codes);

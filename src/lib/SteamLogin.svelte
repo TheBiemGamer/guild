@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import * as api from './api'
-  import type { LoginStep } from './api'
+  import { commands, type LoginStep } from './bindings'
   import { t } from './i18n'
 
   let { onclose, onconnected }: {
@@ -26,7 +26,8 @@
   let password = $state('')
   let code = $state('')
   let phase = $state<'form' | 'busy' | 'approve' | 'code' | 'checking'>('form')
-  let codeKind = $state<'email' | 'app'>('app')
+  /** "email" or "app". */
+  let codeKind = $state('app')
   let approveByEmail = $state(false)
   let error = $state<string | null>(null)
 
@@ -55,7 +56,7 @@
         phase = 'approve'
         approveByEmail = step.email
         error = null
-        return follow(api.steamPasswordNext())
+        return follow(commands.steamPasswordNext())
       case 'code':
         // Steam asks again after a code it didn't take.
         error = phase === 'checking' ? t('steam.codeFailed') : null
@@ -71,7 +72,7 @@
     if (!account.trim() || !password) return
     error = null
     phase = 'busy'
-    const answer = api.steamPasswordLogin(account, password)
+    const answer = commands.steamPasswordLogin(account, password)
     password = ''
     follow(answer)
   }
@@ -80,7 +81,7 @@
     e.preventDefault()
     if (!code.trim()) return
     phase = 'checking'
-    follow(api.steamPasswordCode(code))
+    follow(commands.steamPasswordCode(code))
   }
 
   onMount(() => {
@@ -91,7 +92,7 @@
 
     async function tick() {
       try {
-        const step = await api.steamConnectPoll()
+        const step = await commands.steamConnectPoll()
         if (!alive) return
         failures = 0
         if (step.step === 'connected') return finish()
@@ -111,7 +112,7 @@
       timer = setTimeout(tick, POLL_MS)
     }
 
-    api.steamConnectStart().then(
+    commands.steamConnectStart().then(
       (svgCode) => {
         if (!alive) return
         svg = svgCode
@@ -123,8 +124,8 @@
     return () => {
       alive = false
       clearTimeout(timer)
-      api.steamConnectCancel().catch(() => {})
-      api.steamLoginCancel().catch(() => {})
+      commands.steamConnectCancel().catch(() => {})
+      commands.steamLoginCancel().catch(() => {})
       if (before instanceof HTMLElement && before.isConnected) before.focus()
     }
   })

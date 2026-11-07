@@ -15,7 +15,8 @@ use crate::settings;
 use crate::steamgriddb;
 
 /// What the Edit dialog starts from.
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
+#[serde(rename = "CustomGame")] // its TypeScript name
 pub struct CustomView {
     name: String,
     exe: String,
@@ -23,6 +24,7 @@ pub struct CustomView {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn custom_game(app: AppHandle, key: String) -> Option<CustomView> {
     blocking(move || {
         let row = cache::db::custom_game(&open_db(&app.state::<AppState>())?, custom::id_of(&key)?).ok()??;
@@ -32,7 +34,7 @@ pub async fn custom_game(app: AppHandle, key: String) -> Option<CustomView> {
 }
 
 /// The cover picked in the dialog: a SteamGridDB image or a local file. Copied into the data folder.
-#[derive(Deserialize)]
+#[derive(Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum CoverPick {
     Url(String),
@@ -42,6 +44,7 @@ pub enum CoverPick {
 /// Adds a game (`key` `None`) or saves the one with `key`. `cover` `None` keeps the current cover.
 /// Returns the game's key. Nothing is saved when the cover can't be read.
 #[tauri::command]
+#[specta::specta]
 pub async fn save_custom_game(
     app: AppHandle,
     key: Option<String>,
@@ -97,6 +100,7 @@ fn row_key(id: &str) -> String {
 
 /// Removes the game and its cover. Its files stay on disk; its launch history and playtime stay too.
 #[tauri::command]
+#[specta::specta]
 pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -160,7 +164,7 @@ fn forget_thumbs(thumbs: &Path, id: &str) {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct GridCover {
     /// The full image, passed back to `save_custom_game`.
     url: String,
@@ -171,6 +175,7 @@ pub struct GridCover {
 /// Up to four SteamGridDB covers for `name`. `None` when no API key is saved, so the dialog can say how to
 /// add one; a failed search is an empty list and a log line.
 #[tauri::command]
+#[specta::specta]
 pub async fn grid_search(app: AppHandle, name: String) -> Option<Vec<GridCover>> {
     let key = blocking(settings::grid_key).await?;
     let state = app.state::<AppState>();

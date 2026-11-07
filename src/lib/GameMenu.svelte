@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from 'svelte'
   import * as api from './api'
-  import type { Collection, Listed } from './api'
+  import type { Listed } from './api'
+  import { commands, type Collection } from './bindings'
   import { t } from './i18n'
 
   let { game, at = null, anchor, label, onclose, onchanged, onerror, onedit, onremoved, extra }: {
@@ -36,7 +37,7 @@
   }
 
   async function remove() {
-    await change(() => api.removeCustomGame(game.key))
+    await change(() => commands.removeCustomGame(game.key))
     onremoved?.()
   }
 
@@ -64,7 +65,7 @@
       const r = menu.getBoundingClientRect()
       pos = { x: Math.max(8, Math.min(at.x, innerWidth - r.width - 8)), y: Math.max(8, Math.min(at.y, innerHeight - r.height - 8)) }
     }
-    api.collections().then(
+    commands.collections().then(
       (c) => (collections = c),
       (e) => onerror(api.message(e)),
     )
@@ -102,8 +103,8 @@
 
   async function create() {
     try {
-      const id = await api.createCollection(name)
-      await change(() => api.setInCollection(game.key, id, true))
+      const id = await commands.createCollection(name)
+      await change(() => commands.setInCollection(game.key, id, true))
     } catch (e) {
       // The name is empty or taken: the field stays for another try.
       onerror(api.message(e))
@@ -186,7 +187,7 @@
       <button tabindex="-1" bind:this={removeCancel} onclick={() => onclose(true)}>{t('common.cancel')}</button>
     </div>
   {:else}
-  <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => api.setFavorite(game.key, !game.favorite))}>
+  <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => commands.setFavorite(game.key, !game.favorite))}>
     {#if game.favorite}<span class="check" aria-hidden="true">✓</span>{/if}
     {t('menu.favorite')}
   </button>
@@ -205,7 +206,7 @@
       <div class="menu sub" class:left={subLeft} role="menu" aria-label={t('menu.addToCollection')} tabindex="-1" bind:this={sub}>
         {#each collections as c (c.id)}
           {@const on = game.collections.includes(c.id)}
-          <button role="menuitemcheckbox" aria-checked={on} tabindex="-1" onclick={() => change(() => api.setInCollection(game.key, c.id, !on))}>
+          <button role="menuitemcheckbox" aria-checked={on} tabindex="-1" onclick={() => change(() => commands.setInCollection(game.key, c.id, !on))}>
             {#if on}<span class="check" aria-hidden="true">✓</span>{/if}
             {c.name}
           </button>
@@ -219,7 +220,7 @@
       </div>
     {/if}
   </div>
-  <button role="menuitem" tabindex="-1" onclick={() => change(() => api.setHidden(game.key, !game.hidden))}>
+  <button role="menuitem" tabindex="-1" onclick={() => change(() => commands.setHidden(game.key, !game.hidden))}>
     {game.hidden ? t('menu.show') : t('menu.hide')}
   </button>
   {#if custom || extra}

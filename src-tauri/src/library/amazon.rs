@@ -28,7 +28,8 @@ use crate::msg::Msg;
 use crate::info::{self, GameInfo};
 use crate::tools;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename = "AmazonLogin")] // its TypeScript name
 #[serde(rename_all = "camelCase")]
 pub enum Login {
     /// `nile.exe` is in none of the places `tools::NILE.exe()` looks.

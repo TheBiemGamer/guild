@@ -118,7 +118,7 @@ fn parse_version(text: &str) -> Option<String> {
     version.starts_with(|c: char| c.is_ascii_digit()).then(|| version.to_owned())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolView {
     name: &'static str,

@@ -51,7 +51,8 @@ const LATEST_BUILD_MAX_AGE_SECS: i64 = 6 * 60 * 60;
 const BATCH: usize = 50;
 const BATCH_GAP: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename = "GogLogin")] // its TypeScript name
 #[serde(rename_all = "camelCase")]
 pub enum Login {
     /// `gogdl.exe` is in none of the places `tools::GOGDL.exe()` looks.

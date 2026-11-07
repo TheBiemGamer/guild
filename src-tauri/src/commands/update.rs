@@ -10,7 +10,7 @@ use tauri_plugin_updater::UpdaterExt;
 use super::{blocking, AppState, Res};
 use crate::library::ProviderKind;
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct UpdateInfo {
     version: String,
     /// The release notes, Markdown from CHANGELOG.md.
@@ -19,6 +19,7 @@ pub struct UpdateInfo {
 
 /// Asks GitHub for a newer release and keeps it for `install_update`.
 #[tauri::command]
+#[specta::specta]
 pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Option<UpdateInfo>> {
     let mut pending = state.update.lock().await;
     let checked = async { app.updater_builder().timeout(Duration::from_secs(30)).build()?.check().await };
@@ -34,6 +35,7 @@ pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Opt
 /// Downloads the update found by `check_update`, stops the download queue and runs the installer, which
 /// exits the app and starts the new version.
 #[tauri::command]
+#[specta::specta]
 pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
     let mut update = state.update.lock().await.clone().ok_or(msg!(noUpdate))?;
     // The check's 30 s limit would cut off a slow download.

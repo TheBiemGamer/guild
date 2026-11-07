@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import CardView from './Card.svelte'
-  import { benchDone, queueState, type Card, type Progress, type QueueView, type Section } from './api'
+  import { queueState } from './api'
+  import { commands, type Card, type Progress, type QueueView, type Section } from './bindings'
   import { groupLabel } from './format'
 
   let { games, sections = null, stat = null, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu, benchSpeed, header, headerHeight = 0 }: {
@@ -117,7 +118,7 @@
       lastAt = at
       el.scrollTop += Math.max(1, speed * dt)
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1 && frameMs.length > 0) {
-        benchDone(frameMs, games.length)
+        commands.benchDone(frameMs, games.length)
         return
       }
       frame = requestAnimationFrame(step)

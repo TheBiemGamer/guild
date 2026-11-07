@@ -2,44 +2,12 @@
 // picked program suggests. The words come from the language files; `node --test scripts/` loads it as plain TypeScript.
 
 import { oneDecimal, t } from './i18n.ts'
+import type { Progress } from './bindings.ts'
 
-export type ProgressAction = 'download' | 'install' | 'update' | 'repair' | 'verify'
-/** A job in progress. Steam's are all `download`, with `totalBytes`; Epic's bytes have no total; verify counts files. */
-export interface Progress {
-  /** 0 to 1. */
-  fraction: number
-  action: ProgressAction
-  doneBytes: number | null
-  totalBytes: number | null
-  /** Null until known. */
-  secsLeft: number | null
-  doneFiles: number | null
-  totalFiles: number | null
-}
+export type { Progress }
 
-/** Group ids from Rust's `view::group`, in its order per sort, and `favorites` and `allGames` from `view::favorites_first`. */
-export type GroupId =
-  | 'favorites'
-  | 'allGames'
-  | 'today'
-  | 'thisWeek'
-  | 'thisMonth'
-  | 'earlier'
-  | 'neverPlayed'
-  | 'played500h'
-  | 'played100h'
-  | 'played50h'
-  | 'played20h'
-  | 'played10h'
-  | 'played0h'
-  | 'beat0h'
-  | 'beat5h'
-  | 'beat15h'
-  | 'beat40h'
-  | 'beat100h'
-  | 'unknown'
-
-export const groupLabel = (id: GroupId) => t(`group.${id}`)
+/** `id` is a group id from Rust's `view::group`, in its order per sort, and `favorites` and `allGames` from `view::favorites_first`. */
+export const groupLabel = (id: string) => t(`group.${id}`)
 
 const KB = 1024
 const MB = 1024 * KB

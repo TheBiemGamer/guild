@@ -6,7 +6,7 @@ use crate::library::{percent_encode, ProviderKind};
 
 const EPIC_STORE: &str = "https://store.epicgames.com/";
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum LinkKind {
     SteamStore,

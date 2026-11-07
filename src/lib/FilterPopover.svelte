@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import * as api from './api'
+  import { commands } from './bindings'
   import { collectionFilter, filterGroups, filterName, toggleFilter, type Collection, type Filter } from './filters'
   import { popover } from './popover'
   import { t } from './i18n'
@@ -45,7 +46,7 @@
     renaming = null
     if (draft.trim() === c.name) return
     try {
-      await api.renameCollection(c.id, draft)
+      await commands.renameCollection(c.id, draft)
       problem = null
     } catch (e) {
       problem = api.message(e)
@@ -77,7 +78,7 @@
   async function remove(c: Collection) {
     deleting = null
     try {
-      await api.deleteCollection(c.id)
+      await commands.deleteCollection(c.id)
       filters = filters.filter((f) => f !== collectionFilter(c.id))
     } catch (e) {
       problem = api.message(e)

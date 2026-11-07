@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
   import * as api from './api'
-  import type { SettingsView } from './api'
+  import { commands, type SettingsView, type UpdateInfo } from './bindings'
   import { sizeLabel } from './format'
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
@@ -37,7 +37,7 @@
     refreshing: boolean
     loggingIn: boolean
     /** A newer release, from the app's last check. */
-    update: api.UpdateInfo | null
+    update: UpdateInfo | null
     /** A check answered this session, so "Up to date" is known. */
     updateChecked: boolean
     installing: boolean
@@ -151,7 +151,7 @@
     return ok
   }
 
-  const disconnectSteam = () => change(() => api.steamDisconnect())
+  const disconnectSteam = () => change(() => commands.steamDisconnect())
 
   /** The Language setting: "system" follows Windows' display language. Language names stay in their own language. */
   const languages = $derived([
@@ -171,13 +171,13 @@
     await onchange()
   }
 
-  const toggle = (name: string, on: boolean) => change(() => api.updateSetting(name, String(on)))
+  const toggle = (name: string, on: boolean) => change(() => commands.updateSetting(name, String(on)))
 
   function saveFolder() {
     if (folder.trim() === (view.epicInstallDir ?? '')) return
     change(async () => {
       try {
-        await api.updateSetting('epic_install_dir', folder.trim() || null)
+        await commands.updateSetting('epic_install_dir', folder.trim() || null)
       } catch (e) {
         folder = view.epicInstallDir ?? ''
         throw e
@@ -189,7 +189,7 @@
     if (gogFolder.trim() === (view.gogInstallDir ?? '')) return
     change(async () => {
       try {
-        await api.updateSetting('gog_install_dir', gogFolder.trim() || null)
+        await commands.updateSetting('gog_install_dir', gogFolder.trim() || null)
       } catch (e) {
         gogFolder = view.gogInstallDir ?? ''
         throw e
@@ -201,7 +201,7 @@
     if (amazonFolder.trim() === (view.amazonInstallDir ?? '')) return
     change(async () => {
       try {
-        await api.updateSetting('amazon_install_dir', amazonFolder.trim() || null)
+        await commands.updateSetting('amazon_install_dir', amazonFolder.trim() || null)
       } catch (e) {
         amazonFolder = view.amazonInstallDir ?? ''
         throw e
@@ -211,12 +211,12 @@
 
   function saveClientId() {
     if (clientId.trim() === (view.igdbClientId ?? '')) return
-    change(() => api.updateSetting('igdb_client_id', clientId.trim() || null))
+    change(() => commands.updateSetting('igdb_client_id', clientId.trim() || null))
   }
 
   async function saveSecret() {
     if (!secret.trim()) return
-    if (await change(() => api.setIgdbSecret(secret))) {
+    if (await change(() => commands.setIgdbSecret(secret))) {
       secret = ''
       replacing = false
     }
@@ -224,7 +224,7 @@
 
   async function saveGridKey() {
     if (!gridKey.trim()) return
-    if (await change(() => api.setSteamgriddbKey(gridKey))) {
+    if (await change(() => commands.setSteamgriddbKey(gridKey))) {
       gridKey = ''
       gridReplacing = false
     }
@@ -248,7 +248,7 @@
     testPassed = false
     testing = true
     try {
-      await api.testIgdb()
+      await commands.testIgdb()
       testPassed = true
     } catch (e) {
       error = api.message(e)
@@ -268,7 +268,7 @@
     try {
       const path = await api.pickFolder()
       if (!path) return
-      const games = await api.epicImportable()
+      const games = await commands.epicImportable()
       if (games.length === 0) {
         importNote = t('settings.epicAllInstalled')
         return
@@ -284,7 +284,7 @@
     const { path, games } = importing!
     managing = 'import'
     try {
-      await api.epicImport(importKey, path)
+      await commands.epicImport(importKey, path)
       importNote = t('settings.imported', { title: games.find((g) => g.key === importKey)?.title ?? t('settings.theGame') })
       importing = null
     } catch (e) {
@@ -298,7 +298,7 @@
     eglNote = ''
     managing = 'egl'
     try {
-      await api.epicEglSync()
+      await commands.epicEglSync()
       eglNote = t('settings.eglSynced')
     } catch (e) {
       eglNote = api.message(e)
@@ -329,7 +329,7 @@
       const path = await api.pickFolder()
       if (!path) return
       gogImporting = true
-      gogImportNote = t('settings.imported', { title: await api.gogImport(path) })
+      gogImportNote = t('settings.imported', { title: await commands.gogImport(path) })
     } catch (e) {
       gogImportNote = api.message(e)
     }
@@ -351,7 +351,7 @@
 
   async function gogLogIn() {
     gogLoggingIn = true
-    await change(() => api.gogLogIn())
+    await change(() => commands.gogLogIn())
     gogLoggingIn = false
   }
 
@@ -366,7 +366,7 @@
     try {
       const path = await api.pickFolder()
       if (!path) return
-      const games = await api.amazonImportable()
+      const games = await commands.amazonImportable()
       if (games.length === 0) {
         amazonImportNote = t('settings.amazonAllInstalled')
         return
@@ -382,7 +382,7 @@
     const { path, games } = amazonImport!
     amazonImporting = true
     try {
-      await api.amazonImport(amazonImportKey, path)
+      await commands.amazonImport(amazonImportKey, path)
       amazonImportNote = t('settings.imported', { title: games.find((g) => g.key === amazonImportKey)?.title ?? t('settings.theGame') })
       amazonImport = null
     } catch (e) {
@@ -406,18 +406,18 @@
 
   async function amazonLogIn() {
     amazonLoggingIn = true
-    await change(() => api.amazonLogIn())
+    await change(() => commands.amazonLogIn())
     amazonLoggingIn = false
   }
 
   const jobLabel = (kind: 'install' | 'update', job: { percent: number | null }) =>
     job.percent === null ? t(`settings.job.${kind}`) : t(`settings.job.${kind}Percent`, { percent: job.percent })
 
-  const removeSecret = () => change(() => api.setIgdbSecret(null))
-  const removeGridKey = () => change(() => api.setSteamgriddbKey(null))
-  const logOut = () => change(() => api.epicLogOut())
-  const gogLogOut = () => change(() => api.gogLogOut())
-  const amazonLogOut = () => change(() => api.amazonLogOut())
+  const removeSecret = () => change(() => commands.setIgdbSecret(null))
+  const removeGridKey = () => change(() => commands.setSteamgriddbKey(null))
+  const logOut = () => change(() => commands.epicLogOut())
+  const gogLogOut = () => change(() => commands.gogLogOut())
+  const amazonLogOut = () => change(() => commands.amazonLogOut())
   const clearCache = () => change(() => api.clearCache())
 
   function ago(at: number | null, nowMs: number) {
@@ -898,7 +898,7 @@
               </button>
               {#if languageOpen}
                 <ChoiceMenu
-                  bind:value={() => view.language, (v) => change(() => api.updateSetting('language', v))}
+                  bind:value={() => view.language, (v) => change(() => commands.updateSetting('language', v))}
                   options={languages}
                   label={t('settings.language')}
                   anchor={languageButton}
@@ -923,7 +923,7 @@
               <small>
                 {t('settings.igdbWhat')} ·
                 {#if igdbSet}<span class="ok">{t('settings.connected')}</span>
-                {:else}{igdbHint[0]}<button class="link" onclick={() => api.openTwitchConsole()}>{t('settings.igdbLink')}</button>{igdbHint[1]}{/if}
+                {:else}{igdbHint[0]}<button class="link" onclick={() => commands.openTwitchConsole()}>{t('settings.igdbLink')}</button>{igdbHint[1]}{/if}
               </small>
             </div>
             {@render fold(igdbSet, igdbOpen, 'igdb-fields', () => (igdbOpen = !igdbOpen))}
@@ -983,7 +983,7 @@
               <small>
                 {t('settings.gridWhat')} ·
                 {#if view.steamgriddbKeySet}<span class="ok">{t('settings.connected')}</span>
-                {:else}{gridHint[0]}<button class="link" onclick={() => run(api.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}{/if}
+                {:else}{gridHint[0]}<button class="link" onclick={() => run(commands.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}{/if}
               </small>
             </div>
             {@render fold(view.steamgriddbKeySet, gridOpen, 'grid-fields', () => (gridOpen = !gridOpen))}
@@ -1050,8 +1050,8 @@
           <div class="r">
             {@render tile('file')}
             <div class="what">{t('settings.logFile')}</div>
-            <button class="btn" onclick={() => run(api.openLogFolder)}>{t('settings.openLog')}</button>
-            <button class="btn" onclick={() => run(api.reportProblem)}>{t('settings.report')}</button>
+            <button class="btn" onclick={() => run(commands.openLogFolder)}>{t('settings.openLog')}</button>
+            <button class="btn" onclick={() => run(commands.reportProblem)}>{t('settings.report')}</button>
           </div>
         </div>
       </section>

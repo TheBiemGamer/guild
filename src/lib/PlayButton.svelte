@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import * as api from './api'
-  import type { CopyView } from './api'
+  import type { CopyView } from './bindings'
   import { sizeLabel } from './format'
   import { t } from './i18n'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'

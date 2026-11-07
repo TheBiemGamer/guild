@@ -10,7 +10,7 @@
   import amazonFile from './icons/amazongames.svg?no-inline'
   import padSvg from './icons/gamepad.svg?raw'
   import padFile from './icons/gamepad.svg?no-inline'
-  import type { Store } from './api'
+  import type { Store } from './bindings'
   import { t } from './i18n'
 
   // Simple Icons ship one path per logo; reading it once keeps {@html} out of every card.

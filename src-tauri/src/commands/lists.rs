@@ -11,7 +11,7 @@ use crate::entries;
 use crate::msg::Msg;
 
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct Collection {
     id: i64,
     name: String,
@@ -47,17 +47,20 @@ async fn set_flag(app: AppHandle, key: String, name: &'static str, on: bool) -> 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_favorite(app: AppHandle, key: String, on: bool) -> Res<()> {
     set_flag(app, key, cache::db::FAVORITE, on).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_hidden(app: AppHandle, key: String, on: bool) -> Res<()> {
     set_flag(app, key, cache::db::HIDDEN, on).await
 }
 
 /// Every collection by name, with how many games are in it.
 #[tauri::command]
+#[specta::specta]
 pub async fn collections(app: AppHandle) -> Res<Vec<Collection>> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -93,6 +96,7 @@ fn collections_in(conn: &rusqlite::Connection) -> Res<Vec<(i64, String)>> {
 
 /// Returns the new collection's id.
 #[tauri::command]
+#[specta::specta]
 pub async fn create_collection(app: AppHandle, name: String) -> Res<i64> {
     blocking(move || {
         change(&app, |conn| {
@@ -104,6 +108,7 @@ pub async fn create_collection(app: AppHandle, name: String) -> Res<i64> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()> {
     blocking(move || {
         change(&app, |conn| {
@@ -116,11 +121,13 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
 
 /// The games stay in the library.
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_collection(app: AppHandle, id: i64) -> Res<()> {
     blocking(move || change(&app, |conn| cache::db::delete_collection(conn, id).map_err(Msg::system))).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_in_collection(app: AppHandle, key: String, id: i64, on: bool) -> Res<()> {
     blocking(move || {
         let keys = copy_keys(&app.state::<AppState>(), &key)?;

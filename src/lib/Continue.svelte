@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Featured } from './api'
+  import type { Featured } from './bindings'
   import { t } from './i18n'
 
   let { featured, running, onplay, onopen }: {

@@ -7,14 +7,14 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// `{ "code": "gameNotInLibrary", "params": { … } }`. A `Msg` param is rendered first and put in place.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Msg {
     pub code: String,
     #[serde(default)]
     pub params: BTreeMap<String, Param>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(untagged)]
 pub enum Param {
     Msg(Msg),

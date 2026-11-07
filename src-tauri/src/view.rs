@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::entries::{self, Entry};
 use crate::library::{Game, ProviderKind};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Sort {
     Title,

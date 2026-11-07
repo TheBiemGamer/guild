@@ -1,6 +1,5 @@
 <script lang="ts">
-  import * as api from './api'
-  import type { Card, Progress, QueuedAction, QueueView, Store } from './api'
+  import { commands, type Card, type Progress, type QueueView, type QueuedAction, type Store } from './bindings'
   import { progressShort } from './format'
   import { popover } from './popover'
   import { t } from './i18n'
@@ -28,7 +27,7 @@
     for (const key of Object.keys(progress)) {
       if (known.has(key) || key in asked) continue
       asked[key] = ''
-      api.game(key).then(
+      commands.game(key).then(
         (d) => (asked[key] = d?.title ?? ''),
         () => {},
       )

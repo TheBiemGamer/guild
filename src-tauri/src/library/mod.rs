@@ -11,7 +11,8 @@ use std::time::SystemTime;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename = "Store")] // its TypeScript name
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
     Steam,
@@ -67,7 +68,7 @@ impl ProviderKind {
 }
 
 /// What a job in progress is doing. Steam's are all `Download`; Steam doesn't say which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ProgressAction {
     Download,
@@ -79,10 +80,12 @@ pub enum ProgressAction {
 
 /// Download progress as each store reports it: Steam in bytes, Legendary as a percentage with an ETA.
 /// The UI formats it (`src/lib/format.ts`).
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     /// 0.0 to 1.0.
+    // A plain `number` in TypeScript: clamped, never NaN, so never `null` in JSON.
+    #[specta(type = u32)]
     pub fraction: f32,
     pub action: ProgressAction,
     /// Downloaded so far; `None` for Verify.

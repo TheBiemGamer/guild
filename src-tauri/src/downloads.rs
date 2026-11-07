@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// The settings value holding the queue's JSON.
 pub const DOWNLOAD_QUEUE: &str = "download_queue";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum QueuedAction {
     Install,
@@ -146,7 +146,7 @@ pub fn done_message(action: QueuedAction, repaired: bool) -> &'static str {
 }
 
 /// One queued job as `poll` reports it.
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, specta::Type)]
 pub struct QueuedView {
     pub key: String,
     pub action: QueuedAction,
@@ -154,7 +154,7 @@ pub struct QueuedView {
 }
 
 /// The queue for the UI, in order; `active` is the head's key (also while paused).
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, specta::Type)]
 pub struct QueueView {
     pub jobs: Vec<QueuedView>,
     pub paused: bool,

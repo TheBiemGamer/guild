@@ -7,7 +7,8 @@
   import { filterChips, removeChip, storeSegments, type Collection, type Filter } from './filters'
   import { t } from './i18n'
   import { onMount } from 'svelte'
-  import { onOpenDownloads, type Card, type Progress, type QueueView, type Sort, type Store, type UpdateInfo } from './api'
+  import { onOpenDownloads } from './api'
+  import type { Card, Progress, QueueView, Sort, Store, UpdateInfo } from './bindings'
 
   let {
     query = $bindable(),

@@ -16,6 +16,8 @@ rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta-typescript = "=0.0.13"
 steam-vent = { git = "https://codeberg.org/steam-vent/steam-vent", rev = "b0e40109dd7a1b5101e1546ed27f62663dbe5c4b" }
 steam-vent-proto-steam = "0.5.2"
 steamlocate = "2.1"
@@ -25,6 +27,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["system-proxy"] }
+tauri-specta = { version = "=2.0.0-rc.26", features = ["typescript"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 windows-native-keyring-store = { version = "1.1", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Threading"] }

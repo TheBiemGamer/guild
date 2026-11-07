@@ -24,7 +24,7 @@ use crate::view::{self, Lists, Sort};
 /// How long a launched Epic or added game may take to show up as a process before we stop looking.
 const START_GRACE: Duration = Duration::from_secs(30);
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
     key: String,
@@ -70,13 +70,13 @@ fn card(e: &Entry, games: &[Game], ttb: &HashMap<String, u64>, lists: &Lists) ->
 }
 
 /// A run of `count` cards in `Library::games`; `group` is its id (`view::group`), which the UI names.
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct Section {
     group: &'static str,
     count: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Library {
     /// In order; grouped by the sort, group after group.
@@ -107,6 +107,7 @@ pub struct Library {
 /// them, like its other filters. Here, Hidden brings hidden games back, and favorites go on top unless
 /// Favorites is the only one.
 #[tauri::command]
+#[specta::specta]
 pub fn library(
     state: State<'_, AppState>,
     query: String,
@@ -196,7 +197,7 @@ fn sections(
 
 /// The toolbar's sort as last saved, the version this start updated to (`settings::take_updated`), and the UI's
 /// language (`msg::language`).
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewPrefs {
     sort: Sort,
@@ -207,6 +208,7 @@ pub struct ViewPrefs {
 /// Fills the library from SQLite so the UI renders before the stores are scanned. Answers the saved
 /// sort, so the first `library` call already uses it.
 #[tauri::command]
+#[specta::specta]
 pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -241,6 +243,7 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
 /// Rescans Steam, and Epic, GOG and Amazon too when `epic`: they are slow and online, so the UI only asks on demand.
 /// `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Returns whether the library changed.
 #[tauri::command]
+#[specta::specta]
 pub async fn refresh(app: AppHandle, epic: bool, owned: bool) -> bool {
     let again = app.clone();
     let changed = blocking(move || rescan(&app, epic)).await;
@@ -758,6 +761,7 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
 /// Shows the window, which starts hidden. The UI calls this once the first screen has its covers;
 /// `main` calls it after `SHOW_BY` as a safety net. Only the first call does anything.
 #[tauri::command]
+#[specta::specta]
 pub fn ready(app: AppHandle) {
     show_window(&app, "ui");
 }
@@ -784,7 +788,7 @@ fn first_show(shown: &AtomicBool) -> bool {
     !shown.swap(true, Ordering::SeqCst)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct Cover {
     src: String,
     /// Average colour, `#rrggbb`, painted until the image has loaded.
@@ -795,6 +799,7 @@ pub struct Cover {
 /// local file or URL. `None` means show a title card. At most `COVER_JOBS` run at once.
 // shortcut: requests for cards already scrolled away still run (queued); add cancellation if cold first scrolls feel slow.
 #[tauri::command]
+#[specta::specta]
 pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     let state = app.state::<AppState>();
     let _job = state.cover_jobs.acquire().await.ok()?;
@@ -823,7 +828,7 @@ fn thumb_key(game: &Game, slot: &str, src: &std::path::Path) -> String {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Featured {
     key: String,
@@ -836,6 +841,7 @@ pub struct Featured {
 
 /// The game played last, with its hero art (cover as the fallback) for the library backdrop.
 #[tauri::command]
+#[specta::specta]
 pub async fn featured(app: AppHandle) -> Option<Featured> {
     let state = app.state::<AppState>();
     let (card, game) = {
@@ -859,7 +865,7 @@ fn featured_pick(games: &[Game], entries: &[Entry], lists: &Lists) -> Option<(Ca
     Some((card(e, games, &HashMap::new(), lists), games[e.copies[0]].clone()))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Poll {
     /// Key of the game running: Steam's, or the Epic or added game watched since its launch here.
@@ -872,6 +878,7 @@ pub struct Poll {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn poll(app: AppHandle) -> Poll {
     blocking(move || poll_blocking(&app)).await
 }
@@ -950,11 +957,13 @@ fn apply_steam_progress(s: &mut Shared, results: Vec<(String, Option<Progress>, 
 
 /// `LAUNCHER_BENCH=<px/s>` makes the UI scroll the full library at that speed, then report.
 #[tauri::command]
+#[specta::specta]
 pub fn bench_speed() -> Option<f32> {
     std::env::var("LAUNCHER_BENCH").ok()?.parse().ok()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn bench_done(app: AppHandle, mut frame_ms: Vec<f32>, games: usize) {
     println!("{}", bench::stats(&mut frame_ms, games));
     app.exit(0);

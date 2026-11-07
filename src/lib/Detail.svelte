@@ -42,7 +42,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './api'
-  import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LaunchOptions, LinkKind, Progress, QueueView, SavesView, TimeToBeat } from './api'
+  import type { ActOptions } from './api'
+  import { commands, type Action, type Conflict, type Detail, type Dlc, type GameInfo, type LaunchOptions, type LinkKind, type Progress, type QueueView, type SavesView, type TimeToBeat } from './bindings'
   import PlayButton from './PlayButton.svelte'
   import GameMenu from './GameMenu.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
@@ -122,7 +123,7 @@
     const key = gameKey
     void version
     let alive = true
-    api.game(key).then(
+    commands.game(key).then(
       (g) => alive && (game = g),
       (e) => alive && onerror(api.message(e)),
     )
@@ -201,7 +202,7 @@
 
   async function loadSaves(key: string, alive = () => true) {
     try {
-      const s = await api.saves(key)
+      const s = await commands.saves(key)
       if (alive()) saves = s
     } catch {
       // Quiet: the tab keeps what it showed.
@@ -224,14 +225,14 @@
 
   async function setSaves(choice: boolean | null) {
     const key = copy!.key
-    await run(() => api.setSaves(key, choice))
+    await run(() => commands.setSaves(key, choice))
     await loadSaves(key)
   }
 
   async function syncNow() {
     const key = copy!.key
     syncing = true
-    await run(() => api.syncSavesNow(key))
+    await run(() => commands.syncSavesNow(key))
     await loadSaves(key)
     syncing = false
   }
@@ -246,7 +247,7 @@
     argsSaved = false
     if (!key) return
     let alive = true
-    api.launchOptions(key).then(
+    commands.launchOptions(key).then(
       (o) => {
         if (!alive) return
         launch = o
@@ -263,7 +264,7 @@
   async function setLaunch(change: Partial<LaunchOptions>) {
     const key = copy!.key
     try {
-      const stored = await api.setLaunchOptions(key, { ...launch!, ...change })
+      const stored = await commands.setLaunchOptions(key, { ...launch!, ...change })
       if (copy?.key === key) launch = stored
       return true
     } catch (e) {
@@ -368,7 +369,7 @@
     keepFocus(() => moreButton)
   }
 
-  const run = (f: () => Promise<void>) => f().catch((e) => onerror(api.message(e)))
+  const run = (f: () => Promise<unknown>) => f().catch((e) => onerror(api.message(e)))
 
   function closeMenu(refocus: boolean) {
     menuOpen = false
@@ -461,7 +462,7 @@
 
 {#snippet copyItems()}
   {#if copy!.installDir}
-    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>{t('detail.openInstallFolder')}</button>
+    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => commands.openFolder(copy!.key)))}>{t('detail.openInstallFolder')}</button>
   {/if}
   {#if copy!.installed && !custom}
     <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>{t('detail.uninstall')}</button>
@@ -473,7 +474,7 @@
     <dt>{label}</dt>
     <dd class="chips">
       {#each kinds as kind (kind)}
-        <button class="chip" onclick={() => run(() => api.openLink(game!.key, kind))}>
+        <button class="chip" onclick={() => run(() => commands.openLink(game!.key, kind))}>
           <LinkIcon {kind} />{linkNames[kind]}
         </button>
       {/each}
@@ -665,7 +666,7 @@
           {#if copy!.provider === 'steam'}
             <div class="row">
               <div class="what">{t('detail.steamLaunch')}</div>
-              <button class="chip" onclick={() => run(() => api.openSteamProperties(copy!.key))}>{t('detail.openInSteam')}</button>
+              <button class="chip" onclick={() => run(() => commands.openSteamProperties(copy!.key))}>{t('detail.openInSteam')}</button>
             </div>
           {:else if launch}
             <div class="row">
@@ -714,7 +715,7 @@
           {#if copy!.installDir}
             <div class="row">
               <div class="what">{t('detail.folder')}<small class="path">{copy!.installDir}{#if copy!.sizeBytes !== null}{' · '}{sizeLabel(copy!.sizeBytes)}{/if}</small></div>
-              <button class="chip" onclick={() => run(() => api.openFolder(copy!.key))}>{t('detail.openFolder')}</button>
+              <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.openFolder')}</button>
             </div>
           {/if}
           {#if copy!.updateAvailable}
@@ -773,7 +774,7 @@
             <div class="tile">
               <div class="head">
                 <h2>{t('detail.ttb')}</h2>
-                <button class="credit" title={t('detail.igdbCredit')} aria-label={t('detail.igdbCredit')} onclick={() => run(api.openIgdb)}>IGDB</button>
+                <button class="credit" title={t('detail.igdbCredit')} aria-label={t('detail.igdbCredit')} onclick={() => run(commands.openIgdb)}>IGDB</button>
               </div>
               <p title={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')}>
                 <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}

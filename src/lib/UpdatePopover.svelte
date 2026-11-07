@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { UpdateInfo } from './api'
+  import type { UpdateInfo } from './bindings'
   import NotesPopover from './NotesPopover.svelte'
   import { t } from './i18n'
 

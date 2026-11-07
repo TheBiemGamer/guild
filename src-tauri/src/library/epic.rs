@@ -27,7 +27,7 @@ pub enum InstallEvent {
     Progress(Progress),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Login {
     /// `legendary.exe` is in none of the places `tools::LEGENDARY.exe()` looks.
@@ -70,7 +70,7 @@ impl Provider for Epic {
 }
 
 /// A copy's own launch options, kept in `game_prefs` as JSON. `exe` is relative to the install folder.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LaunchOptions {
     /// Extra game arguments as typed; split by `split_args`.

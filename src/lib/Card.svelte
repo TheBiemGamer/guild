@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { logoFile, storeNames } from './StoreIcon.svelte'
-  import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
+  import { cover, prefetch, type QueueState } from './api'
+  import type { Card, Cover, Progress } from './bindings'
   import { t } from './i18n'
 
   let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu }: {

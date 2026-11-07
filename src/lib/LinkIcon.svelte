@@ -4,7 +4,7 @@
   import wikiSvg from './icons/pcgamingwiki.svg?raw'
   import dbSvg from './icons/steamdb.svg?raw'
   import protonSvg from './icons/protondb.svg?raw'
-  import type { LinkKind } from './api'
+  import type { LinkKind } from './bindings'
 
   // Simple Icons ship one path per logo, like StoreIcon reads them.
   const path = (svg: string) => /\sd="([^"]+)"/.exec(svg)?.[1] ?? ''

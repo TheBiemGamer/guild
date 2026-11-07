@@ -51,6 +51,14 @@ DESIGN.md             visual design system: tokens, components, motion
 CLAUDE.md             rules for AI coding agents working in this repo
 ```
 
+`src/lib/bindings.ts` holds the commands and the types they send, generated with tauri-specta from the commands listed in `bindings()` in `src-tauri/src/main.rs`. A new command needs `#[specta::specta]` under `#[tauri::command]`, and the types it takes or returns need `specta::Type`. A debug build rewrites the file at startup; to regenerate it without starting the app:
+
+```bash
+cd src-tauri && cargo test bindings
+```
+
+`cargo test` fails while the file is stale (and rewrites it), so commit it with the Rust change. `src/lib/api.ts` only adds what needs logic on top: remembered answers, cover batching, asset URLs and pickers.
+
 The database is `library.sqlite`. Schema changes are new migration steps in `src-tauri/src/cache/db.rs`.
 
 ## Releasing

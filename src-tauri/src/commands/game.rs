@@ -26,7 +26,7 @@ use crate::settings;
 use crate::steam_size;
 use crate::view;
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Detail {
     /// The entry key.
@@ -56,7 +56,7 @@ pub struct Detail {
     collections: Vec<i64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyView {
     key: String,
@@ -74,6 +74,7 @@ pub struct CopyView {
 
 /// The game page. Opening it asks GOG for a GOG copy's playtime in the background, when that is due.
 #[tauri::command]
+#[specta::specta]
 pub fn game(app: AppHandle, key: String) -> Option<Detail> {
     let state = app.state::<AppState>();
     let s = state.lock();
@@ -139,6 +140,7 @@ fn installed_dir(g: &Game) -> Option<&PathBuf> {
 
 /// Opens an installed game's folder in File Explorer.
 #[tauri::command]
+#[specta::specta]
 pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
     let game = state.game(&key).ok_or(msg!(gameNotInLibrary))?;
     let dir = installed_dir(&game).ok_or(msg!(noInstallFolder))?;
@@ -150,6 +152,7 @@ pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
 
 /// Opens one of the game page's links in the default browser. The URL is built here from the kind.
 #[tauri::command]
+#[specta::specta]
 pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
     blocking(move || {
         let state = app.state::<AppState>();
@@ -166,12 +169,13 @@ pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
     .await
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Default, specta::Type)]
 pub struct DetailArt {
     hero: Option<String>,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
     let state = app.state::<AppState>();
     let Some(game) = state.game(&key) else { return DetailArt::default() };
@@ -181,7 +185,7 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
     DetailArt { hero: hero.and_then(|p| allow(&app, p)) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Action {
     Play,
@@ -198,7 +202,7 @@ pub enum Action {
 }
 
 /// The answer to a cloud save conflict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Keep {
     Cloud,
@@ -206,7 +210,7 @@ pub enum Keep {
 }
 
 /// Why an Epic or GOG Play didn't launch yet: the question to ask first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Conflict {
     LocalNewer,
@@ -219,6 +223,7 @@ pub enum Conflict {
 /// one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
 /// An Epic or GOG Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 #[tauri::command]
+#[specta::specta]
 pub async fn act(
     app: AppHandle,
     action: Action,
@@ -669,6 +674,7 @@ fn has_launch_options(g: &Game) -> bool {
 
 /// The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others.
 #[tauri::command]
+#[specta::specta]
 pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions> {
     app.state::<AppState>().game(&key).filter(has_launch_options)?;
     blocking(move || Some(launch_options_of(&open_db(&app.state::<AppState>())?, &key))).await
@@ -677,6 +683,7 @@ pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions
 /// Saves an installed Epic, GOG or Amazon copy's launch options. `exe` may be absolute (from the file picker); it is
 /// stored relative to the install folder, and only when it is a file inside it. Returns what was stored.
 #[tauri::command]
+#[specta::specta]
 pub async fn set_launch_options(app: AppHandle, key: String, mut options: LaunchOptions) -> Res<LaunchOptions> {
     let game = app
         .state::<AppState>()
@@ -697,6 +704,7 @@ pub async fn set_launch_options(app: AppHandle, key: String, mut options: Launch
 
 /// Opens a Steam copy's properties in Steam, where its launch options live.
 #[tauri::command]
+#[specta::specta]
 pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()> {
     let game = state.game(&key).filter(|g| g.provider == ProviderKind::Steam).ok_or(msg!(notFromSteam))?;
     crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id)).map_err(Msg::from)
@@ -821,7 +829,7 @@ pub(super) fn upload_saves(app: &AppHandle, key: String, sync: SaveSync) {
     });
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SavesView {
     /// The game's own choice; `None` follows the setting.
@@ -844,6 +852,7 @@ fn saves_view(choice: Option<bool>, last: Option<SyncRecord>) -> SavesView {
 
 /// The Saves tab of an Epic or GOG copy (`key`); `None` for a copy without cloud saves.
 #[tauri::command]
+#[specta::specta]
 pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
     app.state::<AppState>().game(&key).filter(|g| g.installed && g.cloud_saves)?;
     blocking(move || {
@@ -855,6 +864,7 @@ pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
 
 /// Sets an Epic or GOG copy's own cloud save choice; `None` follows its store's setting again.
 #[tauri::command]
+#[specta::specta]
 pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res<()> {
     app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or(msg!(noCloudSaves))?;
     blocking(move || {
@@ -867,6 +877,7 @@ pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res
 
 /// Sync now: the newer side wins. The outcome shows in the Saves tab, so this fails only before Legendary or gogdl runs.
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_saves_now(app: AppHandle, key: String) -> Res<()> {
     let game = app
         .state::<AppState>()
@@ -892,6 +903,7 @@ const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 /// `nile install --info`, also cached for a week.
 /// None if unknown, or for Steam when no account is connected.
 #[tauri::command]
+#[specta::specta]
 pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
     let game = app
         .state::<AppState>()
@@ -991,7 +1003,8 @@ fn steam_token(conn: &Connection) -> Option<String> {
     cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().and_then(|_| settings::steam_token())
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, specta::Type)]
+#[serde(rename = "Dlc")] // its TypeScript name
 #[serde(rename_all = "camelCase")]
 pub struct DlcView {
     id: String,
@@ -1021,7 +1034,7 @@ fn epic_dlc(copies: &[&Game]) -> Vec<DlcView> {
         .collect()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct SteamDlc {
     id: String,
     title: String,
@@ -1031,6 +1044,7 @@ pub struct SteamDlc {
 /// with a connected account and when the store page lists DLC; cached a week, a failure for 6 h.
 /// Failures are quiet and give an empty list.
 #[tauri::command]
+#[specta::specta]
 pub async fn steam_dlc(app: AppHandle, key: String) -> Vec<SteamDlc> {
     let steam_key = {
         let state = app.state::<AppState>();
@@ -1150,6 +1164,7 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// and has its gaps filled like an Epic game's.
 /// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
+#[specta::specta]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
     // A game the owner added has no store to ask.
     let game = app.state::<AppState>().game(&key).filter(|g| g.provider != ProviderKind::Custom)?;
@@ -1215,6 +1230,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
 /// Local files for `game_info`'s screenshot URLs, downloaded on first use; the ones that fail are left out.
 /// Separate from `game_info` so the page's text never waits for images.
 #[tauri::command]
+#[specta::specta]
 pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<String> {
     let state = app.state::<AppState>();
     // The key names the art folder, so it must be a real game.
@@ -1243,7 +1259,8 @@ pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<
     shots
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
+#[serde(rename = "TimeToBeat")] // its TypeScript name
 #[serde(rename_all = "camelCase")]
 /// Seconds; `None` when unknown.
 pub struct TimeToBeatView {
@@ -1309,6 +1326,7 @@ async fn look_up_time_to_beat(
 // Attribution: IGDB asks for visible credit where its data is shown; the game page puts a small
 // "Data from IGDB" link (`open_igdb`) under the tile.
 #[tauri::command]
+#[specta::specta]
 pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView> {
     let state = app.state::<AppState>();
     let (appid, title, epic_key) = {
@@ -1377,6 +1395,7 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
 /// Settings "Test": gets a token with the saved credentials and looks up Steam app 447040.
 /// Errors say what Twitch or IGDB answered and never contain the secret.
 #[tauri::command]
+#[specta::specta]
 pub async fn test_igdb(app: AppHandle) -> Res<()> {
     let state = app.state::<AppState>();
     let (client_id, secret) = {
@@ -1411,6 +1430,7 @@ fn record_play(state: &AppState, key: &str) {
 /// leaves the queue when its process ends; a waiting or paused one leaves the queue at once.
 /// Returns the queue as it is now.
 #[tauri::command]
+#[specta::specta]
 pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
     let pid = {
         let state = app.state::<AppState>();
@@ -1440,6 +1460,7 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
 /// Pauses the whole queue: the active job's Legendary or gogdl is stopped (both resume partial downloads) and
 /// the job stays at the head.
 #[tauri::command]
+#[specta::specta]
 pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
     let pid = {
         let state = app.state::<AppState>();
@@ -1495,6 +1516,7 @@ fn stored_for_restart(queue: &Queue, was_paused: bool) -> Queue {
 
 /// Starts the head job again with the same command.
 #[tauri::command]
+#[specta::specta]
 pub fn resume_downloads(app: AppHandle) -> QueueView {
     {
         let state = app.state::<AppState>();
@@ -1508,6 +1530,7 @@ pub fn resume_downloads(app: AppHandle) -> QueueView {
 
 /// Moves a waiting job one place up or down; the active job stays first.
 #[tauri::command]
+#[specta::specta]
 pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> QueueView {
     let mut s = state.lock();
     let moved = if up { s.queue.move_up(&key) } else { s.queue.move_down(&key) };

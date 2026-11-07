@@ -2,6 +2,7 @@
 // as plain TypeScript.
 
 import { t } from './i18n.ts'
+import type { Collection } from './bindings.ts'
 
 export type Filter =
   | 'notInstalled'
@@ -24,12 +25,7 @@ export type ListFilter = 'favorites' | 'hidden' | `collection-${number}`
 export const collectionFilter = (id: number): ListFilter => `collection-${id}`
 export const isList = (f: Filter): f is ListFilter => f === 'favorites' || f === 'hidden' || f.startsWith('collection-')
 
-/** A collection as Rust's `collections` sends it; `count` is how many games are in it. */
-export interface Collection {
-  id: number
-  name: string
-  count: number
-}
+export type { Collection }
 
 type Group = { label: string; filters: Filter[] }
 /** `id` names the group's words: `filters.group.<id>`. */

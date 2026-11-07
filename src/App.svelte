@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Card, Collection, Featured, Library, Progress, QueueView, Section, SettingsView, Sort, Store } from './lib/api'
+  import { commands, type Action, type Card, type Collection, type Conflict, type CustomGame, type Featured, type Library, type Progress, type QueueView, type Section, type SettingsView, type Sort, type Store, type UpdateInfo } from './lib/bindings'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -64,7 +64,7 @@
   /** The Settings section to open at; null is the top. */
   let settingsSection = $state<string | null>(null)
   /** The Add a game dialog: 'new', or the added game being edited. */
-  let adding = $state<'new' | ({ key: string } & api.CustomGame) | null>(null)
+  let adding = $state<'new' | ({ key: string } & CustomGame) | null>(null)
   let refreshing = $state(false)
   /** When the last full refresh finished (ms since epoch). */
   let refreshedAt = $state<number | null>(null)
@@ -74,7 +74,7 @@
   /** The benchmark waits for both stores, so it scrolls the whole library. */
   let ready = $state(false)
   /** A newer release, from the last check. */
-  let update = $state<api.UpdateInfo | null>(null)
+  let update = $state<UpdateInfo | null>(null)
   /** A check answered this session. */
   let updateChecked = $state(false)
   let installing = $state(false)
@@ -85,7 +85,7 @@
   let updatedNotesButton = $state<HTMLButtonElement>()
 
   async function checkUpdate() {
-    update = await api.checkUpdate()
+    update = await commands.checkUpdate()
     updateChecked = true
   }
 
@@ -100,7 +100,7 @@
     installing = true
     installError = null
     try {
-      await api.installUpdate()
+      await commands.installUpdate()
     } catch (e) {
       installError = api.message(e)
     } finally {
@@ -124,7 +124,7 @@
     const [, f, c] = await Promise.all([
       load(),
       api.featured(),
-      api.collections().catch(() => collections),
+      commands.collections().catch(() => collections),
       withSettings && loadSettings(),
     ])
     featured = f
@@ -135,7 +135,7 @@
   }
 
   async function setFavorite(key: string, on: boolean) {
-    await api.setFavorite(key, on).catch((e) => (error = api.message(e)))
+    await commands.setFavorite(key, on).catch((e) => (error = api.message(e)))
     await reload()
   }
 
@@ -160,7 +160,7 @@
   $effect(() => {
     const now = sort
     if (savedSort === null) return
-    if (now !== savedSort) api.updateSetting('library_sort', now).catch((e) => console.error('saving the library sort', e))
+    if (now !== savedSort) commands.updateSetting('library_sort', now).catch((e) => console.error('saving the library sort', e))
     savedSort = now
   })
 
@@ -180,7 +180,7 @@
   }
 
   /** A Play from a card that stopped at a cloud save conflict; the game page asks, in its hero. */
-  let saveConflict = $state<{ key: string; conflict: api.Conflict } | null>(null)
+  let saveConflict = $state<{ key: string; conflict: Conflict } | null>(null)
 
   async function act(action: Action, key: string, options: api.ActOptions = {}) {
     try {
@@ -198,7 +198,7 @@
   async function logIn() {
     loggingIn = true
     try {
-      await api.epicLogIn()
+      await commands.epicLogIn()
       error = null
     } catch (e) {
       error = t('app.epicLoginError', { error: api.message(e) })
@@ -209,7 +209,7 @@
 
   async function loadSettings() {
     try {
-      settings = await api.settingsView()
+      settings = await commands.settingsView()
       setLanguage(settings.uiLanguage)
     } catch (e) {
       error = t('app.settingsError', { error: api.message(e) })
@@ -234,7 +234,7 @@
       return
     }
     try {
-      const found = await api.customGame(key)
+      const found = await commands.customGame(key)
       if (found) adding = { key, ...found }
     } catch (e) {
       error = api.message(e)
@@ -253,7 +253,7 @@
   async function refreshNow() {
     refreshing = true
     try {
-      await api.refresh(true, true)
+      await commands.refresh(true, true)
       refreshedAt = Date.now()
     } finally {
       refreshing = false
@@ -266,7 +266,7 @@
     if (refreshing) return
     refreshing = true
     try {
-      await api.refresh(true, true)
+      await commands.refresh(true, true)
       refreshedAt = Date.now()
       await reload()
     } catch (e) {
@@ -284,7 +284,7 @@
 
   function dismissNotice() {
     lib.epicNotice = false
-    api.dismissEpicNotice()
+    commands.dismissEpicNotice()
   }
 
   /** Waits, at most 300 ms, for the covers of the cards on screen at start, so the window opens on a filled grid. */
@@ -300,8 +300,8 @@
   onMount(() => {
     // Saved library first, then a quiet rescan: Steam is quick, Legendary can take a while.
     ;(async () => {
-      benchSpeed = await api.benchSpeed()
-      const saved = await api.loadCache().catch((e) => console.error('library cache', e))
+      benchSpeed = await commands.benchSpeed()
+      const saved = await commands.loadCache().catch((e) => console.error('library cache', e))
       if (saved) {
         setLanguage(saved.uiLanguage)
         sort = saved.sort
@@ -311,12 +311,12 @@
       await reload()
       started = true
       await firstCovers()
-      api.ready()
+      commands.ready()
       loadSettings()
       // Holds the flag so a focus event during startup doesn't start a second full refresh.
       refreshing = true
       try {
-        await api.refresh(true, false)
+        await commands.refresh(true, false)
         refreshedAt = Date.now()
       } finally {
         refreshing = false
@@ -327,7 +327,7 @@
     })()
 
     const poller = setInterval(async () => {
-      const p = await api.poll()
+      const p = await commands.poll()
       running = p.running
       progress = p.progress
       queue = p.queue
@@ -335,7 +335,7 @@
     }, 2000)
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.
     const steam = setInterval(async () => {
-      if (await api.refresh(false, false)) await reload()
+      if (await commands.refresh(false, false)) await reload()
     }, 60_000)
     const full = setInterval(backgroundRefresh, FULL_REFRESH_EVERY_MS)
     const updates = setInterval(quietCheck, FULL_REFRESH_EVERY_MS)
@@ -388,7 +388,7 @@
     }
     // Reopens even when a filter hides the game now; a game gone from the library is forgotten.
     const key = step.open
-    const still = await api.game(key).catch(() => null)
+    const still = await commands.game(key).catch(() => null)
     if (!still) lastClosed = null
     else if (open === null && !settingsOpen) openGame(key)
   }
@@ -427,8 +427,8 @@
       return false
     }
   }
-  const cancelDownload = (key: string) => changeQueue(() => api.cancelInstall(key))
-  const resumeDownloads = () => changeQueue(api.resumeDownloads)
+  const cancelDownload = (key: string) => changeQueue(() => commands.cancelInstall(key))
+  const resumeDownloads = () => changeQueue(commands.resumeDownloads)
 
   /** A store needs the owner: the dot on the Settings button and on Settings' Accounts. */
   const attention = $derived(lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention)
@@ -463,9 +463,9 @@
     storesInUse={lib.stores}
     modal={settingsOpen || adding !== null}
     oncancel={cancelDownload}
-    onpause={() => changeQueue(api.pauseDownloads)}
+    onpause={() => changeQueue(commands.pauseDownloads)}
     onresume={resumeDownloads}
-    onmove={(key, up) => changeQueue(() => api.moveDownload(key, up))}
+    onmove={(key, up) => changeQueue(() => commands.moveDownload(key, up))}
     onsettings={() => openSettings()}
     onadd={() => openAddGame()}
     {update}

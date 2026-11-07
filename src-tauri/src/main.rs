@@ -33,6 +33,9 @@ mod view;
 use tauri::Manager;
 
 fn main() {
+    let bindings = bindings();
+    #[cfg(debug_assertions)]
+    export_bindings(&bindings);
     tauri::Builder::default()
         // First, so a second launch exits before the others set anything up.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::reveal(app)))
@@ -58,7 +61,16 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(bindings.invoke_handler())
+        .run(tauri::generate_context!())
+        .expect("the launcher window could not start");
+}
+
+/// Every command, for Tauri and for the generated TypeScript (`src/lib/bindings.ts`). Command errors reject the
+/// promise with the `Msg`, as `invoke` does.
+fn bindings() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::new()
+        .commands(tauri_specta::collect_commands![
             commands::library::library,
             commands::library::load_cache,
             commands::library::refresh,
@@ -135,6 +147,34 @@ fn main() {
             commands::update::check_update,
             commands::update::install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("the launcher window could not start");
+        .error_handling(tauri_specta::ErrorHandlingMode::Throw)
+        .disable_serde_phases()
+        // Sizes, ids and seconds stay far below 2^53.
+        .dangerously_cast_bigints_to_number()
+}
+
+/// Rewrites `src/lib/bindings.ts` when the commands or their types changed; true when it did.
+#[cfg(any(debug_assertions, test))]
+fn export_bindings(bindings: &tauri_specta::Builder<tauri::Wry>) -> bool {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/lib/bindings.ts");
+    let fresh = std::env::temp_dir().join(format!("launcher-bindings-{}.ts", std::process::id()));
+    bindings.export(specta_typescript::Typescript::default(), &fresh).expect("the TypeScript bindings could not be generated");
+    let new = std::fs::read_to_string(&fresh).expect("the generated bindings could not be read");
+    let _ = std::fs::remove_file(&fresh);
+    // Git may check the file out with CRLF.
+    let old = std::fs::read_to_string(path).unwrap_or_default().replace("\r\n", "\n");
+    let changed = old != new;
+    if changed {
+        std::fs::write(path, new).expect("src/lib/bindings.ts could not be written");
+    }
+    changed
+}
+
+#[cfg(test)]
+mod tests {
+    /// `cargo test bindings` regenerates them.
+    #[test]
+    fn bindings_are_current() {
+        assert!(!super::export_bindings(&super::bindings()), "src/lib/bindings.ts was stale and is now regenerated; commit it");
+    }
 }
