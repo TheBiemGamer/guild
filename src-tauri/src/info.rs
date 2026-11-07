@@ -12,7 +12,7 @@ use crate::library::{Error, ProviderKind};
 pub const MAX_SCREENSHOTS: usize = 3;
 
 /// What the game page shows. Missing facts are empty or `None` so the UI can hide them.
-/// Cached with screenshot URLs; the command swaps those for local files before returning.
+/// Cached and returned with screenshot URLs; the `screenshots` command turns those into local files.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameInfo {

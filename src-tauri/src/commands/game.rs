@@ -257,10 +257,14 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
     let bytes = match (cached, steam_id) {
         ((Some(bytes), _), _) => bytes,
         ((None, token), Some(appid)) => {
-            let vdf = steam_size::fetch_appinfo(&token?, appid)
-                .await
-                .inspect_err(|e| eprintln!("steam size {key}: {e}"))
-                .ok()?;
+            let vdf = {
+                // One Steam logon at a time; Steam rate-limits them and the owned-games fetch logs on too.
+                let state = app.state::<AppState>();
+                let _one = state.steam_size.lock().await;
+                steam_size::fetch_appinfo(&token?, appid).await
+            }
+            .inspect_err(|e| eprintln!("steam size {key}: {e}"))
+            .ok()?;
             let bytes = steam_size::parse_download_size(&vdf)?.to_string();
             blocking(move || {
                 if let Some(c) = open_db(&app.state::<AppState>()) {

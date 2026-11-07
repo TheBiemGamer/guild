@@ -138,8 +138,8 @@ export function prefetch(card: Card) {
   const quiet = () => {}
   gameInfo(card.key).catch(quiet)
   timeToBeat(card.key).catch(quiet)
-  // The game page's Play button shows the chosen copy's download size.
-  if (!card.installed) downloadSize(card.chosen).catch(quiet)
+  // Epic sizes only: a Steam size logs on to Steam, which a passing pointer must not do.
+  if (!card.installed && card.chosen.startsWith('epic-')) downloadSize(card.chosen).catch(quiet)
 }
 /** Settings "Test": resolves when Twitch and IGDB accept the saved credentials, else rejects with the reason. */
 export const testIgdb = () => invoke<void>('test_igdb')
@@ -222,10 +222,18 @@ function sendBatch() {
   batch = []
   for (const { key, send } of now) {
     send(
-      invoke<Cover | null>('cover', { key }).then((c) => {
-        if (!c) covers.delete(key)
-        return c && { src: convertFileSrc(c.src), color: c.color }
-      }),
+      invoke<Cover | null>('cover', { key }).then(
+        (c) => {
+          if (!c) covers.delete(key)
+          return c && { src: convertFileSrc(c.src), color: c.color }
+        },
+        (e) => {
+          // Forgotten, so the next ask tries again; the card shows its title meanwhile.
+          console.error('cover', key, e)
+          covers.delete(key)
+          return null
+        },
+      ),
     )
   }
 }

@@ -30,6 +30,8 @@ pub struct AppState {
     http: reqwest::Client,
     shared: Mutex<Shared>,
     cover_jobs: tokio::sync::Semaphore,
+    /// Held across a Steam download-size lookup, so page opens never stack Steam logons.
+    steam_size: tokio::sync::Mutex<()>,
     /// Twitch app access token for IGDB. Never held across a network call.
     igdb: Mutex<igdb::TokenCache>,
     /// The Steam QR login in progress, if any. Held across the poll call so a cancel waits for it.
@@ -100,6 +102,7 @@ impl AppState {
                 .expect("default TLS backend is available"),
             shared: Mutex::new(Shared { status: "Loading library…".into(), ..Shared::default() }),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
+            steam_size: tokio::sync::Mutex::new(()),
             igdb: Mutex::new(igdb::TokenCache::default()),
             steam_qr: tokio::sync::Mutex::new(None),
             steam_gen: std::sync::atomic::AtomicU64::new(0),

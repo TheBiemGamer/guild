@@ -35,6 +35,7 @@
   /** The game page's data is asked once the pointer rests here this long. */
   const REST_MS = 150
   let resting: ReturnType<typeof setTimeout> | undefined
+  $effect(() => () => clearTimeout(resting))
 </script>
 
 <div class="card" class:running class:out={!game.installed} bind:this={el}>
