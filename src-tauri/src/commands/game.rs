@@ -17,7 +17,7 @@ use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
-use crate::library::{Game, Image, ProviderKind};
+use crate::library::{Game, Image, ProgressAction, ProviderKind};
 use crate::links::{self, LinkKind};
 use crate::settings;
 use crate::steam_size;
@@ -432,13 +432,22 @@ fn run_queue(app: &AppHandle) {
         }
         rescan(app, true);
         let mut s = state.lock();
-        s.progress.remove(&key);
+        // A verify that found bad files ends reporting the repair.
+        let repaired = s.progress.remove(&key).is_some_and(|p| p.action == ProgressAction::Repair);
         // A cancelled job fails by design; don't report it.
-        let outcome = if s.cancelled.remove(&key) { Ok(()) } else { result.map_err(|e| format!("Epic Games: {e}")) };
+        let cancelled = s.cancelled.remove(&key);
+        let toast = (result.is_ok() && !cancelled)
+            .then(|| s.games.iter().find(|g| g.key() == key).map(|g| g.title.clone()))
+            .flatten();
+        let outcome = if cancelled { Ok(()) } else { result.map_err(|e| format!("Epic Games: {e}")) };
         s.queue.finish(&key);
         save_queue(&state, &s.queue);
         report(&mut s, &key, outcome);
         s.library_changed = true;
+        drop(s);
+        if let Some(title) = toast {
+            super::notify_done(app, &title, crate::downloads::done_message(job.action, repaired));
+        }
     }
 }
 

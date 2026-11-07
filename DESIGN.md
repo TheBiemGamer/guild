@@ -228,7 +228,7 @@ A full-window column: toolbar, optional notices, then a content area that fills 
 | Shortest to beat | Under 5 h · 5–15 h · 15–40 h · 40–100 h · 100 h+ · Unknown |
 | Title | none: one list under the "Library" label |
 
-Settings is a modal panel (max 760px wide, 24px inset from the window) with a 190px section list on the left; under 640px wide it stacks, nav on top. Sections, in the list and down the page: Accounts · Appearance (Ambient background, Show the "Continue playing" banner) · Extra metadata · Storage · About. Epic's own settings live in its account card (see Account card). The game page covers the whole content area (the library stays mounted underneath, hidden, so its scroll position survives): a column capped at 1360px with a 24px gutter, holding the 300px hero, a tab row (Overview · DLC · Saves · Launch options · Installation), and on Overview a row of three equal fact-tile slots (16px gap; every tile is one head line and one value line, so all tiles are the same height) and a 1.7fr / 1fr About / Details grid.
+Settings is a modal panel (max 760px wide, 24px inset from the window) with a 190px section list on the left; under 640px wide it stacks, nav on top. Sections, in the list and down the page: General (Start with Windows, Keep running in the tray when closed, Notify when a download finishes; toggle rows, no subtitles) · Accounts · Appearance (Ambient background, Show the "Continue playing" banner) · Extra metadata · Storage · About. Epic's own settings live in its account card (see Account card). The game page covers the whole content area (the library stays mounted underneath, hidden, so its scroll position survives): a column capped at 1360px with a 24px gutter, holding the 300px hero, a tab row (Overview · DLC · Saves · Launch options · Installation), and on Overview a row of three equal fact-tile slots (16px gap; every tile is one head line and one value line, so all tiles are the same height) and a 1.7fr / 1fr About / Details grid.
 
 Spacing rhythm observed: 8 / 12 / 16 / 24 px. Controls on bars are 36px high.
 
@@ -294,6 +294,11 @@ Top bar only, left to right (mockup v7): search, the store selector (All · Stea
 ### Toggle
 40x22 pill switch, white 18% off, `accent` on, white knob; `role="switch"`.
 
+### Tray and notifications
+- **Tray icon:** the app icon, tooltip "Game Launcher". Left-click shows and focuses the window. Menu: Open · Downloads (shows the window and opens the Downloads popover when something is downloading) · separator · Quit.
+- **Close:** with "Keep running in the tray when closed" on (default) the window's close button hides it to the tray and downloads go on; off, it quits. Started by Windows, the window stays in the tray.
+- **Toasts:** a Windows toast titled with the game when a download finishes: "Ready to play" (install, Steam download), "Updated", "Files verified" or "Repaired". None for failures (shown in-app) or cancelled jobs.
+
 ### Game page
 `src/lib/Detail.svelte`, per the owner-approved mockup `game-page.html` with the owner's change (no size tile).
 - **Tint:** the window's ambient layer switches to this game's hero art (its cover when it has none) while the page is open, and back on leaving. Same `Ambient.svelte`, so the Appearance on/off setting applies.
@@ -342,7 +347,7 @@ All from `docs/superpowers/specs/2026-11-05-ambient-redesign-design.md` ("What w
 - Epic install from the grid (option B): a small confirm popup next to the cover with size ("Checking size...") and destination; Steam opens its own dialog. Under the destination, an "Include DLC" checkbox (16px, `accent`, `text-2` 14px label), on by default.
 - Epic loading is quiet: cached library shows immediately, rescan runs silently.
 - Game page: quick-fact tiles are Playtime, Last played, How long to beat; "**Not** size". Size lives in Details.
-- Settings: frosted panel over the library; sections Accounts, Appearance, Extra metadata, Storage, About (updated by the owner 2026-11-07, settings layout v3: Library and Downloads folded into Accounts and Appearance). Do not show the Legendary version under Accounts.
+- Settings: frosted panel over the library; sections General, Accounts, Appearance, Extra metadata, Storage, About (updated by the owner 2026-11-07, settings layout v3: Library and Downloads folded into Accounts and Appearance). Do not show the Legendary version under Accounts.
 - Ambient colour on/off: "off = neutral dark gradient".
 - Secrets: IGDB Client Secret in Windows Credential Manager; the UI shows only "Saved ✓" with Replace and Remove.
 - Non-goals: "Light theme"; achievements, friends, chat, store browsing, cloud saves, theming Steam, macOS/Linux.

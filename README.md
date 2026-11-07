@@ -19,6 +19,7 @@ Built with Tauri 2, Svelte 5 + TypeScript, and Rust.
 - **Game pages** with the store description, screenshots, playtime, last played, how long to beat (IGDB), and links to the store pages, PCGamingWiki, SteamDB and ProtonDB.
 - **Sort and filter.** Sorting by playtime or how long to beat also groups the cards. Filters cover status, playtime and how long to beat.
 - **Works offline** from its local cache.
+- **Runs in the tray** if you like, starts with Windows, and shows a Windows notification when a download finishes.
 
 ## Requirements
 

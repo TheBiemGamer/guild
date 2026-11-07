@@ -135,6 +135,16 @@ impl Queue {
     }
 }
 
+/// The toast for a job that worked; `repaired` says a verify went on to repair files.
+pub fn done_message(action: QueuedAction, repaired: bool) -> &'static str {
+    match action {
+        QueuedAction::Install => "Ready to play",
+        QueuedAction::Update => "Updated",
+        QueuedAction::Verify if repaired => "Repaired",
+        QueuedAction::Verify => "Files verified",
+    }
+}
+
 /// One queued job as `poll` reports it.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct QueuedView {
@@ -264,6 +274,14 @@ mod tests {
         assert!(q.paused);
         assert_eq!(Queue::restore(None, |_| true), Queue::default());
         assert_eq!(Queue::restore(Some("junk"), |_| true), Queue::default());
+    }
+
+    #[test]
+    fn done_messages_follow_the_action() {
+        assert_eq!(done_message(Install, false), "Ready to play");
+        assert_eq!(done_message(Update, false), "Updated");
+        assert_eq!(done_message(Verify, false), "Files verified");
+        assert_eq!(done_message(Verify, true), "Repaired");
     }
 
     #[test]

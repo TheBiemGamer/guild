@@ -18,13 +18,26 @@ mod settings;
 mod steam_login;
 mod steam_owned;
 mod steam_size;
+mod tray;
 mod view;
+
+use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        // First, so a second launch exits before the others set anything up.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::reveal(app)))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::Builder::new().arg(tray::MINIMIZED).build())
+        .plugin(tauri_plugin_notification::init())
         .manage(commands::AppState::new())
+        .on_window_event(tray::on_window_event)
         .setup(|app| {
+            tray::build(app.handle())?;
+            // Started by Windows: stay in the tray; neither `ready` nor the safety net shows the window.
+            if std::env::args().any(|a| a == tray::MINIMIZED) {
+                app.state::<commands::AppState>().mark_shown();
+            }
             let app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(commands::library::SHOW_BY).await;

@@ -1,5 +1,6 @@
 // Typed wrappers for the Rust commands in src-tauri/src/commands.rs.
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { GroupId, Progress } from './format'
 
@@ -100,6 +101,10 @@ export interface SettingsView {
   ambient: boolean
   /** Epic games sync cloud saves around play unless the game's Saves tab says otherwise. */
   cloudSaves: boolean
+  /** Read from the Windows startup entry itself. */
+  startWithWindows: boolean
+  closeToTray: boolean
+  notifyDownloads: boolean
   appVersion: string
   legendaryVersion: string | null
   cacheBytes: number
@@ -246,6 +251,8 @@ export async function pickExe(folder: string): Promise<string | null> {
   return typeof path === 'string' ? path : null
 }
 export const dismissEpicNotice = () => invoke<void>('dismiss_epic_notice')
+/** The tray menu's Downloads item. Resolves to the unlisten function. */
+export const onOpenDownloads = (f: () => void) => listen('open-downloads', f)
 export const settingsView = () => invoke<SettingsView>('settings_view')
 /** `null` resets a setting to its default. Booleans travel as "true" / "false". */
 export const updateSetting = (name: string, value: string | null) => invoke<void>('update_setting', { name, value })

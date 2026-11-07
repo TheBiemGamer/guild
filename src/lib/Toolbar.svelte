@@ -4,7 +4,8 @@
   import DownloadsPopover from './DownloadsPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, type Filter } from './filters'
-  import type { Card, Progress, QueueView, Sort, Store } from './api'
+  import { onMount } from 'svelte'
+  import { onOpenDownloads, type Card, type Progress, type QueueView, type Sort, type Store } from './api'
 
   let {
     query = $bindable(),
@@ -92,6 +93,13 @@
   // The last download ended while its popover was open.
   $effect(() => {
     if (!downloading && open === 'downloads') open = null
+  })
+  // The tray's Downloads item: the window is already shown; open the popover only if there is something in it.
+  onMount(() => {
+    const unlisten = onOpenDownloads(() => {
+      if (downloading && !modal) open = 'downloads'
+    })
+    return () => void unlisten.then((f) => f())
   })
 
   function close(refocus: boolean) {

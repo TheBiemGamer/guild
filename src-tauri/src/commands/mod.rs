@@ -138,6 +138,11 @@ impl AppState {
         self.shared.lock().expect("state lock poisoned")
     }
 
+    /// The window is out (or must stay in the tray): the startup show does nothing.
+    pub fn mark_shown(&self) {
+        self.shown.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn game(&self, key: &str) -> Option<Game> {
         self.lock().games.iter().find(|g| g.key() == key).cloned()
     }
@@ -177,6 +182,22 @@ fn allow(app: &AppHandle, path: PathBuf) -> Option<String> {
 /// Seconds since the Unix epoch, as the database stores times; 0 if the clock is before 1970.
 fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Whether closing the main window hides it to the tray (the default) instead of quitting.
+pub fn close_to_tray(app: &AppHandle) -> bool {
+    open_db(&app.state::<AppState>()).is_none_or(|conn| crate::settings::load(&conn).close_to_tray)
+}
+
+/// A Windows toast that a download finished, unless the owner turned them off.
+fn notify_done(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    if !open_db(&app.state::<AppState>()).is_none_or(|conn| crate::settings::load(&conn).notify_downloads) {
+        return;
+    }
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("notification: {e}");
+    }
 }
 
 fn open_db(state: &AppState) -> Option<rusqlite::Connection> {

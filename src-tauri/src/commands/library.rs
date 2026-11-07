@@ -704,26 +704,36 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     };
     let results = tracked.iter().map(|g| (g.key(), g.provider.provider().download_progress(g), g.installed)).collect();
     let finished = apply_steam_progress(&mut state.lock(), results);
-    if finished {
+    if !finished.is_empty() {
         rescan(app, false);
     }
-    let (progress, changed, queue) = {
+    let (progress, changed, queue, installed) = {
         let mut s = state.lock();
         let queue = super::queue_view(&s);
-        (s.progress.clone(), take_changed(&mut s, finished), queue)
+        // A download that stopped without installing the game (cancelled in Steam) gets no toast.
+        let installed: Vec<String> = finished
+            .iter()
+            .filter_map(|key| s.games.iter().find(|g| &g.key() == key && g.installed).map(|g| g.title.clone()))
+            .collect();
+        (s.progress.clone(), take_changed(&mut s, !finished.is_empty()), queue, installed)
     };
+    for title in installed {
+        super::notify_done(app, &title, "Ready to play");
+    }
     Poll { running: steam_running.or(epic_running), progress, changed, queue }
 }
 
-/// Records polled Steam progress. Returns whether a download that was showing progress just ended.
+/// Records polled Steam progress. Returns the keys of the downloads that were showing progress and just ended.
 /// Not-installed games stay tracked: the user may still be in Steam's install dialog.
-fn apply_steam_progress(s: &mut Shared, results: Vec<(String, Option<Progress>, bool)>) -> bool {
-    let mut finished = false;
+fn apply_steam_progress(s: &mut Shared, results: Vec<(String, Option<Progress>, bool)>) -> Vec<String> {
+    let mut finished = Vec::new();
     for (key, progress, installed) in results {
         match progress {
             Some(p) => _ = s.progress.insert(key, p),
             None => {
-                finished |= s.progress.remove(&key).is_some();
+                if s.progress.remove(&key).is_some() {
+                    finished.push(key.clone());
+                }
                 if installed {
                     s.tracked.remove(&key);
                 }
@@ -880,15 +890,15 @@ mod tests {
         };
 
         // Nothing started yet: the not-installed game stays tracked, the installed one is dropped.
-        assert!(!apply_steam_progress(&mut s, vec![("dl".into(), None, false), ("ok".into(), None, true)]));
+        assert!(apply_steam_progress(&mut s, vec![("dl".into(), None, false), ("ok".into(), None, true)]).is_empty());
         assert_eq!(s.tracked, HashSet::from(["dl".to_string()]));
 
-        assert!(!apply_steam_progress(&mut s, vec![("dl".into(), Some(p.clone()), false)]));
+        assert!(apply_steam_progress(&mut s, vec![("dl".into(), Some(p.clone()), false)]).is_empty());
         assert_eq!(s.progress.get("dl"), Some(&p));
 
         // Download finished: progress cleared and reported once.
-        assert!(apply_steam_progress(&mut s, vec![("dl".into(), None, false)]));
+        assert_eq!(apply_steam_progress(&mut s, vec![("dl".into(), None, false)]), ["dl"]);
         assert!(s.progress.is_empty());
-        assert!(!apply_steam_progress(&mut s, vec![("dl".into(), None, false)]));
+        assert!(apply_steam_progress(&mut s, vec![("dl".into(), None, false)]).is_empty());
     }
 }
