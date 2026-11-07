@@ -22,6 +22,7 @@ npm run check                                        # svelte-check + tsc
 npm test                                             # frontend unit tests
 cd src-tauri && cargo test                           # Rust tests
 cd src-tauri && cargo clippy --all-targets -- -D warnings
+cd src-tauri && cargo deny check                    # licenses, advisories, sources (also in CI)
 ```
 
 The scroll benchmark runs against the release build:
