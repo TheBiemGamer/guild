@@ -109,7 +109,7 @@ fn read(user: &str) -> Option<String> {
         Ok(secret) => Some(secret),
         Err(keyring_core::Error::NoEntry) => None,
         Err(e) => {
-            eprintln!("credential manager read: {e}");
+            log!("credential manager read: {e}");
             None
         }
     }

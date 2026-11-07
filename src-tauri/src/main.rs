@@ -1,6 +1,9 @@
 // Release builds are a GUI app with no console window; debug builds keep one for logs.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+mod log;
+
 mod bench;
 mod cache;
 mod commands;
@@ -25,6 +28,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::new())
         .setup(|app| {
+            log::init(&cache::Dirs::new().logs);
+            log!("launcher {} started on {}", app.package_info().version, platform::windows_version());
             let app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(commands::library::SHOW_BY).await;
@@ -81,6 +86,8 @@ fn main() {
             commands::game::open_folder,
             commands::game::open_link,
             commands::settings::open_igdb,
+            commands::settings::open_log_folder,
+            commands::settings::report_problem,
             commands::library::bench_speed,
             commands::library::bench_done,
         ])

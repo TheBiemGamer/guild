@@ -237,7 +237,7 @@ pub(crate) fn fill_twins(app: AppHandle) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{e}");
+                    log!("{e}");
                     if e.starts_with(crate::gamesdb::UNREACHABLE) {
                         break;
                     }
@@ -267,7 +267,7 @@ fn refresh_epic_playtime(app: AppHandle) {
                     show_playtime(&state, &conn);
                 }
             }
-            Err(e) => eprintln!("{e}"),
+            Err(e) => log!("{e}"),
         }
     });
 }
@@ -287,7 +287,7 @@ fn record_session(state: &AppState, key: &str, played: Duration) {
     let Some(conn) = open_db(state) else { return };
     match cache::db::add_session(&conn, key, super::unix_now() - seconds, seconds) {
         Ok(()) => show_playtime(state, &conn),
-        Err(e) => eprintln!("playtime: {e}"),
+        Err(e) => log!("playtime: {e}"),
     }
 }
 
@@ -301,7 +301,7 @@ pub(crate) fn refresh_owned(app: AppHandle, force: bool) {
         let result = steam_owned::fetch(&token).await;
         drop(token);
         if let Err(e) = &result {
-            eprintln!("steam owned: {}", error_kind(e));
+            log!("steam owned: {}", error_kind(e));
         }
         let done = app.clone();
         blocking(move || finish_owned(&done, steam_owned::outcome(result))).await;
@@ -440,11 +440,11 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
         Ok(conn) => {
             match cache::db::launches(&conn) {
                 Ok(launches) => view::merge_last_played(&mut merged.games, &launches),
-                Err(e) => eprintln!("launch history: {e}"),
+                Err(e) => log!("launch history: {e}"),
             }
             epic_playtime::merge(&conn, &mut merged.games);
         }
-        Err(e) => eprintln!("launch history: {e}"),
+        Err(e) => log!("launch history: {e}"),
     }
     // Only a finished scan may claim the library is empty.
     s.status = if merged.errors.is_empty() { "No games found.".into() } else { merged.errors.join("\n") };
@@ -465,7 +465,7 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
     let saved = cache::db::open(&state.dirs.db)
         .and_then(|mut conn| merged.scanned.iter().try_for_each(|&p| cache::db::replace(&mut conn, p, &merged.games)));
     if let Err(e) = saved {
-        eprintln!("library cache save: {e}");
+        log!("library cache save: {e}");
     }
     true
 }
@@ -521,7 +521,7 @@ fn note_epic_login(state: &AppState, s: &mut Shared, login: Login) {
     });
     match stored {
         Ok(previous) => s.epic_notice = epic_notice(s.epic_notice, previous.as_deref(), login),
-        Err(e) => eprintln!("epic login state: {e}"),
+        Err(e) => log!("epic login state: {e}"),
     }
 }
 
@@ -548,7 +548,7 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
                 games.extend(list);
             }
             Err(e) => {
-                eprintln!("{}: {e}", provider.name());
+                log!("{}: {e}", provider.name());
                 if !(provider == ProviderKind::Epic && e.starts_with(EPIC_QUIET)) {
                     errors.push(format!("Couldn't read the {} library: {e}", provider.name()));
                 }
@@ -580,7 +580,7 @@ pub fn show_window(app: &AppHandle, by: &str) {
     if let Some(window) = app.get_webview_window("main")
         && let Err(e) = window.show()
     {
-        eprintln!("show window: {e}");
+        log!("show window: {e}");
     }
 }
 
@@ -612,7 +612,7 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
         let (thumbs, thumb_key) = (state.dirs.thumbs.clone(), format!("{key}-{slot}"));
         match blocking(move || cache::thumbnail(&src, &thumbs, &thumb_key)).await {
             Ok((path, color)) => return allow(&app, path).map(|src| Cover { src, color }),
-            Err(e) => eprintln!("thumbnail {key}: {e}"),
+            Err(e) => log!("thumbnail {key}: {e}"),
         }
     }
     None

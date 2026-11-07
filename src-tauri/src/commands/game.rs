@@ -279,7 +279,7 @@ fn act_blocking(
                 let exe = match alternative {
                     Some(name) => Some(name.to_string_lossy().into_owned()),
                     None => epic::executable(game).unwrap_or_else(|e| {
-                        eprintln!("legendary list-installed {key}: {e}");
+                        log!("legendary list-installed {key}: {e}");
                         None
                     }),
                 };
@@ -327,7 +327,7 @@ fn record_event(s: &mut Shared, key: &str, event: InstallEvent) -> Option<u32> {
 fn save_queue(state: &AppState, queue: &Queue) {
     let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::set_setting(&c, DOWNLOAD_QUEUE, Some(&queue.to_json())));
     if let Err(e) = saved {
-        eprintln!("download queue: {e}");
+        log!("download queue: {e}");
     }
 }
 
@@ -337,7 +337,7 @@ fn report(s: &mut Shared, key: &str, outcome: Res<()>) {
         Some(waiter) => _ = waiter.send(outcome),
         None => {
             if let Err(e) = outcome {
-                eprintln!("download {key}: {e}");
+                log!("download {key}: {e}");
             }
         }
     }
@@ -448,7 +448,7 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
         if let Some(pid) = stop
             && let Err(e) = epic::cancel(pid)
         {
-            eprintln!("stop download {}: {e}", job.key);
+            log!("stop download {}: {e}", job.key);
         }
     };
     match job.action {
@@ -566,7 +566,7 @@ fn sync_record(outcome: &SyncOutcome, at: i64) -> Option<SyncRecord> {
 
 fn record_sync(conn: Option<&Connection>, key: &str, outcome: &SyncOutcome) {
     if let SyncOutcome::Failed(e) = outcome {
-        eprintln!("legendary sync-saves {key}: {e}");
+        log!("legendary sync-saves {key}: {e}");
     }
     let at = unix_now();
     let (Some(conn), Some(mut record)) = (conn, sync_record(outcome, at)) else { return };
@@ -574,7 +574,7 @@ fn record_sync(conn: Option<&Connection>, key: &str, outcome: &SyncOutcome) {
     record.cloud_newer |= record.error.is_some() && last_sync(conn, key).is_some_and(|r| r.cloud_newer);
     let json = serde_json::to_string(&record).unwrap_or_default();
     if let Err(e) = cache::db::put_info(conn, key, SAVES_SYNC, &json, at) {
-        eprintln!("record sync {key}: {e}");
+        log!("record sync {key}: {e}");
     }
 }
 
@@ -732,7 +732,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
                 None => {
                     let vdf = steam_size::fetch_appinfo(&token, appid)
                         .await
-                        .inspect_err(|e| eprintln!("steam size {key}: {e}"))
+                        .inspect_err(|e| log!("steam size {key}: {e}"))
                         .ok()?;
                     let bytes = steam_size::parse_download_size(&vdf)?.to_string();
                     let app = app.clone();
@@ -757,7 +757,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
                     unix_now(),
                     || {
                         let info = epic::info_json(&game)
-                            .inspect_err(|e| eprintln!("legendary info {key}: {e}"))
+                            .inspect_err(|e| log!("legendary info {key}: {e}"))
                             .ok()?;
                         epic::download_size_from_info(&info).map(|size| size.to_string())
                     },
@@ -899,7 +899,7 @@ async fn steam_owned_dlc(app: &AppHandle, key: String) -> Vec<(u32, String)> {
     let (kind, json) = match &result {
         Ok(list) => (DLC, serde_json::to_string(list).unwrap_or_else(|_| "[]".into())),
         Err(e) => {
-            eprintln!("steam dlc {key}: {e}");
+            log!("steam dlc {key}: {e}");
             (DLC_FAILED, "null".into())
         }
     };
@@ -919,7 +919,7 @@ fn steam_details(conn: Option<&Connection>, http: &reqwest::Client, appid: &str,
     info::cached_or_fetch(conn, &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
         let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&l=english");
         let body = tauri::async_runtime::block_on(async { http.get(url).send().await?.error_for_status()?.text().await })
-            .inspect_err(|e| eprintln!("appdetails {key}: {e}"))
+            .inspect_err(|e| log!("appdetails {key}: {e}"))
             .ok()?;
         serde_json::to_string(&info::parse_steam_appdetails(&body, appid)?).ok()
     })
@@ -955,12 +955,12 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
             }
             // One list answers for every Epic game, so all of them are cached from it.
             let catalog = info::cached_or_fetch(conn.as_ref(), &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
-                let list = epic::catalog().inspect_err(|e| eprintln!("legendary list {key}: {e}")).ok()?;
+                let list = epic::catalog().inspect_err(|e| log!("legendary list {key}: {e}")).ok()?;
                 let all = info::epic_details(&list);
                 if let Some(c) = &conn
                     && let Err(e) = info::remember_all(c, &all, now)
                 {
-                    eprintln!("epic details cache: {e}");
+                    log!("epic details cache: {e}");
                 }
                 Some(all.into_iter().find(|(k, _)| *k == key).map_or_else(|| "null".into(), |(_, json)| json))
             });
@@ -968,7 +968,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
             let gamesdb = || {
                 let json = info::gamesdb_cached_or_fetch(conn.as_ref(), &key, now, || {
                     let body = tauri::async_runtime::block_on(gamesdb::fetch(&http, &game.external_id))
-                        .inspect_err(|e| eprintln!("gamesdb details {key}: {e}"))
+                        .inspect_err(|e| log!("gamesdb details {key}: {e}"))
                         .ok()?;
                     serde_json::to_string(&body.and_then(|b| info::parse_gamesdb_info(&b))).ok()
                 });
@@ -1053,7 +1053,7 @@ async fn look_up_time_to_beat(
         if let (Some(game), Some(_)) = (id, epic_key) {
             url = igdb::epic_url_for_game(&state.http, &token, client_id, game)
                 .await
-                .inspect_err(|e| eprintln!("igdb epic url: {e}"))
+                .inspect_err(|e| log!("igdb epic url: {e}"))
                 .ok()
                 .flatten();
         }
@@ -1117,7 +1117,7 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
     let answer = match look_up_time_to_beat(&app, &state, &client_id, &secret, appid, &title, epic_key.as_deref()).await {
         Ok(answer) => answer,
         Err(e) => {
-            eprintln!("how long to beat {key}: {e}");
+            log!("how long to beat {key}: {e}");
             return None;
         }
     };
@@ -1174,7 +1174,7 @@ fn record_play(state: &AppState, key: &str) {
     }
     let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::record_launch(&c, key, secs));
     if let Err(e) = saved {
-        eprintln!("record launch: {e}");
+        log!("record launch: {e}");
     }
 }
 

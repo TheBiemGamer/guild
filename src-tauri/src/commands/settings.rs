@@ -235,6 +235,28 @@ pub fn open_igdb() -> Res<()> {
     crate::library::open_url("https://www.igdb.com").map_err(|e| e.to_string())
 }
 
+/// Opens the folder with launcher.log in File Explorer.
+#[tauri::command]
+pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
+    let dir = &state.dirs.logs;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(|e| e.to_string())
+}
+
+/// Opens a new GitHub bug report with the app and Windows versions filled in.
+#[tauri::command]
+pub fn report_problem(app: AppHandle) -> Res<()> {
+    use crate::library::percent_encode;
+    let version = app.package_info().version.to_string();
+    let os = crate::platform::windows_version();
+    let url = format!(
+        "https://github.com/TheBiemGamer/game-launcher/issues/new?template=bug_report.yml&version={}&os={}",
+        percent_encode(&version),
+        percent_encode(&os)
+    );
+    crate::library::open_url(&url).map_err(|e| e.to_string())
+}
+
 /// One answer to the dialog's poll. Never carries the refresh token.
 #[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "step", rename_all = "camelCase")]

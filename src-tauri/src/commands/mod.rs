@@ -180,5 +180,5 @@ fn unix_now() -> i64 {
 }
 
 fn open_db(state: &AppState) -> Option<rusqlite::Connection> {
-    cache::db::open(&state.dirs.db).inspect_err(|e| eprintln!("settings db: {e}")).ok()
+    cache::db::open(&state.dirs.db).inspect_err(|e| log!("settings db: {e}")).ok()
 }

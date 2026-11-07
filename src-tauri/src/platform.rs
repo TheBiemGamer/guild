@@ -19,3 +19,17 @@ pub fn process_bytes_written(pid: u32) -> Option<u64> {
         (ok != 0).then_some(counters.WriteTransferCount)
     }
 }
+
+/// "Windows 11 (build 26200)", from the registry; builds from 22000 on are Windows 11.
+#[cfg(windows)]
+pub fn windows_version() -> String {
+    let build: Option<u32> = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+        .and_then(|k| k.get_value::<String, _>("CurrentBuild"))
+        .ok()
+        .and_then(|b| b.parse().ok());
+    match build {
+        Some(b) => format!("Windows {} (build {b})", if b >= 22_000 { 11 } else { 10 }),
+        None => "Windows".into(),
+    }
+}

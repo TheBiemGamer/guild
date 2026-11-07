@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in the launcher doesn't work.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+  - type: input
+    id: version
+    attributes:
+      label: App version
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Settings → About → Open log folder; paste the end of launcher.log. It never contains passwords or tokens.
+      render: text

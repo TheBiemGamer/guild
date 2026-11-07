@@ -134,13 +134,13 @@ pub fn remember(conn: &Connection, games: &[OwnedGame], now_secs: i64) {
         .map_err(|e| e.to_string())
         .and_then(|json| put_info(conn, OWNED_KEY, OWNED, &json, now_secs).map_err(|e| e.to_string()));
     if let Err(e) = saved {
-        eprintln!("steam owned save: {e}");
+        log!("steam owned save: {e}");
     }
 }
 
 pub fn forget(conn: &Connection) {
     if let Err(e) = conn.execute("DELETE FROM info WHERE key = ?1 AND kind = ?2", [OWNED_KEY, OWNED]) {
-        eprintln!("steam owned forget: {e}");
+        log!("steam owned forget: {e}");
     }
 }
 

@@ -90,6 +90,16 @@
     }
   }
 
+  /** Runs an action that changes nothing here, showing its error. */
+  async function run(work: () => Promise<unknown>) {
+    error = null
+    try {
+      await work()
+    } catch (e) {
+      error = api.message(e)
+    }
+  }
+
   let testing = $state(false)
   let testPassed = $state(false)
 
@@ -449,6 +459,13 @@
         <div class="row">
           <div>Legendary (Epic Games)</div>
           <span class="value">{view.legendaryVersion ?? 'Not installed'}</span>
+        </div>
+        <div class="row">
+          <div>Troubleshooting</div>
+          <div class="field">
+            <button class="btn" onclick={() => run(api.openLogFolder)}>Open log folder</button>
+            <button class="btn" onclick={() => run(api.reportProblem)}>Report a problem</button>
+          </div>
         </div>
       </section>
     </div>

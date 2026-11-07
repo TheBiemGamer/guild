@@ -16,6 +16,7 @@ pub struct Dirs {
     pub db: PathBuf,
     pub art: PathBuf,
     pub thumbs: PathBuf,
+    pub logs: PathBuf,
 }
 
 impl Dirs {
@@ -26,6 +27,7 @@ impl Dirs {
             db: db::file_in(dirs.data_local_dir()),
             art: dirs.cache_dir().join("art"),
             thumbs: dirs.cache_dir().join("thumbs"),
+            logs: dirs.data_local_dir().join("logs"),
         }
     }
 }
@@ -49,7 +51,7 @@ pub async fn resolve(image: &Image, http: &reqwest::Client, dest: PathBuf) -> Op
         Ok(bytes) => bytes,
         Err(e) if e.status() == Some(reqwest::StatusCode::NOT_FOUND) => return None,
         Err(e) => {
-            eprintln!("art {url}: {e}");
+            log!("art {url}: {e}");
             return None;
         }
     };
@@ -61,7 +63,7 @@ pub async fn resolve(image: &Image, http: &reqwest::Client, dest: PathBuf) -> Op
     match written {
         Ok(()) => Some(dest),
         Err(e) => {
-            eprintln!("art {}: {e}", dest.display());
+            log!("art {}: {e}", dest.display());
             None
         }
     }

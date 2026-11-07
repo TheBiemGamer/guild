@@ -279,6 +279,9 @@ export const openFolder = (key: string) => invoke<void>('open_folder', { key })
 export const openLink = (key: string, kind: LinkKind) => invoke<void>('open_link', { key, kind })
 /** The "Data from IGDB" credit. */
 export const openIgdb = () => invoke<void>('open_igdb')
+export const openLogFolder = () => invoke<void>('open_log_folder')
+/** A new GitHub bug report with the app and Windows versions filled in. */
+export const reportProblem = () => invoke<void>('report_problem')
 export const clearCache = async () => {
   await invoke<void>('clear_cache')
   // Covers shown from now on are fetched and shrunk again.
