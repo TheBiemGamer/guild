@@ -1013,3 +1013,41 @@ Owner request, 2026-11-07. **Order:** run this after Task 24 and before Tasks 25
   4. Open the owner's real database read-only to check its shape (don't write to it).
   5. VERIFY-LATER: after the first start on v4, settings, launch history and cloud-save choices are intact.
 - **Commit:** `feat(db): migrations in place, WAL, user data apart from cache`.
+
+### Task 30: Match games that GamesDB links to several Steam apps
+
+Owner report, 2026-11-07: some games owned on both stores still show twice, for example Dead by Daylight and Red Dead Redemption 2.
+
+**Diagnosis (orchestrator, from the owner's database and GamesDB):**
+- 15 Epic games have exactly the same title as a Steam game the owner owns, but no twin: Borderlands 2, Borderlands 3, Dead by Daylight, Dying Light, Electrician Simulator, Fallout: New Vegas, Ghostrunner, Hello Neighbor, PUBG: BATTLEGROUNDS, Red Dead Redemption 2, Satisfactory, Severed Steel, Total War: WARHAMMER III, Wolfenstein: The New Order and World War Z.
+- GamesDB lists **several different** Steam apps for these games: the game plus a test server, demo, soundtrack or edition. Two examples:
+  - `Brill` (Dead by Daylight) → `381210` and `471230`;
+  - `Heather` (RDR2) → `1174180` and `100003`.
+- The "exactly one distinct Steam appid" rule (Task 12) therefore gives no twin.
+
+**Files:** `src-tauri/src/gamesdb.rs`, `src-tauri/src/commands/library.rs` (`fill_twins` / where twins are resolved), `src-tauri/src/entries.rs` if the rule lives there.
+
+**Interfaces:**
+- Store every distinct Steam appid GamesDB lists for an Epic game, not just a single one. Replace the `twin2` cache value with a list, e.g. `{"steam":[381210,471230]}`, under a new kind `twin3`, so old single-id answers are looked up again.
+- **Resolve the twin against the owner's library:**
+  - if exactly one of the listed appids is a Steam game the owner owns (installed or in `GetOwnedGames`), that is the twin;
+  - if none or several are owned, keep the current behaviour: no merge for the entry. For links and How long to beat, use the single listed id when there is only one.
+- All other merge rules stay as they are:
+  - one-to-one: two Epic games claiming the same appid don't merge;
+  - never merge on title.
+- **Re-resolve when the Steam library changes.** Recompute twins and `regroup` after an owned fetch or a rescan.
+- **Diagnostic scan:** add a small `#[ignore]` test or dev helper that lists same-title Steam/Epic pairs that are still not merged after resolution, reading a database path given by env var. It lists only and never merges. Run it once against a copy of the owner's database. Report what remains and why for each, e.g. no GamesDB entry, or a different appid.
+
+**Tests:**
+- `several_steam_apps_resolve_to_the_owned_one` (Brill: 381210 owned and 471230 not → twin 381210);
+- `several_owned_steam_apps_give_no_twin`;
+- `single_steam_app_still_works`;
+- the existing twin and merge tests stay green.
+
+- [ ] **Steps:**
+  1. Write the failing tests.
+  2. Implement.
+  3. Run the full suite, clippy and `npm run check`.
+  4. Run the diagnostic against a *copy* of `%LOCALAPPDATA%\launcher\data\library-v3.sqlite` (or `library.sqlite` after Task 29) and put the leftover list in the report.
+  5. VERIFY-LATER: Dead by Daylight and RDR2 show as one card with the launcher switcher.
+- **Commit:** `fix(gamesdb): match games that GamesDB links to several Steam apps`.
