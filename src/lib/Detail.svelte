@@ -43,6 +43,7 @@
   import PlayButton from './PlayButton.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
+  import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
 
   let { gameKey, runningKey, progressByKey, queue, oncancel, onresume, version, onback, onerror, onchanged, ontint, onconfirminstall, conflict = null }: {
     gameKey: string
@@ -410,17 +411,19 @@
     closeMenu(false)
   }
 
-  // Tile text comes ready from Rust; null hides the tile (Epic's unknown playtime, never played).
-  const playtime = $derived(game?.playtimeTile ?? null)
-  const lastPlayed = $derived(game?.lastPlayedTile ?? null)
-  const beatMain = $derived(ttb ? (ttb.normally ?? null) : null)
+  // Null hides the tile (Epic's unknown playtime, never played).
+  const playtime = $derived(game?.playtimeMinutes != null ? playtimeLabel(game.playtimeMinutes) : null)
+  const lastPlayed = $derived(game?.lastPlayed != null ? lastPlayedLabel(game.lastPlayed) : null)
+  const beatMain = $derived(ttb?.normally != null ? ttbLabel(ttb.normally) : null)
+  const beatAll = $derived(ttb?.completely != null ? ttbLabel(ttb.completely) : null)
   const beatMore = $derived(
     ttb
-      ? [ttb.hastily && `${ttb.hastily} hastily`, ttb.completely && `${ttb.completely} completely`].filter(
+      ? [ttb.hastily !== null && `${ttbLabel(ttb.hastily)} hastily`, beatAll && `${beatAll} completely`].filter(
           (s): s is string => !!s,
         )
       : [],
   )
+  const savesLine = $derived(saves ? (saves.error ?? syncedLabel(saves.syncedAt)) : null)
   // Decided from `game` alone, never from how long to beat, so a row that appeared never collapses.
   // A Steam game always has its Playtime tile, so its row is never empty; the free slot waits for a time to beat.
   const showTiles = $derived(!!playtime || !!lastPlayed)
@@ -526,7 +529,7 @@
                 >
                   <span style="width: {progress.fraction * 100}%"></span>
                 </div>
-                <small>{job?.state === 'paused' ? `Paused · ${Math.round(progress.fraction * 100)}%` : progress.text}</small>
+                <small>{job?.state === 'paused' ? `Paused · ${Math.round(progress.fraction * 100)}%` : progressLong(progress)}</small>
               </div>
             {/if}
           </div>
@@ -668,7 +671,7 @@
             </div>
           </div>
           <div class="row">
-            <div class="what">Last sync<small class="last" class:failed={saves?.failed} title={saves?.last}>{saves?.last ?? ' '}</small></div>
+            <div class="what">Last sync<small class="last" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</small></div>
           </div>
           <div class="row">
             <div class="what">Sync now<small>The newer save wins.</small></div>
@@ -727,7 +730,7 @@
         <section class="panel rows" aria-label="Installation">
           {#if copy!.installDir}
             <div class="row">
-              <div class="what">Folder<small class="path">{copy!.installDir}{#if copy!.size}{' · '}{copy!.size}{/if}</small></div>
+              <div class="what">Folder<small class="path">{copy!.installDir}{#if copy!.sizeBytes !== null}{' · '}{sizeLabel(copy!.sizeBytes)}{/if}</small></div>
               <button class="chip" onclick={() => run(() => api.openFolder(copy!.key))}>Open folder</button>
             </div>
           {/if}
@@ -768,8 +771,8 @@
           {/if}
         </section>
       {:else}
-      {#if saves?.failed}
-        <p class="sync-note" title={saves.last}>{saves.last}</p>
+      {#if saves?.error}
+        <p class="sync-note" title={saves.error}>{saves.error}</p>
       {/if}
       {#if showTiles}
         <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
@@ -777,11 +780,11 @@
           {#if playtime}
             <div class="tile"><div class="head">
                 <h2>Playtime</h2>
-                {#if game.playtimeNote}<small>{game.playtimeNote}</small>{/if}
+                {#if game.playtimeBoth}<small>Steam + Epic</small>{/if}
               </div><p><b>{playtime}</b></p></div>
           {/if}
           {#if lastPlayed}
-            <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · {game.lastPlayedStore}</span>{/if}</p></div>
+            <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · on {storeNames[game.lastPlayedStore]}</span>{/if}</p></div>
           {/if}
           {#if ttb}
             <div class="tile">
@@ -790,7 +793,7 @@
                 <button class="credit" title="Data from IGDB" aria-label="Data from IGDB" onclick={() => run(api.openIgdb)}>IGDB</button>
               </div>
               <p title={[beatMain && `${beatMain} normally`, ...beatMore].filter(Boolean).join(' · ')}>
-                <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && ttb.completely}<span> · {ttb.completely} all</span>{/if}
+                <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {beatAll} all</span>{/if}
               </p>
             </div>
           {/if}
@@ -837,7 +840,7 @@
               {#if info?.developer}<dt>Developer</dt><dd>{info.developer}</dd>{/if}
               {#if info?.publisher}<dt>Publisher</dt><dd>{info.publisher}</dd>{/if}
               {#if info?.released}<dt>Released</dt><dd>{releaseDate(info.released)}</dd>{/if}
-              {#if copy!.size}<dt>Size</dt><dd>{copy!.size}</dd>{/if}
+              {#if copy!.sizeBytes !== null}<dt>Size</dt><dd>{sizeLabel(copy!.sizeBytes)}</dd>{/if}
               {@render chips('Store pages', storeLinks)}
               {@render chips('Info', infoLinks)}
             </dl>

@@ -22,7 +22,6 @@ use crate::library::ProviderKind;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
 use crate::steam_owned;
-use crate::view;
 
 /// Opens Epic's login window, hands the code to Legendary, then loads the Epic library.
 #[tauri::command]
@@ -130,8 +129,6 @@ pub struct SettingsView {
     app_version: String,
     legendary_version: Option<String>,
     cache_bytes: u64,
-    /// `cache_bytes` as shown, like `812 MB`.
-    cache_size: String,
 }
 
 #[tauri::command]
@@ -162,7 +159,6 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             app_version: app.package_info().version.to_string(),
             legendary_version: epic::legendary_version(),
             cache_bytes,
-            cache_size: view::size_label(cache_bytes),
         })
     })
     .await

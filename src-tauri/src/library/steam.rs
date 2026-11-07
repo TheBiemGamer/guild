@@ -9,7 +9,7 @@ use keyvalues_parser::{Value, Vdf};
 use steamlocate::app::StateFlag;
 use steamlocate::{App, Library, SteamDir};
 
-use super::{Art, Error, Game, Progress, Provider, ProviderKind};
+use super::{Art, Error, Game, Progress, ProgressAction, Provider, ProviderKind};
 use crate::steam_owned::OwnedGame;
 
 /// Playtime in minutes and last played time, per app id.
@@ -156,8 +156,7 @@ fn progress(app: &App, anchors: &mut Option<HashMap<u32, Anchor>>, steam: Option
     }
     let (staged0, to_stage) = (app.bytes_staged.unwrap_or(0), app.bytes_to_stage.unwrap_or(0));
     let Some((pid, writes)) = steam.filter(|_| to_stage > staged0) else {
-        let fraction = done as f32 / total as f32;
-        return Some(Progress { fraction, text: super::download_text(fraction, done, None) });
+        return Some(download(done as f32 / total as f32, done, total, None));
     };
     let fresh = || Anchor { pid, staged0, writes0: writes, at: now, staged: staged0, rate: 0.0 };
     let a = anchors.get_or_insert_with(HashMap::new).entry(app.app_id).or_insert_with(fresh);
@@ -174,7 +173,19 @@ fn progress(app: &App, anchors: &mut Option<HashMap<u32, Anchor>>, steam: Option
     }
     let secs_left = (a.rate > 0.0).then(|| ((to_stage - staged) as f64 / a.rate) as u64);
     let fraction = staged as f32 / to_stage as f32;
-    Some(Progress { fraction, text: super::download_text(fraction, (fraction as f64 * total as f64) as u64, secs_left) })
+    Some(download(fraction, (fraction as f64 * total as f64) as u64, total, secs_left))
+}
+
+fn download(fraction: f32, done: u64, total: u64, secs_left: Option<u64>) -> Progress {
+    Progress {
+        fraction,
+        action: ProgressAction::Download,
+        done_bytes: Some(done),
+        total_bytes: Some(total),
+        secs_left,
+        done_files: None,
+        total_files: None,
+    }
 }
 
 /// The newest `userdata/<account>/config/localconfig.vdf`.
@@ -475,7 +486,7 @@ mod tests {
         let now = Instant::now();
         let p = progress(&app(20), &mut None, None, now).unwrap();
         assert_eq!(p.fraction, 0.25);
-        assert_eq!(p.text, "25% · 0.0 GB");
+        assert_eq!((p.action, p.done_bytes, p.total_bytes, p.secs_left), (ProgressAction::Download, Some(1000), Some(4000), None));
         // SNUG-style finished manifest: downloaded == to_download.
         assert_eq!(progress(&app(10), &mut None, None, now), None);
         // No byte counters at all.
@@ -494,11 +505,11 @@ mod tests {
 
         // First sample anchors on steam.exe's counter; no speed yet.
         let p = progress(&app, &mut anchors, Some((7, 5_000)), at(0)).unwrap();
-        assert_eq!(p.text, "0% · 0.0 GB");
+        assert_eq!((p.fraction, p.done_bytes, p.secs_left), (0.0, Some(0), None));
         // 1 GiB written in 2 s: a quarter staged, 3 GiB at 0.5 GiB/s left.
         let p = progress(&app, &mut anchors, Some((7, 5_000 + (1 << 30))), at(2)).unwrap();
         assert_eq!(p.fraction, 0.25);
-        assert_eq!(p.text, "25% · 0.5 GB · 6 s left");
+        assert_eq!((p.done_bytes, p.total_bytes, p.secs_left), (Some(1 << 29), Some(2 << 30), Some(6)));
         // Never 100% while the manifest says it isn't done.
         let p = progress(&app, &mut anchors, Some((7, 5_000 + (9 << 30))), at(4)).unwrap();
         assert!(p.fraction < 1.0);

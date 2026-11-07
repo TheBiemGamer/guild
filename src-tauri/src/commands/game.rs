@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -35,14 +35,14 @@ pub struct Detail {
     copies: Vec<CopyView>,
     /// The copy key Play and Install use.
     chosen: String,
-    /// Tile text, like `15 h 3 min`; `None` hides the tile (an Epic copy with no known playtime).
-    playtime_tile: Option<String>,
-    /// `Steam + Epic` when both copies contributed to the playtime.
-    playtime_note: Option<String>,
-    /// Tile text, like `12 days ago`; `None` when never played.
-    last_played_tile: Option<String>,
-    /// `on Steam` / `on Epic Games`, only for an entry with several copies.
-    last_played_store: Option<String>,
+    /// Playtime tile minutes, 0 being never played; `None` hides the tile (an Epic copy with no known playtime).
+    playtime_minutes: Option<u64>,
+    /// Both copies contributed to the playtime.
+    playtime_both: bool,
+    /// Unix seconds; `None` when never played.
+    last_played: Option<u64>,
+    /// The store played on last, only for an entry with several copies.
+    last_played_store: Option<ProviderKind>,
     /// Store pages, then info sites when the Steam app id is known.
     links: Vec<LinkKind>,
     /// The Epic copies' DLC; a Steam copy's comes from `steam_dlc`.
@@ -57,8 +57,8 @@ pub struct CopyView {
     installed: bool,
     /// An installed Epic copy has a newer version.
     update_available: bool,
-    /// Size on disk of an installed copy, like `27.3 GB`.
-    size: Option<String>,
+    /// Size on disk of an installed copy.
+    size_bytes: Option<u64>,
     /// Only for an installed copy (Steam knows a folder for games it hasn't installed yet).
     install_dir: Option<String>,
     /// An installed Epic copy that keeps its saves in Epic's cloud.
@@ -69,10 +69,10 @@ pub struct CopyView {
 pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
     let s = state.lock();
     let entry = entries::find(&s.entries, &s.games, &key)?;
-    Some(detail(entry, &s.games, &s.twins, SystemTime::now()))
+    Some(detail(entry, &s.games, &s.twins))
 }
 
-fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: SystemTime) -> Detail {
+fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) -> Detail {
     let (minutes, both) = entries::playtime(entry, games);
     let chosen = &games[entries::default_copy(entry, games)];
     // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone shows only known playtime.
@@ -100,17 +100,17 @@ fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: Syst
                     provider: g.provider,
                     installed: g.installed,
                     update_available: g.installed && g.update_available,
-                    size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
+                    size_bytes: g.size_bytes.filter(|_| g.installed),
                     install_dir: installed_dir(g).map(|p| p.to_string_lossy().into_owned()),
                     cloud_saves: g.installed && g.cloud_saves,
                 }
             })
             .collect(),
         chosen: chosen.key(),
-        playtime_tile: view::playtime_tile(tile_provider, minutes),
-        playtime_note: both.then(|| "Steam + Epic".to_string()),
-        last_played_tile: view::last_played_tile(last.map(|(t, _)| t), now),
-        last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| format!("on {}", p.name())),
+        playtime_minutes: view::playtime_tile(tile_provider, minutes),
+        playtime_both: both,
+        last_played: last.map(|(t, _)| t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())),
+        last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| p),
         dlc: epic_dlc(&entry.copies.iter().map(|&i| &games[i]).collect::<Vec<_>>()),
     }
 }
@@ -627,22 +627,22 @@ pub(super) fn upload_saves(app: &AppHandle, key: String, sync: SaveSync) {
 pub struct SavesView {
     /// The game's own choice; `None` follows the setting.
     choice: Option<bool>,
-    /// `Synced 5 min ago`, `Not synced yet`, or what went wrong.
-    last: String,
-    /// `last` says what went wrong; the Overview repeats it.
-    failed: bool,
+    /// Unix seconds of the last sync that worked; `None` when never synced or `error` is set.
+    synced_at: Option<i64>,
+    /// What went wrong with the last sync; the Overview repeats it.
+    error: Option<String>,
 }
 
-fn saves_view(choice: Option<bool>, last: Option<SyncRecord>, now: i64) -> SavesView {
-    let (last, failed) = match last {
-        None => ("Not synced yet".to_string(), false),
-        Some(SyncRecord { error: Some(e), .. }) => (format!("Cloud saves didn't sync: {e}"), true),
+fn saves_view(choice: Option<bool>, last: Option<SyncRecord>) -> SavesView {
+    let (synced_at, error) = match last {
+        None => (None, None),
+        Some(SyncRecord { error: Some(e), .. }) => (None, Some(format!("Cloud saves didn't sync: {e}"))),
         Some(SyncRecord { cloud_newer: true, .. }) => {
-            ("The cloud save is newer, so this PC's save wasn't uploaded.".to_string(), true)
+            (None, Some("The cloud save is newer, so this PC's save wasn't uploaded.".to_string()))
         }
-        Some(r) => (format!("Synced {}", view::ago_label(now - r.at)), false),
+        Some(r) => (Some(r.at), None),
     };
-    SavesView { choice, last, failed }
+    SavesView { choice, synced_at, error }
 }
 
 /// The Saves tab of an Epic copy (`key`); `None` for a copy without cloud saves.
@@ -651,7 +651,7 @@ pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
     app.state::<AppState>().game(&key).filter(|g| g.installed && g.cloud_saves)?;
     blocking(move || {
         let conn = open_db(&app.state::<AppState>())?;
-        Some(saves_view(saves_choice(&conn, &key), last_sync(&conn, &key), unix_now()))
+        Some(saves_view(saves_choice(&conn, &key), last_sync(&conn, &key)))
     })
     .await
 }
@@ -692,7 +692,7 @@ const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 /// Epic asks Legendary and Steam asks its servers (slow, seconds), so the bytes are cached for a week.
 /// None if unknown, or for Steam when no account is connected.
 #[tauri::command]
-pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
+pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
     let game = app
         .state::<AppState>()
         .game(&key)
@@ -766,7 +766,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
             .await?
         }
     };
-    bytes.parse().ok().map(view::size_label)
+    bytes.parse().ok()
 }
 
 /// The cached download size in bytes, if fresh.
@@ -1020,15 +1020,16 @@ pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+/// Seconds; `None` when unknown.
 pub struct TimeToBeatView {
-    normally: Option<String>,
-    hastily: Option<String>,
-    completely: Option<String>,
+    normally: Option<u64>,
+    hastily: Option<u64>,
+    completely: Option<u64>,
 }
 
 fn time_to_beat_view(t: igdb::TimeToBeat) -> Option<TimeToBeatView> {
-    let label = |secs: Option<u64>| secs.filter(|&s| s > 0).map(view::hours_label);
-    let shown = TimeToBeatView { normally: label(t.normally), hastily: label(t.hastily), completely: label(t.completely) };
+    let known = |secs: Option<u64>| secs.filter(|&s| s > 0);
+    let shown = TimeToBeatView { normally: known(t.normally), hastily: known(t.hastily), completely: known(t.completely) };
     (shown.normally.is_some() || shown.hastily.is_some() || shown.completely.is_some()).then_some(shown)
 }
 
@@ -1285,7 +1286,7 @@ mod tests {
 
     fn pumpkin_detail(games: &[Game], twins: &HashMap<String, u32>) -> Detail {
         let entries = entries::group(games, twins);
-        detail(&entries[0], games, twins, UNIX_EPOCH + Duration::from_secs(1_000 * 86_400))
+        detail(&entries[0], games, twins)
     }
 
     #[test]
@@ -1340,12 +1341,12 @@ mod tests {
 
     #[test]
     fn sync_records_show_in_the_saves_tab() {
-        let shown = |outcome: SyncOutcome| saves_view(None, sync_record(&outcome, 1_000), 1_300).last;
-        assert_eq!(shown(SyncOutcome::Synced), "Synced 5 min ago");
-        assert_eq!(shown(SyncOutcome::Failed("Login failed!".into())), "Cloud saves didn't sync: Login failed!");
-        assert!(saves_view(None, sync_record(&SyncOutcome::CloudNewer, 1_000), 1_300).failed);
+        let shown = |outcome: SyncOutcome| saves_view(None, sync_record(&outcome, 1_000));
+        assert_eq!(shown(SyncOutcome::Synced), SavesView { choice: None, synced_at: Some(1_000), error: None });
+        assert_eq!(shown(SyncOutcome::Failed("Login failed!".into())).error.as_deref(), Some("Cloud saves didn't sync: Login failed!"));
+        assert!(shown(SyncOutcome::CloudNewer).error.is_some());
         assert_eq!(sync_record(&SyncOutcome::LocalNewer, 1_000), None);
-        assert_eq!(saves_view(Some(false), None, 0), SavesView { choice: Some(false), last: "Not synced yet".into(), failed: false });
+        assert_eq!(saves_view(Some(false), None), SavesView { choice: Some(false), synced_at: None, error: None });
         // Stored as JSON in the info table and read back.
         let json = serde_json::to_string(&sync_record(&SyncOutcome::CloudNewer, 7).unwrap()).unwrap();
         assert_eq!(json, r#"{"at":7,"cloud_newer":true}"#);
@@ -1359,8 +1360,8 @@ mod tests {
         assert_eq!(d.key, "steam-635320");
         assert_eq!(d.chosen, "steam-635320");
         assert_eq!(d.copies.len(), 2);
-        assert_eq!(d.playtime_tile.as_deref(), Some("2 h 0 min"));
-        assert_eq!(d.playtime_note, None);
+        assert_eq!(d.playtime_minutes, Some(120));
+        assert!(!d.playtime_both);
         assert_eq!(d.links.len(), 5);
     }
 
@@ -1368,7 +1369,8 @@ mod tests {
     fn last_played_store_only_for_merged_entries() {
         let games = pumpkin(Some(86_400), Some(2 * 86_400));
         let merged = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
-        assert_eq!(merged.last_played_store.as_deref(), Some("on Epic Games"));
+        assert_eq!(merged.last_played_store, Some(ProviderKind::Epic));
+        assert_eq!(merged.last_played, Some(2 * 86_400));
         let single = pumpkin_detail(&games, &HashMap::new());
         assert_eq!(single.last_played_store, None);
     }

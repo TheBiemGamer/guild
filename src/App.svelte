@@ -302,7 +302,7 @@
       const before = games.length
       for (const g of lib.games.slice(at, at + s.count)) if (keep(g)) games.push(g)
       at += s.count
-      if (games.length > before) kept.push({ label: s.label, count: games.length - before })
+      if (games.length > before) kept.push({ group: s.group, count: games.length - before })
     }
     return { games, sections: kept }
   })

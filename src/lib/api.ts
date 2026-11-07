@@ -1,6 +1,10 @@
 // Typed wrappers for the Rust commands in src-tauri/src/commands.rs.
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import type { GroupId, Progress } from './format'
+
+// Rust sends numbers and ids; `format.ts` turns them into labels.
+export type { GroupId, Progress }
 
 export type Store = 'steam' | 'epic'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
@@ -23,8 +27,8 @@ export interface Card {
   playtimeMinutes: number | null
   ttbHours: number | null
 }
-/** A labelled run of `count` cards. */
-export interface Section { label: string; count: number }
+/** A run of `count` cards; `groupLabel` names its `group`. */
+export interface Section { group: GroupId; count: number }
 export interface Library {
   /** Grouped by the sort, group after group. */
   games: Card[]
@@ -49,8 +53,8 @@ export interface CopyView {
   installed: boolean
   /** An installed Epic copy has a newer version. */
   updateAvailable: boolean
-  /** Size on disk of an installed copy, like "27.3 GB". */
-  size: string | null
+  /** Size on disk of an installed copy. */
+  sizeBytes: number | null
   /** Only set for an installed copy. */
   installDir: string | null
   /** An installed Epic copy that keeps its saves in Epic's cloud: the Saves tab. */
@@ -67,14 +71,14 @@ export interface Detail {
   copies: CopyView[]
   /** The copy key Play and Install use. */
   chosen: string
-  /** Playtime tile text ("15 h 3 min", Steam's "Never played"); null hides it (Epic doesn't report playtime). */
-  playtimeTile: string | null
-  /** "Steam + Epic" when both copies contributed. */
-  playtimeNote: string | null
-  /** Last played tile text ("12 days ago"); null when never played. */
-  lastPlayedTile: string | null
-  /** "on Steam" / "on Epic Games", only for a game with several copies. */
-  lastPlayedStore: string | null
+  /** Playtime tile minutes, 0 being Steam's "Never played"; null hides it (Epic doesn't report playtime). */
+  playtimeMinutes: number | null
+  /** Both copies contributed to the playtime. */
+  playtimeBoth: boolean
+  /** Unix seconds; null when never played. */
+  lastPlayed: number | null
+  /** The store played on last, only for a game with several copies. */
+  lastPlayedStore: Store | null
   /** Store pages first, then info sites (only with a Steam app id). */
   links: LinkKind[]
   /** The Epic copies' DLC; a Steam copy's comes from `steamDlc`. */
@@ -99,10 +103,7 @@ export interface SettingsView {
   appVersion: string
   legendaryVersion: string | null
   cacheBytes: number
-  /** `cacheBytes` as shown, like "812 MB". */
-  cacheSize: string
 }
-export interface Progress { fraction: number; text: string }
 export type QueuedAction = 'install' | 'update' | 'verify'
 /** The Epic download queue in order. `active` is the first job's key, also while `paused`. */
 export interface QueueView { jobs: { key: string; action: QueuedAction; title: string }[]; paused: boolean; active: string | null }
@@ -135,8 +136,11 @@ export type Conflict = 'localNewer' | 'cloudNewer'
 /** Resolves to a conflict when an Epic Play asks first instead of launching; null otherwise. */
 export const act = (action: Action, key: string, options: ActOptions = {}) =>
   invoke<Conflict | null>('act', { action, key, ...options })
-/** An Epic copy's Saves tab. `choice`: its own On/Off, null follows Settings. `last`: "Synced 5 min ago", "Not synced yet" or what went wrong (`failed`). */
-export interface SavesView { choice: boolean | null; last: string; failed: boolean }
+/**
+ * An Epic copy's Saves tab. `choice`: its own On/Off, null follows Settings. `syncedAt`: unix seconds of the last
+ * sync that worked, null when never or when `error` says what went wrong with the last one.
+ */
+export interface SavesView { choice: boolean | null; syncedAt: number | null; error: string | null }
 export const saves = (key: string) => invoke<SavesView | null>('saves', { key })
 export const setSaves = (key: string, choice: boolean | null) => invoke<void>('set_saves', { key, choice })
 /** The newer save wins; the outcome shows in `saves`. */
@@ -158,8 +162,8 @@ export const steamDlc = (key: string) =>
   remembered('steamDlc', key, () =>
     invoke<{ id: string; title: string }[]>('steam_dlc', { key }).then((d) => (d.length ? d : null)),
   )
-/** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
-export const downloadSize = (key: string) => remembered('size', key, () => invoke<string | null>('download_size', { key }))
+/** Download size in bytes (Epic asks Legendary online, Steam logs on; cached); null when unknown. */
+export const downloadSize = (key: string) => remembered('size', key, () => invoke<number | null>('download_size', { key }))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */
 export type GameInfo = {
   description: string
@@ -173,8 +177,8 @@ export const gameInfo = (key: string) => remembered('info', key, () => invoke<Ga
 /** `gameInfo`'s screenshots as ready-to-use URLs, downloaded on first use; failed ones are left out. */
 export const screenshots = async (key: string, urls: string[]) =>
   (await invoke<string[]>('screenshots', { key, urls })).flatMap((p) => url(p) ?? [])
-/** How long to beat from IGDB, as labels like "32 h". Null: no credentials, an Epic game, or IGDB doesn't know it. */
-export type TimeToBeat = { normally: string | null; hastily: string | null; completely: string | null }
+/** How long to beat from IGDB in seconds, null where unknown. Null: no credentials, an Epic game, or IGDB doesn't know it. */
+export type TimeToBeat = { normally: number | null; hastily: number | null; completely: number | null }
 export const timeToBeat = (key: string) => remembered('ttb', key, () => invoke<TimeToBeat | null>('time_to_beat', { key }))
 
 /** Game page answers by game key, then by command; the 20 keys used last are kept. */

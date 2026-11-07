@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as api from './api'
   import type { Card, Progress, QueuedAction, QueueView } from './api'
+  import { progressShort } from './format'
   import { popover } from './popover'
   import StoreIcon from './StoreIcon.svelte'
 
@@ -46,7 +47,7 @@
 
   function activeText(p: Progress | undefined): string {
     if (queue.paused) return p ? `Paused · ${Math.round(p.fraction * 100)}%` : 'Paused'
-    return p?.text ?? running[active.action]
+    return p ? progressShort(p) : running[active.action]
   }
 </script>
 
@@ -61,7 +62,7 @@
     <StoreIcon provider={inSteam ? 'steam' : 'epic'} size={16} />
     <div class="what">
       <b>{title(key)}</b>
-      <small>{p.text}</small>
+      <small>{progressShort(p)}</small>
     </div>
   </div>
 {/snippet}

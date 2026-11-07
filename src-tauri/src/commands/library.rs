@@ -60,10 +60,10 @@ fn card(e: &Entry, games: &[Game], ttb: &HashMap<String, u64>) -> Card {
     }
 }
 
-/// A labelled run of `count` cards in `Library::games`.
+/// A run of `count` cards in `Library::games`; `group` is its id (`view::group`), which the UI names.
 #[derive(Serialize)]
 pub struct Section {
-    label: String,
+    group: &'static str,
     count: usize,
 }
 
@@ -115,14 +115,14 @@ fn sections(
     entries: &[Entry],
     ttb: &HashMap<String, u64>,
     shown: Vec<usize>,
-    groups: Vec<(String, Vec<usize>)>,
+    groups: Vec<(&'static str, Vec<usize>)>,
 ) -> (Vec<Card>, Vec<Section>) {
     let card = |&i: &usize| card(&entries[i], games, ttb);
     if groups.is_empty() {
         return (shown.iter().map(card).collect(), Vec::new());
     }
     let cards = groups.iter().flat_map(|(_, ids)| ids.iter().map(card)).collect();
-    (cards, groups.into_iter().map(|(label, ids)| Section { label, count: ids.len() }).collect())
+    (cards, groups.into_iter().map(|(group, ids)| Section { group, count: ids.len() }).collect())
 }
 
 /// The toolbar's sort as last saved.
@@ -750,6 +750,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    use crate::library::ProgressAction;
     use crate::view::tests::game;
 
     #[test]
@@ -868,7 +869,15 @@ mod tests {
     #[test]
     fn steam_progress_tracks_until_done_and_reports_finish_once() {
         let mut s = Shared { tracked: HashSet::from(["dl".to_string(), "ok".to_string()]), ..Shared::default() };
-        let p = Progress { fraction: 0.25, text: "Downloading 1 of 4 GB (25%)".into() };
+        let p = Progress {
+            fraction: 0.25,
+            action: ProgressAction::Download,
+            done_bytes: Some(1),
+            total_bytes: Some(4),
+            secs_left: None,
+            done_files: None,
+            total_files: None,
+        };
 
         // Nothing started yet: the not-installed game stays tracked, the installed one is dropped.
         assert!(!apply_steam_progress(&mut s, vec![("dl".into(), None, false), ("ok".into(), None, true)]));

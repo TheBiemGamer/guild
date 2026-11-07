@@ -2,6 +2,7 @@
   import { tick } from 'svelte'
   import * as api from './api'
   import type { CopyView } from './api'
+  import { sizeLabel } from './format'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
   let { copies, chosen, running, busy, onchoose, onplay, oninstall, onupdate }: {
@@ -21,7 +22,7 @@
   const split = $derived(copies.length > 1)
 
   // Download sizes of not-installed Epic and Steam copies. A key not in here is still being asked.
-  let sizes = $state<Record<string, string | null>>({})
+  let sizes = $state<Record<string, number | null>>({})
   const asked = new Set<string>()
   $effect(() => {
     for (const c of copies) {
@@ -35,12 +36,12 @@
     }
   })
 
-  const downloadText = (key: string) => (key in sizes ? (sizes[key] ? `${sizes[key]} download` : '') : 'Checking size…')
+  const downloadText = (key: string) => (key in sizes ? (sizes[key] !== null ? `${sizeLabel(sizes[key])} download` : '') : 'Checking size…')
 
   function sub(c: CopyView): string {
-    if (c.installed) return c.size ? `Installed · ${c.size}` : 'Installed'
+    if (c.installed) return c.sizeBytes !== null ? `Installed · ${sizeLabel(c.sizeBytes)}` : 'Installed'
     const size = sizes[c.key] ?? null
-    return size ? `Not installed · ${size} download` : 'Not installed'
+    return size !== null ? `Not installed · ${sizeLabel(size)} download` : 'Not installed'
   }
 
   const go = () => (copy.installed ? (copy.updateAvailable ? onupdate() : onplay()) : oninstall())

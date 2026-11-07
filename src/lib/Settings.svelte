@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte'
   import * as api from './api'
   import type { SettingsView } from './api'
+  import { sizeLabel } from './format'
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
 
@@ -437,7 +438,7 @@
       <section id={id('Storage')}>
         <h4>Storage</h4>
         <div class="row">
-          <div>Cached covers and art<span>{view.cacheSize}</span></div>
+          <div>Cached covers and art<span>{sizeLabel(view.cacheBytes)}</span></div>
           <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>Clear cache</button>
         </div>
       </section>

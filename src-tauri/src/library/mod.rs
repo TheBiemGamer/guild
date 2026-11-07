@@ -49,27 +49,34 @@ impl ProviderKind {
     }
 }
 
+/// What a job in progress is doing. Steam's are all `Download`; Steam doesn't say which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProgressAction {
+    Download,
+    Install,
+    Update,
+    Repair,
+    Verify,
+}
+
 /// Download progress as each store reports it: Steam in bytes, Legendary as a percentage with an ETA.
+/// The UI formats it (`src/lib/format.ts`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Progress {
     /// 0.0 to 1.0.
     pub fraction: f32,
-    pub text: String,
-}
-
-/// The download line both stores show: "50% · 0.7 GB · 13 s left". The time is left out until it's known.
-pub fn download_text(fraction: f32, downloaded_bytes: u64, secs_left: Option<u64>) -> String {
-    let gb = downloaded_bytes as f64 / (1u64 << 30) as f64;
-    let mut text = format!("{:.0}% · {gb:.1} GB", fraction * 100.0);
-    if let Some(s) = secs_left {
-        let left = match s {
-            0..60 => format!("{s} s"),
-            60..3600 => format!("{} min", s.div_ceil(60)),
-            _ => format!("{} h {} min", s / 3600, s % 3600 / 60),
-        };
-        text += &format!(" · {left} left");
-    }
-    text
+    pub action: ProgressAction,
+    /// Downloaded so far; `None` for Verify.
+    pub done_bytes: Option<u64>,
+    /// The whole download; only Steam knows it.
+    pub total_bytes: Option<u64>,
+    /// `None` until it's known.
+    pub secs_left: Option<u64>,
+    /// Verify: files checked, and how many there are.
+    pub done_files: Option<u64>,
+    pub total_files: Option<u64>,
 }
 
 /// One art slot: a local file, a URL to download into our art cache, or both (local wins).
@@ -192,14 +199,6 @@ fn lists_image(tasklist_csv: &str, image: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn download_text_rounds_the_time_left() {
-        assert_eq!(download_text(0.5, 3 << 29, None), "50% · 1.5 GB");
-        assert_eq!(download_text(0.5, 0, Some(13)), "50% · 0.0 GB · 13 s left");
-        assert_eq!(download_text(0.5, 0, Some(61)), "50% · 0.0 GB · 2 min left");
-        assert_eq!(download_text(0.5, 0, Some(4800)), "50% · 0.0 GB · 1 h 20 min left");
-    }
 
     #[test]
     fn open_url_refuses_non_https() {

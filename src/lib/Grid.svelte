@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte'
   import CardView from './Card.svelte'
   import { benchDone, queueState, type Card, type Progress, type QueueView, type Section } from './api'
+  import { groupLabel } from './format'
 
   let { games, sections = null, stat = null, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, benchSpeed, header, headerHeight = 0 }: {
     games: Card[]
@@ -53,13 +54,13 @@
   // Groups flatten into label rows and card rows. Rebuilt when the list or the width changes, not on scroll.
   const layout = $derived.by(() => {
     const rows: Row[] = []
-    const runs = sections ?? [{ label: undefined, count: games.length }]
+    const runs = sections ?? [{ group: undefined, count: games.length }]
     let y = sections ? headerHeight : headerHeight + GAP
     let start = 0
     runs.forEach((run, i) => {
-      if (run.label !== undefined) {
+      if (run.group !== undefined) {
         if (i > 0) y += SECTION_GAP
-        rows.push({ y, start, count: run.count, label: run.label })
+        rows.push({ y, start, count: run.count, label: groupLabel(run.group) })
         y += LABEL_H + GAP
       }
       for (let at = 0; at < run.count; at += cols) {

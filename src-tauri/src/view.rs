@@ -1,4 +1,5 @@
-//! What the UI shows: search, store filter, sort and display labels. Pure functions, unit tested.
+//! What the UI shows: search, store filter, sort and groups. Pure functions, unit tested. The UI formats
+//! the labels (`src/lib/format.ts`).
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -45,11 +46,13 @@ pub fn ttb_hours(secs: u64) -> u64 {
     ((secs + 1800) / 3600).max(1)
 }
 
-const RECENT_BUCKETS: [&str; 5] = ["Today", "This week", "This month", "Earlier", "Never played"];
-const PLAYTIME_BUCKETS: [&str; 7] = ["500 h+", "100–500 h", "50–100 h", "20–50 h", "10–20 h", "0–10 h", "Never played"];
+// Group ids; the UI names them. Playtime and time to beat groups are named by their lowest hour.
+const RECENT_BUCKETS: [&str; 5] = ["today", "thisWeek", "thisMonth", "earlier", "neverPlayed"];
+const PLAYTIME_BUCKETS: [&str; 7] =
+    ["played500h", "played100h", "played50h", "played20h", "played10h", "played0h", "neverPlayed"];
 /// Shortest first, as Shortest to beat shows them; Longest to beat uses `TTB_LONGEST`. Unknown is last in both.
-const TTB_BUCKETS: [&str; 6] = ["Under 5 h", "5–15 h", "15–40 h", "40–100 h", "100 h+", "Unknown"];
-const TTB_LONGEST: [&str; 6] = ["100 h+", "40–100 h", "15–40 h", "5–15 h", "Under 5 h", "Unknown"];
+const TTB_BUCKETS: [&str; 6] = ["beat0h", "beat5h", "beat15h", "beat40h", "beat100h", "unknown"];
+const TTB_LONGEST: [&str; 6] = ["beat100h", "beat40h", "beat15h", "beat5h", "beat0h", "unknown"];
 
 /// The calendar day of `t` in a time zone `utc_offset_secs` east of UTC.
 fn local_day(t: SystemTime, utc_offset_secs: i64) -> i64 {
@@ -94,7 +97,7 @@ fn ttb_bucket(secs: Option<u64>) -> usize {
     }
 }
 
-/// `shown` (from `arrange`) split into labelled groups by its sort, in bucket order, each keeping
+/// `shown` (from `arrange`) split into groups (by id) by its sort, in bucket order, each keeping
 /// `shown`'s order. Empty groups are left out; Title is one list, so no groups. Recently played counts
 /// local calendar days: `now` in a time zone `utc_offset_secs` east of UTC.
 pub fn group(
@@ -105,15 +108,15 @@ pub fn group(
     sort: Sort,
     now: SystemTime,
     utc_offset_secs: i64,
-) -> Vec<(String, Vec<usize>)> {
-    let labels: &[&str] = match sort {
+) -> Vec<(&'static str, Vec<usize>)> {
+    let ids: &[&'static str] = match sort {
         Sort::Title => return Vec::new(),
         Sort::LastPlayed => &RECENT_BUCKETS,
         Sort::MostPlayed => &PLAYTIME_BUCKETS,
         Sort::LongestToBeat => &TTB_LONGEST,
         Sort::ShortestToBeat => &TTB_BUCKETS,
     };
-    let mut groups: Vec<Vec<usize>> = vec![Vec::new(); labels.len()];
+    let mut groups: Vec<Vec<usize>> = vec![Vec::new(); ids.len()];
     for &i in shown {
         let e = &entries[i];
         let bucket = match sort {
@@ -127,7 +130,7 @@ pub fn group(
         };
         groups[bucket].push(i);
     }
-    labels.iter().zip(groups).filter(|(_, g)| !g.is_empty()).map(|(l, g)| (l.to_string(), g)).collect()
+    ids.iter().zip(groups).filter(|(_, g)| !g.is_empty()).map(|(&id, g)| (id, g)).collect()
 }
 
 pub fn sort_by_title(games: &mut [Game]) {
@@ -169,60 +172,13 @@ pub fn arrange(
     shown
 }
 
-/// The game page's Playtime tile: `15 h 3 min`, `45 min`, or Steam's `Never played`.
-/// `None` for an Epic copy without playtime: Epic's zero only means nothing is known, so the tile hides.
-pub fn playtime_tile(provider: ProviderKind, minutes: Option<u64>) -> Option<String> {
-    Some(match minutes.unwrap_or(0) {
-        0 if provider == ProviderKind::Epic => return None,
-        0 => "Never played".into(),
-        m if m < 60 => format!("{m} min"),
-        m => format!("{} h {} min", m / 60, m % 60),
-    })
-}
-
-/// The game page's Last played tile, as coarse relative time (`Today`, `12 days ago`); months and
-/// years are 30 and 365 days. `None` when never played.
-pub fn last_played_tile(last: Option<SystemTime>, now: SystemTime) -> Option<String> {
-    let days = now.duration_since(last?).unwrap_or_default().as_secs() / 86_400;
-    let ago = |n: u64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
-    Some(match days {
-        0 => "Today".into(),
-        1 => "Yesterday".into(),
-        d if d < 30 => ago(d, "day"),
-        d if d < 365 => ago(d / 30, "month"),
-        d => ago(d / 365, "year"),
-    })
-}
-
-/// How long ago, for a sync time: `just now`, `5 min ago`, `3 h ago`, `2 days ago`.
-pub fn ago_label(secs: i64) -> String {
-    match secs.max(0) {
-        s if s < 60 => "just now".into(),
-        s if s < 3_600 => format!("{} min ago", s / 60),
-        s if s < 86_400 => format!("{} h ago", s / 3_600),
-        s => {
-            let days = s / 86_400;
-            format!("{days} day{} ago", if days == 1 { "" } else { "s" })
-        }
+/// The game page's Playtime tile in minutes, zero being Steam's `Never played`. `None` for an Epic copy
+/// without playtime: Epic's zero only means nothing is known, so the tile hides.
+pub fn playtime_tile(provider: ProviderKind, minutes: Option<u64>) -> Option<u64> {
+    match minutes.unwrap_or(0) {
+        0 if provider == ProviderKind::Epic => None,
+        m => Some(m),
     }
-}
-
-/// The one size format: `27.3 GB` (GB = 1024^3), whole megabytes under 1 GB, and whole
-/// kilobytes (rounded up, so only empty is `0 KB`) under 1 MB.
-pub fn size_label(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-    match bytes {
-        b if b < MB => format!("{} KB", b.div_ceil(KB)),
-        b if b < GB => format!("{} MB", b / MB),
-        b => format!("{:.1} GB", b as f64 / GB as f64),
-    }
-}
-
-/// Time to beat: `32 h` (nearest hour), or `45 min` under an hour.
-pub fn hours_label(secs: u64) -> String {
-    if secs < 3600 { format!("{} min", secs / 60) } else { format!("{} h", (secs + 1800) / 3600) }
 }
 
 /// Launches made from here count for every store; the later of the store's and ours wins.
@@ -317,36 +273,36 @@ pub(crate) mod tests {
     fn playtime_buckets_edges() {
         let minutes = |m: Option<u64>| PLAYTIME_BUCKETS[playtime_bucket(m)];
         let hours = |h: u64| minutes(Some(h * 60));
-        assert_eq!(minutes(None), "Never played");
-        assert_eq!(hours(0), "Never played");
-        assert_eq!(minutes(Some(1)), "0–10 h");
-        assert_eq!(hours(9), "0–10 h");
-        assert_eq!(minutes(Some(10 * 60 - 1)), "0–10 h");
-        assert_eq!(hours(10), "10–20 h");
-        assert_eq!(hours(20), "20–50 h");
-        assert_eq!(hours(50), "50–100 h");
-        assert_eq!(hours(100), "100–500 h");
-        assert_eq!(hours(499), "100–500 h");
-        assert_eq!(hours(500), "500 h+");
+        assert_eq!(minutes(None), "neverPlayed");
+        assert_eq!(hours(0), "neverPlayed");
+        assert_eq!(minutes(Some(1)), "played0h");
+        assert_eq!(hours(9), "played0h");
+        assert_eq!(minutes(Some(10 * 60 - 1)), "played0h");
+        assert_eq!(hours(10), "played10h");
+        assert_eq!(hours(20), "played20h");
+        assert_eq!(hours(50), "played50h");
+        assert_eq!(hours(100), "played100h");
+        assert_eq!(hours(499), "played100h");
+        assert_eq!(hours(500), "played500h");
     }
 
     #[test]
     fn hltb_buckets_edges() {
         let bucket = |secs: Option<u64>| TTB_BUCKETS[ttb_bucket(secs)];
         let h = |h: u64| Some(h * 3600);
-        assert_eq!(bucket(None), "Unknown");
+        assert_eq!(bucket(None), "unknown");
         // Ten minutes shows as 1 h.
-        assert_eq!(bucket(Some(600)), "Under 5 h");
-        assert_eq!(bucket(h(4)), "Under 5 h");
+        assert_eq!(bucket(Some(600)), "beat0h");
+        assert_eq!(bucket(h(4)), "beat0h");
         // On the shown (rounded) hours: 4 h 40 min shows as 5 h, so 5–15 h.
-        assert_eq!(bucket(Some(4 * 3600 + 40 * 60)), "5–15 h");
-        assert_eq!(bucket(h(5)), "5–15 h");
-        assert_eq!(bucket(h(14)), "5–15 h");
-        assert_eq!(bucket(h(15)), "15–40 h");
-        assert_eq!(bucket(h(39)), "15–40 h");
-        assert_eq!(bucket(h(40)), "40–100 h");
-        assert_eq!(bucket(h(99)), "40–100 h");
-        assert_eq!(bucket(h(100)), "100 h+");
+        assert_eq!(bucket(Some(4 * 3600 + 40 * 60)), "beat5h");
+        assert_eq!(bucket(h(5)), "beat5h");
+        assert_eq!(bucket(h(14)), "beat5h");
+        assert_eq!(bucket(h(15)), "beat15h");
+        assert_eq!(bucket(h(39)), "beat15h");
+        assert_eq!(bucket(h(40)), "beat40h");
+        assert_eq!(bucket(h(99)), "beat40h");
+        assert_eq!(bucket(h(100)), "beat100h");
     }
 
     #[test]
@@ -357,27 +313,27 @@ pub(crate) mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(1_000 * day + 8 * 3600);
         let at = |secs: u64| RECENT_BUCKETS[recent_bucket(Some(UNIX_EPOCH + Duration::from_secs(secs)), now, offset)];
         let days_ago = |d: u64| at(1_000 * day + 8 * 3600 - d * day);
-        assert_eq!(RECENT_BUCKETS[recent_bucket(None, now, offset)], "Never played");
-        assert_eq!(days_ago(0), "Today");
+        assert_eq!(RECENT_BUCKETS[recent_bucket(None, now, offset)], "neverPlayed");
+        assert_eq!(days_ago(0), "today");
         // 00:30 local today is 22:30 UTC yesterday: still today.
-        assert_eq!(at(1_000 * day - 3600 - 1800), "Today");
+        assert_eq!(at(1_000 * day - 3600 - 1800), "today");
         // 23:30 local yesterday: the week, though under a day ago.
-        assert_eq!(at(1_000 * day - 2 * 3600 - 1800), "This week");
-        assert_eq!(days_ago(1), "This week");
-        assert_eq!(days_ago(6), "This week");
-        assert_eq!(days_ago(7), "This month");
-        assert_eq!(days_ago(29), "This month");
-        assert_eq!(days_ago(30), "Earlier");
+        assert_eq!(at(1_000 * day - 2 * 3600 - 1800), "thisWeek");
+        assert_eq!(days_ago(1), "thisWeek");
+        assert_eq!(days_ago(6), "thisWeek");
+        assert_eq!(days_ago(7), "thisMonth");
+        assert_eq!(days_ago(29), "thisMonth");
+        assert_eq!(days_ago(30), "earlier");
         // A clock that went backwards: today.
-        assert_eq!(at(1_000 * day + 9 * 3600), "Today");
+        assert_eq!(at(1_000 * day + 9 * 3600), "today");
     }
 
-    fn named<'a>(g: &'a [Game], e: &[Entry], groups: Vec<(String, Vec<usize>)>) -> Vec<(String, Vec<&'a str>)> {
+    fn named<'a>(g: &'a [Game], e: &[Entry], groups: Vec<(&'static str, Vec<usize>)>) -> Vec<(&'static str, Vec<&'a str>)> {
         groups.into_iter().map(|(l, ids)| (l, ids.into_iter().map(|i| g[e[i].copies[0]].title.as_str()).collect())).collect()
     }
 
     /// Groups `library()` the way the `library` command does: `arrange` in `sort` order, then `group`.
-    fn grouped(g: &[Game], e: &[Entry], sort: Sort, ttb: &HashMap<String, u64>, now: u64) -> Vec<(String, Vec<usize>)> {
+    fn grouped(g: &[Game], e: &[Entry], sort: Sort, ttb: &HashMap<String, u64>, now: u64) -> Vec<(&'static str, Vec<usize>)> {
         let shown = arrange(g, e, "", None, false, sort, ttb);
         group(&shown, e, g, ttb, sort, UNIX_EPOCH + Duration::from_secs(now), 0)
     }
@@ -386,21 +342,20 @@ pub(crate) mod tests {
     fn group_follows_the_sort_and_hides_empty_buckets() {
         let g = library();
         let e = entries::group(&g, &HashMap::new());
-        let label = |l: &str| l.to_string();
         // Gamma Beta 8 h, beta and delta 10 min, Alpha unknown; every other bucket is empty and absent.
         assert_eq!(
             named(&g, &e, grouped(&g, &e, Sort::MostPlayed, &no_ttb(), 0)),
-            [(label("0–10 h"), vec!["Gamma Beta", "beta", "delta"]), (label("Never played"), vec!["Alpha"])]
+            [("played0h", vec!["Gamma Beta", "beta", "delta"]), ("neverPlayed", vec!["Alpha"])]
         );
         // beta played at 300 s, Gamma Beta at 100 s; now is 8 days in.
         assert_eq!(
             named(&g, &e, grouped(&g, &e, Sort::LastPlayed, &no_ttb(), 8 * 86_400)),
-            [(label("This month"), vec!["beta", "Gamma Beta"]), (label("Never played"), vec!["Alpha", "delta"])]
+            [("thisMonth", vec!["beta", "Gamma Beta"]), ("neverPlayed", vec!["Alpha", "delta"])]
         );
         let ttb = HashMap::from([("steam-beta".to_string(), 20 * 3600), ("epic-delta".to_string(), 120 * 3600)]);
         assert_eq!(
             named(&g, &e, grouped(&g, &e, Sort::LongestToBeat, &ttb, 0)),
-            [(label("100 h+"), vec!["delta"]), (label("15–40 h"), vec!["beta"]), (label("Unknown"), vec!["Alpha", "Gamma Beta"])]
+            [("beat100h", vec!["delta"]), ("beat15h", vec!["beta"]), ("unknown", vec!["Alpha", "Gamma Beta"])]
         );
         assert!(group(&[], &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, 0).is_empty());
     }
@@ -414,14 +369,13 @@ pub(crate) mod tests {
             ("epic-delta".to_string(), 3 * 3600),
             ("steam-Gamma Beta".to_string(), 120 * 3600),
         ]);
-        let label = |l: &str| l.to_string();
         assert_eq!(
             named(&g, &e, grouped(&g, &e, Sort::ShortestToBeat, &ttb, 0)),
             [
-                (label("Under 5 h"), vec!["delta"]),
-                (label("15–40 h"), vec!["beta"]),
-                (label("100 h+"), vec!["Gamma Beta"]),
-                (label("Unknown"), vec!["Alpha"]),
+                ("beat0h", vec!["delta"]),
+                ("beat15h", vec!["beta"]),
+                ("beat100h", vec!["Gamma Beta"]),
+                ("unknown", vec!["Alpha"]),
             ]
         );
     }
@@ -471,57 +425,12 @@ pub(crate) mod tests {
     fn playtime_tiles() {
         let steam = ProviderKind::Steam;
         // Steam's zero is a fact.
-        assert_eq!(playtime_tile(steam, None).as_deref(), Some("Never played"));
-        assert_eq!(playtime_tile(steam, Some(0)).as_deref(), Some("Never played"));
-        assert_eq!(playtime_tile(steam, Some(45)).as_deref(), Some("45 min"));
-        assert_eq!(playtime_tile(steam, Some(903)).as_deref(), Some("15 h 3 min"));
+        assert_eq!(playtime_tile(steam, None), Some(0));
+        assert_eq!(playtime_tile(steam, Some(45)), Some(45));
         // Epic without playtime is unknown, so the tile hides; known playtime shows.
         assert_eq!(playtime_tile(ProviderKind::Epic, None), None);
         assert_eq!(playtime_tile(ProviderKind::Epic, Some(0)), None);
-        assert_eq!(playtime_tile(ProviderKind::Epic, Some(90)).as_deref(), Some("1 h 30 min"));
-    }
-
-    #[test]
-    fn last_played_tiles() {
-        let now = UNIX_EPOCH + Duration::from_secs(1_000 * 86_400);
-        let days_ago = |d: u64| Some(now - Duration::from_secs(d * 86_400));
-        let tile = |last| last_played_tile(last, now);
-        assert_eq!(tile(None), None);
-        assert_eq!(tile(days_ago(0)).as_deref(), Some("Today"));
-        assert_eq!(tile(days_ago(1)).as_deref(), Some("Yesterday"));
-        assert_eq!(tile(days_ago(12)).as_deref(), Some("12 days ago"));
-        assert_eq!(tile(days_ago(31)).as_deref(), Some("1 month ago"));
-        assert_eq!(tile(days_ago(800)).as_deref(), Some("2 years ago"));
-        // Clock moved backwards: treat as today rather than panic.
-        assert_eq!(tile(Some(now + Duration::from_secs(60))).as_deref(), Some("Today"));
-    }
-
-    #[test]
-    fn ago_labels() {
-        assert_eq!(ago_label(5), "just now");
-        assert_eq!(ago_label(-30), "just now");
-        assert_eq!(ago_label(5 * 60), "5 min ago");
-        assert_eq!(ago_label(3 * 3_600 + 59), "3 h ago");
-        assert_eq!(ago_label(86_400), "1 day ago");
-        assert_eq!(ago_label(40 * 86_400), "40 days ago");
-    }
-
-    #[test]
-    fn size_labels() {
-        assert_eq!(size_label(812 * 1024 * 1024), "812 MB");
-        assert_eq!(size_label(27_300 * 1024 * 1024 * 1024 / 1000), "27.3 GB");
-        // Under a megabyte (Settings' cache size): kilobytes, a non-empty cache never reads 0.
-        assert_eq!(size_label(0), "0 KB");
-        assert_eq!(size_label(100), "1 KB");
-        assert_eq!(size_label(500 * 1024), "500 KB");
-        assert_eq!(size_label(1024 * 1024), "1 MB");
-    }
-
-    #[test]
-    fn hours_labels() {
-        assert_eq!(hours_label(115_200), "32 h");
-        assert_eq!(hours_label(2_700), "45 min");
-        assert_eq!(hours_label(5_400), "2 h");
+        assert_eq!(playtime_tile(ProviderKind::Epic, Some(90)), Some(90));
     }
 
     #[test]

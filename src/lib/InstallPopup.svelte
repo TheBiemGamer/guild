@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { downloadSize } from './api'
+  import { sizeLabel } from './format'
 
   let { game, anchor, folder, onconfirm, oncancel }: {
     /** The Epic copy's key and the game's title. */
@@ -21,7 +22,7 @@
   let installButton: HTMLButtonElement
   let height = $state(0)
   /** undefined while Legendary is looking it up, null when it couldn't tell. */
-  let size = $state<string | null | undefined>(undefined)
+  let size = $state<number | null | undefined>(undefined)
   let withDlc = $state(true)
 
   // Right of the cover, or left when the window's edge is in the way; kept inside the window.
@@ -35,7 +36,7 @@
     installButton.focus()
     // Answers arriving after the popup is gone are dropped.
     let alive = true
-    downloadSize(game.key).then((label) => alive && (size = label), () => alive && (size = null))
+    downloadSize(game.key).then((bytes) => alive && (size = bytes), () => alive && (size = null))
 
     // The grid scrolls under a fixed popup, so a scroll anywhere closes it.
     const onscroll = () => oncancel()
@@ -70,7 +71,7 @@
   style="left: {x}px; top: {y}px; width: {WIDTH}px"
 >
   <h4>Install {game.title}?</h4>
-  <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${size} download`}</p>
+  <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${sizeLabel(size)} download`}</p>
   <p class="folder">{folder === undefined ? '' : `To ${folder ?? "the default folder"}`}</p>
   <label class="dlc"><input type="checkbox" bind:checked={withDlc} />Include DLC</label>
   <div class="buttons">
