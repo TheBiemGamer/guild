@@ -20,6 +20,7 @@ steam-vent-proto-steam = "0.5.2"
 steamlocate = "2.1"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["system-proxy"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 windows-native-keyring-store = { version = "1.1", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }

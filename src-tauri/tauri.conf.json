@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Game Launcher",
-  "version": "0.1.0",
   "identifier": "dev.noah.gamelauncher",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,7 +27,16 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "TheBiemGamer",
+    "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico", "icons/icon.png"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": ["https://github.com/TheBiemGamer/game-launcher/releases/latest/download/latest.json"]
+    }
   }
 }

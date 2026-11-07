@@ -1,0 +1,73 @@
+# A pushed v* tag builds, signs and publishes a GitHub release with the installer and latest.json for the
+# updater. A manual run only builds and signs, and keeps the files as workflow artifacts.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - run: npm ci
+
+      - run: npm run check
+      - run: npm test
+      - run: cargo test
+        working-directory: src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      - name: Check the versions and read the release notes
+        id: notes
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+          $version = $env:TAG -replace '^v', ''
+          $npm = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.*)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ($npm -ne $version -or $cargo -ne $version) {
+            Write-Error "Tag $env:TAG, package.json $npm and Cargo.toml $cargo must match. Run npm run bump $version."
+            exit 1
+          }
+          $notes = node scripts/release-notes.ts $version
+          if ($LASTEXITCODE) { exit 1 }
+          $delimiter = "NOTES_$([guid]::NewGuid())"
+          Add-Content $env:GITHUB_OUTPUT "body<<$delimiter"
+          Add-Content $env:GITHUB_OUTPUT ($notes -join "`n")
+          Add-Content $env:GITHUB_OUTPUT $delimiter
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          releaseName: ${{ github.event_name == 'push' && format('Game Launcher {0}', github.ref_name) || '' }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}

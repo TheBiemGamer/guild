@@ -9,7 +9,8 @@
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "tauri": "tauri",
-    "test": "node --test scripts/filters.test.ts scripts/format.test.ts"
+    "test": "node --test scripts/filters.test.ts scripts/format.test.ts scripts/changelog.test.ts",
+    "bump": "node scripts/bump.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

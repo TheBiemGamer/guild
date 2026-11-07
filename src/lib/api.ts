@@ -348,6 +348,16 @@ export const openIgdb = () => invoke<void>('open_igdb')
 export const openLogFolder = () => invoke<void>('open_log_folder')
 /** A new GitHub bug report with the app and Windows versions filled in. */
 export const reportProblem = () => invoke<void>('report_problem')
+
+/** A newer release; `notes` is its CHANGELOG.md section (`parseNotes` in changelog.ts reads it). */
+export interface UpdateInfo {
+  version: string
+  notes: string
+}
+/** Null when this is the latest version. */
+export const checkUpdate = () => invoke<UpdateInfo | null>('check_update')
+/** Downloads and installs the update the last check found; the app then restarts. */
+export const installUpdate = () => invoke<void>('install_update')
 export const clearCache = async () => {
   await invoke<void>('clear_cache')
   // Covers shown from now on are fetched and shrunk again.

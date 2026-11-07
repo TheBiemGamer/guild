@@ -1253,17 +1253,53 @@ pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
     let pid = {
         let state = app.state::<AppState>();
         let mut s = state.lock();
-        s.queue.pause();
+        let pid = pause_head(&mut s);
         save_queue(&state, &s.queue);
-        let head = s.queue.jobs.first().map(|j| j.key.clone()).filter(|_| s.queue_running);
-        let pid = head.and_then(|k| s.install_pids.get(&k).copied());
-        s.interrupted |= pid.is_some();
         pid
     };
     if let Some(pid) = pid {
         blocking(move || epic::cancel(pid).map_err(|e| format!("Couldn't pause the download: {e}"))).await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
+}
+
+/// Pauses the queue. Returns the pid of the active job's Legendary, for the caller to stop.
+fn pause_head(s: &mut Shared) -> Option<u32> {
+    s.queue.pause();
+    let head = s.queue.jobs.first().map(|j| j.key.clone()).filter(|_| s.queue_running);
+    let pid = head.and_then(|k| s.install_pids.get(&k).copied());
+    s.interrupted |= pid.is_some();
+    pid
+}
+
+/// Stops the queue before the app exits for an update: the active Legendary is stopped (it continues the
+/// partial download next time) and the queue is stored with its own paused flag, so the next start's
+/// `restore_queue` resumes it. Returns whether the queue was already paused.
+pub(super) fn stop_queue_for_restart(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let (was_paused, pid) = {
+        let mut s = state.lock();
+        (s.queue.paused, pause_head(&mut s))
+    };
+    if let Some(pid) = pid
+        && let Err(e) = epic::cancel(pid)
+    {
+        log!("stop download for update: {e}");
+    }
+    for _ in 0..100 {
+        if !state.lock().queue_running {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    save_queue(&state, &stored_for_restart(&state.lock().queue, was_paused));
+    was_paused
+}
+
+/// The queue as stored across an update restart. The live queue stays paused, so the runner can't start
+/// the next job before the app exits.
+fn stored_for_restart(queue: &Queue, was_paused: bool) -> Queue {
+    Queue { paused: was_paused, ..queue.clone() }
 }
 
 /// Starts the head job again with the same command.
@@ -1294,6 +1330,21 @@ pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> Queue
 mod tests {
     use super::*;
     use crate::view::tests::game;
+
+    #[test]
+    fn restart_keeps_live_queue_paused_and_stores_its_own_flag() {
+        let mut s = Shared { queue_running: true, ..Shared::default() };
+        s.queue.push(Job::new("epic-a", QueuedAction::Install));
+        s.install_pids.insert("epic-a".into(), 42);
+        assert_eq!(pause_head(&mut s), Some(42));
+        assert!(s.queue.paused && s.interrupted);
+
+        let stored = Queue::restore(Some(&stored_for_restart(&s.queue, false).to_json()), |_| true);
+        assert!(!stored.paused, "a running queue resumes after the restart");
+        assert_eq!(stored.jobs, s.queue.jobs);
+        assert!(s.queue.paused, "the live queue stays paused until the app exits");
+        assert!(Queue::restore(Some(&stored_for_restart(&s.queue, true).to_json()), |_| true).paused);
+    }
 
     #[test]
     fn launch_options_round_trip() {
