@@ -847,3 +847,58 @@ These tasks bring over Heroic features the owner chose: updates, cloud saves, in
 **Tests:** argument building from options; `override_exe_must_be_inside_install_dir`.
 
 - [ ] **Steps:** Write the failing tests, implement, run the full suite, clippy and `npm run check`. VERIFY-LATER: launch with extra arguments and in offline mode. **Commit:** `feat(launch): per-game launch options`.
+
+### Task 26: Epic playtime
+
+Owner request, 2026-11-07. Steam games have playtime and Epic games don't. Playtime is needed for sorting and grouping (Task 27).
+
+**Files:** `src-tauri/src/library/epic.rs`, a new `src-tauri/src/epic_playtime.rs`, `src-tauri/src/commands/library.rs`, `cache/db.rs` (only if a table is unavoidable; prefer the `info` table or the existing `launches`), and `platform.rs` for process timing if it exists by then.
+
+**Interfaces:**
+- **Epic's playtime service (try first).**
+  - `GET https://library-service.live.use1a.on.epicgames.com/library/api/public/playtime/account/<accountId>/all` with the Epic access token. This is the service the Epic Games Launcher uses. The endpoint is UNVERIFIED: verify it once with the owner's session before relying on it.
+  - The token and account id come from Legendary's own session (`legendary` keeps them in its `user.json`). Read them in Rust only for this call and never log or store them anywhere else. If the token is expired, let Legendary refresh it (for example by running `legendary status`) and read it again.
+  - Parse the result into `HashMap<String /*artifactId / app_name*/, u64 /*minutes*/>`. Cache it in the `info` table (kind `epic-playtime`) and refresh it with each Epic refresh.
+- **Own tracking (always on, fallback and supplement).**
+  - When an Epic game started from the launcher exits (the existing Epic process watch), add the session length to a per-game total kept in the `info` table, kind `own-playtime`.
+- **Combining.** `Game.playtime_minutes` for Epic is the service value when it exists, otherwise the own total, otherwise `None`. Merged entries keep summing copies (Task 6).
+
+**Tests:**
+- `parses_epic_playtime_response` (fixture shaped after one real, trimmed response);
+- `own_playtime_adds_session_length`;
+- `epic_playtime_prefers_service_then_own`.
+
+- [ ] **Step 1:** Write the failing tests, implement, then run the full suite, clippy and `npm run check`.
+- [ ] **Step 2:** VERIFY-LATER: Epic games show playtime in the tile and the list.
+- [ ] **Step 3: Commit:** `feat(epic): playtime from Epic's service and own tracking`.
+
+### Task 27: Group, sort and filter by playtime and how long to beat
+
+Owner request, 2026-11-07. Approved look: mockup v7 in the brainstorm companion folder (`.superpowers/brainstorm/6468-1794010770/content/layout-v7.html`). Copy it to `docs/superpowers/specs/` when this task starts.
+
+**Files:** `src-tauri/src/view.rs`, `src-tauri/src/commands/library.rs`, `src/lib/Toolbar.svelte`, `src/lib/Grid.svelte`, `src/lib/Card.svelte`, `src/lib/api.ts`.
+
+**Interfaces:**
+- **Sort** gains `mostPlayed`, `longestToBeat` and `shortestToBeat`, next to the existing title, last played and playtime options.
+  - Entries without the value go last, with ties broken by title.
+  - How long to beat uses the cached IGDB `normally` value (in hours). Sorting never triggers network lookups.
+- **Group** is a new toolbar dropdown: None, Store, Your playtime, How long to beat. Genre comes later, once genres are cached for every game.
+  - Your playtime buckets, in this order: `500 h+`, `100–500 h`, `50–100 h`, `20–50 h`, `10–20 h`, `0–10 h`, `Never played`.
+  - How long to beat buckets: `Short · under 5 h`, `Medium · 5–15 h`, `Long · 15–40 h`, `Very long · 40–100 h`, `Endless · 100 h+`, and `Unknown` last.
+  - Empty buckets are hidden.
+  - `view::group(entries, games, by) -> Vec<(String, Vec<usize>)>`.
+- **The grid with groups.** Each group gets a section label in the existing `.label` style ("10–20 h 12"). Virtualisation still works: groups are flattened into rows with label rows. The benchmark must stay at 0 slow frames.
+- **Filters** (the Filters chip popover from the v5/v7 direction, or plain chips if that popover isn't built yet): playtime ranges (Never played, Under 10 h, 10–50 h, 50 h+) and how-long-to-beat ranges (Under 5 h, 5–15 h, 15–40 h, 40–100 h, 100 h+).
+- **Card stat badge.** While grouping or sorting by playtime or how long to beat, each card shows a small bottom-left badge ("38 h played" / "~25 h to beat"). The Install and Update chips win over it when both apply.
+- **Persistence.** The chosen group and sort are kept in settings across restarts.
+
+**Tests:**
+- `playtime_buckets_edges` (0, 9, 10, 499 and 500 h land in the right bucket);
+- `hltb_buckets_edges`;
+- `group_hides_empty_buckets`;
+- `sort_longest_to_beat_puts_unknown_last`.
+
+- [ ] **Step 1:** Write the failing tests, implement, then run the full suite, clippy and `npm run check`.
+- [ ] **Step 2:** Benchmark 4000 and 15000 with grouping on: 0 slow frames.
+- [ ] **Step 3:** VERIFY-LATER: each grouping and sort works on the full library.
+- [ ] **Step 4: Commit:** `feat(library): group and sort by playtime and how long to beat`.
