@@ -80,6 +80,9 @@
   let backButton = $state<HTMLButtonElement>()
   let confirmCancel = $state<HTMLButtonElement>()
   let actionsEl = $state<HTMLDivElement>()
+  type Tab = 'overview' | 'dlc' | 'installation'
+  let tab = $state<Tab>('overview')
+  let tabList = $state<HTMLDivElement>()
 
   // The page takes focus on open, so keyboard users start at "← Library".
   onMount(() => backButton?.focus({ preventScroll: true }))
@@ -115,6 +118,7 @@
     ttb = undefined
     steamDlc = []
     confirmingDlc = null
+    tab = 'overview'
     api.steamDlc(key).then(
       (d) => alive && (steamDlc = d ?? []),
       () => {},
@@ -290,6 +294,27 @@
     keepFocus(() => dlcCancel)
   }
 
+  // Saves (Task 22) and Launch options (Task 25) join when they exist; a tab with nothing for this game is hidden.
+  const tabs = $derived.by(() => {
+    const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
+    if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
+    if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
+    return list
+  })
+  // A tab that went away (the DLC list emptied, the copy was uninstalled) falls back to Overview.
+  const current = $derived(tabs.some((t) => t.id === tab) ? tab : 'overview')
+
+  /** Arrow keys, Home and End move between tabs (roving tabindex); the focused tab opens. */
+  function tabKeydown(e: KeyboardEvent) {
+    const at = tabs.findIndex((t) => t.id === current)
+    const to =
+      e.key === 'ArrowRight' ? at + 1 : e.key === 'ArrowLeft' ? at - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null
+    if (to === null) return
+    e.preventDefault()
+    tab = tabs[(to + tabs.length) % tabs.length].id
+    tick().then(() => tabList?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
+  }
+
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
   // Every game has a store page, so Details always has something to show.
   const showDetails = $derived(!!game)
@@ -374,9 +399,6 @@
                           Open install folder
                         </button>
                       {/if}
-                      {#if copy!.updateAvailable}
-                        <button role="menuitem" tabindex="-1" onclick={() => pick(() => act('playOutdated'))}>Play without updating</button>
-                      {/if}
                       {#if copy!.installed}
                         <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
                       {/if}
@@ -411,6 +433,85 @@
     {#if game === null}
       <p class="gone">This game is no longer in the library.</p>
     {:else if game}
+      <!-- Always shown, Overview alone included, so a DLC tab that arrives late doesn't move the page. -->
+      <div class="tabs" role="tablist" aria-label="Game sections" tabindex="-1" bind:this={tabList} onkeydown={tabKeydown}>
+        {#each tabs as t (t.id)}
+          <button
+            role="tab"
+            id="tab-{t.id}"
+            aria-selected={current === t.id}
+            aria-controls="tab-panel"
+            tabindex={current === t.id ? 0 : -1}
+            onclick={() => (tab = t.id)}
+          >
+            {t.label}{#if t.count}<span class="n">{t.count}</span>{/if}
+          </button>
+        {/each}
+      </div>
+
+      <div id="tab-panel" role="tabpanel" aria-labelledby="tab-{current}">
+      {#if current === 'dlc'}
+        <section class="panel" aria-label="DLC">
+          <ul class="dlc">
+            {#each dlcs as d (`${d.copy}|${d.id}`)}
+              <li>
+                <span class="dlc-title">{d.title}</span>
+                {#if confirmingDlc === `${d.copy}|${d.id}`}
+                  <!-- Asks inline, like the game's own Epic uninstall. -->
+                  <span class="dlc-state">Its files will be deleted.</span>
+                  <button
+                    class="chip danger"
+                    aria-label="Uninstall {d.title}"
+                    onclick={() => {
+                      confirmingDlc = null
+                      act('uninstall', d.copy!, { dlc: d.id })
+                    }}>Uninstall</button
+                  >
+                  <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>Cancel</button>
+                {:else}
+                  <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
+                  <!-- Legendary adds a DLC to an installed game only. -->
+                  {#if d.copy && !busy && game.copies.find((c) => c.key === d.copy)?.installed}
+                    <button
+                      class="chip"
+                      class:danger={d.installed}
+                      aria-label="{d.installed ? 'Uninstall' : 'Install'} {d.title}"
+                      onclick={() => (d.installed ? askUninstallDlc(d) : act('install', d.copy!, { dlc: d.id }))}
+                    >
+                      {d.installed ? 'Uninstall' : 'Install'}
+                    </button>
+                  {/if}
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {:else if current === 'installation'}
+        <!-- Acts on the chosen copy, like the ⋯ menu. Verify and Move come with Task 23. -->
+        <section class="panel rows" aria-label="Installation">
+          {#if copy!.installDir}
+            <div class="row">
+              <div class="what">Folder<small class="path">{copy!.installDir}{#if copy!.size}{' · '}{copy!.size}{/if}</small></div>
+              <button class="chip" onclick={() => run(() => api.openFolder(copy!.key))}>Open folder</button>
+            </div>
+          {/if}
+          {#if copy!.updateAvailable}
+            <div class="row">
+              <div class="what">Update available<small>A newer version is ready to download.</small></div>
+              <button class="chip" disabled={!!busy || running} onclick={() => act('update')}>Update</button>
+              <button class="chip" disabled={!!busy || running} onclick={() => act('playOutdated')}>Play without updating</button>
+            </div>
+          {/if}
+          {#if copy!.installed}
+            <div class="row">
+              <div class="what">
+                Uninstall<small>Removes the {storeNames[copy!.provider]} copy{copy!.provider === 'steam' ? ' in Steam’s own dialog' : ' and deletes its files'}.</small>
+              </div>
+              <button class="chip danger" disabled={!!busy || running} onclick={uninstall}>Uninstall</button>
+            </div>
+          {/if}
+        </section>
+      {:else}
       {#if showTiles}
         <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
         <div class="tiles">
@@ -478,48 +579,13 @@
               {#if info?.publisher}<dt>Publisher</dt><dd>{info.publisher}</dd>{/if}
               {#if info?.released}<dt>Released</dt><dd>{releaseDate(info.released)}</dd>{/if}
               {#if copy!.size}<dt>Size</dt><dd>{copy!.size}</dd>{/if}
-              {#if copy!.installDir}<dt>Install folder</dt><dd class="path">{copy!.installDir}</dd>{/if}
               {@render chips('Store pages', storeLinks)}
               {@render chips('Info', infoLinks)}
             </dl>
-            {#if dlcs.length}
-              <h2 class="sub">DLC</h2>
-              <ul class="dlc">
-                {#each dlcs as d (`${d.copy}|${d.id}`)}
-                  <li>
-                    <span class="dlc-title">{d.title}</span>
-                    {#if confirmingDlc === `${d.copy}|${d.id}`}
-                      <!-- Asks inline, like the game's own Epic uninstall. -->
-                      <span class="dlc-state">Its files will be deleted.</span>
-                      <button
-                        class="chip danger"
-                        aria-label="Uninstall {d.title}"
-                        onclick={() => {
-                          confirmingDlc = null
-                          act('uninstall', d.copy!, { dlc: d.id })
-                        }}>Uninstall</button
-                      >
-                      <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>Cancel</button>
-                    {:else}
-                      <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
-                      <!-- Legendary adds a DLC to an installed game only. -->
-                      {#if d.copy && !busy && game.copies.find((c) => c.key === d.copy)?.installed}
-                        <button
-                          class="chip"
-                          class:danger={d.installed}
-                          aria-label="{d.installed ? 'Uninstall' : 'Install'} {d.title}"
-                          onclick={() => (d.installed ? askUninstallDlc(d) : act('install', d.copy!, { dlc: d.id }))}
-                        >
-                          {d.installed ? 'Uninstall' : 'Install'}
-                        </button>
-                      {/if}
-                    {/if}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
           </section>
         {/if}
+      </div>
+      {/if}
       </div>
     {/if}
   </div>
@@ -949,8 +1015,90 @@
     overflow-wrap: anywhere;
   }
 
-  .panel h2.sub {
-    margin: 16px 0 8px;
+  /* Label-style tabs under the hero; the open one is underlined in `text`. */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-top: 16px;
+    border-bottom: 1px solid var(--glass-line);
+  }
+
+  .tabs:focus-visible {
+    outline: none;
+  }
+
+  [role='tab'] {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: -1px;
+    padding: 10px 14px;
+    border-radius: 8px 8px 0 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+  }
+
+  [role='tab']:hover:not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
+
+  [role='tab']:active:not(:disabled) {
+    transform: none;
+  }
+
+  [role='tab'][aria-selected='true'] {
+    border-bottom-color: var(--text);
+    color: var(--text);
+  }
+
+  [role='tab']:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .n {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--glass-on);
+    font-size: 11px;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  [role='tabpanel'] > .panel {
+    margin-top: 16px;
+  }
+
+  .rows {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0;
+  }
+
+  .row + .row {
+    border-top: 1px solid var(--glass-line);
+  }
+
+  .what {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .what small {
+    display: block;
+    font-size: 12px;
+    color: var(--text-3);
   }
 
   .dlc {

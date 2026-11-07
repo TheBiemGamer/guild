@@ -465,11 +465,11 @@
   .acct {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     margin-bottom: 10px;
     padding: 14px 16px;
-    border-radius: 14px;
-    background: rgb(255 255 255 / 0.05);
+    border-radius: 12px;
+    background: var(--glass);
     border: 1px solid var(--glass-line);
   }
 

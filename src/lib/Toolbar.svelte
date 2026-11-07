@@ -1,28 +1,81 @@
 <script lang="ts">
   import StoreIcon from './StoreIcon.svelte'
-  import type { Sort, Store } from './api'
+  import FilterPopover from './FilterPopover.svelte'
+  import DownloadsPopover from './DownloadsPopover.svelte'
+  import { filterChips, removeChip, type Filter } from './filters'
+  import type { Card, Progress, Sort, Store } from './api'
 
   let {
     query = $bindable(),
     store = $bindable(),
     installedOnly = $bindable(),
+    filters = $bindable(),
     sort = $bindable(),
+    popoverOpen = $bindable(),
     total,
     attention,
+    progress,
+    games,
+    modal,
+    oncancel,
     onsettings,
   }: {
     query: string
     store: Store | null
     installedOnly: boolean
+    /** The Filters popover's extra filters. */
+    filters: Filter[]
     sort: Sort
+    /** A popover is open; App ignores mouse Back/Forward meanwhile, as for Settings. */
+    popoverOpen: boolean
     total: number
     /** Something in settings needs a look (Epic logged out, Legendary missing…). */
     attention: boolean
+    /** `poll`'s map, by copy key: the Downloads chip shows while it has anything. */
+    progress: Record<string, Progress>
+    games: Card[]
+    /** A modal (Settings) is open: Ctrl K leaves focus where it is. */
+    modal: boolean
+    oncancel: (key: string) => void
     onsettings: () => void
   } = $props()
 
   const stores: Store[] = ['steam', 'epic']
+  const chips = $derived(filterChips(filters))
+
+  let open = $state<'filters' | 'downloads' | null>(null)
+  let search = $state<HTMLInputElement>()
+  let filtersChip = $state<HTMLButtonElement>()
+  let downloadsChip = $state<HTMLButtonElement>()
+  $effect(() => {
+    popoverOpen = open !== null
+  })
+
+  const jobs = $derived(Object.values(progress))
+  const downloading = $derived(jobs.length > 0)
+  const fraction = $derived(jobs.length ? jobs.reduce((sum, p) => sum + p.fraction, 0) / jobs.length : 0)
+  // The last download ended while its popover was open.
+  $effect(() => {
+    if (!downloading && open === 'downloads') open = null
+  })
+
+  function close(refocus: boolean) {
+    const chip = open === 'filters' ? filtersChip : downloadsChip
+    open = null
+    if (refocus) chip?.focus()
+  }
+
+  function onkeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !modal) {
+      e.preventDefault()
+      open = null
+      search?.focus()
+      search?.select()
+    }
+  }
 </script>
+
+<svelte:window {onkeydown} />
 
 <nav class="bar">
   <label class="search">
@@ -30,7 +83,14 @@
       <circle cx="11" cy="11" r="6.5" />
       <path d="m16 16 4 4" />
     </svg>
-    <input type="search" placeholder={total ? `Search ${total} games` : 'Search games'} bind:value={query} />
+    <input
+      type="search"
+      placeholder={total ? `Search ${total} games` : 'Search games'}
+      aria-keyshortcuts="Control+K"
+      bind:this={search}
+      bind:value={query}
+    />
+    {#if !query}<kbd aria-hidden="true">Ctrl K</kbd>{/if}
   </label>
 
   <div class="chips" role="group" aria-label="Filter">
@@ -48,12 +108,34 @@
     <button class="chip" aria-pressed={installedOnly} onclick={() => (installedOnly = !installedOnly)}>
       Installed
     </button>
+    {#each chips as chip (chip.filter)}
+      <button class="chip on" aria-label="Remove filter: {chip.label}" onclick={() => (filters = removeChip(filters, chip))}>
+        {chip.label}<i aria-hidden="true">✕</i>
+      </button>
+    {/each}
+    <div class="dd">
+      <button
+        class="chip"
+        bind:this={filtersChip}
+        aria-haspopup="dialog"
+        aria-expanded={open === 'filters'}
+        onclick={() => (open = open === 'filters' ? null : 'filters')}
+      >
+        <svg class="line" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
+          <circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" />
+        </svg>
+        Filters
+      </button>
+      {#if open === 'filters'}
+        <FilterPopover bind:filters anchor={filtersChip} onclose={close} />
+      {/if}
+    </div>
   </div>
 
   <span class="spacer"></span>
 
   <label class="sort">
-    <span>Sort</span>
     <select bind:value={sort} aria-label="Sort by">
       <option value="title">Title</option>
       <option value="lastPlayed">Last played</option>
@@ -61,6 +143,26 @@
     </select>
     <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
   </label>
+
+  {#if downloading}
+    <div class="dd">
+      <button
+        class="chip icon"
+        bind:this={downloadsChip}
+        aria-label="Downloads, {Math.round(fraction * 100)}%"
+        title="Downloads"
+        aria-haspopup="dialog"
+        aria-expanded={open === 'downloads'}
+        onclick={() => (open = open === 'downloads' ? null : 'downloads')}
+      >
+        <span class="ring" style="--done: {fraction * 100}%"></span>
+        <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+      </button>
+      {#if open === 'downloads'}
+        <DownloadsPopover {progress} {games} anchor={downloadsChip} onclose={close} {oncancel} />
+      {/if}
+    </div>
+  {/if}
 
   <button class="chip icon settings" onclick={onsettings} aria-label={attention ? 'Settings (needs attention)' : 'Settings'} title="Settings">
     <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -75,6 +177,8 @@
 
 <style>
   .bar {
+    position: relative;
+    z-index: 5;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -124,9 +228,28 @@
     color: var(--text-3);
   }
 
+  kbd {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--glass-on-line);
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-2);
+  }
+
+  .search:focus-within kbd {
+    display: none;
+  }
+
   .chips {
     display: flex;
+    align-items: center;
     gap: 6px;
+  }
+
+  .dd {
+    position: relative;
   }
 
   .chip {
@@ -137,6 +260,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
     border-radius: 10px;
     background: var(--glass);
     border: 1px solid var(--glass-line);
@@ -152,10 +277,34 @@
     color: var(--text);
   }
 
-  .chip[aria-pressed='true'] {
+  .chip[aria-pressed='true'],
+  .chip.on {
     background: var(--glass-on);
     border-color: var(--glass-on-line);
     color: var(--text);
+  }
+
+  .chip.on {
+    gap: 8px;
+  }
+
+  .chip.on i {
+    font-style: normal;
+    font-size: 11px;
+    color: var(--text-3);
+  }
+
+  /* Progress as a ring inside the chip's edge; it changes with each poll, never per frame. */
+  .ring {
+    position: absolute;
+    inset: 3px;
+    padding: 2px;
+    border-radius: 8px;
+    background: conic-gradient(var(--accent-2) 0 var(--done), transparent var(--done));
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+    pointer-events: none;
   }
 
   .spacer {
@@ -177,16 +326,10 @@
     background: var(--glass-hover);
   }
 
-  .sort span {
-    padding-left: 12px;
-    color: var(--text-3);
-    pointer-events: none;
-  }
-
   .sort select {
     appearance: none;
     height: 100%;
-    padding: 0 30px 0 6px;
+    padding: 0 30px 0 12px;
     border: 0;
     background: transparent;
     color: var(--text);

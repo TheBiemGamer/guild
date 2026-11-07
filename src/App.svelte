@@ -32,11 +32,15 @@
   import Detail from './lib/Detail.svelte'
   import Settings from './lib/Settings.svelte'
   import InstallPopup from './lib/InstallPopup.svelte'
+  import { matches, type Filter } from './lib/filters'
 
   let query = $state('')
   let store = $state<Store | null>(null)
   let sort = $state<Sort>('title')
   let installedOnly = $state(false)
+  /** The Filters popover's extra filters, applied here to the loaded list. */
+  let filters = $state<Filter[]>([])
+  let popoverOpen = $state(false)
 
   let lib = $state<Library>({ games: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false })
   let featured = $state<Featured | null>(null)
@@ -248,7 +252,7 @@
     e.preventDefault()
     // mouseup and auxclick both arrive for one press; only mouseup acts. Settings (and the Steam log in
     // inside it) is modal: the page behind it stays put and focus stays in the dialog.
-    if (e.type !== 'mouseup' || settingsOpen) return
+    if (e.type !== 'mouseup' || settingsOpen || popoverOpen) return
     const step = navStep(e.button, open, lastClosed)
     if (!step) return
     if (step.open === null) {
@@ -260,6 +264,21 @@
     const still = await api.game(key).catch(() => null)
     if (!still) lastClosed = null
     else if (open === null && !settingsOpen) openGame(key)
+  }
+
+  // Worked out when the list, the filters or (with "Downloading" on) the progress change; never per frame.
+  const shown = $derived.by(() => {
+    if (filters.length === 0) return lib.games
+    const p = filters.includes('downloading') ? progress : {}
+    return lib.games.filter((g) => matches(g, filters, p))
+  })
+
+  async function cancelDownload(key: string) {
+    try {
+      await api.cancelInstall(key)
+    } catch (e) {
+      error = api.message(e)
+    }
   }
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
@@ -281,9 +300,15 @@
     bind:query
     bind:store
     bind:installedOnly
+    bind:filters
     bind:sort
+    bind:popoverOpen
     total={lib.total}
     attention={lib.epicAttention || lib.steamAttention}
+    {progress}
+    games={lib.games}
+    modal={settingsOpen}
+    oncancel={cancelDownload}
     onsettings={openSettings}
   />
 
@@ -324,10 +349,10 @@
   <div class="content">
     <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
     <div class="library" class:away={open !== null}>
-    {#if lib.games.length > 0}
+    {#if shown.length > 0}
       <Grid
-        games={lib.games}
-        resetKey={`${query}|${store}|${sort}|${installedOnly}`}
+        games={shown}
+        resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
         {running}
         {progress}
         onopen={openGame}
@@ -348,8 +373,8 @@
             </div>
           {/if}
           <h2 class="label">
-            {query || store || installedOnly ? 'Results' : 'Library'}
-            <span>{lib.games.length}</span>
+            {query || store || installedOnly || filters.length ? 'Results' : 'Library'}
+            <span>{shown.length}</span>
           </h2>
         {/snippet}
       </Grid>

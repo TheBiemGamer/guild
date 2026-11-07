@@ -96,6 +96,19 @@ components:
   chip-selected:
     backgroundColor: "{colors.glass-on}"
     textColor: "{colors.text}"
+  filter-toggle:
+    backgroundColor: "{colors.glass}"
+    textColor: "{colors.text-2}"
+    rounded: "{rounded.pill}"
+    height: "30px"
+    padding: "0 12px"
+  popover:
+    backgroundColor: "{colors.surface-2}"
+    rounded: "{rounded.notice}"
+    padding: "12px"
+  game-tab:
+    textColor: "{colors.text-2}"
+    padding: "10px 14px"
   search-field:
     backgroundColor: "{colors.glass}"
     textColor: "{colors.text}"
@@ -128,6 +141,10 @@ components:
     backgroundColor: "{colors.glass}"
     rounded: "{rounded.notice}"
     padding: "16px"
+  account-card:
+    backgroundColor: "{colors.glass}"
+    rounded: "{rounded.notice}"
+    padding: "14px 16px"
   settings-panel:
     backgroundColor: "rgb(22 22 32 / 0.82)"
     rounded: "{rounded.panel}"
@@ -193,7 +210,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 
 A full-window column: toolbar, optional notices, then a content area that fills the rest. The library is a **virtualised grid** of fixed 180x270 covers with a 16px gap, columns centred in the available width, a 24px page gutter on bars and notices, and the Continue banner (180px high) plus section label scrolling with the covers as the grid header. Only rows near the viewport exist in the DOM. Because of that, card size and gap are constants in code, not fluid.
 
-Settings is a modal panel (max 760px wide, 24px inset from the window) with a 190px section list on the left; under 640px wide it stacks, nav on top. The game page covers the whole content area (the library stays mounted underneath, hidden, so its scroll position survives): a column capped at 1360px with a 24px gutter, holding the 300px hero, a row of three equal fact-tile slots (16px gap; every tile is one head line and one value line, so all tiles are the same height) and a 1.7fr / 1fr About / Details grid.
+Settings is a modal panel (max 760px wide, 24px inset from the window) with a 190px section list on the left; under 640px wide it stacks, nav on top. The game page covers the whole content area (the library stays mounted underneath, hidden, so its scroll position survives): a column capped at 1360px with a 24px gutter, holding the 300px hero, a tab row (Overview · DLC · Installation; Saves and Launch options join with their features), and on Overview a row of three equal fact-tile slots (16px gap; every tile is one head line and one value line, so all tiles are the same height) and a 1.7fr / 1fr About / Details grid.
 
 Spacing rhythm observed: 8 / 12 / 16 / 24 px. Controls on bars are 36px high.
 
@@ -205,7 +222,7 @@ Hybrid: tonal layering and translucency for chrome, soft black shadows for objec
 - **Cover rest** (`0 4px 12px rgb(0 0 0 / 0.45)`): covers at rest.
 - **Cover lift** (`0 16px 34px rgb(0 0 0 / 0.6), 0 0 0 2px rgb(255 255 255 / 0.85)`): hovered or focused cover, with a 4px rise and 1.03 scale. The white 2px ring is the hover outline the owner asked for.
 - **Banner** (`0 10px 30px rgb(0 0 0 / 0.45)`).
-- **Modal** (`0 30px 80px rgb(0 0 0 / 0.6)`) with `backdrop-filter: blur(24px)` on the Settings panel.
+- **Modal** (`0 30px 80px rgb(0 0 0 / 0.6)`) with `backdrop-filter: blur(24px)` on the Settings panel. Popovers (⋯ menu, Play with, Filters, Downloads) use the same shadow without the blur.
 
 ### Named Rules
 **The No Halo Rule.** Shadows are black and directional. No coloured glow halos (owner anti-goal). The only coloured ring is the green running ring on a card.
@@ -213,7 +230,7 @@ Hybrid: tonal layering and translucency for chrome, soft black shadows for objec
 
 ## Shapes
 
-Rounded, soft-cornered, never sharp: 10px for covers, chips, fields and rows; 8px for plain buttons; 12px notices and logo tiles; 14px banner and account cards; 18px modal; full pills for primary actions, toggles and the cover store logo (26px glass circle, top-right).
+Rounded, soft-cornered, never sharp: 10px for covers, chips, fields and rows; 8px for plain buttons; 12px notices, popovers, logo tiles and account cards; 14px banner; 18px modal; full pills for primary actions, toggles and the cover store logo (26px glass circle, top-right).
 
 Borders are always thin and translucent (`glass-line`, 1px). Cover art is clipped to the card radius. Portrait art fills the cover (`cover`); landscape art stays whole (`contain`).
 
@@ -226,21 +243,29 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Settings button:** 10px radius, white 10% fill, white 14% border; destructive variant uses red text, not a red fill.
 - **Focus:** 2px `focus` outline, 2px offset, everywhere. Disabled is 60% opacity.
 
-### Chips (filters, sort, settings button)
-36px high, `glass` fill, `glass-line` border, `text-2` text. Selected (`aria-pressed`) = `glass-on` fill, `glass-on-line` border, `text`. Store filters are icon-only chips with the real logo. The settings chip carries an 8px amber dot, ringed in `bg`, when attention is needed.
+### Chips (filters, sort, downloads, settings button)
+36px high, `glass` fill, `glass-line` border, `text-2` text, 6px icon gap. Selected (`aria-pressed`) = `glass-on` fill, `glass-on-line` border, `text`. Store filters are icon-only chips with the real logo. The settings chip carries an 8px amber dot, ringed in `bg`, when attention is needed.
+- **Active filter chip:** a filter turned on in the Filters popover also shows in the toolbar, after Installed, as a selected chip with its name and a `text-3` 11px ✕ (8px gap); clicking it clears exactly that filter (`removeChip` in `src/lib/filters.ts`).
+- **Filters chip:** a 15px sliders icon plus "Filters"; opens the Filters popover.
+- **Downloads chip:** a 36px icon chip (17px download arrow), shown only while `poll` reports an install or update. A 2px `accent-2` ring inset 3px inside its edge fills clockwise with the average progress (a conic gradient masked to a ring; it changes with each 2 s poll, never per frame). `aria-label` "Downloads, 42%".
+
+### Popovers (Filters, Downloads)
+`surface-2` fill, `glass-on-line` border, 12px radius, modal shadow, 44px below their chip (Filters left-aligned, Downloads right-aligned). Keyboard and pointer (`src/lib/popover.ts`): focus moves to the first control on open, Tab and Shift+Tab stay inside, Escape closes and returns focus to the chip, a click outside closes. Mouse Back/Forward are ignored while one is open, as with Settings. Ctrl K closes it and focuses the search.
+- **Filters:** 360px wide, 12px padding. Groups under 11px uppercase `text-3` headings (10px above, 6px below; the first 2px): Status (Not installed, Update available, Downloading) and Has (On both stores). Filters in one group widen each other, groups narrow. Toggles are 30px pills, 13px, `glass` fill and `glass-line` border, on = `glass-on` / `glass-on-line` / `text`, `aria-pressed`. A footer under a `glass-line` rule (12px above, 10px padding) holds Clear (13px `text-2` text button) on the left; the right slot is kept for collections. Playtime and how-long-to-beat ranges (Task 27), Genre (once genres are cached), DLC and Cloud saves join when their data exists.
+- **Downloads:** 380px wide, 6px padding. "Downloading" (Epic installs and updates: title 600, Legendary's progress text in `text-3` 12px, a 6px `accent` bar, a 32px round glass Cancel) then "In Steam" (Steam's own downloads, read-only, "In Steam · 1.2 of 4 GB"). Each row has its 16px store logo; rows are split by `glass-line`. Pause, "Up next" and reordering come with the download queue (Task 24).
 
 ### Cards / Containers
 - **Cover card:** 180x270, 10px radius. While the cover loads it shows `surface-2`, then the cover's average colour, then the image fading in over 150ms; the title shows only when there is no art. Store logo top-right. Installed = full colour; not installed = `saturate(0.5) brightness(0.75)` plus a bottom-left glass "Install" chip (owner's option C). Running = "Playing" green badge and green ring; installing = a 6px progress strip.
 - **Hover:** lifts, white ring, reveals title and a small Play (installed) or Install (not) pill. The overlay is absent (not transparent) when idle, to keep scrolling cheap.
 - **Continue banner:** 14px radius, 180px, hero art cover-fit, left-to-right dark scrim, title and white Play pill bottom-left.
 - **Notice:** `glass-strong`, 12px radius, 44px min height, dismiss button; error variant has a red border. Used for Epic logged-out (only on state change), "Playing" and errors.
-- **Account card (Settings):** 14px radius, white 5% fill, 40px store-logo tile.
+- **Account card (Settings, Accounts first):** one per source (Steam, Epic Games), per mockup v5: `glass` fill, `glass-line` border, 12px radius, 14px 16px padding, 14px gap; a 40px store-logo tile, then the name, a status line (a green or amber `●`, "Logged in as …"), and Log in / Log out buttons.
 
 ### Inputs / Fields
-36px high, 10px radius, `glass` fill, `glass-line` border, `text-3` placeholder, 2px focus outline. The search field's border brightens to `glass-on-line` on focus. Secrets are shown only as "Saved ✓" with Replace and Remove (owner decision).
+36px high, 10px radius, `glass` fill, `glass-line` border, `text-3` placeholder, 2px focus outline. The search field's border brightens to `glass-on-line` on focus. It carries a `Ctrl K` hint at the right (11px, `text-2`, 5px radius, `glass-on-line` border), hidden while focused or filled; Ctrl K focuses it (not while Settings is open). Secrets are shown only as "Saved ✓" with Replace and Remove (owner decision).
 
 ### Navigation
-Top bar only: search, chips, spacer, sort, settings. Settings has a left section list (active = white 10% fill) in the modal. There is no sidebar.
+Top bar only, left to right (mockup v7): search, quick chips (All, Steam, Epic, Installed), active filter chips, Filters, spacer, sort (Group joins it with Task 27), Downloads (only while something downloads), settings. The bar sits above the content (`z-index: 5`) so its popovers hang over the grid and the game page. Settings has a left section list (active = white 10% fill) in the modal. There is no sidebar.
 
 ### Toggle
 40x22 pill switch, white 18% off, `accent` on, white knob; `role="switch"`.
@@ -251,9 +276,13 @@ Top bar only: search, chips, spacer, sort, settings. Settings has a left section
 - **Hero:** 300px, 14px radius, banner shadow; art cover-fit at 30% from the top, fading in. A gradient darkens the top (`glass`) for the back button and the bottom (`scrim`) for the text. Back button top-left: `glass-strong` with `glass-line`, 10px radius (no backdrop blur: the hero scrolls). Bottom-left: Display title, then a meta line in `text-2` (a logo per store that owns it · "Installed on <Store>" (the chosen copy's, else the first installed copy's) or "Not installed" · developer · year, `·` in `text-3`). Install progress, while it runs, is a 6px `accent` bar under the meta line.
 - **Actions** (bottom-right): a 44px round glass `⋯` button and the large white pill (Play, Install, disabled "Playing", or busy text; the busy pill is `aria-disabled` so it stays focusable). A game owned on both stores gets the **split pill** instead: one 44px white pill in two segments. The left holds the chosen store's 18px logo and a 14px chevron (`aria-haspopup="menu"`, `aria-expanded`, `aria-label="Choose launcher, now <Store>"`); a 1px divider at `bg` 18% inset 10px; the right is Play (play icon) or Install (download icon) for the chosen copy. The choice is not stored; it resets to the default copy when another game opens. A not-installed Epic copy shows "Checking size…", then "27.3 GB download", in `text-2` beside Install. Epic uninstall asks inline (text, then Uninstall in `danger-text` and Cancel, both round glass); Steam asks in its own dialog.
 - **Play with menu:** same popover look as the ⋯ menu, 290px wide, under the split pill. A "Play with" Label heading, then one `menuitemradio` per copy: store logo, name, and a `text-2` 12px sub-line ("Installed · 27.3 GB", "Not installed", or "Not installed · 4.3 GB download" for Epic); a check mark marks the chosen copy. Keyboard as the ⋯ menu: focus opens on the chosen item, arrows/Home/End move, Escape returns focus to the switcher, Tab closes, a click outside closes. Picking a copy closes the menu and returns focus to the switcher.
-- **⋯ menu:** `surface-2` popover with a `glass-on-line` border, 12px radius and the modal shadow, hanging below the button. It acts on the chosen copy. Items: Open install folder (installed only), Uninstall (installed only, `danger-text`, last). Keyboard: focus moves to the first item on open, arrows/Home/End move, Escape closes and returns focus to the button, Tab closes, and a click outside closes. When an action swaps the buttons, focus moves to what replaced them (the busy pill, or the confirm's Cancel). The page focuses "← Library" on open; Back returns focus to the card or banner that opened it.
+- **⋯ menu:** `surface-2` popover with a `glass-on-line` border, 12px radius and the modal shadow, hanging below the button. It acts on the chosen copy and keeps only quick actions: Open install folder (installed only), Uninstall (installed only, `danger-text`, last). "Play without updating" is on the Installation tab. Keyboard: focus moves to the first item on open, arrows/Home/End move, Escape closes and returns focus to the button, Tab closes, and a click outside closes. When an action swaps the buttons, focus moves to what replaced them (the busy pill, or the confirm's Cancel). The page focuses "← Library" on open; Back returns focus to the card or banner that opened it.
+- **Tabs:** under the hero (16px above), a `role="tablist"` row with a `glass-line` bottom rule: Overview, DLC (with a count pill: 11px, `glass-on`, 999px), Installation. Saves and Launch options join when Tasks 22 and 25 build them. A tab with nothing for this game is hidden (no DLC; Installation when the chosen copy isn't installed); the row itself always shows, Overview alone included, so a DLC list that arrives late doesn't move the page. Tabs use the Label style (12px/600 uppercase, 0.08em) in `text-2`, 10px 14px padding; the open tab is `text` with a 2px `text` underline. Roving tabindex: Left/Right (wrapping), Home and End move and open. A new game opens on Overview; a tab that disappears falls back to Overview.
+- **Overview:** today's page: fact tiles, About and Details.
+- **DLC tab:** the DLC list in one `glass` panel (rows as described under About / Details below).
+- **Installation tab:** one `glass` panel of rows (10px padding, `glass-line` between): Folder (path · size in `text-3` 12px, Open folder chip), Update available (Update and Play without updating chips; Epic only), Uninstall (`danger-text` chip; Epic asks inline in the hero, Steam in its own dialog). Acts on the chosen copy. Verify and Move come with Task 23.
 - **Fact tiles:** Playtime, Last played, How long to beat, in three fixed slots. Every tile has the same two lines, a 24px head line (Label heading) and a single value line (20px/600 tabular, ellipsis), so a tile that answers late is exactly as tall as the ones already shown and the row never changes height. Whether the row exists is decided from the game alone (it has a Playtime or Last played tile), never from how long to beat, so it never collapses once shown and is never empty: Steam games always show Playtime, "Never played" included. Playtime's head line carries "Steam + Epic" at the right (`text-2`, 12px) when both copies counted, and Last played adds " · on Steam" after its value (`text-2`) for a multi-copy game. Each tile: `glass` fill, `glass-line` border, 12px radius. How long to beat shows "normally" as the value with " · N all" (completely) after it in `text-2`, per the mockup; all three figures are in the tooltip. Its head line carries a quiet "IGDB" credit link (`text-3`, underlined, 24px tall target, labelled "Data from IGDB") that opens igdb.com. A tile with nothing to say is absent. Steam's "Never played" is a real value and shows; Epic games get no playtime from Legendary, so their playtime is unknown and that tile hides. The tile text comes ready from Rust (`view::playtime_tile`, `view::last_played_tile`); the UI doesn't reword it.
-- **About / Details:** `glass` panels, 16px padding, 12px radius, Label headings. Until the store details arrive, About shows four `glass-hover` skeleton lines and Details skeleton values for Genres, Developer, Publisher and Released; screenshot slots stay reserved (16:9, `surface`) while they download. About: plain-text description (line breaks kept) and up to three 16:9 screenshots. Details: a two-column `dl` (`text-2` terms) with Genres (small `glass-on` pills), Developer, Publisher, Released ("28 Nov 2016"; the meta line shows only the year), Size, Install folder (wraps anywhere); each row is absent when unknown. Below them, **Store pages** (one chip per store that owns the game) and **Info** (PCGamingWiki, SteamDB, ProtonDB; only when the Steam app id is known, else the row is absent). Details sits in the right column, or the left one when the game has no About. When the game has owned DLC, a **DLC** Label heading (16px above) follows inside the Details panel, one 28px row per DLC: title, then "Installed"/"Not installed" in `text-2` 12px, then for an Epic DLC of an installed copy an Install or Uninstall (`danger-text`) link chip. Uninstall asks inline in the row ("Its files will be deleted." in `text-2`, then Uninstall in `danger-text` and Cancel chips; focus goes to Cancel). Steam DLC is listed only; Steam installs it itself. No DLC, no heading.
+- **About / Details:** `glass` panels, 16px padding, 12px radius, Label headings. Until the store details arrive, About shows four `glass-hover` skeleton lines and Details skeleton values for Genres, Developer, Publisher and Released; screenshot slots stay reserved (16:9, `surface`) while they download. About: plain-text description (line breaks kept) and up to three 16:9 screenshots. Details: a two-column `dl` (`text-2` terms) with Genres (small `glass-on` pills), Developer, Publisher, Released ("28 Nov 2016"; the meta line shows only the year), Size; each row is absent when unknown (the install folder is on the Installation tab). Below them, **Store pages** (one chip per store that owns the game) and **Info** (PCGamingWiki, SteamDB, ProtonDB; only when the Steam app id is known, else the row is absent). Details sits in the right column, or the left one when the game has no About. When the game has owned DLC, the **DLC tab** lists it, one 28px row per DLC: title, then "Installed"/"Not installed" in `text-2` 12px, then for an Epic DLC of an installed copy an Install or Uninstall (`danger-text`) link chip. Uninstall asks inline in the row ("Its files will be deleted." in `text-2`, then Uninstall in `danger-text` and Cancel chips; focus goes to Cancel). Steam DLC is listed only; Steam installs it itself. No DLC, no heading.
 - **Link chips:** buttons, 28px high, 10px side padding, 999px radius, 13px text, a 14px logo (`currentColor`) with a 6px gap, `glass-hover` fill, `glass-line` border, `glass-on` fill on hover. They open the default browser; the UI sends only a link kind and Rust builds the URL (Epic uses the store page IGDB reported when it is on store.epicgames.com, else a store search by title).
 
 ## Do's and Don'ts
