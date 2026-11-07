@@ -35,7 +35,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExQUJFRUM1Q0U5N0E1MEYKUldRUHBaZk94ZTZyRVN4aXhsRWlzV1lCNTQ3UHdDendzSVpXTXJUd29XNEZ5MktTRVpaemdhUHQK",
       "endpoints": ["https://github.com/TheBiemGamer/game-launcher/releases/latest/download/latest.json"]
     }
   }
