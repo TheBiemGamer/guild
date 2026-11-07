@@ -125,7 +125,7 @@ export const steamConnectStart = () => invoke<string>('steam_connect_start')
 export const steamConnectPoll = () => invoke<ConnectStep>('steam_connect_poll')
 export const steamConnectCancel = () => invoke<void>('steam_connect_cancel')
 export type LoginStep =
-  | { step: 'approve' }
+  | { step: 'approve'; email: boolean }
   | { step: 'code'; kind: 'email' | 'app' }
   | { step: 'connected'; account: string }
   | { step: 'failed'; message: string }

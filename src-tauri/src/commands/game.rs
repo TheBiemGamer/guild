@@ -247,7 +247,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
                 (None, Some(_), Some(c)) => cache::db::setting(c, settings::STEAM_ACCOUNT)
                     .ok()
                     .flatten()
-                    .and(settings::steam_token()),
+                    .and_then(|_| settings::steam_token()),
                 _ => None,
             };
             (fresh, token)

@@ -338,8 +338,8 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
 #[derive(Serialize)]
 #[serde(tag = "step", rename_all = "camelCase")]
 pub enum LoginStep {
-    /// Approve the login in the Steam app.
-    Approve,
+    /// Approve the login: in the Steam app, or (`email`) with the link Steam emailed.
+    Approve { email: bool },
     /// Type the Steam Guard code sent by `kind`: "email" or "app".
     Code { kind: String },
     Connected { account: String },
@@ -470,9 +470,11 @@ impl AuthConfirmationHandler for UiConfirmation {
     ) -> Box<dyn Future<Output = Option<ConfirmationAction>> + 'a> {
         let code = allowed.iter().find_map(ConfirmationMethod::token_type);
         let approve = allowed.iter().any(|m| m.class() == ConfirmationMethodClass::Confirmation);
+        // The app wins when Steam offers both.
+        let by_email = approve && !allowed.iter().any(|m| m.confirmation_type() == "device confirmation");
         let step = match &code {
             // Steam finishes on its own once approved in the app; a code still works meanwhile.
-            _ if approve => LoginStep::Approve,
+            _ if approve => LoginStep::Approve { email: by_email },
             Some(GuardTokenType::Email) => LoginStep::Code { kind: "email".into() },
             Some(_) => LoginStep::Code { kind: "app".into() },
             None => return Box::new(std::future::ready(None)),
@@ -518,7 +520,7 @@ mod tests {
     #[test]
     fn login_step_serializes_with_a_step_tag() {
         let json = |s: &LoginStep| serde_json::to_string(s).unwrap();
-        assert_eq!(json(&LoginStep::Approve), r#"{"step":"approve"}"#);
+        assert_eq!(json(&LoginStep::Approve { email: true }), r#"{"step":"approve","email":true}"#);
         assert_eq!(json(&LoginStep::Code { kind: "email".into() }), r#"{"step":"code","kind":"email"}"#);
         assert_eq!(json(&LoginStep::Connected { account: "a".into() }), r#"{"step":"connected","account":"a"}"#);
     }

@@ -26,6 +26,7 @@
   let code = $state('')
   let phase = $state<'form' | 'busy' | 'approve' | 'code' | 'checking'>('form')
   let codeKind = $state<'email' | 'app'>('app')
+  let approveByEmail = $state(false)
   let error = $state<string | null>(null)
 
   function finish() {
@@ -51,6 +52,7 @@
         return
       case 'approve':
         phase = 'approve'
+        approveByEmail = step.email
         error = null
         return follow(api.steamPasswordNext())
       case 'code':
@@ -144,7 +146,7 @@
     <div class="cols">
       <div class="side">
         {#if phase === 'approve'}
-          <p>Approve the login in the Steam app on your phone.</p>
+          <p>{approveByEmail ? 'Open the link Steam emailed you to approve this login.' : 'Approve the login in the Steam app on your phone.'}</p>
         {:else if phase === 'code' || phase === 'checking'}
           <form onsubmit={sendCode}>
             <label for="steam-code">
@@ -156,6 +158,7 @@
               {phase === 'checking' ? 'Checking…' : 'Submit'}
             </button>
           </form>
+          {#if phase === 'checking'}<p class="hint">This can take up to 30 seconds.</p>{/if}
         {:else}
           <form onsubmit={signIn}>
             <label for="steam-account">Account name</label>
@@ -290,7 +293,8 @@
     color: var(--text-2);
   }
 
-  form + .fail {
+  form + .fail,
+  form + .hint {
     margin-top: 10px;
   }
 
