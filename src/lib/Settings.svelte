@@ -38,6 +38,10 @@
   let connecting = $state(false)
   /** The Epic card's Options panel; folded each time Settings opens. */
   let epicOptions = $state(false)
+  /** Legendary's install or update while it runs, with its percent once known. */
+  let legendaryJob = $state<{ percent: number | null } | null>(null)
+  let legendaryError = $state('')
+  const legendary = $derived(view.tools.find((t) => t.name === 'legendary'))
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -180,6 +184,20 @@
     await onchange()
   }
 
+  async function installLegendary() {
+    legendaryError = ''
+    legendaryJob = { percent: null }
+    try {
+      await api.installTool('legendary', (percent) => (legendaryJob = { percent }))
+    } catch (e) {
+      legendaryError = api.message(e)
+    }
+    legendaryJob = null
+    await onchange()
+  }
+
+  const jobLabel = (verb: string, job: { percent: number | null }) => (job.percent === null ? `${verb}…` : `${verb}… ${job.percent}%`)
+
   const removeSecret = () => change(() => api.setIgdbSecret(null))
   const removeGridKey = () => change(() => api.setSteamgriddbKey(null))
   const logOut = () => change(() => api.epicLogOut())
@@ -211,7 +229,9 @@
       case 'unreachable':
         return { name: null, problem: "Can't reach Epic", fix: 'Reconnect', logout: false }
       case 'noLegendary':
-        return { name: null, problem: "Legendary isn't installed", fix: null, logout: false }
+        return legendaryError
+          ? { name: null, problem: legendaryError, fix: null, logout: false }
+          : { name: 'Epic games need Legendary, a free open-source tool.', problem: null, fix: null, logout: false }
       default:
         return { name: 'Checking…', problem: null, fix: null, logout: false }
     }
@@ -345,6 +365,11 @@
                 <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
               </button>
             {/if}
+            {#if view.epic === 'noLegendary'}
+              <button class="btn" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
+                {legendaryJob ? jobLabel('Installing', legendaryJob) : 'Install Legendary'}
+              </button>
+            {/if}
             {#if epic.fix}
               <button class="btn" disabled={loggingIn} onclick={onlogin}>{loggingIn ? 'Logging in…' : epic.fix}</button>
             {/if}
@@ -411,6 +436,15 @@
                 <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? 'Syncing…' : 'Sync'}</button>
               </div>
               {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
+              {#if legendary?.update}
+                <div class="row">
+                  <div>Legendary {legendary.version ?? ''}<span>{legendary.pinned} is available.</span></div>
+                  <button class="btn" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
+                    {legendaryJob ? jobLabel('Updating', legendaryJob) : 'Update'}
+                  </button>
+                </div>
+                {#if legendaryError}<p class="note" title={legendaryError}>{legendaryError}</p>{/if}
+              {/if}
             </div>
           {/if}
         </div>

@@ -11,7 +11,6 @@ use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -29,7 +28,7 @@ pub enum InstallEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Login {
-    /// `legendary.exe` isn't on PATH or in `%LOCALAPPDATA%\Programs\legendary`.
+    /// `legendary.exe` is in none of the places `tools::LEGENDARY.exe()` looks.
     NoLegendary,
     LoggedOut,
     LoggedIn,
@@ -566,23 +565,6 @@ pub fn login_state() -> Login {
     }
 }
 
-/// Legendary's own version, for About. Asked once per app run; Settings reads it on every open.
-pub fn legendary_version() -> Option<String> {
-    static VERSION: OnceLock<Option<String>> = OnceLock::new();
-    VERSION
-        .get_or_init(|| {
-            let output = legendary(&["--version"]).output().ok()?;
-            parse_legendary_version(&String::from_utf8_lossy(&output.stdout))
-        })
-        .clone()
-}
-
-/// `legendary version "0.21.1", codename "Lowlife"` -> `0.21.1`
-fn parse_legendary_version(text: &str) -> Option<String> {
-    let version = text.split('"').nth(1)?;
-    (!version.is_empty()).then(|| version.to_owned())
-}
-
 /// Hands a code from the login window to Legendary, which stores the session.
 /// The code is single-use and short-lived; Legendary only accepts it as an argument.
 pub fn log_in(authorization_code: &str) -> Result<(), Error> {
@@ -594,11 +576,9 @@ pub fn log_out() -> Result<(), Error> {
     run(legendary(&["auth", "--delete"]))
 }
 
-/// `%LOCALAPPDATA%\Programs\legendary\legendary.exe` if present (no PATH edit needed), else `legendary` on PATH.
+/// Ours first, then the owner's own install (`tools::LEGENDARY`).
 fn legendary_exe() -> PathBuf {
-    let local = directories::BaseDirs::new()
-        .map(|d| d.data_local_dir().join("Programs").join("legendary").join("legendary.exe"));
-    local.filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from("legendary"))
+    crate::tools::LEGENDARY.exe()
 }
 
 fn legendary(args: &[&str]) -> Command {
@@ -1205,14 +1185,6 @@ mod tests {
     fn download_size_from_info_handles_missing_fields() {
         assert_eq!(download_size_from_info(&serde_json::json!({})), None);
         assert_eq!(download_size_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })), None);
-    }
-
-    #[test]
-    fn parses_the_legendary_version() {
-        assert_eq!(parse_legendary_version("legendary version \"0.21.1\", codename \"Lowlife\"
-").as_deref(), Some("0.21.1"));
-        assert_eq!(parse_legendary_version("something else"), None);
-        assert_eq!(parse_legendary_version("legendary version \"\""), None);
     }
 
     #[test]

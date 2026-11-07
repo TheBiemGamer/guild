@@ -28,6 +28,7 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
 - **Network** work runs in the background and is throttled, and it fails quietly: a dot in Settings, no banners.
   - Steam CM logons must not fan out. Use the single-flight guards.
 - **Logging:** app code logs through `log!` (`src-tauri/src/log.rs`, writes `logs/launcher.log` in the local data folder), never `eprintln!`. The log rule for secrets above applies.
+- **Store tools** (Legendary, gogdl, Nile) are pinned in `src-tauri/src/tools.rs` and SHA-256-checked before use; bump one by changing its version, URL and hash together.
 - **New OS-specific code** goes behind `src-tauri/src/platform.rs` with `#[cfg(windows)]`. Linux may come later.
 - **UI** follows `DESIGN.md` (tokens, components, motion). Update it whenever the UI changes.
 - **Dependencies:** ask the owner before adding a crate or npm package.

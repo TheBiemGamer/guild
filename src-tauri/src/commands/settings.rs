@@ -11,6 +11,7 @@ use steam_vent::{Connection as Session, ConnectionError, EResult, LoginError, Ne
 use tokio::sync::mpsc;
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -23,6 +24,7 @@ use crate::library::ProviderKind;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
 use crate::steam_owned;
+use crate::tools;
 
 /// Opens Epic's login window, hands the code to Legendary, then loads the Epic library.
 #[tauri::command]
@@ -102,6 +104,22 @@ pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     .await
 }
 
+/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Legendary then rescans Epic,
+/// so the card moves on to Log in.
+#[tauri::command]
+pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>) -> Res<()> {
+    let tool = tools::find(&name).ok_or("Unknown tool.")?;
+    let http = app.state::<AppState>().http.clone();
+    tools::install(&http, tool, |percent| {
+        let _ = on_percent.send(percent);
+    })
+    .await?;
+    if tool.name == tools::LEGENDARY.name {
+        blocking(move || rescan(&app, true)).await;
+    }
+    Ok(())
+}
+
 /// The owned-games login, separate from the local install.
 #[derive(Serialize)]
 pub struct SteamLibrary {
@@ -135,6 +153,7 @@ pub struct SettingsView {
     notify_downloads: bool,
     app_version: String,
     legendary_version: Option<String>,
+    tools: Vec<tools::ToolView>,
     cache_bytes: u64,
 }
 
@@ -168,7 +187,8 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
-            legendary_version: epic::legendary_version(),
+            legendary_version: tools::version(&tools::LEGENDARY),
+            tools: tools::view(),
             cache_bytes,
         })
     })

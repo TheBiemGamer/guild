@@ -18,7 +18,7 @@ A Windows launcher that shows your Steam and Epic Games libraries as one library
 
 - Windows 10 or 11
 - [Steam](https://store.steampowered.com/about/), for Steam games
-- [Legendary](https://github.com/derrod/legendary/releases), for Epic games. Put `legendary.exe` on your `PATH` or in `%LOCALAPPDATA%\Programs\legendary`.
+- [Legendary](https://github.com/derrod/legendary), for Epic games. **Settings → Accounts** installs it when you ask (a pinned release, checked against its SHA-256). Or put your own `legendary.exe` on your `PATH` or in `%LOCALAPPDATA%\Programs\legendary`.
 - Optional, for how long to beat: a free Twitch developer application (see below)
 
 ## Install
@@ -54,6 +54,9 @@ A Steam and an Epic copy merge only when [GOG GamesDB](https://gamesdb.gog.com) 
 - **IGDB (via Twitch):** how long to beat, only if you add credentials
 - **SteamGridDB:** covers for games you add yourself, only if you add an API key
 - **Store image servers** (Steam, Epic, GOG): cover art and screenshots
+- **GitHub:** downloads a store tool's official release when you ask Settings to install it
+
+Third-party tools (GPL-3.0, downloaded from their official releases only when you ask): [Legendary](https://github.com/derrod/legendary) for Epic, [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl) for GOG, [Nile](https://github.com/imLinguin/nile) for Amazon.
 
 Some of these connections are unofficial and can break when a store changes its API. When one fails, a dot appears on the Settings button.
 
