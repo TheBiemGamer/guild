@@ -21,6 +21,7 @@ specta-typescript = "=0.0.13"
 steam-vent = { git = "https://codeberg.org/steam-vent/steam-vent", rev = "b0e40109dd7a1b5101e1546ed27f62663dbe5c4b" }
 steam-vent-proto-steam = "0.5.2"
 steamlocate = "2.1"
+thiserror = "2"
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"

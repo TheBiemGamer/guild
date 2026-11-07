@@ -36,7 +36,7 @@ use crate::tools;
 pub async fn epic_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
         let code = epic_login::run(&app)?.ok_or(msg!(loginWindowClosed))?;
-        epic::log_in(&code).map_err(Msg::from)?;
+        epic::log_in(&code)?;
         rescan(&app, true);
         Ok(())
     })
@@ -54,7 +54,7 @@ pub fn dismiss_epic_notice(state: State<'_, AppState>) {
 #[specta::specta]
 pub async fn epic_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
-        epic::log_out().map_err(Msg::from)?;
+        epic::log_out()?;
         note_signed_out(&app, "epic");
         rescan(&app, true);
         // The user did this; it isn't news.
@@ -70,7 +70,7 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
 pub async fn gog_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
         let code = gog_login::run(&app)?.ok_or(msg!(loginWindowClosed))?;
-        gog::log_in(&code).map_err(Msg::from)?;
+        gog::log_in(&code)?;
         rescan(&app, true);
         fill_twins(app.clone());
         Ok(())
@@ -83,7 +83,7 @@ pub async fn gog_log_in(app: AppHandle) -> Res<()> {
 #[specta::specta]
 pub async fn gog_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
-        gog::log_out().map_err(Msg::from)?;
+        gog::log_out()?;
         note_signed_out(&app, "gog");
         rescan(&app, true);
         Ok(())
@@ -97,11 +97,11 @@ pub async fn gog_log_out(app: AppHandle) -> Res<()> {
 #[specta::specta]
 pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
-        let sign_in = amazon::sign_in().map_err(Msg::from)?;
+        let sign_in = amazon::sign_in()?;
         // Starting may have logged a stale account out.
         app.state::<AppState>().lock().amazon_login = Some(amazon::login());
         let code = amazon_login::run(&app, &sign_in.url)?.ok_or(msg!(loginWindowClosed))?;
-        amazon::register(&sign_in, &code).map_err(Msg::from)?;
+        amazon::register(&sign_in, &code)?;
         rescan(&app, true);
         fill_twins(app.clone());
         Ok(())
@@ -114,7 +114,7 @@ pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
 #[specta::specta]
 pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
-        amazon::log_out().map_err(Msg::from)?;
+        amazon::log_out()?;
         note_signed_out(&app, "amazon");
         rescan(&app, true);
         Ok(())
@@ -220,11 +220,11 @@ pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
 pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let id = gog::import(std::path::Path::new(&path)).map_err(Msg::from)?;
+        let id = gog::import(std::path::Path::new(&path))?;
         let key = ProviderKind::Gog.key(&id);
         let title = state.game(&key).map(|g| g.title).ok_or(msg!(notInGogLibrary))?;
-        let conn = cache::db::open(&state.dirs.db).map_err(Msg::from)?;
-        gog::record_install(&conn, &id, std::path::Path::new(&path)).map_err(Msg::from)?;
+        let conn = cache::db::open(&state.dirs.db)?;
+        gog::record_install(&conn, &id, std::path::Path::new(&path))?;
         rescan(&app, true);
         Ok(title)
     })
@@ -318,7 +318,7 @@ pub struct SettingsView {
 pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let conn = cache::db::open(&state.dirs.db).map_err(Msg::from)?;
+        let conn = cache::db::open(&state.dirs.db)?;
         let saved = settings::load(&conn);
         let epic = state.lock().epic_login;
         let epic_account = if epic == Some(Login::LoggedIn) { crate::epic_playtime::account_name() } else { None };
@@ -390,7 +390,7 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
             return done.map_err(|e| msg!(cantChangeStartup, detail = e.to_string()));
         }
         let state = app.state::<AppState>();
-        let conn = cache::db::open(&state.dirs.db).map_err(Msg::from)?;
+        let conn = cache::db::open(&state.dirs.db)?;
         settings::update(&conn, &name, value.as_deref())?;
         if name == settings::IGDB_CLIENT_ID {
             state.igdb.lock().expect("token cache lock poisoned").reset();
@@ -561,8 +561,8 @@ fn save_login(app: &AppHandle, approved: steam_login::Approved) -> Res<()> {
         return Err(msg!(steamNoAccount));
     }
     // Account first, so there is never a token without an account.
-    let conn = cache::db::open(&state.dirs.db).map_err(Msg::from)?;
-    cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, Some(&approved.account)).map_err(Msg::from)?;
+    let conn = cache::db::open(&state.dirs.db)?;
+    cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, Some(&approved.account))?;
     if let Err(e) = settings::set_steam_token(Some(&approved.refresh_token)) {
         _ = cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, None);
         return Err(e);
@@ -607,8 +607,8 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
     blocking(move || {
         let state = app.state::<AppState>();
         settings::set_steam_token(None)?;
-        let conn = cache::db::open(&state.dirs.db).map_err(Msg::from)?;
-        cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, None).map_err(Msg::from)?;
+        let conn = cache::db::open(&state.dirs.db)?;
+        cache::db::set_setting(&conn, settings::STEAM_ACCOUNT, None)?;
         steam_owned::forget(&conn);
         {
             let mut s = state.lock();

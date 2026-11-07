@@ -10,7 +10,6 @@ use super::{allow, blocking, open_db, unix_now, AppState, Res};
 use crate::cache;
 use crate::library::custom::{self, CustomGame};
 use crate::library::Image;
-use crate::msg::Msg;
 use crate::settings;
 use crate::steamgriddb;
 
@@ -72,7 +71,7 @@ pub async fn save_custom_game(
     blocking(move || {
         let state = app.state::<AppState>();
         let conn = open_db(&state).ok_or(msg!(noDb))?;
-        let existing = cache::db::custom_game(&conn, &id).map_err(Msg::system)?;
+        let existing = cache::db::custom_game(&conn, &id)?;
         if key.is_some() && existing.is_none() {
             return Err(msg!(gameNotInLibrary));
         }
@@ -86,7 +85,7 @@ pub async fn save_custom_game(
             if existing.is_none() {
                 _ = std::fs::remove_dir_all(&dir);
             }
-            return Err(Msg::system(e));
+            return Err(e.into());
         }
         rescan(&app, false);
         Ok(row_key(&id))
@@ -106,7 +105,7 @@ pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
         let state = app.state::<AppState>();
         let id = custom::id_of(&key).ok_or(msg!(notAddedGame))?;
         let conn = open_db(&state).ok_or(msg!(noDb))?;
-        cache::db::delete_custom_game(&conn, id).map_err(Msg::system)?;
+        cache::db::delete_custom_game(&conn, id)?;
         match std::fs::remove_dir_all(state.dirs.custom.join(id)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => log!("remove cover {key}: {e}"),
             _ => {}

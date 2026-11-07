@@ -425,7 +425,7 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
     let result = match action {
         Action::Play | Action::PlayOutdated => {
             let conn = open_db(state).ok_or(msg!(noDb))?;
-            let row = cache::db::custom_game(&conn, &game.external_id).map_err(Msg::from)?.ok_or(msg!(gameNotInLibrary))?;
+            let row = cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
             crate::library::custom::launch(&row).map(|exe| {
                 record_play(state, &key);
@@ -693,7 +693,7 @@ pub async fn set_launch_options(app: AppHandle, key: String, mut options: Launch
     blocking(move || {
         if let Some(exe) = &options.exe {
             let dir = installed_dir(&game).ok_or(msg!(noInstallFolder))?;
-            options.exe = Some(epic::override_exe(dir, exe).map_err(Msg::from)?);
+            options.exe = Some(epic::override_exe(dir, exe)?);
         }
         let conn = open_db(&app.state::<AppState>()).ok_or(msg!(noDb))?;
         store_launch_options(&conn, &key, &options)?;
@@ -1401,7 +1401,7 @@ pub async fn test_igdb(app: AppHandle) -> Res<()> {
     let (client_id, secret) = {
         let app = app.clone();
         blocking(move || {
-            let conn = cache::db::open(&app.state::<AppState>().dirs.db).map_err(Msg::from)?;
+            let conn = cache::db::open(&app.state::<AppState>().dirs.db)?;
             let client_id = settings::load(&conn).igdb_client_id.ok_or(msg!(enterClientId))?;
             let secret = settings::secret().ok_or(msg!(saveClientSecret))?;
             Ok::<_, Msg>((client_id, secret))

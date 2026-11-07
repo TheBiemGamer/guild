@@ -196,7 +196,7 @@ async fn download(
     tool: &Tool,
     part: &Path,
     mut on_percent: impl FnMut(u8),
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::library::Error> {
     let mut response = http.get(tool.url).timeout(DOWNLOAD_TIMEOUT).send().await?.error_for_status()?;
     let total = response.content_length().filter(|&n| n > 0);
     fs::create_dir_all(part.parent().expect("a tool path has a folder"))?;
@@ -223,7 +223,7 @@ async fn download(
 #[cfg(test)]
 pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Result<(), Msg> {
     let (part, dest) = (tool.managed(root).with_extension("exe.part"), tool.managed(root));
-    let digest = download(http, tool, &part, |_| {}).await.map_err(Msg::system)?;
+    let digest = download(http, tool, &part, |_| {}).await?;
     place(&part, &dest, &digest, tool.sha256)
 }
 

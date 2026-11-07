@@ -66,9 +66,9 @@ impl From<Msg> for Param {
 /// A store error keeps its `Msg` if it is one; anything else is `system`.
 impl From<crate::library::Error> for Msg {
     fn from(e: crate::library::Error) -> Self {
-        match e.downcast::<Msg>() {
-            Ok(m) => *m,
-            Err(e) => Self::system(e),
+        match e {
+            crate::library::Error::Msg(m) => m,
+            e => Self::system(e),
         }
     }
 }

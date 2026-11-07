@@ -9,7 +9,38 @@ pub mod steam;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+/// What store, tool, database and file work can fail with. `Msg::from` is the one place it becomes text for the
+/// owner: a `Msg` stays as it is, everything else is `system` with its own words as the detail.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    Msg(#[from] crate::msg::Msg),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    SteamFiles(#[from] steamlocate::Error),
+    /// A tool's or service's own words.
+    #[error("{0}")]
+    Text(String),
+}
+
+impl From<String> for Error {
+    fn from(s: String) -> Self {
+        Self::Text(s)
+    }
+}
+
+impl From<&str> for Error {
+    fn from(s: &str) -> Self {
+        Self::Text(s.into())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename = "Store")] // its TypeScript name

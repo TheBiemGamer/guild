@@ -553,7 +553,7 @@ pub fn login_state() -> Login {
     match json(&["status", "--json"]) {
         Ok(status) if status["account"] == "<not logged in>" => Login::LoggedOut,
         Ok(_) => Login::LoggedIn,
-        Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == ErrorKind::NotFound) => {
+        Err(Error::Io(e)) if e.kind() == ErrorKind::NotFound => {
             Login::NoLegendary
         }
         // `status` refreshes the session online and exits 1 when that fails.

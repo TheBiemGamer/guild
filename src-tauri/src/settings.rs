@@ -96,7 +96,7 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
 pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), Msg> {
     let value = value.map(str::trim).filter(|v| !v.is_empty());
     validate(name, value)?;
-    db::set_setting(conn, name, value).map_err(Msg::system)
+    db::set_setting(conn, name, value).map_err(Msg::from)
 }
 
 /// `current` when it is newer than the version that last started here, so the UI says "Updated to" once.
@@ -122,7 +122,7 @@ pub fn signed_out(conn: &Connection, store: &str) -> bool {
 }
 
 pub fn set_signed_out(conn: &Connection, store: &str, on: bool) -> Result<(), Msg> {
-    db::set_setting(conn, &format!("signed_out_{store}"), on.then_some("true")).map_err(Msg::system)
+    db::set_setting(conn, &format!("signed_out_{store}"), on.then_some("true")).map_err(Msg::from)
 }
 
 const SERVICE: &str = "dev.noah.gamelauncher";

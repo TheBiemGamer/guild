@@ -131,8 +131,8 @@ pub fn cached(conn: &Connection) -> Option<(Vec<OwnedGame>, i64)> {
 
 pub fn remember(conn: &Connection, games: &[OwnedGame], now_secs: i64) {
     let saved = serde_json::to_string(games)
-        .map_err(|e| e.to_string())
-        .and_then(|json| put_info(conn, OWNED_KEY, OWNED, &json, now_secs).map_err(|e| e.to_string()));
+        .map_err(crate::library::Error::from)
+        .and_then(|json| put_info(conn, OWNED_KEY, OWNED, &json, now_secs));
     if let Err(e) = saved {
         log!("steam owned save: {e}");
     }

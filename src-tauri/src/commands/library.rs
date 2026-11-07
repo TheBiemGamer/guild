@@ -212,14 +212,14 @@ pub struct ViewPrefs {
 pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     blocking(move || {
         let state = app.state::<AppState>();
-        let conn = cache::db::open(&state.dirs.db).map_err(Msg::system)?;
-        let mut games = cache::db::load(&conn).map_err(Msg::system)?;
-        view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(Msg::system)?);
+        let conn = cache::db::open(&state.dirs.db)?;
+        let mut games = cache::db::load(&conn)?;
+        view::merge_last_played(&mut games, &cache::db::launches(&conn)?);
         epic_playtime::merge(&conn, &mut games);
         view::sort_by_title(&mut games);
         let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
         let ttb = crate::igdb::all_normally(&conn);
-        let lists = cache::db::lists(&conn).map_err(Msg::system)?;
+        let lists = cache::db::lists(&conn)?;
         let mut s = state.lock();
         s.ttb = ttb;
         s.lists = lists;

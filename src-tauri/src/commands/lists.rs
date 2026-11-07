@@ -31,7 +31,7 @@ fn change<T>(app: &AppHandle, f: impl FnOnce(&mut rusqlite::Connection) -> Res<T
     let state = app.state::<AppState>();
     let mut conn = open_db(&state).ok_or(msg!(noDb))?;
     let out = f(&mut conn)?;
-    let lists = cache::db::lists(&conn).map_err(Msg::system)?;
+    let lists = cache::db::lists(&conn)?;
     state.lock().lists = lists;
     Ok(out)
 }
@@ -40,7 +40,7 @@ async fn set_flag(app: AppHandle, key: String, name: &'static str, on: bool) -> 
     blocking(move || {
         let keys = copy_keys(&app.state::<AppState>(), &key)?;
         change(&app, |conn| {
-            keys.iter().try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1"))).map_err(Msg::system)
+            keys.iter().try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1"))).map_err(Msg::from)
         })
     })
     .await
@@ -91,7 +91,7 @@ fn check_name(name: &str, taken: &[(i64, String)], except: Option<i64>) -> Res<S
 }
 
 fn collections_in(conn: &rusqlite::Connection) -> Res<Vec<(i64, String)>> {
-    cache::db::collections(conn).map_err(Msg::system)
+    cache::db::collections(conn).map_err(Msg::from)
 }
 
 /// Returns the new collection's id.
@@ -101,7 +101,7 @@ pub async fn create_collection(app: AppHandle, name: String) -> Res<i64> {
     blocking(move || {
         change(&app, |conn| {
             let name = check_name(&name, &collections_in(conn)?, None)?;
-            cache::db::create_collection(conn, &name).map_err(Msg::system)
+            cache::db::create_collection(conn, &name).map_err(Msg::from)
         })
     })
     .await
@@ -113,7 +113,7 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
     blocking(move || {
         change(&app, |conn| {
             let name = check_name(&name, &collections_in(conn)?, Some(id))?;
-            cache::db::rename_collection(conn, id, &name).map_err(Msg::system)
+            cache::db::rename_collection(conn, id, &name).map_err(Msg::from)
         })
     })
     .await
@@ -123,7 +123,7 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_collection(app: AppHandle, id: i64) -> Res<()> {
-    blocking(move || change(&app, |conn| cache::db::delete_collection(conn, id).map_err(Msg::system))).await
+    blocking(move || change(&app, |conn| cache::db::delete_collection(conn, id).map_err(Msg::from))).await
 }
 
 #[tauri::command]
@@ -135,7 +135,7 @@ pub async fn set_in_collection(app: AppHandle, key: String, id: i64, on: bool) -
             if !collections_in(conn)?.iter().any(|(c, _)| *c == id) {
                 return Err(msg!(collectionGone));
             }
-            cache::db::set_in_collection(conn, id, &keys, on).map_err(Msg::system)
+            cache::db::set_in_collection(conn, id, &keys, on).map_err(Msg::from)
         })
     })
     .await
