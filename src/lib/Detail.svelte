@@ -219,7 +219,17 @@
     syncing = false
   }
 
-  const labels: Record<Action, string> = { play: 'Launching…', playOutdated: 'Launching…', install: 'Installing…', update: 'Updating…', uninstall: 'Uninstalling…' }
+  const labels: Record<Action, string> = {
+    play: 'Launching…',
+    playOutdated: 'Launching…',
+    install: 'Installing…',
+    update: 'Updating…',
+    uninstall: 'Uninstalling…',
+    verify: 'Verifying…',
+    move: 'Moving…',
+  }
+  /** Epic runs these in Legendary, so they can be cancelled. */
+  const cancellable = ['Installing…', 'Updating…', 'Verifying…', 'Moving…']
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false
@@ -246,6 +256,14 @@
     } catch (e) {
       onerror(api.message(e))
     }
+  }
+
+  /** Epic moves into a picked folder; Steam opens its own storage manager. */
+  async function move() {
+    const key = copy!.key
+    if (copy!.provider !== 'epic') return act('move', key)
+    const dest = await api.pickFolder().catch((e) => (onerror(api.message(e)), null))
+    if (dest) act('move', key, { dest })
   }
 
   // Steam asks in its own dialog; Legendary doesn't, so Epic asks here first.
@@ -494,7 +512,7 @@
                   )
                 }}
               />
-              {#if (busy === 'Installing…' || busy === 'Updating…') && copy!.provider === 'epic'}
+              {#if busy && cancellable.includes(busy) && copy!.provider === 'epic'}
                 <button class="glass round" onclick={cancel}>Cancel</button>
               {/if}
             {/if}
@@ -581,7 +599,7 @@
           </div>
         </section>
       {:else if current === 'installation'}
-        <!-- Acts on the chosen copy, like the ⋯ menu. Verify and Move come with Task 23. -->
+        <!-- Acts on the chosen copy, like the ⋯ menu. -->
         <section class="panel rows" aria-label="Installation">
           {#if copy!.installDir}
             <div class="row">
@@ -597,6 +615,18 @@
             </div>
           {/if}
           {#if copy!.installed}
+            <div class="row">
+              <div class="what">
+                Verify files<small>{copy!.provider === 'steam' ? 'Steam checks the files in its own window.' : 'Checks every file and repairs bad or missing ones.'}</small>
+              </div>
+              <button class="chip" disabled={!!busy || running} onclick={() => act('verify')}>Verify files</button>
+            </div>
+            <div class="row">
+              <div class="what">
+                Move<small>{copy!.provider === 'steam' ? 'Opens Steam’s storage manager.' : 'Moves the game folder into another folder on the same drive.'}</small>
+              </div>
+              <button class="chip" disabled={!!busy || running} onclick={move}>Move…</button>
+            </div>
             <div class="row">
               <div class="what">
                 Uninstall<small>Removes the {storeNames[copy!.provider]} copy{copy!.provider === 'steam' ? ' in Steam’s own dialog' : ' and deletes its files'}.</small>

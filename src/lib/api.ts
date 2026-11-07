@@ -1,10 +1,11 @@
 // Typed wrappers for the Rust commands in src-tauri/src/commands.rs.
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 
 export type Store = 'steam' | 'epic'
 export type Sort = 'title' | 'lastPlayed' | 'playtime'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
-export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall'
+export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
  * `stores`: every store this game is in, the one `key` belongs to first. `chosen`: the copy key Play and
@@ -94,9 +95,9 @@ export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refre
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 /**
  * `withDlc`: an Epic install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the Epic copy `key`.
- * `keep`: the answer to the cloud save conflict an earlier Play returned.
+ * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic Move goes to.
  */
-export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: 'cloud' | 'local' }
+export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: 'cloud' | 'local'; dest?: string }
 /** Which save is newer when an Epic Play stopped to ask before launching. */
 export type Conflict = 'localNewer' | 'cloudNewer'
 /** Resolves to a conflict when an Epic Play asks first instead of launching; null otherwise. */
@@ -178,6 +179,15 @@ export const cancelInstall = (key: string) => invoke<void>('cancel_install', { k
 export const poll = () => invoke<Poll>('poll')
 export const epicLogIn = () => invoke<void>('epic_log_in')
 export const epicLogOut = () => invoke<void>('epic_log_out')
+/** Owned Epic games that aren't installed, by title, for "Import an existing install". */
+export const epicImportable = () => invoke<{ key: string; title: string }[]>('epic_importable')
+export const epicImport = (key: string, path: string) => invoke<void>('epic_import', { key, path })
+export const epicEglSync = () => invoke<void>('epic_egl_sync')
+/** The system folder picker; null when it was closed without picking. */
+export async function pickFolder(): Promise<string | null> {
+  const path = await open({ directory: true })
+  return typeof path === 'string' ? path : null
+}
 export const dismissEpicNotice = () => invoke<void>('dismiss_epic_notice')
 export const settingsView = () => invoke<SettingsView>('settings_view')
 /** `null` resets a setting to its default. Booleans travel as "true" / "false". */

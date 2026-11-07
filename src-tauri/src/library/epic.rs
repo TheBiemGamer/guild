@@ -222,15 +222,154 @@ pub fn install(
     if let Some(dir) = base_path {
         command.arg("--base-path").arg(dir);
     }
-    stream(command, on_event)
+    stream(command, "Installing", on_event)
 }
 
 /// Updates an installed game (Legendary's app name) like `install`: same events, same cancel.
 pub fn update(app_name: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
-    stream(legendary(&["-y", "update", app_name, "--skip-sdl"]), on_event)
+    stream(legendary(&["-y", "update", app_name, "--skip-sdl"]), "Installing", on_event)
 }
 
-fn stream(mut command: Command, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+// Verbs and flags below are from Legendary 0.21.1's `--help` for each command and its `cli.py`.
+
+fn verify_args(app_name: &str) -> Vec<&str> {
+    vec!["verify", app_name]
+}
+
+/// `repair` is an alias of `install` that turns on repair mode. It reuses the repair file `verify` just
+/// wrote, redownloads only the bad and missing files, and doesn't update the game.
+fn repair_args(app_name: &str) -> Vec<&str> {
+    vec!["-y", "repair", app_name, "--skip-sdl"]
+}
+
+/// Moves the game folder into `dest`. Never `--skip-move`, which only rewrites Legendary's record.
+fn move_args<'a>(app_name: &'a str, dest: &'a str) -> Vec<&'a str> {
+    vec!["move", app_name, dest]
+}
+
+/// `--with-dlcs` imports the DLC found in the folder too, without asking.
+fn import_args<'a>(app_name: &'a str, path: &'a str) -> Vec<&'a str> {
+    vec!["import", "--with-dlcs", app_name, path]
+}
+
+/// Takes games installed by the Epic Games Launcher, once: nothing is exported to it and automatic sync stays off.
+fn egl_sync_args() -> Vec<&'static str> {
+    vec!["-y", "egl-sync", "--import-only", "--one-shot"]
+}
+
+/// What `legendary verify` found.
+#[derive(Debug, PartialEq, Eq)]
+enum Verify {
+    Ok,
+    /// Some files are bad or missing.
+    Repair,
+}
+
+/// Verifies an installed game's files, then repairs the bad or missing ones, like `install`: same events,
+/// same cancel. Verify reports progress as it checks files, repair as it downloads.
+pub fn verify(app_name: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+    let (success, log) = run_logged(legendary(&verify_args(app_name)), &mut on_event)?;
+    match parse_verify(success, &log)? {
+        Verify::Ok => Ok(()),
+        Verify::Repair => stream(legendary(&repair_args(app_name)), "Repairing", on_event),
+    }
+}
+
+/// Moves an installed game's folder into `dest`, with the same events and cancel as `install`.
+/// Legendary 0.21 renames the folder, so another drive fails with its message.
+pub fn move_to(app_name: &str, dest: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+    let (success, log) = run_logged(legendary(&move_args(app_name, dest)), on_event)?;
+    Ok(log_outcome(success, &log, Some("Finished."))?)
+}
+
+/// Makes Legendary take an existing install of an owned game at `path`.
+pub fn import(app_name: &str, path: &str) -> Result<(), Error> {
+    import_requires_existing_folder(Path::new(path))?;
+    let (success, log) = run_logged(legendary(&import_args(app_name, path)), |_| {})?;
+    Ok(log_outcome(success, &log, Some("has been imported."))?)
+}
+
+fn import_requires_existing_folder(path: &Path) -> Result<(), String> {
+    if path.is_dir() { Ok(()) } else { Err(format!("Not a folder: {}", path.display())) }
+}
+
+/// Imports the games the Epic Games Launcher installed.
+pub fn egl_sync() -> Result<(), Error> {
+    let (success, log) = run_logged(legendary(&egl_sync_args()), |_| {})?;
+    Ok(log_outcome(success, &log, None)?)
+}
+
+/// Runs a Legendary command, reporting its pid and `verify`'s progress, and returns whether it exited 0
+/// and its log (stderr). stdin is closed, so a prompt ends the command instead of hanging it.
+fn run_logged(mut command: Command, mut on_event: impl FnMut(InstallEvent)) -> Result<(bool, String), Error> {
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    on_event(InstallEvent::Started(child.id()));
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    // Read aside, so a full pipe never stalls the process.
+    let reader = std::thread::spawn(move || {
+        let mut log = Vec::new();
+        _ = stderr.read_to_end(&mut log);
+        String::from_utf8_lossy(&log).into_owned()
+    });
+    // Verify rewrites its progress line in place, ending each with `\r`.
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let mut chunk = Vec::new();
+    while stdout.read_until(b'\r', &mut chunk)? > 0 {
+        if let Some(progress) = parse_verify_progress(&String::from_utf8_lossy(&chunk)) {
+            on_event(InstallEvent::Progress(progress));
+        }
+        chunk.clear();
+    }
+    let status = child.wait()?;
+    Ok((status.success(), reader.join().unwrap_or_default()))
+}
+
+/// `Verification progress: 12/345 (3.5%) [10.0 MiB/s]` (stdout).
+fn parse_verify_progress(line: &str) -> Option<Progress> {
+    let (_, rest) = line.split_once("Verification progress: ")?;
+    let (files, rest) = rest.split_once(" (")?;
+    let (num, total) = files.split_once('/')?;
+    let percent: f32 = rest.split('%').next()?.parse().ok()?;
+    let text = format!("Verifying {percent:.0}% · {num} of {total} files");
+    Some(Progress { fraction: (percent / 100.0).clamp(0.0, 1.0), text })
+}
+
+/// Reads `verify`'s log (`verify_game` in 0.21's `cli.py`), which exits 0 whatever it found.
+fn parse_verify(success: bool, log: &str) -> Result<Verify, String> {
+    if success && log.contains("Verification finished successfully.") {
+        Ok(Verify::Ok)
+    } else if success && log.contains("Verification failed, ") {
+        Ok(Verify::Repair)
+    } else {
+        Err(log_error(log))
+    }
+}
+
+/// Legendary 0.21 exits 0 after most failures, so the log decides: it worked when it exited 0 and logged
+/// the `done` line, or, without one, logged no error.
+fn log_outcome(success: bool, log: &str, done: Option<&str>) -> Result<(), String> {
+    let finished = match done {
+        Some(done) => log.lines().any(|l| l.trim_end().ends_with(done)),
+        None => !log.lines().any(is_error_line),
+    };
+    if success && finished { Ok(()) } else { Err(log_error(log)) }
+}
+
+/// `[cli] ERROR: …` or `[cli] CRITICAL: …` (`logger.fatal`).
+fn is_error_line(line: &str) -> bool {
+    line.contains("] ERROR: ") || line.contains("] CRITICAL: ")
+}
+
+/// The last error in a log, else its last line, without the `[cli] ERROR: ` head.
+fn log_error(log: &str) -> String {
+    let lines = || log.lines().rev().map(str::trim).filter(|l| !l.is_empty());
+    let Some(line) = lines().find(|l| is_error_line(l)).or_else(|| lines().next()) else {
+        return "Legendary gave no reason.".into();
+    };
+    line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m).to_owned()
+}
+
+fn stream(mut command: Command, verb: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
     let mut child = command
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -239,7 +378,7 @@ fn stream(mut command: Command, mut on_event: impl FnMut(InstallEvent)) -> Resul
     let mut downloaded_mib = 0.0;
     let mut last_line = String::new();
     for line in BufReader::new(child.stderr.take().expect("stderr is piped")).lines().map_while(Result::ok) {
-        if let Some(progress) = parse_progress(&line, &mut downloaded_mib) {
+        if let Some(progress) = parse_progress(&line, verb, &mut downloaded_mib) {
             on_event(InstallEvent::Progress(progress));
         }
         if !line.trim().is_empty() {
@@ -269,7 +408,7 @@ pub fn cancel(pid: u32) -> Result<(), Error> {
 /// `= Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:00`
 /// ` - Downloaded: 123.45 MiB, Written: 234.56 MiB`
 /// The Downloaded line follows the Progress line, so the text shows the previous second's total.
-fn parse_progress(line: &str, downloaded_mib: &mut f64) -> Option<Progress> {
+fn parse_progress(line: &str, verb: &str, downloaded_mib: &mut f64) -> Option<Progress> {
     if let Some((_, rest)) = line.split_once(" - Downloaded: ") {
         if let Some(mib) = rest.split_whitespace().next().and_then(|n| n.parse().ok()) {
             *downloaded_mib = mib;
@@ -279,7 +418,7 @@ fn parse_progress(line: &str, downloaded_mib: &mut f64) -> Option<Progress> {
     let (_, rest) = line.split_once("= Progress: ")?;
     let percent: f32 = rest.split('%').next()?.trim().parse().ok()?;
     let eta = rest.split_once("ETA: ").map_or("--:--:--", |(_, eta)| eta.trim());
-    let text = format!("Installing {percent:.0}% · {:.1} GB downloaded · {eta} left", *downloaded_mib / 1024.0);
+    let text = format!("{verb} {percent:.0}% · {:.1} GB downloaded · {eta} left", *downloaded_mib / 1024.0);
     Some(Progress { fraction: (percent / 100.0).clamp(0.0, 1.0), text })
 }
 
@@ -777,17 +916,87 @@ mod tests {
     fn parses_legendary_progress_lines() {
         let mut mib = 0.0;
         let progress = "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05";
-        let first = parse_progress(progress, &mut mib).unwrap();
+        let first = parse_progress(progress, "Installing", &mut mib).unwrap();
         assert!((first.fraction - 0.1234).abs() < 1e-6);
         assert_eq!(first.text, "Installing 12% · 0.0 GB downloaded · 00:01:05 left");
 
-        assert_eq!(parse_progress("[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB", &mut mib), None);
+        assert_eq!(parse_progress("[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB", "Installing", &mut mib), None);
         assert_eq!(mib, 2048.0);
-        assert_eq!(parse_progress(progress, &mut mib).unwrap().text, "Installing 12% · 2.0 GB downloaded · 00:01:05 left");
+        assert_eq!(parse_progress(progress, "Installing", &mut mib).unwrap().text, "Installing 12% · 2.0 GB downloaded · 00:01:05 left");
+        assert_eq!(parse_progress(progress, "Repairing", &mut mib).unwrap().text, "Repairing 12% · 2.0 GB downloaded · 00:01:05 left");
 
         // Other log lines and broken numbers are ignored.
-        assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", &mut mib), None);
-        assert_eq!(parse_progress("= Progress: abc%", &mut mib), None);
+        assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", "Installing", &mut mib), None);
+        assert_eq!(parse_progress("= Progress: abc%", "Installing", &mut mib), None);
+    }
+
+    #[test]
+    fn manage_install_args() {
+        assert_eq!(verify_args("Goo"), ["verify", "Goo"]);
+        // `repair` is `install` in repair mode: it reuses verify's repair file and doesn't update the game.
+        assert_eq!(repair_args("Goo"), ["-y", "repair", "Goo", "--skip-sdl"]);
+        // Never `--skip-move`: that only rewrites Legendary's record and leaves the files behind.
+        assert_eq!(move_args("Goo", r"D:\Games"), ["move", "Goo", r"D:\Games"]);
+        assert_eq!(import_args("Goo", r"D:\Games\Goo"), ["import", "--with-dlcs", "Goo", r"D:\Games\Goo"]);
+        // Import only: nothing is exported to the Epic Games Launcher, and automatic sync isn't switched on.
+        assert_eq!(egl_sync_args(), ["-y", "egl-sync", "--import-only", "--one-shot"]);
+    }
+
+    #[test]
+    fn import_requires_existing_folder() {
+        let dir = std::env::temp_dir();
+        assert!(super::import_requires_existing_folder(&dir).is_ok());
+        assert!(super::import_requires_existing_folder(&dir.join("launcher-no-such-folder")).is_err());
+        let file = dir.join(format!("launcher-import-{}.txt", std::process::id()));
+        std::fs::write(&file, "x").unwrap();
+        assert!(super::import_requires_existing_folder(&file).is_err());
+        _ = std::fs::remove_file(file);
+    }
+
+    #[test]
+    fn verify_output_decides_whether_to_repair() {
+        // Legendary 0.21's `verify_game` (cli.py) logs these and exits 0 either way.
+        let ok = "[cli] INFO: Loading installed manifest for \"Goo\"\n[cli] INFO: Verifying \"Goo\" version \"1\"\n\
+                  [cli] INFO: Verification finished successfully.\n";
+        assert_eq!(parse_verify(true, ok), Ok(Verify::Ok));
+        let broken = "[cli] ERROR: File is missing: \"Goo.exe\"\n\
+                      [cli] ERROR: Verification failed, 0 file(s) corrupted, 1 file(s) are missing.\n\
+                      [cli] INFO: Run \"legendary repair Goo\" to repair your game installation.\n";
+        assert_eq!(parse_verify(true, broken), Ok(Verify::Repair));
+        let gone = "[cli] INFO: Loading installed manifest for \"Goo\"\n\
+                    [cli] ERROR: Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.\n";
+        assert_eq!(parse_verify(true, gone), Err("Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.".into()));
+        assert_eq!(parse_verify(false, ""), Err("Legendary gave no reason.".into()));
+    }
+
+    #[test]
+    fn verify_progress_lines() {
+        let p = parse_verify_progress("\nVerification progress: 12/345 (3.5%) [10.0 MiB/s]\t\r").unwrap();
+        assert!((p.fraction - 0.035).abs() < 1e-6);
+        assert_eq!(p.text, "Verifying 4% · 12 of 345 files");
+        assert_eq!(parse_verify_progress("Checking for importable games..."), None);
+    }
+
+    #[test]
+    fn log_decides_moves_imports_and_syncs() {
+        // `move`, `import` and `egl-sync` exit 0 after their errors in 0.21, so the log decides.
+        let moved = "[cli] INFO: Moving \"Goo\" from \"C:/Games\" to \"D:\\Games\"\n[cli] INFO: Finished.\n";
+        assert_eq!(log_outcome(true, moved, Some("Finished.")), Ok(()));
+        let other_drive = "[cli] INFO: Moving \"Goo\" from \"C:/Games\" to \"D:\\Games\"\n\
+                           [cli] ERROR: Moving to a different drive is not supported.\n";
+        assert_eq!(log_outcome(true, other_drive, Some("Finished.")), Err("Moving to a different drive is not supported.".into()));
+        // A DLC that fails to import doesn't undo the game's import.
+        let imported = "[cli] ERROR: No files belonging to DLC \"Hat\" (Hat) found in the specified location.\n\
+                        [cli] INFO: Game \"Goo\" has been imported.\n";
+        assert_eq!(log_outcome(true, imported, Some("has been imported.")), Ok(()));
+        let wrong = "[cli] CRITICAL: Did not find game \"Goo\" on account.\n";
+        assert_eq!(log_outcome(true, wrong, Some("has been imported.")), Err("Did not find game \"Goo\" on account.".into()));
+        // egl-sync has no closing line: any error fails it.
+        assert_eq!(log_outcome(true, "[cli] INFO: Reading EGL game manifests...\n", None), Ok(()));
+        let no_meta = "[cli] ERROR: Legendary is missing game metadata, please login.\n";
+        assert_eq!(log_outcome(true, no_meta, None), Err("Legendary is missing game metadata, please login.".into()));
+        // A prompt that read the closed stdin crashes with a traceback.
+        assert_eq!(log_outcome(false, "Traceback...\nEOFError: EOF when reading a line\n", None), Err("EOFError: EOF when reading a line".into()));
     }
 
     #[test]

@@ -55,6 +55,54 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
     .await
 }
 
+/// An owned Epic game that isn't installed, for "Import an existing install".
+#[derive(Serialize)]
+pub struct Importable {
+    key: String,
+    title: String,
+}
+
+/// Owned Epic games that aren't installed, by title.
+#[tauri::command]
+pub fn epic_importable(state: State<'_, AppState>) -> Vec<Importable> {
+    let mut games: Vec<Importable> = state
+        .lock()
+        .games
+        .iter()
+        .filter(|g| g.provider == ProviderKind::Epic && !g.installed)
+        .map(|g| Importable { key: g.key(), title: g.title.clone() })
+        .collect();
+    games.sort_by_key(|g| g.title.to_lowercase());
+    games
+}
+
+/// Makes Legendary take an existing install of an owned Epic game (`key`) at `path`, then rescans Epic.
+#[tauri::command]
+pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| g.provider == ProviderKind::Epic && !g.installed)
+        .ok_or("This game can't be imported.")?;
+    blocking(move || {
+        let result = epic::import(&game.external_id, &path).map_err(|e| e.to_string());
+        rescan(&app, true);
+        result
+    })
+    .await
+}
+
+/// Imports the games the Epic Games Launcher installed, then rescans Epic.
+#[tauri::command]
+pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        let result = epic::egl_sync().map_err(|e| e.to_string());
+        rescan(&app, true);
+        result
+    })
+    .await
+}
+
 /// The Steam install found on this PC.
 #[derive(Serialize)]
 pub struct SteamLocal {

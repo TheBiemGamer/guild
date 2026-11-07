@@ -171,6 +171,10 @@ pub enum Action {
     /// Epic only; Steam updates games itself.
     Update,
     Uninstall,
+    /// Epic verifies and repairs here; Steam validates in its own window.
+    Verify,
+    /// Epic moves the folder to `dest`; Steam opens its storage manager.
+    Move,
 }
 
 /// The answer to a cloud save conflict.
@@ -192,7 +196,7 @@ pub enum Conflict {
 /// Steam requests return at once (Steam shows its own dialogs). Epic requests return when
 /// Legendary is done; installs report progress through `poll` meanwhile, under the game's key.
 /// `with_dlc` (Epic install, default on) installs the owned DLC too. `dlc` installs or uninstalls
-/// one DLC of the Epic copy `key` instead of the game.
+/// one DLC of the Epic copy `key` instead of the game. `dest` is the folder an Epic Move goes to.
 /// An Epic Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 #[tauri::command]
 pub async fn act(
@@ -202,6 +206,7 @@ pub async fn act(
     with_dlc: Option<bool>,
     dlc: Option<String>,
     keep: Option<Keep>,
+    dest: Option<String>,
 ) -> Res<Option<Conflict>> {
     let game = app.state::<AppState>().game(&key).ok_or("This game is no longer in the library.")?;
     if let Some(id) = &dlc
@@ -211,7 +216,7 @@ pub async fn act(
     }
     // A DLC install is just that DLC.
     let with_dlc = if dlc.is_some() { None } else { Some(with_dlc.unwrap_or(true)) };
-    blocking(move || act_blocking(&app, action, &game, with_dlc, dlc.as_deref(), keep)).await
+    blocking(move || act_blocking(&app, action, &game, with_dlc, dlc.as_deref(), keep, dest.as_deref())).await
 }
 
 fn act_blocking(
@@ -221,6 +226,7 @@ fn act_blocking(
     with_dlc: Option<bool>,
     dlc: Option<&str>,
     keep: Option<Keep>,
+    dest: Option<&str>,
 ) -> Res<Option<Conflict>> {
     let state = app.state::<AppState>();
     let key = game.key();
@@ -234,6 +240,8 @@ fn act_blocking(
             Action::Install => store.install(game),
             Action::Update => Err("Steam updates its games itself.".into()),
             Action::Uninstall => store.uninstall(game),
+            Action::Verify => crate::library::open_uri(&format!("steam://validate/{}", game.external_id)),
+            Action::Move => crate::library::open_uri("steam://open/storage"),
         };
         return result.map(|()| None).map_err(|e| format!("Steam: {e}"));
     }
@@ -254,7 +262,7 @@ fn act_blocking(
                 state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), upload });
             })
         }
-        Action::Install | Action::Update => {
+        Action::Install | Action::Update | Action::Verify | Action::Move => {
             let on_event = |event| {
                 let mut s = state.lock();
                 match event {
@@ -262,11 +270,17 @@ fn act_blocking(
                     InstallEvent::Progress(p) => _ = s.progress.insert(key.clone(), p),
                 }
             };
-            let result = if action == Action::Update {
-                epic::update(&game.external_id, on_event)
-            } else {
-                let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
-                epic::install(dlc.unwrap_or(&game.external_id), with_dlc, base.as_deref(), on_event)
+            let result = match action {
+                Action::Update => epic::update(&game.external_id, on_event),
+                Action::Verify => epic::verify(&game.external_id, on_event),
+                Action::Move => match dest {
+                    Some(dest) => epic::move_to(&game.external_id, dest, on_event),
+                    None => Err("Pick a folder to move the game to.".into()),
+                },
+                _ => {
+                    let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
+                    epic::install(dlc.unwrap_or(&game.external_id), with_dlc, base.as_deref(), on_event)
+                }
             };
             let mut s = state.lock();
             s.install_pids.remove(&key);

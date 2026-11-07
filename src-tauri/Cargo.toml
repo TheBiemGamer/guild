@@ -18,6 +18,7 @@ steam-vent = { git = "https://codeberg.org/steam-vent/steam-vent", rev = "b0e401
 steam-vent-proto-steam = "0.5.2"
 steamlocate = "2.1"
 tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 windows-native-keyring-store = { version = "1.1", default-features = false }
 winreg = "0.56"

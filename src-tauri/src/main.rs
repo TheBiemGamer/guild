@@ -19,6 +19,7 @@ mod view;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::new())
         .setup(|app| {
             let app = app.handle().clone();
@@ -52,6 +53,9 @@ fn main() {
             commands::settings::epic_log_in,
             commands::settings::dismiss_epic_notice,
             commands::settings::epic_log_out,
+            commands::settings::epic_importable,
+            commands::settings::epic_import,
+            commands::settings::epic_egl_sync,
             commands::settings::settings_view,
             commands::settings::update_setting,
             commands::settings::set_igdb_secret,

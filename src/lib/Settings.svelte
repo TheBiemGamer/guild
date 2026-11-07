@@ -103,6 +103,57 @@
     testing = false
   }
 
+  /** Import and EGL sync: which one runs, the picked folder and game, and each row's last result. */
+  let managing = $state<'import' | 'egl' | null>(null)
+  let importing = $state<{ path: string; games: { key: string; title: string }[] } | null>(null)
+  let importKey = $state('')
+  let importNote = $state('')
+  let eglNote = $state('')
+
+  async function pickImport() {
+    importNote = ''
+    try {
+      const path = await api.pickFolder()
+      if (!path) return
+      const games = await api.epicImportable()
+      if (games.length === 0) {
+        importNote = 'Every owned Epic game is already installed.'
+        return
+      }
+      importing = { path, games }
+      importKey = games[0].key
+    } catch (e) {
+      importNote = api.message(e)
+    }
+  }
+
+  async function runImport() {
+    const { path, games } = importing!
+    managing = 'import'
+    try {
+      await api.epicImport(importKey, path)
+      importNote = `Imported ${games.find((g) => g.key === importKey)?.title ?? 'the game'}.`
+      importing = null
+    } catch (e) {
+      importNote = api.message(e)
+    }
+    managing = null
+    await onchange()
+  }
+
+  async function eglSync() {
+    eglNote = ''
+    managing = 'egl'
+    try {
+      await api.epicEglSync()
+      eglNote = 'Synced with the Epic Games Launcher.'
+    } catch (e) {
+      eglNote = api.message(e)
+    }
+    managing = null
+    await onchange()
+  }
+
   const removeSecret = () => change(() => api.setIgdbSecret(null))
   const logOut = () => change(() => api.epicLogOut())
   const clearCache = () => change(() => api.clearCache())
@@ -250,6 +301,28 @@
             onclick={() => toggle('cloud_saves', !view.cloudSaves)}
           ></button>
         </div>
+        <div class="row">
+          <div>Import an existing install<span>An Epic game already on this PC. Pick its folder, then which game it is.</span></div>
+          <button class="btn" disabled={managing !== null || importing !== null} onclick={pickImport}>Import…</button>
+        </div>
+        {#if importing}
+          <div class="row stack">
+            <label for="import-game">Which game is in {importing.path}?</label>
+            <div class="field">
+              <select id="import-game" bind:value={importKey}>
+                {#each importing.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
+              </select>
+              <button class="btn" disabled={managing !== null} onclick={runImport}>{managing === 'import' ? 'Importing…' : 'Import'}</button>
+              <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>Cancel</button>
+            </div>
+          </div>
+        {/if}
+        {#if importNote}<p class="note" title={importNote}>{importNote}</p>{/if}
+        <div class="row">
+          <div>Sync with Epic Games Launcher<span>Adds the games it installed. Nothing is sent to it.</span></div>
+          <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? 'Syncing…' : 'Sync'}</button>
+        </div>
+        {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
       </section>
 
       <section id={id('Downloads')}>
@@ -582,7 +655,8 @@
     gap: 8px;
   }
 
-  input {
+  input,
+  select {
     flex: 1;
     min-width: 0;
     height: 36px;
@@ -591,6 +665,15 @@
     border: 1px solid var(--glass-line);
     background: var(--glass);
     color: var(--text);
+  }
+
+  .note {
+    margin: 6px 0 0;
+    color: var(--text-2);
+    font-size: 13px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   input:focus-visible {
