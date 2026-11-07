@@ -528,7 +528,10 @@ fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
         OwnedOutcome::KeepAndFlag => {
             let connected = open_db(&state).is_some_and(|c| steam_connected(&c));
             if connected {
-                state.lock().steam_attention = true;
+                let mut s = state.lock();
+                s.steam_attention = true;
+                // The next poll re-reads the library and an open Settings, so the dot shows.
+                s.library_changed = true;
             }
         }
         OwnedOutcome::KeepQuiet => {}

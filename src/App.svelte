@@ -118,9 +118,15 @@
     if (!multi && filters.includes('bothStores')) filters = filters.filter((f) => f !== 'bothStores')
   }
 
-  /** Library, the last-played game and the collections together, so the banner and the tint arrive with the grid. */
-  async function reload() {
-    const [, f, c] = await Promise.all([load(), api.featured(), api.collections().catch(() => collections)])
+  /** Library, the last-played game and the collections together, so the banner and the tint arrive with the grid.
+   * An open Settings is re-read too: scans, logins and tool installs change what its account cards say. */
+  async function reload(withSettings = settingsOpen) {
+    const [, f, c] = await Promise.all([
+      load(),
+      api.featured(),
+      api.collections().catch(() => collections),
+      withSettings && loadSettings(),
+    ])
     featured = f
     collections = c
     // A collection that went away takes its filter along.
@@ -242,9 +248,7 @@
   }
 
   /** After a setting changed: the panel, the tint and the banner follow, and a logout changes the library. */
-  async function settingsChanged() {
-    await Promise.all([loadSettings(), reload()])
-  }
+  const settingsChanged = () => reload(true)
 
   async function refreshNow() {
     refreshing = true
@@ -654,10 +658,7 @@
     onclose={() => (settingsOpen = false)}
     onchange={settingsChanged}
     onrefresh={refreshNow}
-    onlogin={async () => {
-      await logIn()
-      await loadSettings()
-    }}
+    onlogin={logIn}
   />
 {/if}
 

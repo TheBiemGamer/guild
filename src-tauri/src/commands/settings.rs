@@ -218,8 +218,8 @@ pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
     .await
 }
 
-/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then a rescan, so its card moves
-/// on to Log in.
+/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then it reads just that store's
+/// login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.
 #[tauri::command]
 pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>) -> Res<()> {
     let tool = tools::find(&name).ok_or(msg!(unknownTool))?;
@@ -228,7 +228,25 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
         let _ = on_percent.send(percent);
     })
     .await?;
-    blocking(move || rescan(&app, true)).await;
+    let quick = app.clone();
+    blocking(move || {
+        let state = quick.state::<AppState>();
+        if tool.name == tools::LEGENDARY.name {
+            let login = epic::login_state();
+            state.lock().epic_login = Some(login);
+        } else if tool.name == tools::GOGDL.name {
+            let login = gog::login().0;
+            state.lock().gog_login = Some(login);
+        } else {
+            let login = amazon::login();
+            state.lock().amazon_login = Some(login);
+        }
+    })
+    .await;
+    tauri::async_runtime::spawn(blocking(move || {
+        rescan(&app, true);
+        app.state::<AppState>().lock().library_changed = true;
+    }));
     Ok(())
 }
 
