@@ -107,6 +107,16 @@ pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
     seen.map(|_| current.to_string())
 }
 
+/// Whether the owner logged out of `store` ("epic", "gog", "amazon") with Log out, so its Settings dot stays down
+/// until it is logged in again. Internal: not in `validate`.
+pub fn signed_out(conn: &Connection, store: &str) -> bool {
+    db::setting(conn, &format!("signed_out_{store}")).ok().flatten().is_some()
+}
+
+pub fn set_signed_out(conn: &Connection, store: &str, on: bool) -> Result<(), String> {
+    db::set_setting(conn, &format!("signed_out_{store}"), on.then_some("true")).map_err(|e| e.to_string())
+}
+
 const SERVICE: &str = "dev.noah.gamelauncher";
 const SECRET_USER: &str = "igdb-client-secret";
 const GRID_KEY_USER: &str = "steamgriddb";
@@ -280,6 +290,17 @@ mod tests {
         assert_eq!(take_updated(&conn, "0.3.0"), None);
         assert_eq!(db::setting(&conn, SEEN_VERSION).unwrap().as_deref(), Some("0.10.0"));
         assert!(validate(SEEN_VERSION, Some("9.9.9")).is_err());
+    }
+
+    #[test]
+    fn signed_out_is_internal_and_round_trips() {
+        let conn = memory();
+        assert!(!signed_out(&conn, "gog"));
+        set_signed_out(&conn, "gog", true).unwrap();
+        assert!(signed_out(&conn, "gog") && !signed_out(&conn, "epic"));
+        set_signed_out(&conn, "gog", false).unwrap();
+        assert!(!signed_out(&conn, "gog"));
+        assert!(validate("signed_out_gog", Some("true")).is_err());
     }
 
     #[test]

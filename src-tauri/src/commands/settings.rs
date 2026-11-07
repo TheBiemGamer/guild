@@ -51,6 +51,7 @@ pub fn dismiss_epic_notice(state: State<'_, AppState>) {
 pub async fn epic_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         epic::log_out().map_err(|e| e.to_string())?;
+        note_signed_out(&app, "epic");
         rescan(&app, true);
         // The user did this; it isn't news.
         app.state::<AppState>().lock().epic_notice = false;
@@ -77,6 +78,7 @@ pub async fn gog_log_in(app: AppHandle) -> Res<()> {
 pub async fn gog_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         gog::log_out().map_err(|e| e.to_string())?;
+        note_signed_out(&app, "gog");
         rescan(&app, true);
         Ok(())
     })
@@ -105,10 +107,20 @@ pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
 pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         amazon::log_out().map_err(|e| e.to_string())?;
+        note_signed_out(&app, "amazon");
         rescan(&app, true);
         Ok(())
     })
     .await
+}
+
+/// Remembers a deliberate Log out, so the Settings dot stays down (`settings::signed_out`); the next scan that finds
+/// the store logged in forgets it.
+fn note_signed_out(app: &AppHandle, store: &str) {
+    let saved = super::open_db(&app.state::<AppState>()).map(|c| settings::set_signed_out(&c, store, true));
+    if let Some(Err(e)) = saved {
+        log!("{store} signed out: {e}");
+    }
 }
 
 /// An owned Epic game that isn't installed, for "Import an existing install".

@@ -63,6 +63,8 @@ struct Shared {
     epic_login: Option<Login>,
     gog_login: Option<crate::library::gog::Login>,
     amazon_login: Option<crate::library::amazon::Login>,
+    /// Epic, GOG and Amazon logged out on purpose (`settings::signed_out`), read with the logins.
+    signed_out: [bool; 3],
     /// Epic logged out since the last run; shown once until dismissed.
     epic_notice: bool,
     /// Steam games polled for download progress.
