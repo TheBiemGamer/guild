@@ -580,9 +580,13 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         if epic::is_running(&exe) {
             return Some(key);
         }
-        // Gone, or never showed up: stop watching once it had time to start.
+        // Gone, or never showed up: stop watching once it had time to start, and upload its saves.
+        // shortcut: one that never showed up (a bootstrapper exe) has its saves uploaded while it may still run.
         if since.elapsed() > EPIC_START_GRACE {
-            state.lock().epic_watch = None;
+            let ended = state.lock().epic_watch.take();
+            if let Some(super::EpicWatch { key, upload: Some(sync), .. }) = ended {
+                super::game::upload_saves(app, key, sync);
+            }
         }
         None
     });

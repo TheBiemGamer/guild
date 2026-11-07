@@ -88,6 +88,8 @@ struct EpicWatch {
     key: String,
     exe: String,
     since: Instant,
+    /// How its cloud saves are uploaded once it exits; `None` doesn't sync.
+    upload: Option<crate::library::epic::SaveSync>,
 }
 
 impl AppState {

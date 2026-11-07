@@ -7,7 +7,7 @@
 //! - `status --json`: `{account: "<not logged in>" | name, …}`
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, ErrorKind};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -74,6 +74,97 @@ pub fn launch(app_name: &str, skip_version_check: bool) -> Result<(), Error> {
         command.arg("--skip-version-check");
     }
     run(command)
+}
+
+/// Which way `sync-saves` goes. Legendary compares the newest local file with the cloud save's date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveSync {
+    /// Before launch: take a newer cloud save, never upload.
+    Download,
+    /// After the game exits: send a newer local save, never download.
+    Upload,
+    /// Sync now: the newer side wins.
+    Both,
+    /// Keep cloud: download even over a newer local save.
+    KeepCloud,
+    /// Keep local: upload even over a newer cloud save.
+    KeepLocal,
+}
+
+/// What a `sync-saves` run found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncOutcome {
+    /// Up to date, transferred, or nothing to sync.
+    Synced,
+    /// The local save is newer and uploading was off, so nothing changed.
+    LocalNewer,
+    /// The cloud save is newer and downloading was off, so nothing changed.
+    CloudNewer,
+    /// Legendary's last message.
+    Failed(String),
+}
+
+/// Flags from `legendary sync-saves --help` (0.21.1).
+fn sync_args(app_name: &str, sync: SaveSync) -> Vec<&str> {
+    let mut args = vec!["sync-saves", app_name];
+    args.extend_from_slice(match sync {
+        SaveSync::Download => &["--skip-upload"][..],
+        SaveSync::Upload => &["--skip-download"],
+        SaveSync::Both => &[],
+        SaveSync::KeepCloud => &["--skip-upload", "--force-download"],
+        SaveSync::KeepLocal => &["--skip-download", "--force-upload"],
+    });
+    args
+}
+
+/// Answers for `sync-saves`' prompts. Legendary 0.21 has no flag that accepts the save folder it works out,
+/// and `-y` skips a game whose folder isn't set yet. Each prompt ("Is this correct?" for the folder,
+/// "Download cloud save?", "Upload local save?") takes yes on an empty line; a folder it can't work out
+/// asks for a path instead, where an empty line skips the game.
+const SYNC_ANSWERS: &[u8] = b"\n\n\n\n";
+
+/// Runs `legendary sync-saves` for one installed game. Never fails: a failure is an outcome.
+pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
+    let run = || -> std::io::Result<std::process::Output> {
+        let mut child = legendary(&sync_args(app_name, sync))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        // Closed after the answers, so a prompt beyond them ends Legendary with an error instead of hanging.
+        child.stdin.take().expect("stdin is piped").write_all(SYNC_ANSWERS)?;
+        child.wait_with_output()
+    };
+    match run() {
+        Ok(output) => parse_sync(output.status.success(), &String::from_utf8_lossy(&output.stderr)),
+        Err(e) => SyncOutcome::Failed(e.to_string()),
+    }
+}
+
+/// Reads Legendary 0.21's `sync-saves` log (stderr, `[cli] INFO: …` lines, from its `cli.py`). A side that
+/// has no save at all (`date: N/A`) is no conflict: the other side simply goes over next time.
+fn parse_sync(success: bool, log: &str) -> SyncOutcome {
+    if !success {
+        let last = log.lines().rev().map(str::trim).find(|l| !l.is_empty());
+        // `[cli] ERROR: Login failed!` -> `Login failed!`
+        let message = last.map(|l| l.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(l, |(_, m)| m));
+        return SyncOutcome::Failed(message.unwrap_or("Legendary gave no reason.").to_owned());
+    }
+    let has = |text: &str| log.contains(text);
+    if has("Empty input, skipping...") || has("skipping due to --yes") {
+        SyncOutcome::Failed("Legendary can't tell where this game keeps its saves.".into())
+    } else if has("Save game uploading is disabled") && !has("- Cloud save date: N/A") {
+        SyncOutcome::LocalNewer
+    } else if has("Save game downloading is disabled") && !has("- Local save date: N/A") {
+        SyncOutcome::CloudNewer
+    } else {
+        SyncOutcome::Synced
+    }
+}
+
+/// Legendary's `supports_cloud_saves`: the catalog item (`metadata`) has a `customAttributes.CloudSaveFolder`.
+fn has_cloud_saves(metadata: &Value) -> bool {
+    !metadata["customAttributes"]["CloudSaveFolder"].is_null()
 }
 
 /// Installed games with their update flags. The update check is online, so when it fails
@@ -336,6 +427,7 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
             }
             let title = g["app_title"].as_str().or(local.and_then(|l| l["title"].as_str())).unwrap_or(name);
             let mut game = game(name, title, local, art(&g["metadata"]));
+            game.cloud_saves = has_cloud_saves(&g["metadata"]);
             game.dlc = g["metadata"]["id"].as_str().and_then(|id| dlc.remove(id)).unwrap_or_default();
             game.dlc.sort_by(|a, b| a.title.cmp(&b.title));
             Some(game)
@@ -361,6 +453,7 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         art,
         dlc: Vec::new(),
         update_available: installed.is_some_and(has_update),
+        cloud_saves: false,
     }
 }
 
@@ -546,6 +639,97 @@ mod tests {
         let all = games(&list, &installed);
         let dlc = all.iter().find(|g| g.external_id == "SpotifyDlc").expect("installed DLC stays");
         assert!(dlc.installed);
+    }
+
+    #[test]
+    fn cloud_save_folder_detected() {
+        // Real metadata without a CloudSaveFolder (Last Day of June); the Fortnite fixture has one.
+        assert!(!has_cloud_saves(&fixture("list-entry.json")));
+        assert!(has_cloud_saves(&fixture("list.json")[0]["metadata"]));
+        assert!(!has_cloud_saves(&Value::Null));
+        let all = sorted_games();
+        assert!(all[0].cloud_saves);
+        // Goo has no customAttributes; Imported isn't in the owned list, so there's no metadata at all.
+        assert!(!all[1].cloud_saves && !all[2].cloud_saves);
+    }
+
+    #[test]
+    fn sync_args_before_and_after_launch() {
+        assert_eq!(sync_args("Goo", SaveSync::Download), ["sync-saves", "Goo", "--skip-upload"]);
+        assert_eq!(sync_args("Goo", SaveSync::Upload), ["sync-saves", "Goo", "--skip-download"]);
+        assert_eq!(sync_args("Goo", SaveSync::KeepCloud), ["sync-saves", "Goo", "--skip-upload", "--force-download"]);
+        assert_eq!(sync_args("Goo", SaveSync::KeepLocal), ["sync-saves", "Goo", "--skip-download", "--force-upload"]);
+        assert_eq!(sync_args("Goo", SaveSync::Both), ["sync-saves", "Goo"]);
+        // No `-y`: Legendary 0.21 skips a game whose save folder isn't set yet under it. Empty lines on stdin
+        // take each prompt's default (yes) instead, and skip a folder Legendary can't work out.
+        assert!(SYNC_ANSWERS.iter().all(|&b| b == b'\n'));
+    }
+
+    #[test]
+    fn sync_output_decides_the_outcome() {
+        use SyncOutcome::*;
+        let log = |lines: &[&str]| lines.iter().map(|l| format!("[cli] INFO: {l}")).collect::<Vec<_>>().join("\n");
+        let same = log(&["Got 1 remote save game(s)", r#"Checking "Goo" (Goo)"#, r#"Save game for "Goo" is up to date, skipping..."#]);
+        assert_eq!(parse_sync(true, &same), Synced);
+        let none = log(&["No cloud or local savegame found."]);
+        assert_eq!(parse_sync(true, &none), Synced);
+        let downloaded = log(&[
+            r#"Cloud save for "Goo" is newer:"#,
+            "- Cloud save date: 2026-11-02 10:00:00",
+            "- Local save date: 2026-11-01 10:00:00",
+            "Downloading remote savegame...",
+        ]);
+        assert_eq!(parse_sync(true, &downloaded), Synced);
+        let uploaded = log(&[
+            r#"Local save for "Goo" is newer"#,
+            "- Cloud save date: 2026-11-01 10:00:00",
+            "- Local save date: 2026-11-02 10:00:00",
+            "Uploading local savegame...",
+        ]);
+        assert_eq!(parse_sync(true, &uploaded), Synced);
+
+        // Before launch (`--skip-upload`): a newer local save is a conflict, unless the cloud has none yet.
+        let local_newer = log(&[
+            r#"Local save for "Goo" is newer"#,
+            "- Cloud save date: 2026-11-01 10:00:00",
+            "- Local save date: 2026-11-02 10:00:00",
+            "Save game uploading is disabled, skipping...",
+        ]);
+        assert_eq!(parse_sync(true, &local_newer), LocalNewer);
+        let cloud_empty = log(&[
+            r#"Local save for "Goo" is newer"#,
+            "- Cloud save date: N/A",
+            "- Local save date: 2026-11-02 10:00:00",
+            "Save game uploading is disabled, skipping...",
+        ]);
+        assert_eq!(parse_sync(true, &cloud_empty), Synced);
+
+        // After the game (`--skip-download`): a newer cloud save is a conflict, unless there's no local save.
+        let cloud_newer = log(&[
+            r#"Cloud save for "Goo" is newer:"#,
+            "- Cloud save date: 2026-11-02 10:00:00",
+            "- Local save date: 2026-11-01 10:00:00",
+            "Save game downloading is disabled, skipping...",
+        ]);
+        assert_eq!(parse_sync(true, &cloud_newer), CloudNewer);
+        let local_empty = log(&[
+            r#"Cloud save for "Goo" is newer:"#,
+            "- Cloud save date: 2026-11-02 10:00:00",
+            "- Local save date: N/A",
+            "Save game downloading is disabled, skipping...",
+        ]);
+        assert_eq!(parse_sync(true, &local_empty), Synced);
+
+        // Offline, or another Legendary error: its last message.
+        let offline = "[cli] INFO: Logging in...\n[cli] ERROR: Login failed! Cannot continue with download process.\n";
+        assert_eq!(parse_sync(false, offline), Failed("Login failed! Cannot continue with download process.".into()));
+        assert_eq!(parse_sync(false, ""), Failed("Legendary gave no reason.".into()));
+        // A save folder with variables Legendary can't fill in: the empty answer skips the game.
+        let no_folder = log(&[
+            r#"Computed save path: "{AppData}/Goo""#,
+            "Empty input, skipping...",
+        ]);
+        assert_eq!(parse_sync(true, &no_folder), Failed("Legendary can't tell where this game keeps its saves.".into()));
     }
 
     #[test]

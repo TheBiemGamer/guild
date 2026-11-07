@@ -77,6 +77,7 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
             art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)?, logo: image(r, 13)? },
             dlc: Vec::new(),
             update_available: false,
+            cloud_saves: false,
         }))
     })?;
     // Rows from an unknown provider (e.g. written by a newer build) are skipped.
@@ -201,6 +202,7 @@ mod tests {
             },
             dlc: Vec::new(),
             update_available: false,
+            cloud_saves: false,
         }
     }
 

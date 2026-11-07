@@ -1,6 +1,7 @@
 [
   {"app_name": "Fortnite", "app_title": "Fortnite", "base_urls": [], "sidecar": null, "achievements": null, "asset_infos": {},
-   "metadata": {"id": "4fe75bbc5a674f4f9b356b5c90567da5", "namespace": "fn", "title": "Fortnite", "categories": [{"path": "games"}], "keyImages": [
+   "metadata": {"id": "4fe75bbc5a674f4f9b356b5c90567da5", "namespace": "fn", "title": "Fortnite", "categories": [{"path": "games"}],
+     "customAttributes": {"CloudSaveFolder": {"type": "STRING", "value": "{AppData}/FortniteGame/Saved/SaveGames"}}, "keyImages": [
      {"type": "DieselGameBox", "url": "https://cdn1.epicgames.com/wide.jpg"},
      {"type": "DieselGameBoxTall", "url": "https://cdn1.epicgames.com/tall.jpg"}]},
    "dlcs": []},

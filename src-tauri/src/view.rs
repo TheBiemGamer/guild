@@ -74,6 +74,19 @@ pub fn last_played_tile(last: Option<SystemTime>, now: SystemTime) -> Option<Str
     })
 }
 
+/// How long ago, for a sync time: `just now`, `5 min ago`, `3 h ago`, `2 days ago`.
+pub fn ago_label(secs: i64) -> String {
+    match secs.max(0) {
+        s if s < 60 => "just now".into(),
+        s if s < 3_600 => format!("{} min ago", s / 60),
+        s if s < 86_400 => format!("{} h ago", s / 3_600),
+        s => {
+            let days = s / 86_400;
+            format!("{days} day{} ago", if days == 1 { "" } else { "s" })
+        }
+    }
+}
+
 /// The one size format: `27.3 GB` (GB = 1024^3), whole megabytes under 1 GB, and whole
 /// kilobytes (rounded up, so only empty is `0 KB`) under 1 MB.
 pub fn size_label(bytes: u64) -> String {
@@ -129,6 +142,7 @@ pub(crate) mod tests {
             art: Art::default(),
             dlc: Vec::new(),
             update_available: false,
+            cloud_saves: false,
         }
     }
 
@@ -213,6 +227,16 @@ pub(crate) mod tests {
         assert_eq!(tile(days_ago(800)).as_deref(), Some("2 years ago"));
         // Clock moved backwards: treat as today rather than panic.
         assert_eq!(tile(Some(now + Duration::from_secs(60))).as_deref(), Some("Today"));
+    }
+
+    #[test]
+    fn ago_labels() {
+        assert_eq!(ago_label(5), "just now");
+        assert_eq!(ago_label(-30), "just now");
+        assert_eq!(ago_label(5 * 60), "5 min ago");
+        assert_eq!(ago_label(3 * 3_600 + 59), "3 h ago");
+        assert_eq!(ago_label(86_400), "1 day ago");
+        assert_eq!(ago_label(40 * 86_400), "40 days ago");
     }
 
     #[test]

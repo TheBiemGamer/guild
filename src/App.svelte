@@ -94,9 +94,16 @@
     confirmInstall(key, title, anchor, (withDlc) => act('install', key, { withDlc }))
   }
 
+  /** A Play from a card that stopped at a cloud save conflict; the game page asks, in its hero. */
+  let saveConflict = $state<{ key: string; conflict: api.Conflict } | null>(null)
+
   async function act(action: Action, key: string, options: api.ActOptions = {}) {
     try {
-      await api.act(action, key, options)
+      const conflict = await api.act(action, key, options)
+      if (conflict) {
+        saveConflict = { key, conflict }
+        openGame(lib.games.find((g) => g.copyKeys.includes(key))?.key ?? key)
+      }
     } catch (e) {
       error = api.message(e)
     }
@@ -239,6 +246,7 @@
   async function closeGame() {
     if (open) lastClosed = open
     open = null
+    saveConflict = null
     tint = undefined
     const back = opener
     opener = null
@@ -410,6 +418,7 @@
         onchanged={reload}
         ontint={(url) => (tint = url)}
         onconfirminstall={confirmInstall}
+        conflict={saveConflict}
       />
     {/if}
   </div>

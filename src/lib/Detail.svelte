@@ -39,12 +39,12 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './api'
-  import type { ActOptions, Action, Detail, Dlc, GameInfo, LinkKind, Progress, TimeToBeat } from './api'
+  import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LinkKind, Progress, SavesView, TimeToBeat } from './api'
   import PlayButton from './PlayButton.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
-  let { gameKey, runningKey, progressByKey, version, onback, onerror, onchanged, ontint, onconfirminstall }: {
+  let { gameKey, runningKey, progressByKey, version, onback, onerror, onchanged, ontint, onconfirminstall, conflict = null }: {
     gameKey: string
     /** Copy keys, as `poll` reports them. */
     runningKey: string | null
@@ -58,6 +58,8 @@
     ontint: (url: string | null) => void
     /** Install through the library's flow: an Epic copy asks in the install popup first, then calls `go`. */
     onconfirminstall: (key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) => void
+    /** A Play from a card stopped at this cloud save conflict (`key`: the copy played); the hero asks. */
+    conflict?: { key: string; conflict: Conflict } | null
   } = $props()
 
   // undefined: still loading. null: the answer is "none".
@@ -80,9 +82,15 @@
   let backButton = $state<HTMLButtonElement>()
   let confirmCancel = $state<HTMLButtonElement>()
   let actionsEl = $state<HTMLDivElement>()
-  type Tab = 'overview' | 'dlc' | 'installation'
+  type Tab = 'overview' | 'dlc' | 'saves' | 'installation'
   let tab = $state<Tab>('overview')
   let tabList = $state<HTMLDivElement>()
+  /** The chosen copy's Saves tab; null without cloud saves. */
+  let saves = $state<SavesView | null>(null)
+  let syncing = $state(false)
+  /** A Play that stopped at a cloud save conflict, asked in the hero. */
+  let asking = $state<{ conflict: Conflict; action: Action; key: string } | null>(null)
+  let askCancel = $state<HTMLButtonElement>()
 
   // The page takes focus on open, so keyboard users start at "← Library".
   onMount(() => backButton?.focus({ preventScroll: true }))
@@ -118,6 +126,7 @@
     ttb = undefined
     steamDlc = []
     confirmingDlc = null
+    asking = null
     tab = 'overview'
     api.steamDlc(key).then(
       (d) => alive && (steamDlc = d ?? []),
@@ -151,6 +160,13 @@
     }
   })
 
+  // After the reset above, so a conflict that opened this page survives it.
+  $effect(() => {
+    if (conflict) asking = { ...conflict, action: 'play' }
+  })
+  // The question takes focus when it appears, like the Epic uninstall confirm (its Cancel).
+  $effect(() => askCancel?.focus())
+
   // Which copy Play and Install use: the default until the owner picks one. Not stored.
   let chosenKey = $state('')
   let chosenFor = ''
@@ -166,6 +182,43 @@
   const running = $derived(runningKey !== null && copyKeys.includes(runningKey))
   const progress = $derived(copyKeys.map((k) => progressByKey[k]).find(Boolean))
 
+  async function loadSaves(key: string, alive = () => true) {
+    try {
+      const s = await api.saves(key)
+      if (alive()) saves = s
+    } catch {
+      // Quiet: the tab keeps what it showed.
+    }
+  }
+
+  $effect(() => {
+    const key = copy?.cloudSaves ? copy.key : null
+    void version
+    if (!key) {
+      saves = null
+      return
+    }
+    let alive = true
+    loadSaves(key, () => alive)
+    return () => {
+      alive = false
+    }
+  })
+
+  async function setSaves(choice: boolean | null) {
+    const key = copy!.key
+    await run(() => api.setSaves(key, choice))
+    await loadSaves(key)
+  }
+
+  async function syncNow() {
+    const key = copy!.key
+    syncing = true
+    await run(() => api.syncSavesNow(key))
+    await loadSaves(key)
+    syncing = false
+  }
+
   const labels: Record<Action, string> = { play: 'Launching…', playOutdated: 'Launching…', install: 'Installing…', update: 'Updating…', uninstall: 'Uninstalling…' }
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
@@ -174,7 +227,8 @@
     busy = labels[action]
     keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
     try {
-      await api.act(action, key, options)
+      const found = await api.act(action, key, options)
+      if (found) asking = { conflict: found, action, key }
     } catch (e) {
       onerror(api.message(e))
     } finally {
@@ -202,6 +256,18 @@
     }
     confirming = true
     keepFocus(() => confirmCancel)
+  }
+
+  /** Keep cloud downloads it first; Keep local launches as is and uploads afterwards. */
+  function keep(side: 'cloud' | 'local') {
+    const { action, key } = asking!
+    asking = null
+    act(action, key, { keep: side })
+  }
+
+  function cancelAsk() {
+    asking = null
+    keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill, button.go'))
   }
 
   function keepUninstalled() {
@@ -294,10 +360,11 @@
     keepFocus(() => dlcCancel)
   }
 
-  // Saves (Task 22) and Launch options (Task 25) join when they exist; a tab with nothing for this game is hidden.
+  // Launch options (Task 25) joins when it exists; a tab with nothing for this game is hidden.
   const tabs = $derived.by(() => {
     const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
     if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
+    if (copy?.cloudSaves) list.push({ id: 'saves', label: 'Saves' })
     if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
     return list
   })
@@ -373,7 +440,13 @@
           </div>
 
           <div class="actions" bind:this={actionsEl}>
-            {#if confirming}
+            {#if asking}
+              <!-- Asks before launching, like the Epic uninstall; never picks a save by itself. -->
+              <span class="ask">{asking.conflict === 'localNewer' ? 'Local save is newer than the cloud save.' : 'Cloud save is newer than the local save.'}</span>
+              <button class="glass round" onclick={() => keep('cloud')}>Keep cloud</button>
+              <button class="glass round" onclick={() => keep('local')}>Keep local</button>
+              <button class="glass round" bind:this={askCancel} onclick={cancelAsk}>Cancel</button>
+            {:else if confirming}
               <span class="ask">Uninstall {game.title}? Its files will be deleted.</span>
               <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
@@ -486,6 +559,27 @@
             {/each}
           </ul>
         </section>
+      {:else if current === 'saves'}
+        <!-- The chosen Epic copy's cloud saves; the global default is in Settings → Library. -->
+        <section class="panel rows" aria-label="Saves">
+          <div class="row">
+            <div class="what">Sync cloud saves<small>Downloads before you play and uploads after. Default follows Settings.</small></div>
+            <div class="chips" role="group" aria-label="Sync cloud saves">
+              {#each [{ value: null, label: 'Default' }, { value: true, label: 'On' }, { value: false, label: 'Off' }] as option (option.label)}
+                <button class="chip" aria-pressed={saves !== null && saves.choice === option.value} onclick={() => setSaves(option.value)}>
+                  {option.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+          <div class="row">
+            <div class="what">Last sync<small class="last" class:failed={saves?.failed} title={saves?.last}>{saves?.last ?? ' '}</small></div>
+          </div>
+          <div class="row">
+            <div class="what">Sync now<small>The newer save wins.</small></div>
+            <button class="chip" disabled={!!busy || running || syncing} onclick={syncNow}>{syncing ? 'Syncing…' : 'Sync now'}</button>
+          </div>
+        </section>
       {:else if current === 'installation'}
         <!-- Acts on the chosen copy, like the ⋯ menu. Verify and Move come with Task 23. -->
         <section class="panel rows" aria-label="Installation">
@@ -520,6 +614,9 @@
           {/if}
         </section>
       {:else}
+      {#if saves?.failed}
+        <p class="sync-note" title={saves.last}>{saves.last}</p>
+      {/if}
       {#if showTiles}
         <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
         <div class="tiles">
@@ -1019,6 +1116,11 @@
     background: var(--glass-on);
   }
 
+  .chip[aria-pressed='true'] {
+    background: var(--glass-on);
+    border-color: var(--glass-on-line);
+  }
+
   .path {
     overflow-wrap: anywhere;
   }
@@ -1107,6 +1209,26 @@
     display: block;
     font-size: 12px;
     color: var(--text-3);
+  }
+
+  /* One quiet line; the full text is in the title. */
+  .what small.last {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .what small.failed,
+  .sync-note {
+    color: var(--text-2);
+  }
+
+  .sync-note {
+    margin: 16px 0 0;
+    font-size: 13px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .dlc {

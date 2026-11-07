@@ -9,6 +9,7 @@ use crate::cache::db;
 
 pub const SHOW_BANNER: &str = "show_banner";
 pub const AMBIENT: &str = "ambient";
+pub const CLOUD_SAVES: &str = "cloud_saves";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
 /// Name of the signed-in Steam account. Not a secret; the refresh token is in Credential Manager.
@@ -18,16 +19,19 @@ pub const STEAM_ACCOUNT: &str = "steam_account";
 pub struct Settings {
     pub show_banner: bool,
     pub ambient: bool,
+    /// Epic games sync their cloud saves around play unless the game says otherwise.
+    pub cloud_saves: bool,
     pub epic_install_dir: Option<PathBuf>,
     pub igdb_client_id: Option<String>,
 }
 
-/// Unset or unreadable values fall back to the defaults: banner and ambient color on.
+/// Unset or unreadable values fall back to the defaults: banner, ambient color and cloud saves on.
 pub fn load(conn: &Connection) -> Settings {
     let get = |name| db::setting(conn, name).ok().flatten();
     Settings {
         show_banner: get(SHOW_BANNER).is_none_or(|v| v != "false"),
         ambient: get(AMBIENT).is_none_or(|v| v != "false"),
+        cloud_saves: get(CLOUD_SAVES).is_none_or(|v| v != "false"),
         epic_install_dir: get(EPIC_INSTALL_DIR).map(PathBuf::from),
         igdb_client_id: get(IGDB_CLIENT_ID),
     }
@@ -36,7 +40,7 @@ pub fn load(conn: &Connection) -> Settings {
 /// Whether `name` may be set to `value` (`None` resets it). The secret has its own command.
 pub fn validate(name: &str, value: Option<&str>) -> Result<(), String> {
     match name {
-        SHOW_BANNER | AMBIENT => match value {
+        SHOW_BANNER | AMBIENT | CLOUD_SAVES => match value {
             None | Some("true" | "false") => Ok(()),
             Some(_) => Err(format!("{name} must be true or false.")),
         },
@@ -128,9 +132,9 @@ mod tests {
     }
 
     #[test]
-    fn defaults_have_banner_and_ambient_on() {
+    fn defaults_have_banner_ambient_and_cloud_saves_on() {
         let s = load(&memory());
-        assert!(s.show_banner && s.ambient);
+        assert!(s.show_banner && s.ambient && s.cloud_saves);
         assert_eq!((s.epic_install_dir, s.igdb_client_id), (None, None));
     }
 
@@ -139,10 +143,11 @@ mod tests {
         let conn = memory();
         let dir = std::env::temp_dir();
         update(&conn, SHOW_BANNER, Some("false")).unwrap();
+        update(&conn, CLOUD_SAVES, Some("false")).unwrap();
         update(&conn, EPIC_INSTALL_DIR, Some(&format!("  {}  ", dir.display()))).unwrap();
         update(&conn, IGDB_CLIENT_ID, Some(" abc ")).unwrap();
         let s = load(&conn);
-        assert!(!s.show_banner && s.ambient);
+        assert!(!s.show_banner && s.ambient && !s.cloud_saves);
         assert_eq!(s.epic_install_dir, Some(dir));
         assert_eq!(s.igdb_client_id.as_deref(), Some("abc"));
         // Blank resets.

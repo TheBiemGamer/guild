@@ -15,7 +15,7 @@ use crate::entries::{self, Entry};
 use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
-use crate::library::epic::{self, InstallEvent};
+use crate::library::epic::{self, InstallEvent, SaveSync, SyncOutcome};
 use crate::library::{Game, Image, ProviderKind};
 use crate::links::{self, LinkKind};
 use crate::settings;
@@ -60,6 +60,8 @@ pub struct CopyView {
     size: Option<String>,
     /// Only for an installed copy (Steam knows a folder for games it hasn't installed yet).
     install_dir: Option<String>,
+    /// An installed Epic copy that keeps its saves in Epic's cloud.
+    cloud_saves: bool,
 }
 
 #[tauri::command]
@@ -97,6 +99,7 @@ fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: Syst
                     update_available: g.installed && g.update_available,
                     size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
                     install_dir: installed_dir(g).map(|p| p.to_string_lossy().into_owned()),
+                    cloud_saves: g.installed && g.cloud_saves,
                 }
             })
             .collect(),
@@ -170,12 +173,36 @@ pub enum Action {
     Uninstall,
 }
 
+/// The answer to a cloud save conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Keep {
+    Cloud,
+    Local,
+}
+
+/// Why an Epic Play didn't launch yet: the question to ask first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Conflict {
+    LocalNewer,
+    CloudNewer,
+}
+
 /// Steam requests return at once (Steam shows its own dialogs). Epic requests return when
 /// Legendary is done; installs report progress through `poll` meanwhile, under the game's key.
 /// `with_dlc` (Epic install, default on) installs the owned DLC too. `dlc` installs or uninstalls
 /// one DLC of the Epic copy `key` instead of the game.
+/// An Epic Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 #[tauri::command]
-pub async fn act(app: AppHandle, action: Action, key: String, with_dlc: Option<bool>, dlc: Option<String>) -> Res<()> {
+pub async fn act(
+    app: AppHandle,
+    action: Action,
+    key: String,
+    with_dlc: Option<bool>,
+    dlc: Option<String>,
+    keep: Option<Keep>,
+) -> Res<Option<Conflict>> {
     let game = app.state::<AppState>().game(&key).ok_or("This game is no longer in the library.")?;
     if let Some(id) = &dlc
         && (matches!(action, Action::Play | Action::PlayOutdated) || !game.dlc.iter().any(|d| &d.id == id))
@@ -184,10 +211,17 @@ pub async fn act(app: AppHandle, action: Action, key: String, with_dlc: Option<b
     }
     // A DLC install is just that DLC.
     let with_dlc = if dlc.is_some() { None } else { Some(with_dlc.unwrap_or(true)) };
-    blocking(move || act_blocking(&app, action, &game, with_dlc, dlc.as_deref())).await
+    blocking(move || act_blocking(&app, action, &game, with_dlc, dlc.as_deref(), keep)).await
 }
 
-fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<bool>, dlc: Option<&str>) -> Res<()> {
+fn act_blocking(
+    app: &AppHandle,
+    action: Action,
+    game: &Game,
+    with_dlc: Option<bool>,
+    dlc: Option<&str>,
+    keep: Option<Keep>,
+) -> Res<Option<Conflict>> {
     let state = app.state::<AppState>();
     let key = game.key();
     let store = game.provider.provider();
@@ -201,18 +235,25 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
             Action::Update => Err("Steam updates its games itself.".into()),
             Action::Uninstall => store.uninstall(game),
         };
-        return result.map_err(|e| format!("Steam: {e}"));
+        return result.map(|()| None).map_err(|e| format!("Steam: {e}"));
     }
     let result = match action {
-        Action::Play | Action::PlayOutdated => epic::launch(&game.external_id, action == Action::PlayOutdated).map(|()| {
-            record_play(&state, &key);
-            // The game started either way; without its exe name it just isn't shown as running.
-            let exe = epic::executable(game).unwrap_or_else(|e| {
-                eprintln!("legendary list-installed {key}: {e}");
-                None
-            });
-            state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now() });
-        }),
+        Action::Play | Action::PlayOutdated => {
+            let upload = match saves_before_play(&state, game, keep) {
+                Ok(upload) => upload,
+                Err(conflict) => return Ok(Some(conflict)),
+            };
+            epic::launch(&game.external_id, action == Action::PlayOutdated).map(|()| {
+                record_play(&state, &key);
+                // The game started either way; without its exe name it just isn't shown as running.
+                // shortcut: unwatched, its saves aren't uploaded either; the next Play asks about the newer local save.
+                let exe = epic::executable(game).unwrap_or_else(|e| {
+                    eprintln!("legendary list-installed {key}: {e}");
+                    None
+                });
+                state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), upload });
+            })
+        }
         Action::Install | Action::Update => {
             let on_event = |event| {
                 let mut s = state.lock();
@@ -238,7 +279,173 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
     if !matches!(action, Action::Play | Action::PlayOutdated) {
         rescan(app, true);
     }
-    result.map_err(|e| format!("Epic Games: {e}"))
+    result.map(|()| None).map_err(|e| format!("Epic Games: {e}"))
+}
+
+/// Info cache kind for an Epic copy's own cloud save choice, `on` or `off`; anything else follows the setting.
+const SAVES_CHOICE: &str = "cloud-saves";
+/// Info cache kind for an Epic copy's last cloud save sync, as a `SyncRecord`.
+const SAVES_SYNC: &str = "cloud-saves-sync";
+/// Info rows are read with a maximum age; these never go stale.
+const FOREVER: i64 = i64::MAX / 2;
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct SyncRecord {
+    /// Unix seconds.
+    at: i64,
+    /// What went wrong; nothing synced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    /// After the game, the cloud save was newer, so the local one wasn't uploaded. The next Play asks first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    cloud_newer: bool,
+}
+
+fn saves_choice(conn: &Connection, key: &str) -> Option<bool> {
+    match cache::db::cached_info(conn, key, SAVES_CHOICE, FOREVER, unix_now()).ok().flatten()?.as_str() {
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn last_sync(conn: &Connection, key: &str) -> Option<SyncRecord> {
+    let json = cache::db::cached_info(conn, key, SAVES_SYNC, FOREVER, unix_now()).ok().flatten()?;
+    serde_json::from_str(&json).ok()
+}
+
+/// What a sync leaves for the Saves tab. A conflict found before launch leaves nothing: nothing ran.
+fn sync_record(outcome: &SyncOutcome, at: i64) -> Option<SyncRecord> {
+    Some(match outcome {
+        SyncOutcome::Synced => SyncRecord { at, error: None, cloud_newer: false },
+        SyncOutcome::CloudNewer => SyncRecord { at, error: None, cloud_newer: true },
+        SyncOutcome::Failed(e) => SyncRecord { at, error: Some(e.clone()), cloud_newer: false },
+        SyncOutcome::LocalNewer => return None,
+    })
+}
+
+fn record_sync(conn: Option<&Connection>, key: &str, outcome: &SyncOutcome) {
+    if let SyncOutcome::Failed(e) = outcome {
+        eprintln!("legendary sync-saves {key}: {e}");
+    }
+    let at = unix_now();
+    let (Some(conn), Some(mut record)) = (conn, sync_record(outcome, at)) else { return };
+    // A failure changed nothing, so a newer cloud save left by the last upload still waits to be asked about.
+    record.cloud_newer |= record.error.is_some() && last_sync(conn, key).is_some_and(|r| r.cloud_newer);
+    let json = serde_json::to_string(&record).unwrap_or_default();
+    if let Err(e) = cache::db::put_info(conn, key, SAVES_SYNC, &json, at) {
+        eprintln!("record sync {key}: {e}");
+    }
+}
+
+/// Whether to download before launch, and how. `Err` is the conflict to ask about instead.
+/// `cloud_newer`: the last upload found the cloud save newer, which no plain download may overwrite.
+fn pre_launch_sync(keep: Option<Keep>, cloud_newer: bool) -> Result<Option<SaveSync>, Conflict> {
+    match keep {
+        Some(Keep::Local) => Ok(None),
+        Some(Keep::Cloud) => Ok(Some(SaveSync::KeepCloud)),
+        None if cloud_newer => Err(Conflict::CloudNewer),
+        None => Ok(Some(SaveSync::Download)),
+    }
+}
+
+/// Syncs an Epic game's cloud saves before it launches, when it has them and syncing is on for it.
+/// Returns how to upload after the game exits (`None`: no syncing), or the conflict to ask about instead
+/// of launching. A failed sync is remembered and never stops the launch.
+fn saves_before_play(state: &AppState, game: &Game, keep: Option<Keep>) -> Result<Option<SaveSync>, Conflict> {
+    let key = game.key();
+    let conn = open_db(state);
+    let enabled = conn.as_ref().is_none_or(|c| saves_choice(c, &key).unwrap_or_else(|| settings::load(c).cloud_saves));
+    if !game.cloud_saves || !enabled {
+        return Ok(None);
+    }
+    let cloud_newer = conn.as_ref().and_then(|c| last_sync(c, &key)).is_some_and(|r| r.cloud_newer);
+    let Some(download) = pre_launch_sync(keep, cloud_newer)? else {
+        // Keep local: the upload afterwards sends this PC's save whatever the cloud holds.
+        return Ok(Some(SaveSync::KeepLocal));
+    };
+    let outcome = epic::sync_saves(&game.external_id, download);
+    if outcome == SyncOutcome::LocalNewer {
+        return Err(Conflict::LocalNewer);
+    }
+    record_sync(conn.as_ref(), &key, &outcome);
+    Ok(Some(SaveSync::Upload))
+}
+
+/// Uploads a watched Epic game's saves once it has exited, off the poll.
+pub(super) fn upload_saves(app: &AppHandle, key: String, sync: SaveSync) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(app_name) = key.strip_prefix("epic-") else { return };
+        let outcome = epic::sync_saves(app_name, sync);
+        record_sync(open_db(&app.state::<AppState>()).as_ref(), &key, &outcome);
+    });
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavesView {
+    /// The game's own choice; `None` follows the setting.
+    choice: Option<bool>,
+    /// `Synced 5 min ago`, `Not synced yet`, or what went wrong.
+    last: String,
+    /// `last` says what went wrong; the Overview repeats it.
+    failed: bool,
+}
+
+fn saves_view(choice: Option<bool>, last: Option<SyncRecord>, now: i64) -> SavesView {
+    let (last, failed) = match last {
+        None => ("Not synced yet".to_string(), false),
+        Some(SyncRecord { error: Some(e), .. }) => (format!("Cloud saves didn't sync: {e}"), true),
+        Some(SyncRecord { cloud_newer: true, .. }) => {
+            ("The cloud save is newer, so this PC's save wasn't uploaded.".to_string(), true)
+        }
+        Some(r) => (format!("Synced {}", view::ago_label(now - r.at)), false),
+    };
+    SavesView { choice, last, failed }
+}
+
+/// The Saves tab of an Epic copy (`key`); `None` for a copy without cloud saves.
+#[tauri::command]
+pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
+    app.state::<AppState>().game(&key).filter(|g| g.installed && g.cloud_saves)?;
+    blocking(move || {
+        let conn = open_db(&app.state::<AppState>())?;
+        Some(saves_view(saves_choice(&conn, &key), last_sync(&conn, &key), unix_now()))
+    })
+    .await
+}
+
+/// Sets an Epic copy's own cloud save choice; `None` follows the setting again.
+#[tauri::command]
+pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res<()> {
+    app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or("This game has no cloud saves.")?;
+    blocking(move || {
+        let conn = open_db(&app.state::<AppState>()).ok_or("The settings database can't be opened.")?;
+        let value = match choice {
+            Some(true) => "on",
+            Some(false) => "off",
+            None => "default",
+        };
+        cache::db::put_info(&conn, &key, SAVES_CHOICE, value, unix_now()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Sync now: the newer side wins. The outcome shows in the Saves tab, so this fails only before Legendary runs.
+#[tauri::command]
+pub async fn sync_saves_now(app: AppHandle, key: String) -> Res<()> {
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| g.installed && g.cloud_saves)
+        .ok_or("This game has no cloud saves.")?;
+    blocking(move || {
+        let outcome = epic::sync_saves(&game.external_id, SaveSync::Both);
+        record_sync(open_db(&app.state::<AppState>()).as_ref(), &key, &outcome);
+        Ok(())
+    })
+    .await
 }
 
 /// How long an Epic download size stays good; sizes change only with game updates.
@@ -781,6 +988,29 @@ mod tests {
         cache::db::put_info(&conn, "steam-2", DLC_FAILED, "null", 1_000).unwrap();
         assert!(cached_dlc(&conn, "steam-2", 1_000 + DLC_RETRY_SECS).1);
         assert!(!cached_dlc(&conn, "steam-2", 1_001 + DLC_RETRY_SECS).1);
+    }
+
+    #[test]
+    fn conflict_decision_before_launch() {
+        assert_eq!(pre_launch_sync(None, false), Ok(Some(SaveSync::Download)));
+        // A newer cloud save left over from the last upload is never downloaded without asking.
+        assert_eq!(pre_launch_sync(None, true), Err(Conflict::CloudNewer));
+        assert_eq!(pre_launch_sync(Some(Keep::Cloud), true), Ok(Some(SaveSync::KeepCloud)));
+        assert_eq!(pre_launch_sync(Some(Keep::Local), false), Ok(None));
+    }
+
+    #[test]
+    fn sync_records_show_in_the_saves_tab() {
+        let shown = |outcome: SyncOutcome| saves_view(None, sync_record(&outcome, 1_000), 1_300).last;
+        assert_eq!(shown(SyncOutcome::Synced), "Synced 5 min ago");
+        assert_eq!(shown(SyncOutcome::Failed("Login failed!".into())), "Cloud saves didn't sync: Login failed!");
+        assert!(saves_view(None, sync_record(&SyncOutcome::CloudNewer, 1_000), 1_300).failed);
+        assert_eq!(sync_record(&SyncOutcome::LocalNewer, 1_000), None);
+        assert_eq!(saves_view(Some(false), None, 0), SavesView { choice: Some(false), last: "Not synced yet".into(), failed: false });
+        // Stored as JSON in the info table and read back.
+        let json = serde_json::to_string(&sync_record(&SyncOutcome::CloudNewer, 7).unwrap()).unwrap();
+        assert_eq!(json, r#"{"at":7,"cloud_newer":true}"#);
+        assert_eq!(serde_json::from_str::<SyncRecord>(r#"{"at":7}"#).unwrap(), SyncRecord { at: 7, error: None, cloud_newer: false });
     }
 
     #[test]

@@ -240,6 +240,16 @@
             onclick={() => toggle('show_banner', !view.showBanner)}
           ></button>
         </div>
+        <div class="row">
+          <div id="saves-label">Sync cloud saves<span>Epic games download their cloud saves before you play and upload them after.</span></div>
+          <button
+            class="toggle"
+            role="switch"
+            aria-checked={view.cloudSaves}
+            aria-labelledby="saves-label"
+            onclick={() => toggle('cloud_saves', !view.cloudSaves)}
+          ></button>
+        </div>
       </section>
 
       <section id={id('Downloads')}>

@@ -36,6 +36,8 @@ export interface CopyView {
   size: string | null
   /** Only set for an installed copy. */
   installDir: string | null
+  /** An installed Epic copy that keeps its saves in Epic's cloud: the Saves tab. */
+  cloudSaves: boolean
 }
 export type LinkKind = 'steamStore' | 'epicStore' | 'pcGamingWiki' | 'steamDb' | 'protonDb'
 export interface Detail {
@@ -73,6 +75,8 @@ export interface SettingsView {
   igdbSecretSet: boolean
   showBanner: boolean
   ambient: boolean
+  /** Epic games sync cloud saves around play unless the game's Saves tab says otherwise. */
+  cloudSaves: boolean
   appVersion: string
   legendaryVersion: string | null
   cacheBytes: number
@@ -88,9 +92,22 @@ export const loadCache = () => invoke<void>('load_cache')
 /** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */
 export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
-/** `withDlc`: an Epic install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the Epic copy `key`. */
-export interface ActOptions { withDlc?: boolean; dlc?: string }
-export const act = (action: Action, key: string, options: ActOptions = {}) => invoke<void>('act', { action, key, ...options })
+/**
+ * `withDlc`: an Epic install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the Epic copy `key`.
+ * `keep`: the answer to the cloud save conflict an earlier Play returned.
+ */
+export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: 'cloud' | 'local' }
+/** Which save is newer when an Epic Play stopped to ask before launching. */
+export type Conflict = 'localNewer' | 'cloudNewer'
+/** Resolves to a conflict when an Epic Play asks first instead of launching; null otherwise. */
+export const act = (action: Action, key: string, options: ActOptions = {}) =>
+  invoke<Conflict | null>('act', { action, key, ...options })
+/** An Epic copy's Saves tab. `choice`: its own On/Off, null follows Settings. `last`: "Synced 5 min ago", "Not synced yet" or what went wrong (`failed`). */
+export interface SavesView { choice: boolean | null; last: string; failed: boolean }
+export const saves = (key: string) => invoke<SavesView | null>('saves', { key })
+export const setSaves = (key: string, choice: boolean | null) => invoke<void>('set_saves', { key, choice })
+/** The newer save wins; the outcome shows in `saves`. */
+export const syncSavesNow = (key: string) => invoke<void>('sync_saves_now', { key })
 /** A DLC under its game. `copy` is the Epic copy's key for Install and Uninstall; null for Steam, which installs DLC itself. */
 export interface Dlc { id: string; title: string; installed: boolean; copy: string | null }
 /**
