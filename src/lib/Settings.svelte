@@ -501,6 +501,8 @@
       const el = document.getElementById(id(name))
       if (el && el.getBoundingClientRect().top <= top) active = name
     }
+    // A short last section never reaches the top edge; at the bottom it's the one being read.
+    if (main.scrollTop + main.clientHeight >= main.scrollHeight - 1) active = sections[sections.length - 1]
   }
 
   function onkeydown(e: KeyboardEvent) {
