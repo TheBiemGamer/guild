@@ -18,7 +18,7 @@
     onlogin: () => void
   } = $props()
 
-  const sections = ['Accounts', 'Library', 'Downloads', 'Appearance', 'Extra metadata', 'Storage', 'About']
+  const sections = ['Accounts', 'Appearance', 'Extra metadata', 'Storage', 'About']
   let active = $state(sections[0])
   let main: HTMLElement
   let closeButton: HTMLButtonElement
@@ -31,6 +31,8 @@
   let replacing = $state(false)
   let busy = $state(false)
   let connecting = $state(false)
+  /** The Epic card's Options panel; folded each time Settings opens. */
+  let epicOptions = $state(false)
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -159,11 +161,11 @@
   const clearCache = () => change(() => api.clearCache())
 
   function ago(at: number | null, nowMs: number) {
-    if (at === null) return 'Not refreshed since the app started.'
+    if (at === null) return 'Not refreshed yet'
     const mins = Math.floor((nowMs - at) / 60_000)
-    if (mins < 1) return 'Last refreshed just now.'
-    if (mins < 60) return `Last refreshed ${mins} minute${mins === 1 ? '' : 's'} ago.`
-    return `Last refreshed ${Math.floor(mins / 60)} hour${mins < 120 ? '' : 's'} ago.`
+    if (mins < 1) return 'Refreshed just now'
+    if (mins < 60) return `Refreshed ${mins} min ago`
+    return `Refreshed ${Math.floor(mins / 60)} h ago`
   }
 
   /** What the Steam card says: the account name, or a problem in its place. */
@@ -235,110 +237,122 @@
       {/if}
 
       <section id={id('Accounts')}>
-        <h3>Accounts</h3>
-        <div class="acct">
-          <div class="logo steam"><StoreIcon provider="steam" size={24} /></div>
-          <div class="who">
-            <b>Steam</b>
-            {#if steam.problem}<span class="problem"><i class="dot"></i>{steam.problem}</span>
-            {:else if steam.name}<span>{steam.name}</span>{/if}
-          </div>
-          {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
-          {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>Log out</button>{/if}
-        </div>
-
-        <div class="acct">
-          <div class="logo epic"><StoreIcon provider="epic" size={24} /></div>
-          <div class="who">
-            <b>Epic Games</b>
-            {#if epic.problem}<span class="problem"><i class="dot"></i>{epic.problem}</span>
-            {:else if epic.name}<span>{epic.name}</span>{/if}
-          </div>
-          {#if epic.fix}
-            <button class="btn" disabled={loggingIn} onclick={onlogin}>{loggingIn ? 'Logging in…' : epic.fix}</button>
-          {/if}
-          {#if epic.logout}
-            <button class="btn danger" disabled={busy} onclick={logOut}>Log out</button>
-          {/if}
-        </div>
-      </section>
-
-      <section id={id('Library')}>
-        <h4>Library</h4>
-        <div class="row">
-          <div>Refresh library<span>{ago(refreshedAt, now)}</span></div>
-          <button class="btn" disabled={refreshing} onclick={onrefresh}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
-        </div>
-        <div class="row">
-          <div id="banner-label">Show the "Continue playing" banner</div>
+        <div class="head">
+          <h4>Accounts</h4>
+          {#if refreshing}<span class="ago still">Refreshing…</span>{/if}
+          <span class="ago" class:moving={refreshing}>{ago(refreshedAt, now)}</span>
           <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.showBanner}
-            aria-labelledby="banner-label"
-            onclick={() => toggle('show_banner', !view.showBanner)}
-          ></button>
+            class="refresh"
+            class:spinning={refreshing}
+            disabled={refreshing}
+            onclick={onrefresh}
+            aria-label="Refresh library"
+            title="Refresh library"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
+          </button>
         </div>
-        <div class="row">
-          <div id="saves-label">Sync cloud saves<span>Epic games only.</span></div>
-          <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.cloudSaves}
-            aria-labelledby="saves-label"
-            onclick={() => toggle('cloud_saves', !view.cloudSaves)}
-          ></button>
-        </div>
-        <div class="row">
-          <div>Import an existing install<span>An Epic game already on this PC.</span></div>
-          <button class="btn" disabled={managing !== null || importing !== null} onclick={pickImport}>Import…</button>
-        </div>
-        {#if importing}
-          <div class="row stack">
-            <label for="import-game">Which game is in {importing.path}?</label>
-            <div class="field">
-              <select id="import-game" bind:value={importKey}>
-                {#each importing.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
-              </select>
-              <button class="btn" disabled={managing !== null} onclick={runImport}>{managing === 'import' ? 'Importing…' : 'Import'}</button>
-              <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>Cancel</button>
+        <div class="acct">
+          <div class="top">
+            <div class="logo steam"><StoreIcon provider="steam" size={24} /></div>
+            <div class="who">
+              <b>Steam</b>
+              {#if steam.problem}<span class="problem"><i class="dot"></i>{steam.problem}</span>
+              {:else if steam.name}<span>{steam.name}</span>{/if}
             </div>
+            {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
+            {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>Log out</button>{/if}
           </div>
-        {/if}
-        {#if importNote}<p class="note" title={importNote}>{importNote}</p>{/if}
-        <div class="row">
-          <div>Sync with Epic Games Launcher<span>Adds the games it installed.</span></div>
-          <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? 'Syncing…' : 'Sync'}</button>
         </div>
-        {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
-      </section>
 
-      <section id={id('Downloads')}>
-        <h4>Downloads</h4>
-        <div class="row stack">
-          <label for="epic-folder">Epic install folder</label>
-          <div class="field">
-            <input
-              id="epic-folder"
-              type="text"
-              placeholder="Default (~/Games)"
-              spellcheck="false"
-              bind:value={folder}
-              onblur={saveFolder}
-              onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            />
-            {#if view.epicInstallDir}
+        <div class="acct">
+          <div class="top">
+            <div class="logo epic"><StoreIcon provider="epic" size={24} /></div>
+            <div class="who">
+              <b>Epic Games</b>
+              {#if epic.problem}<span class="problem"><i class="dot"></i>{epic.problem}</span>
+              {:else if epic.name}<span>{epic.name}</span>{/if}
+            </div>
+            {#if view.epic !== 'noLegendary'}
               <button
-                class="btn"
-                onclick={() => {
-                  folder = ''
-                  saveFolder()
-                }}
+                class="btn opt"
+                class:open={epicOptions}
+                aria-expanded={epicOptions}
+                aria-controls="epic-options"
+                onclick={() => (epicOptions = !epicOptions)}
               >
-                Reset
+                Options
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
               </button>
             {/if}
+            {#if epic.fix}
+              <button class="btn" disabled={loggingIn} onclick={onlogin}>{loggingIn ? 'Logging in…' : epic.fix}</button>
+            {/if}
+            {#if epic.logout}
+              <button class="btn danger" disabled={busy} onclick={logOut}>Log out</button>
+            {/if}
           </div>
+          {#if epicOptions && view.epic !== 'noLegendary'}
+            <div class="opts" id="epic-options">
+              <div class="row">
+                <label for="epic-folder">Install folder</label>
+                <div class="field">
+                  <input
+                    id="epic-folder"
+                    type="text"
+                    placeholder="Default (~/Games)"
+                    spellcheck="false"
+                    bind:value={folder}
+                    onblur={saveFolder}
+                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  />
+                  {#if view.epicInstallDir}
+                    <button
+                      class="btn"
+                      onclick={() => {
+                        folder = ''
+                        saveFolder()
+                      }}
+                    >
+                      Reset
+                    </button>
+                  {/if}
+                </div>
+              </div>
+              <div class="row">
+                <div id="saves-label">Sync cloud saves</div>
+                <button
+                  class="toggle"
+                  role="switch"
+                  aria-checked={view.cloudSaves}
+                  aria-labelledby="saves-label"
+                  onclick={() => toggle('cloud_saves', !view.cloudSaves)}
+                ></button>
+              </div>
+              <div class="row">
+                <div>Import an existing install</div>
+                <button class="btn" disabled={managing !== null || importing !== null} onclick={pickImport}>Import…</button>
+              </div>
+              {#if importing}
+                <div class="row stack">
+                  <label for="import-game">Which game is in {importing.path}?</label>
+                  <div class="field">
+                    <select id="import-game" bind:value={importKey}>
+                      {#each importing.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
+                    </select>
+                    <button class="btn" disabled={managing !== null} onclick={runImport}>{managing === 'import' ? 'Importing…' : 'Import'}</button>
+                    <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>Cancel</button>
+                  </div>
+                </div>
+              {/if}
+              {#if importNote}<p class="note" title={importNote}>{importNote}</p>{/if}
+              <div class="row">
+                <div>Sync with Epic Games Launcher<span>Adds the games it installed.</span></div>
+                <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? 'Syncing…' : 'Sync'}</button>
+              </div>
+              {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
+            </div>
+          {/if}
         </div>
       </section>
 
@@ -354,6 +368,16 @@
             aria-checked={view.ambient}
             aria-labelledby="ambient-label"
             onclick={() => toggle('ambient', !view.ambient)}
+          ></button>
+        </div>
+        <div class="row">
+          <div id="banner-label">Show the "Continue playing" banner</div>
+          <button
+            class="toggle"
+            role="switch"
+            aria-checked={view.showBanner}
+            aria-labelledby="banner-label"
+            onclick={() => toggle('show_banner', !view.showBanner)}
           ></button>
         </div>
       </section>
@@ -507,17 +531,74 @@
     background: rgb(255 255 255 / 0.08);
   }
 
-  h3 {
-    margin: 4px 0 16px;
-    font-size: 20px;
-  }
-
   h4 {
     margin: 26px 0 10px;
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-2);
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    margin: 4px 0 10px;
+  }
+
+  .head h4 {
+    flex: 1;
+    margin: 0;
+  }
+
+  .ago {
+    margin-right: 8px;
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  .ago.still {
+    display: none;
+  }
+
+  /* No spin under reduced motion (app.css stops it), so the text says it instead. */
+  @media (prefers-reduced-motion: reduce) {
+    .ago.still {
+      display: inline;
+    }
+
+    .ago.moving {
+      display: none;
+    }
+  }
+
+  .refresh {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--glass-on);
+    border: 1px solid var(--glass-on-line);
+  }
+
+  .refresh.spinning svg {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .error {
@@ -529,14 +610,59 @@
   }
 
   .acct {
-    display: flex;
-    align-items: center;
-    gap: 14px;
     margin-bottom: 10px;
-    padding: 12px 14px;
     border-radius: 12px;
     background: var(--glass);
     border: 1px solid var(--glass-line);
+    overflow: hidden;
+  }
+
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+  }
+
+  .btn.opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border-color: var(--glass-line);
+    color: var(--text-2);
+  }
+
+  .btn.opt:hover:not(:disabled) {
+    background: var(--glass-hover);
+  }
+
+  .btn.opt svg {
+    stroke-width: 2.4;
+    transition: transform 150ms ease-out;
+  }
+
+  .btn.opt.open svg {
+    transform: rotate(180deg);
+  }
+
+  /* Indented to line up with the store name (14px padding + 40px logo + 12px). */
+  .opts {
+    padding: 4px 14px 8px 66px;
+    border-top: 1px solid var(--glass-line);
+  }
+
+  .opts .row {
+    padding: 8px 0;
+    border-bottom-color: var(--glass-line);
+  }
+
+  .opts > :last-child {
+    border-bottom: 0;
+  }
+
+  .opts .row:not(.stack) > .field {
+    flex: 0 1 260px;
   }
 
   .logo {
