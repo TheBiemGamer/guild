@@ -9,7 +9,7 @@
 - Epic games through Legendary, without the Epic Games Launcher: install, update, verify, repair and move games, and import games you already installed.
 - A download queue for Epic games that you can pause, resume and reorder.
 - Cloud saves and per-game launch options for Epic games.
-- GOG games in the same library.
+- GOG games in the same library, through gogdl: install, update, verify, repair, move and uninstall them and their DLC in the same download queue, and import games you already installed.
 - Game pages with the description, screenshots, playtime, last played, how long to beat, and links to the store, PCGamingWiki, SteamDB and ProtonDB.
 - Sort and filter by store, install status, playtime and how long to beat.
 - Favorites, hidden games and your own collections.

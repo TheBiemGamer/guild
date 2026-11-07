@@ -4,11 +4,11 @@
   import { sizeLabel } from './format'
 
   let { game, anchor, folder, onconfirm, oncancel }: {
-    /** The Epic copy's key and the game's title. */
+    /** The Epic or GOG copy's key and the game's title. */
     game: { key: string; title: string }
     /** The cover's rectangle; the popup opens beside it. */
     anchor: DOMRect
-    /** The saved install folder; null means Legendary's own, undefined that settings aren't read yet. */
+    /** The store's saved install folder; null means its default, undefined that settings aren't read yet. */
     folder: string | null | undefined
     /** `withDlc`: the "Include DLC" box, on by default. */
     onconfirm: (withDlc: boolean) => void

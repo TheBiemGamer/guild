@@ -51,7 +51,7 @@
     /** Copy keys, as `poll` reports them. */
     runningKey: string | null
     progressByKey: Record<string, Progress>
-    /** The Epic download queue; this game's job in it decides the busy pill. */
+    /** The Epic and GOG download queue; this game's job in it decides the busy pill. */
     queue: QueueView
     /** Stops or removes a queued job, by copy key; resolves to whether it worked. */
     oncancel: (key: string) => Promise<boolean>
@@ -63,7 +63,7 @@
     onchanged: () => void
     /** This game's art for the window tint; null when it has none. */
     ontint: (url: string | null) => void
-    /** Install through the library's flow: an Epic copy asks in the install popup first, then calls `go`. */
+    /** Install through the library's flow: an Epic or GOG copy asks in the install popup first, then calls `go`. */
     onconfirminstall: (key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) => void
     /** Opens the Edit dialog for a game the owner added. */
     onedit: (key: string) => void
@@ -80,7 +80,7 @@
   let shots = $state<string[] | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
   let steamDlc = $state<{ id: string; title: string }[]>([])
-  /** The Epic DLC whose uninstall is being confirmed, as `copy|id`. */
+  /** The Epic or GOG DLC whose uninstall is being confirmed, as `copy|id`. */
   let confirmingDlc = $state<string | null>(null)
   let dlcCancel = $state<HTMLButtonElement>()
   let busy = $state<string | null>(null)
@@ -291,7 +291,7 @@
     verify: 'Verifying…',
     move: 'Moving…',
   }
-  /** This game's Epic job in the download queue. */
+  /** This game's job in the download queue. */
   const job = $derived(api.queueState(queue, copyKeys))
   /** The job Cancel was pressed for, until it leaves the queue. */
   let cancelling = $state<string | null>(null)
@@ -328,7 +328,7 @@
     }
   }
 
-  /** Epic's queued jobs run in Legendary, so they can be cancelled. Not Move: stopped halfway, Legendary's record and the folder disagree. */
+  /** Queued jobs run in Legendary or gogdl, so they can be cancelled. Not Move: stopped halfway, the record and the folder disagree. */
   async function cancel() {
     const key = job!.key
     cancelling = key
@@ -336,17 +336,17 @@
     if (!(await oncancel(key))) cancelling = null
   }
 
-  /** Epic moves into a picked folder; Steam opens its own storage manager. */
+  /** Epic and GOG move into a picked folder; Steam opens its own storage manager. */
   async function move() {
     const key = copy!.key
-    if (copy!.provider !== 'epic') return act('move', key)
+    if (copy!.provider === 'steam') return act('move', key)
     const dest = await api.pickFolder().catch((e) => (onerror(api.message(e)), null))
     if (dest) act('move', key, { dest })
   }
 
-  // Steam asks in its own dialog; Legendary doesn't, so Epic asks here first.
+  // Steam asks in its own dialog; Legendary and gogdl don't, so Epic and GOG ask here first.
   function uninstall() {
-    if (copy?.provider !== 'epic') {
+    if (copy?.provider === 'steam') {
       act('uninstall')
       return
     }
@@ -383,8 +383,10 @@
     f()
   }
 
-  /** The copies Play and Install can act on. */
-  const playable = $derived(game?.copies.filter((c) => api.actionable(c.key)) ?? [])
+  /** The copies Play and Install can act on: an installed GOG copy only to update it, as GOG games don't launch here yet. */
+  const playable = $derived(game?.copies.filter((c) => api.launches(c.key) || !c.installed || c.updateAvailable) ?? [])
+  /** The copy the pill acts on: the chosen one, unless the pill leaves it out. */
+  const pillKey = $derived((playable.find((c) => c.key === chosenKey) ?? playable[0])?.key)
 
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
@@ -439,7 +441,7 @@
     const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
     if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
     if (copy?.cloudSaves) list.push({ id: 'saves', label: 'Saves' })
-    if (copy?.installed && !custom) list.push({ id: 'launch', label: 'Launch options' })
+    if (copy?.installed && !custom && api.launches(copy.key)) list.push({ id: 'launch', label: 'Launch options' })
     if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
     return list
   })
@@ -567,10 +569,10 @@
                 {running}
                 busy={shown}
                 onchoose={(key) => (chosenKey = key)}
-                onplay={() => act('play')}
-                onupdate={() => act('update')}
+                onplay={() => act('play', pillKey)}
+                onupdate={() => act('update', pillKey)}
                 oninstall={() => {
-                  const key = copy!.key // the copy shown when the popup opens, not when it is confirmed
+                  const key = pillKey! // the copy shown when the popup opens, not when it is confirmed
                   onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), (withDlc) =>
                     act('install', key, { withDlc }),
                   )
@@ -629,7 +631,7 @@
                   <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>Cancel</button>
                 {:else}
                   <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
-                  <!-- Legendary adds a DLC to an installed game only. -->
+                  <!-- Legendary and gogdl add a DLC to an installed game only. -->
                   {#if d.copy && !shown && game.copies.find((c) => c.key === d.copy)?.installed}
                     <button
                       class="chip"
@@ -726,7 +728,9 @@
             <div class="row">
               <div class="what">Update available</div>
               <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>Update</button>
-              <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
+              {#if api.launches(copy!.key)}
+                <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
+              {/if}
             </div>
           {/if}
           {#if copy!.installed && !custom}
@@ -746,7 +750,7 @@
               <div class="what">
                 Uninstall{#if copy!.provider === 'steam'}<small>Opens in Steam.</small>{/if}
               </div>
-              <!-- The Epic confirm is in the hero; this chip stays, so focus is moved there by hand. -->
+              <!-- The Epic and GOG confirm is in the hero; this chip stays, so focus is moved there by hand. -->
               <button
                 class="chip danger"
                 disabled={!!shown || running}

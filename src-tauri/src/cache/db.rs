@@ -423,6 +423,18 @@ pub fn gog_installs(conn: &Connection) -> Result<HashMap<String, PathBuf>, Error
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Records where a GOG game is installed, or forgets it for `None`.
+pub fn set_gog_install(conn: &Connection, key: &str, path: Option<&Path>) -> Result<(), Error> {
+    match path {
+        Some(path) => conn.execute(
+            "INSERT INTO gog_installs (key, path) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET path = excluded.path",
+            params![key, path.to_string_lossy()],
+        )?,
+        None => conn.execute("DELETE FROM gog_installs WHERE key = ?1", [key])?,
+    };
+    Ok(())
+}
+
 /// Cached JSON for `(key, kind)` if it was fetched within `max_age_secs` of `now_secs`.
 pub fn cached_info(
     conn: &Connection,
@@ -446,6 +458,11 @@ pub fn put_info(conn: &Connection, key: &str, kind: &str, json: &str, now_secs: 
          ON CONFLICT(key, kind) DO UPDATE SET json = excluded.json, fetched = excluded.fetched",
         params![key, kind, json, now_secs],
     )?;
+    Ok(())
+}
+
+pub fn delete_info(conn: &Connection, key: &str, kind: &str) -> Result<(), Error> {
+    conn.execute("DELETE FROM info WHERE key = ?1 AND kind = ?2", [key, kind])?;
     Ok(())
 }
 
@@ -799,6 +816,11 @@ mod tests {
         assert!(gog_installs(&conn).unwrap().is_empty());
         conn.execute(r"INSERT INTO gog_installs (key, path) VALUES ('gog-1', 'C:\Games\A')", []).unwrap();
         assert_eq!(gog_installs(&conn).unwrap(), HashMap::from([("gog-1".to_string(), PathBuf::from(r"C:\Games\A"))]));
+        set_gog_install(&conn, "gog-1", Some(Path::new(r"D:\Games\A"))).unwrap();
+        set_gog_install(&conn, "gog-2", Some(Path::new(r"C:\Games\B"))).unwrap();
+        assert_eq!(gog_installs(&conn).unwrap()["gog-1"], PathBuf::from(r"D:\Games\A"));
+        set_gog_install(&conn, "gog-1", None).unwrap();
+        assert_eq!(gog_installs(&conn).unwrap().into_keys().collect::<Vec<_>>(), ["gog-2"]);
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as api from './api'
-  import type { Card, Progress, QueuedAction, QueueView } from './api'
+  import type { Card, Progress, QueuedAction, QueueView, Store } from './api'
   import { progressShort } from './format'
   import { popover } from './popover'
   import StoreIcon from './StoreIcon.svelte'
@@ -8,7 +8,7 @@
   let { progress, queue, games, anchor, onclose, oncancel, onpause, onresume, onmove }: {
     /** `poll`'s map, by copy key. */
     progress: Record<string, Progress>
-    /** The Epic download queue; its first job is the active one. */
+    /** The Epic and GOG download queue; its first job is the active one. */
     queue: QueueView
     /** The library as loaded, for titles; a game hidden by the search is asked for once. */
     games: Card[]
@@ -39,9 +39,10 @@
   const active = $derived(queue.jobs[0])
   const next = $derived(queue.jobs.slice(1))
   const jobs = $derived(Object.entries(progress))
-  // Epic jobs outside the queue (Move) show their progress only; Steam's run in Steam.
-  const other = $derived(jobs.filter(([k]) => k.startsWith('epic-') && k !== active?.key))
-  const steam = $derived(jobs.filter(([k]) => !k.startsWith('epic-')))
+  const storeOf = (key: string): Store => (key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : 'steam')
+  // Epic and GOG jobs outside the queue (Move, a GOG DLC uninstall) show their progress only; Steam's run in Steam.
+  const other = $derived(jobs.filter(([k]) => storeOf(k) !== 'steam' && k !== active?.key))
+  const steam = $derived(jobs.filter(([k]) => storeOf(k) === 'steam'))
   const running: Record<QueuedAction, string> = { install: 'Installing…', update: 'Updating…', verify: 'Verifying…' }
   const actionName: Record<QueuedAction, string> = { install: 'Install', update: 'Update', verify: 'Verify' }
 
@@ -56,10 +57,10 @@
   <span class="fill" class:paused style="width: {pct}%" role="progressbar" aria-label="{title(key)} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}></span>
 {/snippet}
 
-{#snippet job(key: string, p: Progress, inSteam: boolean)}
+{#snippet job(key: string, p: Progress)}
   <div class="job">
     {@render fill(key, p)}
-    <StoreIcon provider={inSteam ? 'steam' : 'epic'} size={16} />
+    <StoreIcon provider={storeOf(key)} size={16} />
     <div class="what">
       <b>{title(key)}</b>
       <small>{progressShort(p)}</small>
@@ -71,7 +72,7 @@
   {#if active}
     <div class="job">
       {@render fill(active.key, progress[active.key], queue.paused)}
-      <StoreIcon provider="epic" size={16} />
+      <StoreIcon provider={storeOf(active.key)} size={16} />
       <div class="what">
         <b>{title(active.key)}</b>
         <small>{activeText(progress[active.key])}</small>
@@ -90,13 +91,13 @@
       </button>
     </div>
   {/if}
-  {#each other as [key, p] (key)}{@render job(key, p, false)}{/each}
-  {#each steam as [key, p] (key)}{@render job(key, p, true)}{/each}
+  {#each other as [key, p] (key)}{@render job(key, p)}{/each}
+  {#each steam as [key, p] (key)}{@render job(key, p)}{/each}
   {#if next.length}
     <h3>Up next</h3>
     {#each next as j, i (`${j.key}|${j.action}`)}
       <div class="job">
-        <StoreIcon provider="epic" size={16} />
+        <StoreIcon provider={storeOf(j.key)} size={16} />
         <div class="what">
           <b>{title(j.key)}</b>
           <small class="quiet">{actionName[j.action]}</small>

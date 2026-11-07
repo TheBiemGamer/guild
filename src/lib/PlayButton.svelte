@@ -21,12 +21,12 @@
   const copy = $derived(copies.find((c) => c.key === chosen) ?? copies[0])
   const split = $derived(copies.length > 1)
 
-  // Download sizes of not-installed Epic and Steam copies. A key not in here is still being asked.
+  // Download sizes of not-installed store copies. A key not in here is still being asked.
   let sizes = $state<Record<string, number | null>>({})
   const asked = new Set<string>()
   $effect(() => {
     for (const c of copies) {
-      if ((c.provider !== 'epic' && c.provider !== 'steam') || c.installed || asked.has(c.key)) continue
+      if (c.provider === 'custom' || c.installed || asked.has(c.key)) continue
       asked.add(c.key)
       const key = c.key
       api.downloadSize(key).then(
@@ -103,7 +103,7 @@
 
 <svelte:window {onpointerdown} />
 
-{#if !copy.installed && !busy && !running && (copy.provider === 'epic' || copy.provider === 'steam') && downloadText(copy.key)}
+{#if !copy.installed && !busy && !running && copy.provider !== 'custom' && downloadText(copy.key)}
   <span class="download">{downloadText(copy.key)}</span>
 {/if}
 

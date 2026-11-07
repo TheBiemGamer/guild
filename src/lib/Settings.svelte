@@ -90,9 +90,10 @@
   let legendaryJob = $state<{ percent: number | null } | null>(null)
   let legendaryError = $state('')
   const legendary = $derived(view.tools.find((t) => t.name === 'legendary'))
-  /** gogdl's install while it runs, like Legendary's. */
+  /** gogdl's install or update while it runs, like Legendary's. */
   let gogdlJob = $state<{ percent: number | null } | null>(null)
   let gogdlError = $state('')
+  const gogdl = $derived(view.tools.find((t) => t.name === 'gogdl'))
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -256,6 +257,24 @@
       legendaryError = api.message(e)
     }
     legendaryJob = null
+    await onchange()
+  }
+
+  /** GOG's Import: gogdl reads which game the picked folder holds. */
+  let gogImporting = $state(false)
+  let gogImportNote = $state('')
+
+  async function gogImport() {
+    gogImportNote = ''
+    try {
+      const path = await api.pickFolder()
+      if (!path) return
+      gogImporting = true
+      gogImportNote = `Imported ${await api.gogImport(path)}.`
+    } catch (e) {
+      gogImportNote = api.message(e)
+    }
+    gogImporting = false
     await onchange()
   }
 
@@ -608,6 +627,20 @@
                   {/if}
                 </div>
               </div>
+              <div class="row">
+                <div>Import an existing install</div>
+                <button class="btn" disabled={gogImporting} onclick={gogImport}>{gogImporting ? 'Importing…' : 'Import…'}</button>
+              </div>
+              {#if gogImportNote}<p class="note" title={gogImportNote}>{gogImportNote}</p>{/if}
+              {#if gogdl?.update}
+                <div class="row">
+                  <div>gogdl {gogdl.version ?? ''}<span>{gogdl.pinned} is available.</span></div>
+                  <button class="btn" disabled={gogdlJob !== null} aria-live="polite" onclick={installGogdl}>
+                    {gogdlJob ? jobLabel('Updating', gogdlJob) : 'Update'}
+                  </button>
+                </div>
+                {#if gogdlError}<p class="note" title={gogdlError}>{gogdlError}</p>{/if}
+              {/if}
             </div>
           {/if}
         </div>

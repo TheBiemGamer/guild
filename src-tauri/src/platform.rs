@@ -7,6 +7,14 @@ pub fn no_window(command: &mut std::process::Command) -> &mut std::process::Comm
     command.creation_flags(crate::library::CREATE_NO_WINDOW)
 }
 
+/// Kills a process and every process it started (Legendary and gogdl unpack themselves into a child process,
+/// and gogdl starts download workers). Both resume a killed download when run again.
+#[cfg(windows)]
+pub fn kill_tree(pid: u32) -> Result<(), crate::library::Error> {
+    let status = no_window(std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"])).status()?;
+    if status.success() { Ok(()) } else { Err(format!("taskkill exited with {status}").into()) }
+}
+
 /// Bytes a process has written since it started (`WriteTransferCount`), or `None` when it's gone or not ours to read.
 #[cfg(windows)]
 pub fn process_bytes_written(pid: u32) -> Option<u64> {

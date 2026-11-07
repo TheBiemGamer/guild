@@ -130,6 +130,23 @@ pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     .await
 }
 
+/// Takes an existing install of an owned GOG game at `path` (gogdl reads which game it is), then rescans GOG.
+/// Resolves to the game's title.
+#[tauri::command]
+pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let id = gog::import(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+        let key = ProviderKind::Gog.key(&id);
+        let title = state.game(&key).map(|g| g.title).ok_or("That game isn't in your GOG library.")?;
+        let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
+        gog::record_install(&conn, &id, std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+        rescan(&app, true);
+        Ok(title)
+    })
+    .await
+}
+
 /// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Legendary and gogdl then
 /// rescan, so their card moves on to Log in.
 #[tauri::command]

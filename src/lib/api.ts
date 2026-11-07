@@ -13,8 +13,8 @@ export type Store = 'steam' | 'epic' | 'gog' | 'custom'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type GogLogin = 'noGogdl' | 'loggedOut' | 'loggedIn' | 'unreachable'
-/** GOG copies are listed only: nothing installs or plays them here yet, so Install and Play leave them out. */
-export const actionable = (key: string) => !key.startsWith('gog-')
+/** GOG copies don't launch here yet, so Play leaves them out. */
+export const launches = (key: string) => !key.startsWith('gog-')
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
@@ -67,7 +67,7 @@ export interface CopyView {
   key: string
   provider: Store
   installed: boolean
-  /** An installed Epic copy has a newer version. */
+  /** An installed Epic or GOG copy has a newer version. */
   updateAvailable: boolean
   /** Size on disk of an installed copy. */
   sizeBytes: number | null
@@ -97,7 +97,7 @@ export interface Detail {
   lastPlayedStore: Store | null
   /** Store pages first, then info sites (only with a Steam app id). */
   links: LinkKind[]
-  /** The Epic copies' DLC; a Steam copy's comes from `steamDlc`. */
+  /** The Epic and GOG copies' DLC; a Steam copy's comes from `steamDlc`. */
   dlc: Dlc[]
   favorite: boolean
   hidden: boolean
@@ -148,7 +148,7 @@ export interface ToolView {
   update: boolean
 }
 export type QueuedAction = 'install' | 'update' | 'verify'
-/** The Epic download queue in order. `active` is the first job's key, also while `paused`. */
+/** The Epic and GOG download queue in order. `active` is the first job's key, also while `paused`. */
 export interface QueueView { jobs: { key: string; action: QueuedAction; title: string }[]; paused: boolean; active: string | null }
 export interface Poll { running: string | null; progress: Record<string, Progress>; changed: boolean; queue: QueueView }
 export const emptyQueue: QueueView = { jobs: [], paused: false, active: null }
@@ -184,8 +184,8 @@ export const loadCache = () => invoke<{ sort: Sort; updatedTo: string | null }>(
 export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 /**
- * `withDlc`: an Epic install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the Epic copy `key`.
- * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic Move goes to.
+ * `withDlc`: an Epic or GOG install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the copy `key`.
+ * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic or GOG Move goes to.
  */
 export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: 'cloud' | 'local'; dest?: string }
 /** Which save is newer when an Epic Play stopped to ask before launching. */
@@ -209,7 +209,7 @@ export const launchOptions = (key: string) => invoke<LaunchOptions | null>('laun
 export const setLaunchOptions = (key: string, options: LaunchOptions) => invoke<LaunchOptions>('set_launch_options', { key, options })
 /** A Steam copy's properties in Steam, where its launch options live. */
 export const openSteamProperties = (key: string) => invoke<void>('open_steam_properties', { key })
-/** A DLC under its game. `copy` is the Epic copy's key for Install and Uninstall; null for Steam, which installs DLC itself. */
+/** A DLC under its game. `copy` is the Epic or GOG copy's key for Install and Uninstall; null for Steam, which installs DLC itself. */
 export interface Dlc { id: string; title: string; installed: boolean; copy: string | null }
 /**
  * The Steam copy's owned DLC (Steam logs on for it: connected account only, cached in Rust). Asked once per
@@ -219,7 +219,7 @@ export const steamDlc = (key: string) =>
   remembered('steamDlc', key, () =>
     invoke<{ id: string; title: string }[]>('steam_dlc', { key }).then((d) => (d.length ? d : null)),
   )
-/** Download size in bytes (Epic asks Legendary online, Steam logs on; cached); null when unknown. */
+/** Download size in bytes (Epic asks Legendary online, GOG asks gogdl, Steam logs on; cached); null when unknown. */
 export const downloadSize = (key: string) => remembered('size', key, () => invoke<number | null>('download_size', { key }))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */
 export type GameInfo = {
@@ -272,15 +272,15 @@ export function prefetch(card: Card) {
   const quiet = () => {}
   gameInfo(card.key).catch(quiet)
   timeToBeat(card.key).catch(quiet)
-  // Epic sizes only: a Steam size logs on to Steam, which a passing pointer must not do.
-  if (!card.installed && card.chosen.startsWith('epic-')) downloadSize(card.chosen).catch(quiet)
+  // Epic and GOG sizes only: a Steam size logs on to Steam, which a passing pointer must not do.
+  if (!card.installed && (card.chosen.startsWith('epic-') || card.chosen.startsWith('gog-'))) downloadSize(card.chosen).catch(quiet)
 }
 /** Settings "Test": resolves when Twitch and IGDB accept the saved credentials, else rejects with the reason. */
 export const testIgdb = () => invoke<void>('test_igdb')
 // These resolve to the queue as it is now, so the UI needn't wait for the next poll.
 /** Stops a game's active download, or takes a waiting or paused one out of the queue. */
 export const cancelInstall = (key: string) => invoke<QueueView>('cancel_install', { key })
-/** Pause stops the active Legendary job and keeps it first; Resume starts it again. */
+/** Pause stops the active job's Legendary or gogdl and keeps it first; Resume starts it again. */
 export const pauseDownloads = () => invoke<QueueView>('pause_downloads')
 export const resumeDownloads = () => invoke<QueueView>('resume_downloads')
 /** One place up or down; the active job stays first. */
@@ -294,6 +294,8 @@ export const epicImport = (key: string, path: string) => invoke<void>('epic_impo
 export const epicEglSync = () => invoke<void>('epic_egl_sync')
 export const gogLogIn = () => invoke<void>('gog_log_in')
 export const gogLogOut = () => invoke<void>('gog_log_out')
+/** Takes an existing install of an owned GOG game at `path`; gogdl reads which game it is. Resolves to its title. */
+export const gogImport = (path: string) => invoke<string>('gog_import', { path })
 /** Downloads and checks a store tool; `onPercent` hears each new whole percent once the size is known. */
 export function installTool(name: ToolView['name'], onPercent: (percent: number) => void) {
   const channel = new Channel<number>()

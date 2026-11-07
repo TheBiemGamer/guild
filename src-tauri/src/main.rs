@@ -96,6 +96,7 @@ fn main() {
             commands::settings::epic_egl_sync,
             commands::settings::gog_log_in,
             commands::settings::gog_log_out,
+            commands::settings::gog_import,
             commands::settings::install_tool,
             commands::settings::settings_view,
             commands::settings::update_setting,

@@ -17,8 +17,10 @@ use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
+use crate::library::gog;
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
 use crate::links::{self, LinkKind};
+use crate::platform::kill_tree;
 use crate::settings;
 use crate::steam_size;
 use crate::view;
@@ -45,7 +47,7 @@ pub struct Detail {
     last_played_store: Option<ProviderKind>,
     /// Store pages, then info sites when the Steam app id is known.
     links: Vec<LinkKind>,
-    /// The Epic copies' DLC; a Steam copy's comes from `steam_dlc`.
+    /// The Epic and GOG copies' DLC; a Steam copy's comes from `steam_dlc`.
     dlc: Vec<DlcView>,
     /// Any copy is a favorite, hidden, or in the collection (ids).
     favorite: bool,
@@ -59,7 +61,7 @@ pub struct CopyView {
     key: String,
     provider: ProviderKind,
     installed: bool,
-    /// An installed Epic copy has a newer version.
+    /// An installed Epic or GOG copy has a newer version.
     update_available: bool,
     /// Size on disk of an installed copy.
     size_bytes: Option<u64>,
@@ -177,12 +179,12 @@ pub enum Action {
     /// Epic only: start an out-of-date game without updating it first.
     PlayOutdated,
     Install,
-    /// Epic only; Steam updates games itself.
+    /// Epic and GOG; Steam updates games itself.
     Update,
     Uninstall,
-    /// Epic verifies and repairs here; Steam validates in its own window.
+    /// Epic and GOG verify and repair here; Steam validates in its own window.
     Verify,
-    /// Epic moves the folder to `dest`; Steam opens its storage manager.
+    /// Epic and GOG move the folder to `dest`; Steam opens its storage manager.
     Move,
 }
 
@@ -202,10 +204,10 @@ pub enum Conflict {
     CloudNewer,
 }
 
-/// Steam requests return at once (Steam shows its own dialogs). Epic requests return when
-/// Legendary is done; installs report progress through `poll` meanwhile, under the game's key.
-/// `with_dlc` (Epic install, default on) installs the owned DLC too. `dlc` installs or uninstalls
-/// one DLC of the Epic copy `key` instead of the game. `dest` is the folder an Epic Move goes to.
+/// Steam requests return at once (Steam shows its own dialogs). Epic and GOG requests return when
+/// Legendary or gogdl is done; installs report progress through `poll` meanwhile, under the game's key.
+/// `with_dlc` (Epic or GOG install, default on) installs the owned DLC too. `dlc` installs or uninstalls
+/// one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
 /// An Epic Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 #[tauri::command]
 pub async fn act(
@@ -257,26 +259,29 @@ fn act_blocking(
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
     }
-    // shortcut: GOG copies are listed only; the UI offers no action for them until the GOG install and launch land.
-    if game.provider == ProviderKind::Gog {
-        return Err("GOG games can't be installed or played here yet.".into());
-    }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
         Action::Update => Some(QueuedAction::Update),
         Action::Verify => Some(QueuedAction::Verify),
         _ => None,
     };
+    if game.provider == ProviderKind::Gog && action == Action::Install && dlc.is_none() && game.installed {
+        return Err("GOG: This game is already installed.".into());
+    }
     if let Some(queued) = queued {
-        let dest = (queued == QueuedAction::Install)
-            .then(|| open_db(&state).and_then(|c| settings::load(&c).epic_install_dir))
-            .flatten()
-            .map(|p| p.to_string_lossy().into_owned());
+        let dest = (queued == QueuedAction::Install).then(|| install_base(&state, game.provider)).flatten();
         let job = Job { dlc: dlc.map(str::to_string), with_dlc, dest, ..Job::new(&key, queued) };
         return enqueue(app, job).map(|()| None);
     }
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
         return Err("This game is in the download queue. Cancel its download first.".into());
+    }
+    if game.provider == ProviderKind::Gog {
+        let result = act_gog(&state, action, game, dlc, dest);
+        if !matches!(action, Action::Play | Action::PlayOutdated) {
+            rescan(app, true);
+        }
+        return result.map(|()| None).map_err(|e| format!("GOG: {e}"));
     }
     let result = match action {
         Action::Play | Action::PlayOutdated => {
@@ -321,6 +326,39 @@ fn act_blocking(
     result.map(|()| None).map_err(|e| format!("Epic Games: {e}"))
 }
 
+/// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
+/// the setting, else Legendary's default (`None`). GOG: the setting, else `%USERPROFILE%\Games` (gogdl has no default).
+fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
+    let saved = open_db(state).map(|c| settings::load(&c));
+    let dir = match provider {
+        ProviderKind::Gog => saved.and_then(|s| s.gog_install_dir).or_else(gog::default_base),
+        _ => saved.and_then(|s| s.epic_install_dir),
+    };
+    dir.map(|p| p.to_string_lossy().into_owned())
+}
+
+/// A GOG copy's actions outside the queue. A DLC uninstall is an update without it, so it reports progress like Move.
+fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, dest: Option<&str>) -> Result<(), crate::library::Error> {
+    let key = game.key();
+    let dir = installed_dir(game).ok_or("This game isn't installed.")?;
+    let conn = cache::db::open(&state.dirs.db)?;
+    match (action, dlc) {
+        // shortcut: GOG games don't launch here yet; the UI offers no Play for them.
+        (Action::Play | Action::PlayOutdated, _) => Err("GOG games can't be played here yet.".into()),
+        (Action::Move, _) => gog::move_to(&conn, &game.external_id, dir, std::path::Path::new(dest.ok_or("Pick a folder to move the game to.")?)),
+        (Action::Uninstall, None) => gog::uninstall(&conn, &game.external_id, dir),
+        (Action::Uninstall, Some(dlc)) => {
+            let on_event = |event| _ = record_event(&mut state.lock(), &key, event);
+            let result = gog::change_dlc(&game.external_id, dir, dlc, false, on_event);
+            let mut s = state.lock();
+            s.install_pids.remove(&key);
+            s.progress.remove(&key);
+            result
+        }
+        (Action::Install | Action::Update | Action::Verify, _) => unreachable!("queued"),
+    }
+}
+
 /// A game the owner added only plays: its program starts, watched like an Epic game to time the session.
 fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
     let store = game.provider.provider();
@@ -343,7 +381,7 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
     result.map_err(|e| e.to_string())
 }
 
-/// Records a Legendary job's pid or progress under its copy key. Returns the pid of a queued job that
+/// Records a Legendary or gogdl job's pid or progress under its copy key. Returns the pid of a queued job that
 /// must stop at once: it was cancelled or the queue paused before its process started.
 fn record_event(s: &mut Shared, key: &str, event: InstallEvent) -> Option<u32> {
     match event {
@@ -379,7 +417,7 @@ fn report(s: &mut Shared, key: &str, outcome: Res<()>) {
     }
 }
 
-/// Queues an Epic job and waits until it leaves the queue: done, failed, cancelled or removed.
+/// Queues an Epic or GOG job and waits until it leaves the queue: done, failed, cancelled or removed.
 fn enqueue(app: &AppHandle, job: Job) -> Res<()> {
     let state = app.state::<AppState>();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -449,10 +487,12 @@ fn run_queue(app: &AppHandle) {
             }
         };
         let key = job.key.clone();
-        let result = match state.game(&key) {
-            Some(game) => run_job(&state, &game, &job),
+        let game = state.game(&key);
+        let result = match &game {
+            Some(game) => run_job(&state, game, &job),
             None => Err("This game is no longer in the library.".into()),
         };
+        let store = game.map_or(ProviderKind::Epic, |g| g.provider).name();
         let paused = {
             let mut s = state.lock();
             s.install_pids.remove(&key);
@@ -475,7 +515,7 @@ fn run_queue(app: &AppHandle) {
         let toast = (result.is_ok() && !cancelled)
             .then(|| s.games.iter().find(|g| g.key() == key).map(|g| g.title.clone()))
             .flatten();
-        let outcome = if cancelled { Ok(()) } else { result.map_err(|e| format!("Epic Games: {e}")) };
+        let outcome = if cancelled { Ok(()) } else { result.map_err(|e| format!("{store}: {e}")) };
         s.queue.finish(&key);
         save_queue(&state, &s.queue);
         report(&mut s, &key, outcome);
@@ -491,11 +531,14 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
     let on_event = |event| {
         let stop = record_event(&mut state.lock(), &job.key, event);
         if let Some(pid) = stop
-            && let Err(e) = epic::cancel(pid)
+            && let Err(e) = kill_tree(pid)
         {
             log!("stop download {}: {e}", job.key);
         }
     };
+    if game.provider == ProviderKind::Gog {
+        return run_gog_job(state, game, job, on_event);
+    }
     match job.action {
         QueuedAction::Update => epic::update(&game.external_id, on_event),
         QueuedAction::Verify => epic::verify(&game.external_id, on_event),
@@ -505,6 +548,22 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
             job.dest.as_deref().map(std::path::Path::new),
             on_event,
         ),
+    }
+}
+
+/// A queued GOG job. Each makes sure of the login first; an install writes the game's record once its files are in.
+fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(InstallEvent)) -> Result<(), crate::library::Error> {
+    let id = &game.external_id;
+    let dir = || installed_dir(game).ok_or("This game isn't installed.");
+    match (job.action, &job.dlc) {
+        (QueuedAction::Install, None) => {
+            let base = job.dest.as_deref().map(PathBuf::from).ok_or("There's no folder to install into.")?;
+            let dir = gog::install(open_db(state).as_ref(), id, &base, job.with_dlc != Some(false), on_event)?;
+            gog::record_install(&cache::db::open(&state.dirs.db)?, id, &dir)
+        }
+        (QueuedAction::Install, Some(dlc)) => gog::change_dlc(id, dir()?, dlc, true, on_event),
+        (QueuedAction::Update, _) => gog::update(id, dir()?, on_event),
+        (QueuedAction::Verify, _) => gog::verify(id, dir()?, on_event),
     }
 }
 
@@ -734,7 +793,8 @@ const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// Download size of a game that isn't installed, like `27.3 GB`, for the install popup and game page.
-/// Epic asks Legendary and Steam asks its servers (slow, seconds), so the bytes are cached for a week.
+/// Epic asks Legendary and Steam asks its servers (slow, seconds), so the bytes are cached for a week. GOG's comes
+/// from `gogdl info`, also cached for a week, with the owned DLC an install takes by default.
 /// None if unknown, or for Steam when no account is connected.
 #[tauri::command]
 pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
@@ -745,8 +805,15 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
     let steam_id = match game.provider {
         ProviderKind::Epic => None,
         ProviderKind::Steam => Some(game.external_id.parse::<u32>().ok()?),
-        // shortcut: GOG sizes come with the GOG install (`gogdl info`).
-        ProviderKind::Gog | ProviderKind::Custom => return None,
+        ProviderKind::Gog => {
+            let dlcs: Vec<String> = game.dlc.iter().map(|d| d.id.clone()).collect();
+            return blocking(move || {
+                let info = gog::install_info(open_db(&app.state::<AppState>()).as_ref(), &game.external_id)?;
+                gog::download_size(&info, &dlcs)
+            })
+            .await;
+        }
+        ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());
@@ -1236,7 +1303,7 @@ fn record_play(state: &AppState, key: &str) {
     }
 }
 
-/// Cancels a game's queued Epic job: the active one is stopped (Legendary resumes it next time) and
+/// Cancels a game's queued job: the active one is stopped (Legendary and gogdl resume it next time) and
 /// leaves the queue when its process ends; a waiting or paused one leaves the queue at once.
 /// Returns the queue as it is now.
 #[tauri::command]
@@ -1261,13 +1328,13 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
     };
     start_queue(&app);
     if let Some(pid) = pid {
-        blocking(move || epic::cancel(pid).map_err(|e| format!("Couldn't cancel the install: {e}"))).await?;
+        blocking(move || kill_tree(pid).map_err(|e| format!("Couldn't cancel the install: {e}"))).await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
 }
 
-/// Pauses the whole queue: the active job's Legendary is stopped (it resumes partial downloads) and the
-/// job stays at the head.
+/// Pauses the whole queue: the active job's Legendary or gogdl is stopped (both resume partial downloads) and
+/// the job stays at the head.
 #[tauri::command]
 pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
     let pid = {
@@ -1278,12 +1345,12 @@ pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
         pid
     };
     if let Some(pid) = pid {
-        blocking(move || epic::cancel(pid).map_err(|e| format!("Couldn't pause the download: {e}"))).await?;
+        blocking(move || kill_tree(pid).map_err(|e| format!("Couldn't pause the download: {e}"))).await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
 }
 
-/// Pauses the queue. Returns the pid of the active job's Legendary, for the caller to stop.
+/// Pauses the queue. Returns the pid of the active job's process, for the caller to stop.
 fn pause_head(s: &mut Shared) -> Option<u32> {
     s.queue.pause();
     let head = s.queue.jobs.first().map(|j| j.key.clone()).filter(|_| s.queue_running);
@@ -1292,7 +1359,7 @@ fn pause_head(s: &mut Shared) -> Option<u32> {
     pid
 }
 
-/// Stops the queue before the app exits for an update: the active Legendary is stopped (it continues the
+/// Stops the queue before the app exits for an update: the active job's process is stopped (it continues the
 /// partial download next time) and the queue is stored with its own paused flag, so the next start's
 /// `restore_queue` resumes it. Returns whether the queue was already paused.
 pub(super) fn stop_queue_for_restart(app: &AppHandle) -> bool {
@@ -1302,7 +1369,7 @@ pub(super) fn stop_queue_for_restart(app: &AppHandle) -> bool {
         (s.queue.paused, pause_head(&mut s))
     };
     if let Some(pid) = pid
-        && let Err(e) = epic::cancel(pid)
+        && let Err(e) = kill_tree(pid)
     {
         log!("stop download for update: {e}");
     }

@@ -1,4 +1,4 @@
-//! The Epic download queue: one Legendary job at a time, the rest wait in order. Pure; `commands::game`
+//! The download queue: one Legendary or gogdl job at a time, the rest wait in order. Pure; `commands::game`
 //! runs it and stores it as the `download_queue` setting.
 
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ pub enum QueuedAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Job {
-    /// The Epic copy key, `epic-<app_name>`.
+    /// The copy key, `epic-<app_name>` or `gog-<product_id>`.
     pub key: String,
     pub action: QueuedAction,
     /// Install: just this DLC of the game.
@@ -25,7 +25,7 @@ pub struct Job {
     /// Install: take the owned DLC too, or skip them; `None` for a DLC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub with_dlc: Option<bool>,
-    /// Install: the base folder chosen when it was queued; `None` is Legendary's default.
+    /// Install: the base folder chosen when it was queued (GOG always has one); `None` is Legendary's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dest: Option<String>,
 }

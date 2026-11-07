@@ -66,19 +66,19 @@ struct Shared {
     epic_notice: bool,
     /// Steam games polled for download progress.
     tracked: HashSet<String>,
-    /// Steam (polled) and Epic (streamed) download progress by game key.
+    /// Steam (polled), Epic and GOG (streamed) download progress by game key.
     progress: HashMap<String, Progress>,
-    /// Legendary's pid per running Epic job, for cancelling and pausing.
+    /// The Legendary or gogdl pid per running job, for cancelling and pausing.
     install_pids: HashMap<String, u32>,
     /// Queued jobs the user cancelled while they ran; their failure isn't an error.
     cancelled: HashSet<String>,
-    /// Epic installs, updates and verifies, run one at a time (`game::start_queue`).
+    /// Epic and GOG installs, updates and verifies, run one at a time (`game::start_queue`).
     queue: crate::downloads::Queue,
     /// A runner is working through `queue`.
     queue_running: bool,
     /// The stored queue was read at start.
     queue_loaded: bool,
-    /// Pause stopped the active job's Legendary; its failure isn't an error and it stays at the head.
+    /// Pause stopped the active job's process; its failure isn't an error and it stays at the head.
     interrupted: bool,
     /// The `act` call waiting for a queued job's outcome, by copy key.
     waiters: HashMap<String, std::sync::mpsc::Sender<Res<()>>>,

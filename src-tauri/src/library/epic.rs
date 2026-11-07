@@ -214,7 +214,7 @@ fn run_with_timeout(mut command: Command, input: &[u8], timeout: Duration) -> st
             return Ok(Some((status.success(), reader.join().unwrap_or_default())));
         }
         if Instant::now() >= deadline {
-            if let Err(e) = cancel(child.id()) {
+            if let Err(e) = crate::platform::kill_tree(child.id()) {
                 log!("stop timed-out legendary: {e}");
                 _ = child.kill();
             }
@@ -265,7 +265,7 @@ fn with_fallback(checked: Result<Value, Error>, plain: impl FnOnce() -> Result<V
 }
 
 /// Runs a hidden `legendary install` of a game or a DLC (Legendary's app name), reporting its pid and
-/// progress as they come. Returns once the download ends; killing the pid (see `cancel`) ends it with an error.
+/// progress as they come. Returns once the download ends; killing the pid (`platform::kill_tree`) ends it with an error.
 /// Installs under `base_path` when given, else in Legendary's default folder; a DLC goes into its game's folder.
 /// `with_dlc` (a game, not a DLC) installs its owned DLC too or skips them (`--with-dlcs` / `--skip-dlcs`).
 pub fn install(
@@ -346,7 +346,7 @@ pub fn move_to(app_name: &str, from: Option<&Path>, dest: &str, on_event: impl F
 
 /// Whether two paths are on the same drive (or network share).
 // shortcut: compares path prefixes only; a folder mounted from another disk counts as the same drive.
-fn same_drive(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_drive(a: &Path, b: &Path) -> bool {
     let volume = |path: &Path| match path.components().next()? {
         Component::Prefix(p) => Some(match p.kind() {
             Prefix::Disk(d) | Prefix::VerbatimDisk(d) => d.to_ascii_uppercase().to_string(),
@@ -474,16 +474,6 @@ fn stream(mut command: Command, action: ProgressAction, mut on_event: impl FnMut
 /// Uninstalls a game or a DLC (Legendary's app name).
 pub fn uninstall(app_name: &str) -> Result<(), Error> {
     run(legendary(&["-y", "uninstall", app_name]))
-}
-
-/// Stops an install started by `install`, including Legendary's download worker processes.
-/// Legendary resumes the download next time.
-pub fn cancel(pid: u32) -> Result<(), Error> {
-    let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()?;
-    if status.success() { Ok(()) } else { Err(format!("taskkill exited with {status}").into()) }
 }
 
 /// Legendary's DLManager logs, about once a second:
