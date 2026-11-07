@@ -17,9 +17,9 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
 - **Secrets** live only in Windows Credential Manager (service `dev.noah.gamelauncher`): the Steam refresh token and the IGDB secret.
   - Never put them in SQLite, files, logs, error strings or `Debug` output, and never send them to the frontend.
   - Steam passwords and Steam Guard codes are never stored.
-- **The database** (`library-v3.sqlite`) also holds the owner's settings and launch history.
-  - Don't bump its file name, because that wipes them.
-  - Put new cached data in the `info` table under a new `kind`.
+- **The database** (`library-v3.sqlite`, with the version in the file name) has no migrations, and it holds the owner's `settings` and `launches`.
+  - A new file version is fine only if it copies `settings` and `launches` over from the old file, or brings real migrations (`PRAGMA user_version`). A bare bump wipes them.
+  - Prefer the `info` table with a new `kind` for new cached data.
 - **Keys:**
   - A store copy is keyed `steam-<appid>` or `epic-<app_name>`.
   - `entries.rs` groups copies into one card, and merges only on an exact, one-to-one Steam appid match (from GOG GamesDB twins).
