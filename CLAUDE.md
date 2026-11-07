@@ -1,6 +1,6 @@
 # game-launcher
 
-Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svelte 5 + TypeScript, and Rust (`src-tauri/src`). Epic goes through the Legendary CLI; Steam through local files and steam-vent.
+Windows-only launcher for the Steam, Epic, GOG and Amazon Games libraries. Built with Tauri 2, Svelte 5 + TypeScript, and Rust (`src-tauri/src`). Epic goes through the Legendary CLI, GOG through gogdl, Amazon through Nile; Steam through local files and steam-vent.
 
 ## Commands
 - Frontend:
@@ -22,8 +22,8 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
   - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections`, `collection_games` (members by copy key) and `custom_games` (games the owner added). Their covers are owner data too: files in `<data_local_dir>/custom/<id>/`, never the cache folder.
   - `info` is cache only: use it with a new `kind` for new cached data, never for anything the owner chose or built up.
 - **Keys:**
-  - A store copy is keyed `steam-<appid>`, `epic-<app_name>` or `gog-<product_id>`; a game the owner added is `custom-<id>` and never merges.
-  - `entries.rs` groups copies into one card, and merges an Epic or GOG copy only on an exact, one-to-one Steam appid match (from GOG GamesDB twins), per store. When several games of one store claim one appid, only the single one whose title equals the Steam title (trimmed, case-insensitive) merges; never on title alone. Epic and GOG copies only meet through an owned Steam copy.
+  - A store copy is keyed `steam-<appid>`, `epic-<app_name>`, `gog-<product_id>` or `amazon-<product id>` (`amzn1.adg.product.…`); a game the owner added is `custom-<id>` and never merges.
+  - `entries.rs` groups copies into one card, and merges an Epic, GOG or Amazon copy only on an exact, one-to-one Steam appid match (from GOG GamesDB twins; Amazon by product id only), per store. When several games of one store claim one appid, only the single one whose title equals the Steam title (trimmed, case-insensitive) merges; never on title alone. Epic, GOG and Amazon copies only meet through an owned Steam copy.
   - Launch history stays keyed by copy key.
 - **Network** work runs in the background and is throttled, and it fails quietly: a dot in Settings, no banners.
   - Steam CM logons must not fan out. Use the single-flight guards.

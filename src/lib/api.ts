@@ -9,10 +9,13 @@ import type { Collection, ListFilter } from './filters'
 export type { Collection, GroupId, Progress }
 
 /** `custom`: a game the owner added (key `custom-<id>`); it never shares a card with a store copy. */
-export type Store = 'steam' | 'epic' | 'gog' | 'custom'
+export type Store = 'steam' | 'epic' | 'gog' | 'amazon' | 'custom'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type GogLogin = 'noGogdl' | 'loggedOut' | 'loggedIn' | 'unreachable'
+export type AmazonLogin = 'noNile' | 'loggedOut' | 'loggedIn' | 'unreachable'
+/** Amazon copies are listed only: nothing installs or plays them here yet, so Install and Play leave them out. */
+export const actionable = (key: string) => !key.startsWith('amazon-')
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
@@ -57,6 +60,9 @@ export interface Library {
   gog: GogLogin | null
   /** GOG's state is known and it isn't logged in: the settings button carries a dot. */
   gogAttention: boolean
+  amazon: AmazonLogin | null
+  /** Amazon's state is known and it isn't logged in: the settings button carries a dot. */
+  amazonAttention: boolean
 }
 /** The game played last; `hero` is ready for an `<img>` or CSS `url()`. `chosen` and `copyKeys` as on `Card`. */
 export interface Featured { key: string; chosen: string; copyKeys: string[]; title: string; hero: string | null }
@@ -115,6 +121,11 @@ export interface SettingsView {
   gogAccount: string | null
   /** Null means the default folder. */
   gogInstallDir: string | null
+  amazon: AmazonLogin | null
+  /** The logged-in Amazon account's first name, from Nile's file. */
+  amazonAccount: string | null
+  /** Null means the default folder. */
+  amazonInstallDir: string | null
   igdbClientId: string | null
   /** The secret itself never reaches the UI. */
   igdbSecretSet: boolean
@@ -299,6 +310,8 @@ export const gogLogIn = () => invoke<void>('gog_log_in')
 export const gogLogOut = () => invoke<void>('gog_log_out')
 /** Takes an existing install of an owned GOG game at `path`; gogdl reads which game it is. Resolves to its title. */
 export const gogImport = (path: string) => invoke<string>('gog_import', { path })
+export const amazonLogIn = () => invoke<void>('amazon_log_in')
+export const amazonLogOut = () => invoke<void>('amazon_log_out')
 /** Downloads and checks a store tool; `onPercent` hears each new whole percent once the size is known. */
 export function installTool(name: ToolView['name'], onPercent: (percent: number) => void) {
   const channel = new Channel<number>()

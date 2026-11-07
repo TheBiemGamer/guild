@@ -4,6 +4,7 @@
 #[macro_use]
 mod log;
 
+mod amazon_login;
 mod bench;
 mod cache;
 mod commands;
@@ -97,6 +98,8 @@ fn main() {
             commands::settings::gog_log_in,
             commands::settings::gog_log_out,
             commands::settings::gog_import,
+            commands::settings::amazon_log_in,
+            commands::settings::amazon_log_out,
             commands::settings::install_tool,
             commands::settings::settings_view,
             commands::settings::update_setting,

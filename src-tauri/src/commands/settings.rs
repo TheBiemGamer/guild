@@ -1,4 +1,4 @@
-//! The settings page and the Epic and GOG login actions.
+//! The settings page and the Epic, GOG and Amazon login actions.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -17,11 +17,12 @@ use tauri_plugin_autostart::ManagerExt;
 
 use super::library::{fill_twins, refresh_owned, rescan};
 use super::{blocking, AppState, Res};
+use crate::amazon_login;
 use crate::cache;
 use crate::epic_login;
 use crate::gog_login;
 use crate::library::epic::{self, Login};
-use crate::library::gog;
+use crate::library::{amazon, gog};
 use crate::library::ProviderKind;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
@@ -76,6 +77,34 @@ pub async fn gog_log_in(app: AppHandle) -> Res<()> {
 pub async fn gog_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         gog::log_out().map_err(|e| e.to_string())?;
+        rescan(&app, true);
+        Ok(())
+    })
+    .await
+}
+
+/// Starts Nile's device login, opens Amazon's login window on it, hands the code back to Nile, then loads the
+/// Amazon library.
+#[tauri::command]
+pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        let sign_in = amazon::sign_in().map_err(|e| e.to_string())?;
+        // Starting may have logged a stale account out.
+        app.state::<AppState>().lock().amazon_login = Some(amazon::login());
+        let code = amazon_login::run(&app, &sign_in.url)?.ok_or("The login window was closed before logging in.")?;
+        amazon::register(&sign_in, &code).map_err(|e| e.to_string())?;
+        rescan(&app, true);
+        fill_twins(app.clone());
+        Ok(())
+    })
+    .await
+}
+
+/// Deregisters this PC from the Amazon account and forgets the login, then rescans. Cached Amazon games stay.
+#[tauri::command]
+pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        amazon::log_out().map_err(|e| e.to_string())?;
         rescan(&app, true);
         Ok(())
     })
@@ -147,8 +176,8 @@ pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
     .await
 }
 
-/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Legendary and gogdl then
-/// rescan, so their card moves on to Log in.
+/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then a rescan, so its card moves
+/// on to Log in.
 #[tauri::command]
 pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>) -> Res<()> {
     let tool = tools::find(&name).ok_or("Unknown tool.")?;
@@ -157,9 +186,7 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
         let _ = on_percent.send(percent);
     })
     .await?;
-    if [tools::LEGENDARY.name, tools::GOGDL.name].contains(&tool.name) {
-        blocking(move || rescan(&app, true)).await;
-    }
+    blocking(move || rescan(&app, true)).await;
     Ok(())
 }
 
@@ -186,6 +213,10 @@ pub struct SettingsView {
     /// The logged-in GOG account's name, once a GOG scan has fetched it.
     gog_account: Option<String>,
     gog_install_dir: Option<String>,
+    amazon: Option<amazon::Login>,
+    /// The logged-in Amazon account's first name, from Nile's file.
+    amazon_account: Option<String>,
+    amazon_install_dir: Option<String>,
     igdb_client_id: Option<String>,
     /// Whether a secret is saved; its value never leaves Credential Manager.
     igdb_secret_set: bool,
@@ -215,6 +246,8 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         let epic_account = if epic == Some(Login::LoggedIn) { crate::epic_playtime::account_name() } else { None };
         let gog = state.lock().gog_login;
         let gog_account = if gog == Some(gog::Login::LoggedIn) { gog::account_name(&conn) } else { None };
+        let amazon = state.lock().amazon_login;
+        let amazon_account = if amazon == Some(amazon::Login::LoggedIn) { amazon::account_name() } else { None };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
         let steam = steamlocate::SteamDir::locate().is_ok();
         let steam_library = SteamLibrary {
@@ -230,6 +263,9 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             gog,
             gog_account,
             gog_install_dir: saved.gog_install_dir.map(|p| p.to_string_lossy().into_owned()),
+            amazon,
+            amazon_account,
+            amazon_install_dir: saved.amazon_install_dir.map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
             igdb_secret_set: settings::secret().is_some(),
             steamgriddb_key_set: settings::grid_key().is_some(),

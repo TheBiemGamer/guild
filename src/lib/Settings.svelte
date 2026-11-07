@@ -55,6 +55,7 @@
   // Drafts start from the saved values; after that they are the user's text.
   let folder = $state(untrack(() => view.epicInstallDir ?? ''))
   let gogFolder = $state(untrack(() => view.gogInstallDir ?? ''))
+  let amazonFolder = $state(untrack(() => view.amazonInstallDir ?? ''))
   let clientId = $state(untrack(() => view.igdbClientId ?? ''))
   let secret = $state('')
   let replacing = $state(false)
@@ -62,10 +63,12 @@
   let gridReplacing = $state(false)
   let busy = $state(false)
   let connecting = $state(false)
-  /** The Epic and GOG cards' Options panels; folded each time Settings opens. */
+  /** The Epic, GOG and Amazon cards' Options panels; folded each time Settings opens. */
   let epicOptions = $state(false)
   let gogOptions = $state(false)
   let gogLoggingIn = $state(false)
+  let amazonOptions = $state(false)
+  let amazonLoggingIn = $state(false)
   let checking = $state(false)
   let checkError = $state<string | null>(null)
   const notes = $derived(installedNotes(view.appVersion))
@@ -94,6 +97,10 @@
   let gogdlJob = $state<{ percent: number | null } | null>(null)
   let gogdlError = $state('')
   const gogdl = $derived(view.tools.find((t) => t.name === 'gogdl'))
+  /** Nile's install or update while it runs, like Legendary's. */
+  let nileJob = $state<{ percent: number | null } | null>(null)
+  let nileError = $state('')
+  const nile = $derived(view.tools.find((t) => t.name === 'nile'))
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -145,6 +152,18 @@
         await api.updateSetting('gog_install_dir', gogFolder.trim() || null)
       } catch (e) {
         gogFolder = view.gogInstallDir ?? ''
+        throw e
+      }
+    })
+  }
+
+  function saveAmazonFolder() {
+    if (amazonFolder.trim() === (view.amazonInstallDir ?? '')) return
+    change(async () => {
+      try {
+        await api.updateSetting('amazon_install_dir', amazonFolder.trim() || null)
+      } catch (e) {
+        amazonFolder = view.amazonInstallDir ?? ''
         throw e
       }
     })
@@ -296,12 +315,31 @@
     gogLoggingIn = false
   }
 
+  async function installNile() {
+    nileError = ''
+    nileJob = { percent: null }
+    try {
+      await api.installTool('nile', (percent) => (nileJob = { percent }))
+    } catch (e) {
+      nileError = api.message(e)
+    }
+    nileJob = null
+    await onchange()
+  }
+
+  async function amazonLogIn() {
+    amazonLoggingIn = true
+    await change(() => api.amazonLogIn())
+    amazonLoggingIn = false
+  }
+
   const jobLabel = (verb: string, job: { percent: number | null }) => (job.percent === null ? `${verb}…` : `${verb}… ${job.percent}%`)
 
   const removeSecret = () => change(() => api.setIgdbSecret(null))
   const removeGridKey = () => change(() => api.setSteamgriddbKey(null))
   const logOut = () => change(() => api.epicLogOut())
   const gogLogOut = () => change(() => api.gogLogOut())
+  const amazonLogOut = () => change(() => api.amazonLogOut())
   const clearCache = () => change(() => api.clearCache())
 
   function ago(at: number | null, nowMs: number) {
@@ -351,6 +389,24 @@
         return gogdlError
           ? { name: null, problem: gogdlError, fix: null, logout: false }
           : { name: 'GOG games need gogdl, a free open-source tool.', problem: null, fix: null, logout: false }
+      default:
+        return { name: 'Checking…', problem: null, fix: null, logout: false }
+    }
+  })
+
+  /** What the Amazon card says, and which fix it offers. */
+  const amazon = $derived.by(() => {
+    switch (view.amazon) {
+      case 'loggedIn':
+        return { name: view.amazonAccount ?? 'Logged in', problem: null, fix: null, logout: true }
+      case 'loggedOut':
+        return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+      case 'unreachable':
+        return { name: null, problem: "Can't reach Amazon", fix: 'Reconnect', logout: false }
+      case 'noNile':
+        return nileError
+          ? { name: null, problem: nileError, fix: null, logout: false }
+          : { name: 'Amazon games need Nile, a free open-source tool.', problem: null, fix: null, logout: false }
       default:
         return { name: 'Checking…', problem: null, fix: null, logout: false }
     }
@@ -650,6 +706,78 @@
                   </button>
                 </div>
                 {#if gogdlError}<p class="note" title={gogdlError}>{gogdlError}</p>{/if}
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <div class="acct">
+          <div class="top">
+            <div class="logo amazon"><StoreIcon provider="amazon" size={24} /></div>
+            <div class="who">
+              <b>Amazon Games</b>
+              {#if amazon.problem}<span class="problem"><i class="dot"></i>{amazon.problem}</span>
+              {:else if amazon.name}<span>{amazon.name}</span>{/if}
+            </div>
+            {#if view.amazon !== 'noNile'}
+              <button
+                class="btn opt"
+                class:open={amazonOptions}
+                aria-expanded={amazonOptions}
+                aria-controls="amazon-options"
+                onclick={() => (amazonOptions = !amazonOptions)}
+              >
+                Options
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+            {/if}
+            {#if view.amazon === 'noNile'}
+              <button class="btn" disabled={nileJob !== null} aria-live="polite" onclick={installNile}>
+                {nileJob ? jobLabel('Installing', nileJob) : 'Install Nile'}
+              </button>
+            {/if}
+            {#if amazon.fix}
+              <button class="btn" disabled={amazonLoggingIn} onclick={amazonLogIn}>{amazonLoggingIn ? 'Logging in…' : amazon.fix}</button>
+            {/if}
+            {#if amazon.logout}
+              <button class="btn danger" disabled={busy} onclick={amazonLogOut}>Log out</button>
+            {/if}
+          </div>
+          {#if amazonOptions && view.amazon !== 'noNile'}
+            <div class="opts" id="amazon-options">
+              <div class="row">
+                <label for="amazon-folder">Install folder</label>
+                <div class="field">
+                  <input
+                    id="amazon-folder"
+                    type="text"
+                    placeholder="Default (~/Games)"
+                    spellcheck="false"
+                    bind:value={amazonFolder}
+                    onblur={saveAmazonFolder}
+                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  />
+                  {#if view.amazonInstallDir}
+                    <button
+                      class="btn"
+                      onclick={() => {
+                        amazonFolder = ''
+                        saveAmazonFolder()
+                      }}
+                    >
+                      Reset
+                    </button>
+                  {/if}
+                </div>
+              </div>
+              {#if nile?.update}
+                <div class="row">
+                  <div>Nile {nile.version ?? ''}<span>{nile.pinned} is available.</span></div>
+                  <button class="btn" disabled={nileJob !== null} aria-live="polite" onclick={installNile}>
+                    {nileJob ? jobLabel('Updating', nileJob) : 'Update'}
+                  </button>
+                </div>
+                {#if nileError}<p class="note" title={nileError}>{nileError}</p>{/if}
               {/if}
             </div>
           {/if}
@@ -1046,6 +1174,10 @@
 
   .logo.gog {
     background: #86328a;
+  }
+
+  .logo.amazon {
+    background: #232f3e;
   }
 
   .who {

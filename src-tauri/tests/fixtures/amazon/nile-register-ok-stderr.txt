@@ -1,0 +1,5 @@
+INFO [AUTH_MANAGER]:	 Registerring a device. ID: 5445535453455249414c30
+INFO [AUTH_MANAGER]:	 Succesfully registered a device
+INFO [AUTH_MANAGER]:	 Written data to the config
+INFO [LIBRARY]:	 Synchronizing library
+INFO [LIBRARY]:	 Successfully synced the library

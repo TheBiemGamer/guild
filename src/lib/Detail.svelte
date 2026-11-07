@@ -383,6 +383,9 @@
     f()
   }
 
+  /** The copies Play and Install can act on. */
+  const playable = $derived(game?.copies.filter((c) => api.actionable(c.key)) ?? [])
+
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
 
@@ -557,8 +560,9 @@
                   />
                 {/if}
               </div>
+              {#if playable.length}
               <PlayButton
-                copies={game.copies}
+                copies={playable}
                 chosen={chosenKey}
                 {running}
                 busy={shown}
@@ -572,6 +576,7 @@
                   )
                 }}
               />
+              {/if}
               {#if job?.state === 'paused'}
                 <button class="glass round" onclick={onresume}>Resume</button>
               {/if}

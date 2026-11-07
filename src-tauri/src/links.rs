@@ -23,7 +23,7 @@ pub fn kinds(stores: &[ProviderKind], steam_appid: Option<u32>) -> Vec<LinkKind>
         .filter_map(|s| match s {
             ProviderKind::Steam => Some(LinkKind::SteamStore),
             ProviderKind::Epic => Some(LinkKind::EpicStore),
-            ProviderKind::Gog | ProviderKind::Custom => None,
+            ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Custom => None,
         })
         .collect();
     if steam_appid.is_some() {

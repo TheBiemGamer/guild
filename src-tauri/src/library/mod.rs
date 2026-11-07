@@ -1,5 +1,6 @@
 //! Normalized game model shared by all stores.
 
+pub mod amazon;
 pub mod custom;
 pub mod epic;
 pub mod gog;
@@ -16,18 +17,21 @@ pub enum ProviderKind {
     Steam,
     Epic,
     Gog,
+    Amazon,
     /// A program the owner added (`custom_games`); never merged with a store copy.
     Custom,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 4] = [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Custom];
+    pub const ALL: [ProviderKind; 5] =
+        [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Amazon, ProviderKind::Custom];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Steam => "steam",
             Self::Epic => "epic",
             Self::Gog => "gog",
+            Self::Amazon => "amazon",
             Self::Custom => "custom",
         }
     }
@@ -41,6 +45,7 @@ impl ProviderKind {
             Self::Steam => "Steam",
             Self::Epic => "Epic Games",
             Self::Gog => "GOG",
+            Self::Amazon => "Amazon Games",
             Self::Custom => "added games",
         }
     }
@@ -50,6 +55,7 @@ impl ProviderKind {
             Self::Steam => &steam::Steam,
             Self::Epic => &epic::Epic,
             Self::Gog => &gog::Gog,
+            Self::Amazon => &amazon::Amazon,
             Self::Custom => &custom::Custom,
         }
     }

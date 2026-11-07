@@ -1,0 +1,7 @@
+WARNING [CLI]:	 There was an error getting sdk
+INFO [AUTH_MANAGER]:	 Refreshing token
+ERROR [AUTH_MANAGER]:	 Failed to refresh the token HTTPSConnectionPool(host='api.amazon.com', port=443): Max retries exceeded with url: /auth/token (Caused by NameResolutionError("Failed to resolve 'api.amazon.com'"))
+INFO [LIBRARY]:	 Synchronizing library
+Traceback (most recent call last):
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='gaming.amazon.com', port=443): Max retries exceeded
+[PYI-1234:ERROR] Failed to execute script 'cli' due to unhandled exception!

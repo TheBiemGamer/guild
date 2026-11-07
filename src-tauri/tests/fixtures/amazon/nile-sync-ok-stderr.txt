@@ -1,0 +1,2 @@
+INFO [LIBRARY]:	 Synchronizing library
+INFO [LIBRARY]:	 Successfully synced the library

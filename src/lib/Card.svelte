@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { logoFile, storeNames } from './StoreIcon.svelte'
-  import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
+  import { actionable, cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
 
   let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu }: {
     game: Card
@@ -134,7 +134,7 @@
     </span>
   {:else if statText}
     <span class="chip stat">{statText}</span>
-  {:else if !game.installed}
+  {:else if !game.installed && actionable(game.chosen)}
     <span class="chip">
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       Install
@@ -153,12 +153,12 @@
             <button class="glass small" onclick={() => oncancel(waiting.key)}>Cancel</button>
           {/if}
         </span>
-      {:else if game.installed}
+      {:else if game.installed && actionable(game.chosen)}
         <button class="pill small" onclick={() => onplay(game.chosen)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
           Play
         </button>
-      {:else if !game.installed}
+      {:else if !game.installed && actionable(game.chosen)}
         <button class="pill small" onclick={() => oninstall(game.chosen, el.getBoundingClientRect())}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
           Install

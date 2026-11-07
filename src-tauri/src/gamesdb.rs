@@ -1,5 +1,5 @@
-//! GOG GamesDB (public, keyless): which Steam release is the same game as an Epic or GOG one, and a GOG
-//! game's portrait cover. Matched by store ID, never by title. A twin is only taken when the answer is unambiguous.
+//! GOG GamesDB (public, keyless): which Steam release is the same game as an Epic, GOG or Amazon one, and a GOG
+//! or Amazon game's portrait cover. Matched by store ID, never by title. A twin is only taken when the answer is unambiguous.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
@@ -83,12 +83,12 @@ pub fn steam_ids(games: &[crate::library::Game]) -> HashSet<u32> {
         .collect()
 }
 
-/// `resolve` for every Epic or GOG game key with a list.
+/// `resolve` for every Epic, GOG or Amazon game key with a list.
 pub fn resolve_all(lists: &HashMap<String, Vec<u32>>, owned: &HashSet<u32>) -> HashMap<String, u32> {
     lists.iter().filter_map(|(key, apps)| Some((key.clone(), resolve(apps, owned)?))).collect()
 }
 
-/// Asks GamesDB for the Steam apps and the cover of an Epic or GOG copy key. A 404 means GamesDB doesn't know the game.
+/// Asks GamesDB for the Steam apps and the cover of an Epic, GOG or Amazon copy key. A 404 means GamesDB doesn't know the game.
 pub async fn look_up(http: &reqwest::Client, key: &str) -> Result<(Vec<u32>, Option<String>), String> {
     match fetch(http, key).await? {
         Some(body) => Ok((parse_steam_apps(&body)?, parse_cover(&body))),
@@ -96,13 +96,16 @@ pub async fn look_up(http: &reqwest::Client, key: &str) -> Result<(Vec<u32>, Opt
     }
 }
 
-/// The GamesDB release URL of an Epic or GOG copy key: its store is GamesDB's platform, its id the release's.
+/// The GamesDB release URL of an Epic, GOG or Amazon copy key: its store is GamesDB's platform, its id the release's.
+/// An Amazon game is looked up by its product id only.
+// shortcut: GamesDB keeps some Amazon releases under a bare UUID instead, maybe `legacyProductIds`; unverified, so not tried.
 fn release_url(key: &str) -> Option<String> {
-    let (platform, id) = key.split_once('-').filter(|(p, id)| matches!(*p, "epic" | "gog") && !id.is_empty())?;
+    let (platform, id) =
+        key.split_once('-').filter(|(p, id)| matches!(*p, "epic" | "gog" | "amazon") && !id.is_empty())?;
     Some(format!("{URL}/{platform}/external_releases/{}", percent_encode(id)))
 }
 
-/// GamesDB's answer body for an Epic or GOG copy key; `None` when it doesn't know the game (404).
+/// GamesDB's answer body for an Epic, GOG or Amazon copy key; `None` when it doesn't know the game (404).
 pub async fn fetch(http: &reqwest::Client, key: &str) -> Result<Option<String>, String> {
     let url = release_url(key).ok_or_else(|| format!("gamesdb: no platform for {key}"))?;
     let resp = http.get(url).send().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
@@ -120,7 +123,7 @@ pub async fn fetch(http: &reqwest::Client, key: &str) -> Result<Option<String>, 
 #[derive(Serialize, Deserialize)]
 struct Stored {
     steam: Vec<u32>,
-    /// GamesDB's portrait cover; GOG copies use it.
+    /// GamesDB's portrait cover; GOG and Amazon copies use it.
     #[serde(default)]
     cover: Option<String>,
 }
@@ -149,16 +152,16 @@ fn all_stored(conn: &Connection, now_secs: i64) -> Vec<(String, Stored)> {
     rows.flatten().filter_map(|(key, json)| Some((key, serde_json::from_str::<Stored>(&json).ok()?))).collect()
 }
 
-/// Every fresh cached Steam app list by Epic or GOG game key.
+/// Every fresh cached Steam app list by Epic, GOG or Amazon game key.
 pub fn all_cached(conn: &Connection, now_secs: i64) -> HashMap<String, Vec<u32>> {
     all_stored(conn, now_secs).into_iter().map(|(key, s)| (key, s.steam)).collect()
 }
 
-/// Every fresh cached cover of a GOG game, by its key.
+/// Every fresh cached cover of a GOG or Amazon game, by its key.
 pub fn covers(conn: &Connection, now_secs: i64) -> HashMap<String, String> {
     all_stored(conn, now_secs)
         .into_iter()
-        .filter(|(key, _)| key.starts_with("gog-"))
+        .filter(|(key, _)| key.starts_with("gog-") || key.starts_with("amazon-"))
         .filter_map(|(key, s)| Some((key, s.cover?)))
         .collect()
 }
@@ -335,12 +338,42 @@ mod tests {
         assert_eq!(parse_cover("nope"), None);
     }
 
+    fn amazon_fixture(name: &str) -> String {
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/amazon").join(name)).unwrap()
+    }
+
+    #[test]
+    fn amazon_releases_list_their_steam_twin_or_none() {
+        let ldoj = amazon_fixture("gdb-amzn1-last-day-of-june.json");
+        assert_eq!(parse_steam_apps(&ldoj).unwrap(), [635320]);
+        assert!(parse_cover(&ldoj).is_some_and(|c| c.starts_with("https://images.gog.com/")));
+        assert!(parse_steam_apps(&amazon_fixture("gdb-amzn1-dungeon-of-the-endless-no-steam.json")).unwrap().is_empty());
+        // `fetch` turns the 404 into "unknown" before parsing; its body isn't a game.
+        assert!(parse_steam_apps(&amazon_fixture("gdb-404.json")).is_err());
+    }
+
+    /// `cargo test real_amazon_twin -- --ignored`
+    #[test]
+    #[ignore]
+    fn real_amazon_twin() {
+        let http = reqwest::Client::new();
+        let key = "amazon-amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633";
+        let (apps, cover) = tauri::async_runtime::block_on(look_up(&http, key)).unwrap();
+        assert_eq!(apps, [635320]);
+        assert!(cover.is_some());
+    }
+
     #[test]
     fn release_url_takes_the_platform_from_the_key() {
         let url = |key| release_url(key);
         assert_eq!(url("epic-Pumpkin").as_deref(), Some("https://gamesdb.gog.com/platforms/epic/external_releases/Pumpkin"));
         assert_eq!(url("gog-1425609977").as_deref(), Some("https://gamesdb.gog.com/platforms/gog/external_releases/1425609977"));
         assert_eq!(url("epic-a b").as_deref(), Some("https://gamesdb.gog.com/platforms/epic/external_releases/a%20b"));
+        assert_eq!(
+            url("amazon-amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633").as_deref(),
+            Some("https://gamesdb.gog.com/platforms/amazon/external_releases/amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633")
+        );
+        assert_eq!(url("amazon-"), None);
         assert_eq!(url("steam-70"), None);
         assert_eq!(url("custom-x"), None);
         assert_eq!(url("gog-"), None);
@@ -352,7 +385,14 @@ mod tests {
         remember(&conn, "gog-1", &[635320], Some("https://images.gog.com/c.jpg"), 1000);
         remember(&conn, "gog-2", &[], None, 1000);
         remember(&conn, "epic-a", &[], Some("https://images.gog.com/e.jpg"), 1000);
-        assert_eq!(covers(&conn, 1000), HashMap::from([("gog-1".to_string(), "https://images.gog.com/c.jpg".to_string())]));
+        remember(&conn, "amazon-p", &[], Some("https://images.gog.com/a.jpg"), 1000);
+        assert_eq!(
+            covers(&conn, 1000),
+            HashMap::from([
+                ("gog-1".to_string(), "https://images.gog.com/c.jpg".to_string()),
+                ("amazon-p".to_string(), "https://images.gog.com/a.jpg".to_string()),
+            ])
+        );
         assert_eq!(all_cached(&conn, 1000)["gog-1"], [635320]);
         // An answer stored before covers were kept still reads.
         db::put_info(&conn, "gog-3", TWIN, r#"{"steam":[70]}"#, 1000).unwrap();

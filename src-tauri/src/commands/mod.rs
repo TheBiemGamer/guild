@@ -62,6 +62,7 @@ struct Shared {
     status: String,
     epic_login: Option<Login>,
     gog_login: Option<crate::library::gog::Login>,
+    amazon_login: Option<crate::library::amazon::Login>,
     /// Epic logged out since the last run; shown once until dismissed.
     epic_notice: bool,
     /// Steam games polled for download progress.
@@ -91,9 +92,9 @@ struct Shared {
     owned_attempt: Option<Instant>,
     /// The library changed outside a UI call (owned games arrived); the next poll reports it.
     library_changed: bool,
-    /// Every Steam app GamesDB lists for an Epic or GOG game, by its key.
+    /// Every Steam app GamesDB lists for an Epic, GOG or Amazon game, by its key.
     twin_lists: HashMap<String, Vec<u32>>,
-    /// Steam twin (app id) of an Epic or GOG game, by its key. Resolved from `twin_lists` by `regroup`.
+    /// Steam twin (app id) of an Epic, GOG or Amazon game, by its key. Resolved from `twin_lists` by `regroup`.
     twins: HashMap<String, u32>,
     /// A twin lookup run is in flight.
     twins_running: bool,

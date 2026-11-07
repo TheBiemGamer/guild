@@ -17,7 +17,7 @@ use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
-use crate::library::gog;
+use crate::library::{amazon, gog};
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
 use crate::links::{self, LinkKind};
 use crate::platform::kill_tree;
@@ -266,6 +266,10 @@ fn act_blocking(
     }
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
+    }
+    // shortcut: Amazon copies are listed only; the UI offers no action for them until the Amazon install and launch land.
+    if game.provider == ProviderKind::Amazon {
+        return Err("Amazon games can't be installed or played here yet.".into());
     }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
@@ -856,7 +860,8 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
             })
             .await;
         }
-        ProviderKind::Custom => return None,
+        // shortcut: Amazon sizes come with the Amazon install (`nile install --info`).
+        ProviderKind::Amazon | ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());
@@ -1091,7 +1096,8 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 /// An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
 /// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG game starts
-/// from GamesDB and has its gaps filled from its Steam twin's page.
+/// from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
+/// and has its gaps filled like an Epic game's.
 /// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
@@ -1127,6 +1133,11 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
                     (Some(base), Some(extra)) => info::fill_missing(base, extra),
                     (base, extra) => base.or(extra).unwrap_or_default(),
                 };
+                return (all != GameInfo::default()).then_some(all);
+            }
+            if game.provider == ProviderKind::Amazon {
+                let base = amazon::details(&game.external_id).unwrap_or_default();
+                let all = steam_twin().or_else(gamesdb).map_or(base.clone(), |extra| info::fill_missing(base, extra));
                 return (all != GameInfo::default()).then_some(all);
             }
             // One list answers for every Epic game, so all of them are cached from it.

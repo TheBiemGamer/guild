@@ -23,6 +23,8 @@ pub struct Dirs {
     pub tools: PathBuf,
     /// gogdl's login file and manifests (`library::gog`).
     pub gog: PathBuf,
+    /// Nile's config folder (`library::amazon`).
+    pub amazon: PathBuf,
 }
 
 impl Dirs {
@@ -37,6 +39,7 @@ impl Dirs {
             custom: dirs.data_local_dir().join("custom"),
             tools: dirs.data_local_dir().join("tools"),
             gog: dirs.data_local_dir().join("gog"),
+            amazon: dirs.data_local_dir().join("amazon"),
         }
     }
 }

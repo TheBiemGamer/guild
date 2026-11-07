@@ -1,0 +1,7 @@
+INFO [AUTH_MANAGER]:	 Registerring a device. ID: 5445535453455249414c30
+ERROR [AUTH_MANAGER]:	 Failed to register a device
+INFO [LIBRARY]:	 Synchronizing library
+Traceback (most recent call last):
+  File "nile\api\library.py", line 87, in sync
+AttributeError: 'NoneType' object has no attribute 'encode'
+[PYI-1234:ERROR] Failed to execute script 'cli' due to unhandled exception!

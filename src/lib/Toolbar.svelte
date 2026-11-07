@@ -74,7 +74,7 @@
   } = $props()
 
   /** The store segments, in order; null is All. */
-  const stores: (Store | null)[] = [null, 'steam', 'epic', 'gog']
+  const stores: (Store | null)[] = [null, 'steam', 'epic', 'gog', 'amazon']
   const storeIndex = $derived(stores.indexOf(store))
   let segments = $state<HTMLButtonElement[]>([])
   const chips = $derived(filterChips(filters, collections))

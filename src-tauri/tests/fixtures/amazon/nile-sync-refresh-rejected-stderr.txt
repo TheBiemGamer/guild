@@ -1,0 +1,7 @@
+INFO [AUTH_MANAGER]:	 Refreshing token
+ERROR [AUTH_MANAGER]:	 Failed to refresh the token <Response [400]>
+INFO [LIBRARY]:	 Synchronizing library
+Traceback (most recent call last):
+  File "nile\api\library.py", line 117, in sync
+KeyError: 'entitlements'
+[PYI-1234:ERROR] Failed to execute script 'cli' due to unhandled exception!
