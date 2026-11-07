@@ -292,8 +292,8 @@ fn is_game(item: &Value) -> bool {
 
 /// Owned games, marked installed where Legendary has them, plus installed items missing
 /// from the owned list (e.g. imported ones). Owned items that aren't games are left out unless
-/// installed, so nothing installed disappears. A DLC (`addons`) goes under its base game, found by
-/// the catalog id in its `mainGameItem`; one whose base isn't listed is treated like other non-games.
+/// installed, so nothing installed disappears. A DLC (any item whose `mainGameItem` names another
+/// item's catalog id) goes under that base game when the base is listed; otherwise the rules above apply to it.
 fn games(owned: &Value, installed: &Value) -> Vec<Game> {
     let mut installed: HashMap<&str, &Value> =
         installed.as_array().into_iter().flatten().filter_map(|g| Some((g["app_name"].as_str()?, g))).collect();
@@ -314,8 +314,11 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
     let items: Vec<&Value> = items
         .into_iter()
         .filter(|g| {
-            let base = g["metadata"]["mainGameItem"]["id"].as_str().filter(|id| bases.contains(id));
-            let (Some(name), Some(base), true) = (g["app_name"].as_str(), base, has_category(g, "addons")) else {
+            // Some DLC (ARK's maps) are listed as games; naming another item as its base is what makes a DLC.
+            let base = g["metadata"]["mainGameItem"]["id"]
+                .as_str()
+                .filter(|id| bases.contains(id) && g["metadata"]["id"].as_str() != Some(id));
+            let (Some(name), Some(base)) = (g["app_name"].as_str(), base) else {
                 return true;
             };
             let title = g["app_title"].as_str().unwrap_or(name).to_owned();
@@ -510,6 +513,21 @@ mod tests {
         // Installed, it stays as its own entry: nothing installed disappears.
         let installed = serde_json::json!([{ "app_name": SAND_PATCH, "title": "Sand Patch Grade", "is_dlc": true }]);
         assert!(games(&categories(), &installed).iter().any(|g| g.external_id == SAND_PATCH));
+    }
+
+    #[test]
+    fn item_naming_its_base_game_is_dlc_whatever_its_category() {
+        // Shaped like ARK's maps: listed as games, but `mainGameItem` names ARK's catalog id.
+        let list = serde_json::json!([
+            { "app_name": "aafc587fbf654758802c8e41e4fb3255", "app_title": "ARK: Survival Evolved",
+              "metadata": { "id": "743e47ee84ac49a1a49f4781da70e0d0", "categories": [{ "path": "games" }] } },
+            { "app_name": "ArkRagnarok", "app_title": "ARK Ragnarok",
+              "metadata": { "id": "ragnarok", "categories": [{ "path": "public" }, { "path": "games" }, { "path": "applications" }],
+                            "mainGameItem": { "id": "743e47ee84ac49a1a49f4781da70e0d0" } } }
+        ]);
+        let all = games(&list, &Value::Null);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].dlc, [Dlc { id: "ArkRagnarok".into(), title: "ARK Ragnarok".into(), installed: false }]);
     }
 
     #[test]
