@@ -336,7 +336,10 @@
   const resumeDownloads = () => changeQueue(api.resumeDownloads)
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
-  const runningTitle = $derived(running ? lib.games.find((g) => g.copyKeys.includes(running!))?.title : undefined)
+  const runningCard = $derived(running ? lib.games.find((g) => g.copyKeys.includes(running!)) : undefined)
+  const runningTitle = $derived(runningCard?.title)
+  /** The running game's page: its card, else the copy key (the game page resolves either). */
+  const runningKey = $derived(runningCard?.key ?? running)
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
   const LABEL_H = 18
@@ -365,6 +368,9 @@
     {queue}
     games={lib.games}
     modal={settingsOpen}
+    {runningKey}
+    {runningTitle}
+    onopenrunning={openGame}
     oncancel={cancelDownload}
     onpause={() => changeQueue(api.pauseDownloads)}
     onresume={resumeDownloads}
@@ -378,9 +384,6 @@
       <button class="glass" onclick={openSettings}>Settings</button>
       <button class="close" onclick={dismissNotice} aria-label="Dismiss">✕</button>
     </div>
-  {/if}
-  {#if running}
-    <div class="notice playing"><span class="live" aria-hidden="true"></span><span>Playing {runningTitle ?? 'a game'}</span></div>
   {/if}
   {#if error}
     <div class="notice error">
@@ -526,28 +529,6 @@
 
   .notice > span:first-child {
     flex: 1;
-  }
-
-  .notice.playing {
-    gap: 10px;
-    color: var(--text-2);
-  }
-
-  /* Beats `.notice > span:first-child`: the dot stays a dot, the text after it takes the room. */
-  .notice.playing .live {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--play);
-    animation: live 2s ease-in-out infinite;
-  }
-
-  /* app.css turns animations off under prefers-reduced-motion. */
-  @keyframes live {
-    50% {
-      opacity: 0.35;
-    }
   }
 
   .notice.error {
