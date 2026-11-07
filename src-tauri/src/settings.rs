@@ -109,7 +109,7 @@ pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
         return None;
     }
     if let Err(e) = db::set_setting(conn, SEEN_VERSION, Some(current)) {
-        log!("saving the seen version: {e}");
+        tracing::warn!("saving the seen version: {e}");
         return None;
     }
     seen.map(|_| current.to_string())
@@ -176,7 +176,7 @@ fn read(user: &str) -> Option<String> {
         Ok(secret) => Some(secret),
         Err(keyring_core::Error::NoEntry) => None,
         Err(e) => {
-            log!("credential manager read: {e}");
+            tracing::warn!("credential manager read: {e}");
             None
         }
     }

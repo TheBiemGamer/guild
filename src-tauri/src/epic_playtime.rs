@@ -112,7 +112,7 @@ fn cached(conn: &Connection) -> HashMap<String, u64> {
 pub fn remember(conn: &Connection, minutes: &HashMap<String, u64>, now_secs: i64) {
     let json = serde_json::to_string(minutes).expect("a map of numbers serializes");
     if let Err(e) = db::put_info(conn, KEY, KIND, &json, now_secs) {
-        log!("epic playtime save: {e}");
+        tracing::warn!("epic playtime save: {e}");
     }
 }
 
@@ -128,7 +128,7 @@ fn gog_cached(conn: &Connection) -> HashMap<String, u64> {
 /// Returns whether anything changed.
 pub fn merge(conn: &Connection, games: &mut [Game]) -> bool {
     let own = db::own_totals(conn).unwrap_or_else(|e| {
-        log!("own playtime: {e}");
+        tracing::warn!("own playtime: {e}");
         HashMap::new()
     });
     apply(games, &cached(conn), &gog_cached(conn), &own)

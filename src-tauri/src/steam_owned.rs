@@ -134,13 +134,13 @@ pub fn remember(conn: &Connection, games: &[OwnedGame], now_secs: i64) {
         .map_err(crate::library::Error::from)
         .and_then(|json| put_info(conn, OWNED_KEY, OWNED, &json, now_secs));
     if let Err(e) = saved {
-        log!("steam owned save: {e}");
+        tracing::warn!("steam owned save: {e}");
     }
 }
 
 pub fn forget(conn: &Connection) {
     if let Err(e) = conn.execute("DELETE FROM info WHERE key = ?1 AND kind = ?2", [OWNED_KEY, OWNED]) {
-        log!("steam owned forget: {e}");
+        tracing::warn!("steam owned forget: {e}");
     }
 }
 

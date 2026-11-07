@@ -24,7 +24,7 @@ pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Opt
     let mut pending = state.update.lock().await;
     let checked = async { app.updater_builder().timeout(Duration::from_secs(30)).build()?.check().await };
     let update = checked.await.map_err(|e: tauri_plugin_updater::Error| {
-        log!("update check: {e}");
+        tracing::warn!("update check: {e}");
         msg!(cantCheckUpdates)
     })?;
     let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone().unwrap_or_default() });
@@ -45,7 +45,7 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<(
     }
     // Verifies the signature.
     let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| {
-        log!("update download: {e}");
+        tracing::warn!("update download: {e}");
         msg!(cantDownloadUpdate)
     })?;
     if game_running(&app).await {
@@ -60,13 +60,13 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<(
     let tray = app.tray_by_id("main");
     let show_tray = |on: bool| {
         if let Some(Err(e)) = tray.as_ref().map(|t| t.set_visible(on)) {
-            log!("tray: {e}");
+            tracing::warn!("tray: {e}");
         }
     };
     show_tray(false);
     // On Windows this starts the installer and exits; it only returns on failure.
     if let Err(e) = update.install(bytes) {
-        log!("update install: {e}");
+        tracing::error!("update install: {e}");
         show_tray(true);
         if !was_paused {
             super::game::resume_downloads(app);

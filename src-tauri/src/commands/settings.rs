@@ -127,7 +127,7 @@ pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
 fn note_signed_out(app: &AppHandle, store: &str) {
     let saved = super::open_db(&app.state::<AppState>()).map(|c| settings::set_signed_out(&c, store, true));
     if let Some(Err(e)) = saved {
-        log!("{store} signed out: {e}");
+        tracing::warn!("{store} signed out: {e}");
     }
 }
 

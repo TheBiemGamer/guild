@@ -134,7 +134,7 @@ fn auth() -> Auth {
     let output = match gogdl(["auth"]).output() {
         Ok(output) => output,
         Err(e) => {
-            log!("gogdl auth: {e}");
+            tracing::warn!("gogdl auth: {e}");
             return Auth::Unreachable;
         }
     };
@@ -142,8 +142,8 @@ fn auth() -> Auth {
     match &auth {
         Auth::In(creds) => *cached = Some(creds.clone()),
         // stdout and stderr stay unread here: stdout carries the tokens.
-        Auth::Unreachable => log!("gogdl auth: couldn't refresh the login ({})", output.status),
-        Auth::Out => log!("gogdl auth: the login expired"),
+        Auth::Unreachable => tracing::warn!("gogdl auth: couldn't refresh the login ({})", output.status),
+        Auth::Out => tracing::warn!("gogdl auth: the login expired"),
     }
     auth
 }
@@ -281,7 +281,7 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
     let (owned, products, latest, saves) = tauri::async_runtime::block_on(async {
         let owned = owned_ids(&get_json(http.get(OWNED_URL).header(reqwest::header::AUTHORIZATION, creds.bearer())).await?);
         if let Err(e) = remember_account(http, &conn, creds, now).await {
-            log!("gog account: {e}");
+            tracing::warn!("gog account: {e}");
         }
         let mut products = HashMap::new();
         let mut missing = Vec::new();
@@ -335,12 +335,12 @@ async fn latest_builds(http: &reqwest::Client, conn: &Connection, ids: &[u64], n
                     Ok(body) => {
                         let json = default_build(&body).map_or(Value::Null, Value::String).to_string();
                         if let Err(e) = db::put_info(conn, &key(id), LATEST_BUILD, &json, now) {
-                            log!("gog builds cache: {e}");
+                            tracing::warn!("gog builds cache: {e}");
                         }
                         json
                     }
                     Err(e) => {
-                        log!("gog builds {id}: {e}");
+                        tracing::warn!("gog builds {id}: {e}");
                         continue;
                     }
                 }
@@ -564,10 +564,10 @@ pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
     let json = crate::info::cached_or_fetch(conn, &key, INSTALL_INFO, INSTALL_INFO_MAX_AGE_SECS, now_secs() as i64, || {
         // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
         _ = login();
-        let output = gogdl(["info", id, "--os", "windows"]).output().inspect_err(|e| log!("gogdl info {id}: {e}")).ok()?;
+        let output = gogdl(["info", id, "--os", "windows"]).output().inspect_err(|e| tracing::warn!("gogdl info {id}: {e}")).ok()?;
         let info = json_line(&output.stdout).filter(|v| v["size"].is_object());
         if info.is_none() {
-            log!("gogdl info {id}: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
+            tracing::warn!("gogdl info {id}: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
         }
         Some(info?.to_string())
     })?;
@@ -727,7 +727,7 @@ fn run(args: Vec<OsString>, mut action: ProgressAction, mut on_event: impl FnMut
     });
     if fed == Fed::Stalled {
         if let Err(e) = crate::platform::kill_tree(pid) {
-            log!("stop stalled gogdl: {e}");
+            tracing::warn!("stop stalled gogdl: {e}");
             _ = child.kill();
         }
         _ = child.wait();
@@ -834,7 +834,7 @@ pub fn verify(id: &str, dir: &Path, on_event: impl FnMut(InstallEvent)) -> Resul
 pub fn record_install(conn: &Connection, id: &str, dir: &Path) -> Result<(), Error> {
     db::set_gog_install(conn, &ProviderKind::Gog.key(id), Some(dir))?;
     if read_json(&manifest(id)).is_some_and(|m| m["scriptInterpreter"] == true) {
-        log!("gog {id}: its install script was skipped");
+        tracing::warn!("gog {id}: its install script was skipped");
     }
     Ok(())
 }
@@ -864,7 +864,7 @@ pub fn import(path: &Path) -> Result<String, Error> {
     match json_line(&output.stdout).and_then(|v| id_text(&v["appName"])) {
         Some(id) => Ok(id),
         None => {
-            log!("gogdl import: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
+            tracing::warn!("gogdl import: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
             Err(msg!(noGogGameIn, path = path.display().to_string()).into())
         }
     }
@@ -1010,12 +1010,12 @@ async fn with_cloud_saves(
                     Ok(config) => {
                         let json = save_locations(&config).to_string();
                         if let Err(e) = db::put_info(conn, &key(id), SAVES, &json, now) {
-                            log!("gog saves cache: {e}");
+                            tracing::warn!("gog saves cache: {e}");
                         }
                         json
                     }
                     Err(e) => {
-                        log!("gog remote config {id}: {e}");
+                        tracing::warn!("gog remote config {id}: {e}");
                         continue;
                     }
                 }
@@ -1065,7 +1065,7 @@ fn save_folders(locations: &Value, client: &str, install: &Path) -> Vec<(String,
             let (name, location) = (l["name"].as_str()?, l["location"].as_str()?);
             let folder = resolve(location, install);
             if folder.is_none() {
-                log!("gog saves: unknown folder in {location}");
+                tracing::warn!("gog saves: unknown folder in {location}");
             }
             Some((name.to_owned(), folder?))
         })
@@ -1123,7 +1123,7 @@ fn save_stamps(conn: &Connection, key: &str) -> HashMap<String, String> {
 fn store_save_stamps(conn: &Connection, key: &str, stamps: &HashMap<String, String>) {
     let json = serde_json::to_string(stamps).unwrap_or_default();
     if let Err(e) = db::put_info(conn, key, SAVE_TS, &json, now_secs() as i64) {
-        log!("gog save timestamps: {e}");
+        tracing::warn!("gog save timestamps: {e}");
     }
 }
 

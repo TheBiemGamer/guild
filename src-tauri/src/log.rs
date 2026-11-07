@@ -1,21 +1,23 @@
-//! The log file, `logs/launcher.log` in the app's local data folder. Release builds have no console,
-//! so diagnostics go here (and to stderr in debug builds). Never log tokens, secrets, passwords or codes.
+//! The log file, `logs/launcher.log` in the app's local data folder. Release builds have no console, so
+//! `tracing` events from this crate go here (and to stderr in debug builds), one per line:
+//! `2026-11-07 14:03:12  WARN steam library: …` in local time. Never log tokens, secrets, passwords or codes.
 //! At 1 MB it rolls to `launcher.1.log`; `launcher.4.log` is the oldest kept.
 
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use jiff::{tz::TimeZone, Timestamp};
+use tracing::Level;
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
+use tracing_subscriber::prelude::*;
 
 const MAX_BYTES: u64 = 1024 * 1024;
 /// launcher.log plus launcher.1.log … launcher.4.log.
 const KEEP: usize = 5;
-
-/// Formats and writes one line: `log!("steam library: {e}")`.
-macro_rules! log {
-    ($($arg:tt)*) => { $crate::log::write(&format!($($arg)*)) };
-}
 
 struct Log {
     dir: PathBuf,
@@ -40,8 +42,8 @@ impl Log {
         Ok(Self { dir: dir.to_path_buf(), file, len })
     }
 
-    fn append(&mut self, line: &str) -> io::Result<()> {
-        self.file.write_all(line.as_bytes())?;
+    fn append(&mut self, line: &[u8]) -> io::Result<()> {
+        self.file.write_all(line)?;
         self.len += line.len() as u64;
         if self.len > MAX_BYTES {
             self.roll()?;
@@ -71,45 +73,56 @@ fn rotate(dir: &Path) {
 
 static LOG: Mutex<Option<Log>> = Mutex::new(None);
 
-/// Starts writing to `dir`; until then (and if it can't open) lines only reach stderr in debug builds.
+/// Writes each formatted event, whole, to the open file; nothing before `init` opens it or when it couldn't.
+struct LogFile;
+
+impl Write for LogFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(log) = LOG.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            // A full disk or a lost file isn't worth failing over.
+            let _ = log.append(buf);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct LocalTime;
+
+impl FormatTime for LocalTime {
+    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
+        write!(w, "{}", stamp(Timestamp::now(), TimeZone::system()))
+    }
+}
+
+/// `YYYY-MM-DD HH:MM:SS` on the clock in `tz`.
+fn stamp(at: Timestamp, tz: TimeZone) -> String {
+    at.to_zoned(tz).strftime("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Sends this crate's info and above to the log file in `dir` (and stderr in debug builds). The file is
+/// written unbuffered, so nothing waits to be flushed when the app exits.
 pub fn init(dir: &Path) {
+    #[cfg(debug_assertions)]
+    let writer = (|| LogFile).and(io::stderr);
+    #[cfg(not(debug_assertions))]
+    let writer = || LogFile;
+    let layer = tracing_subscriber::fmt::layer().with_timer(LocalTime).with_target(false).with_writer(writer);
+    let _ = tracing_subscriber::registry()
+        .with(layer.with_filter(Targets::new().with_target("launcher", Level::INFO)))
+        .try_init();
     match Log::open(dir) {
         Ok(log) => *LOG.lock().unwrap_or_else(|e| e.into_inner()) = Some(log),
-        Err(e) => eprintln!("log file {}: {e}", dir.display()),
+        Err(e) => tracing::error!("log file {}: {e}", dir.display()),
     }
-}
-
-pub fn write(msg: &str) {
-    #[cfg(debug_assertions)]
-    eprintln!("{msg}");
-    let mut log = LOG.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(log) = log.as_mut() {
-        // A full disk or a lost file isn't worth failing over.
-        let _ = log.append(&format!("{} {msg}\n", timestamp(SystemTime::now())));
-    }
-}
-
-/// `YYYY-MM-DD HH:MM:SSZ` in UTC (local time needs the OS's time zone rules).
-fn timestamp(t: SystemTime) -> String {
-    let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let (days, rem) = (secs / 86_400, secs % 86_400);
-    // Howard Hinnant's civil-from-days.
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("launcher-log-{name}-{}", std::process::id()));
@@ -145,22 +158,24 @@ mod tests {
         assert_eq!(log.len, 0);
         assert_eq!(fs::metadata(name(&dir, 1)).unwrap().len(), MAX_BYTES + 1);
 
-        log.append("first\n").unwrap();
+        log.append(b"first\n").unwrap();
         log.len = MAX_BYTES;
-        log.append("last\n").unwrap();
+        log.append(b"last\n").unwrap();
         assert_eq!(log.len, 0);
         assert_eq!(read(&dir, 1).unwrap(), "first\nlast\n");
         assert_eq!(fs::metadata(name(&dir, 2)).unwrap().len(), MAX_BYTES + 1);
-        log.append("next\n").unwrap();
+        log.append(b"next\n").unwrap();
         assert_eq!(read(&dir, 0).unwrap(), "next\n");
         drop(log);
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn timestamps_are_utc_calendar_time() {
-        assert_eq!(timestamp(UNIX_EPOCH), "1970-01-01 00:00:00Z");
-        // 2024-02-29 13:05:09 UTC, a leap day.
-        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(1_709_211_909)), "2024-02-29 13:05:09Z");
+    fn timestamps_are_local_clock_time() {
+        let tz = TimeZone::get("Europe/Amsterdam").unwrap();
+        // 2024-02-29 23:05:09 UTC, the last hour of a leap day: already March 1st in winter time (+1).
+        assert_eq!(stamp(Timestamp::from_second(1_709_247_909).unwrap(), tz.clone()), "2024-03-01 00:05:09");
+        // 2024-07-01 12:00:00 UTC in summer time (+2).
+        assert_eq!(stamp(Timestamp::from_second(1_719_835_200).unwrap(), tz), "2024-07-01 14:00:00");
     }
 }

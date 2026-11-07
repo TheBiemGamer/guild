@@ -148,7 +148,7 @@ pub fn file_in(dir: &Path) -> PathBuf {
         return new;
     }
     let keep_old = |why: &dyn std::fmt::Display| {
-        log!("database: {why}; keeps using {}", old.display());
+        tracing::warn!("database: {why}; keeps using {}", old.display());
         old.clone()
     };
     // SQLite would apply a stray journal of `library.sqlite` to the adopted file.
@@ -166,7 +166,7 @@ pub fn file_in(dir: &Path) -> PathBuf {
         }
     }
     let adopted = rename_with_sidecars(&old, &new).or_else(|e| {
-        log!("database: renaming {}: {e}; copying it instead", old.display());
+        tracing::warn!("database: renaming {}: {e}; copying it instead", old.display());
         copy(&old, &new)
     });
     match adopted {

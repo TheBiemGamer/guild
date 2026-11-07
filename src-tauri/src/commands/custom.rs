@@ -107,7 +107,7 @@ pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
         let conn = open_db(&state).ok_or(msg!(noDb))?;
         cache::db::delete_custom_game(&conn, id)?;
         match std::fs::remove_dir_all(state.dirs.custom.join(id)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => log!("remove cover {key}: {e}"),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => tracing::warn!("remove cover {key}: {e}"),
             _ => {}
         }
         forget_thumbs(&state.dirs.thumbs, id);
@@ -127,7 +127,7 @@ async fn download(http: &reqwest::Client, url: &str) -> Res<Vec<u8>> {
         Err(e) => Err(e),
     };
     bytes.map(|b| b.to_vec()).map_err(|e| {
-        log!("cover download: {e}");
+        tracing::warn!("cover download: {e}");
         msg!(cantDownloadCover)
     })
 }
@@ -183,7 +183,7 @@ pub async fn grid_search(app: AppHandle, name: String) -> Option<Vec<GridCover>>
         return Some(Vec::new());
     }
     let found = steamgriddb::search(&state.http, &key, name).await.unwrap_or_else(|e| {
-        log!("{e}");
+        tracing::warn!("{e}");
         Vec::new()
     });
     drop(key);

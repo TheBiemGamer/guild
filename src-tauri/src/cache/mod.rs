@@ -63,7 +63,7 @@ pub async fn resolve(image: &Image, http: &reqwest::Client, dest: PathBuf) -> Op
         Ok(bytes) => bytes,
         Err(e) if e.status() == Some(reqwest::StatusCode::NOT_FOUND) => return None,
         Err(e) => {
-            log!("art {url}: {e}");
+            tracing::warn!("art {url}: {e}");
             return None;
         }
     };
@@ -75,7 +75,7 @@ pub async fn resolve(image: &Image, http: &reqwest::Client, dest: PathBuf) -> Op
     match written {
         Ok(()) => Some(dest),
         Err(e) => {
-            log!("art {}: {e}", dest.display());
+            tracing::warn!("art {}: {e}", dest.display());
             None
         }
     }

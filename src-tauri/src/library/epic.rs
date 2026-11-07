@@ -225,7 +225,7 @@ pub(super) fn run_with_timeout(
         }
         if Instant::now() >= deadline {
             if let Err(e) = crate::platform::kill_tree(child.id()) {
-                log!("stop timed-out sync: {e}");
+                tracing::warn!("stop timed-out sync: {e}");
                 _ = child.kill();
             }
             _ = child.wait();
@@ -269,7 +269,7 @@ fn installed_list() -> Result<Value, Error> {
 
 fn with_fallback(checked: Result<Value, Error>, plain: impl FnOnce() -> Result<Value, Error>) -> Result<Value, Error> {
     checked.or_else(|e| {
-        log!("legendary list-installed --check-updates: {e}");
+        tracing::warn!("legendary list-installed --check-updates: {e}");
         plain()
     })
 }
@@ -559,7 +559,7 @@ pub fn login_state() -> Login {
         // `status` refreshes the session online and exits 1 when that fails.
         // shortcut: an expired session also lands here; it needs `legendary auth --delete` before "Log in" shows.
         Err(e) => {
-            log!("legendary status: {e}");
+            tracing::warn!("legendary status: {e}");
             Login::Unreachable
         }
     }

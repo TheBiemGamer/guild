@@ -2,8 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[macro_use]
-mod log;
-#[macro_use]
 mod msg;
 
 mod amazon_login;
@@ -20,6 +18,7 @@ mod igdb;
 mod info;
 mod library;
 mod links;
+mod log;
 mod platform;
 mod settings;
 mod steam_login;
@@ -47,7 +46,7 @@ fn main() {
         .on_window_event(tray::on_window_event)
         .setup(|app| {
             log::init(&cache::Dirs::new().logs);
-            log!("launcher {} started on {}", app.package_info().version, platform::windows_version());
+            tracing::info!("launcher {} started on {}", app.package_info().version, platform::windows_version());
             commands::apply_language(app.handle());
             tray::build(app.handle())?;
             // Started by Windows: stay in the tray; neither `ready` nor the safety net shows the window.

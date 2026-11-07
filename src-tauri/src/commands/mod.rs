@@ -217,10 +217,10 @@ fn notify_done(app: &AppHandle, title: &str, body: &str) {
         return;
     }
     if let Err(e) = app.notification().builder().title(title).body(body).show() {
-        log!("notification: {e}");
+        tracing::warn!("notification: {e}");
     }
 }
 
 fn open_db(state: &AppState) -> Option<rusqlite::Connection> {
-    cache::db::open(&state.dirs.db).inspect_err(|e| log!("settings db: {e}")).ok()
+    cache::db::open(&state.dirs.db).inspect_err(|e| tracing::error!("settings db: {e}")).ok()
 }

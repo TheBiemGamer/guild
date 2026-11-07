@@ -179,14 +179,14 @@ pub async fn install(http: &reqwest::Client, tool: &'static Tool, on_percent: im
     let digest = match download(http, tool, &part, on_percent).await {
         Ok(digest) => digest,
         Err(e) => {
-            log!("install {}: {e}", tool.name);
+            tracing::warn!("install {}: {e}", tool.name);
             let _ = fs::remove_file(&part);
             return Err(msg!(cantDownloadTool, tool = tool.title));
         }
     };
-    place(&part, &dest, &digest, tool.sha256).inspect_err(|e| log!("install {}: {e}", tool.name))?;
+    place(&part, &dest, &digest, tool.sha256).inspect_err(|e| tracing::warn!("install {}: {e}", tool.name))?;
     VERSIONS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_default().remove(tool.name);
-    log!("installed {} {}", tool.name, tool.version);
+    tracing::info!("installed {} {}", tool.name, tool.version);
     Ok(())
 }
 
@@ -239,7 +239,7 @@ fn place(part: &Path, dest: &Path, digest: &str, expected: &str) -> Result<(), M
     }
     fs::rename(part, dest).map_err(|e| {
         let _ = fs::remove_file(part);
-        log!("install {}: {e}", dest.display());
+        tracing::warn!("install {}: {e}", dest.display());
         // Windows refuses to replace a program that is running.
         msg!(cantReplaceTool)
     })

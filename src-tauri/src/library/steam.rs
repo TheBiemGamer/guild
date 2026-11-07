@@ -32,7 +32,7 @@ impl Provider for Steam {
             match library {
                 Ok(library) => games.extend(library_games(&library, &librarycache)),
                 // e.g. a library on an unplugged drive; the others still load.
-                Err(e) => log!("steam library: {e}"),
+                Err(e) => tracing::warn!("steam library: {e}"),
             }
         }
         let stats = play_stats(steam.path());
@@ -204,7 +204,7 @@ fn newest_localconfig(steam_root: &Path) -> Option<PathBuf> {
 fn read_localconfig(steam_root: &Path) -> Option<String> {
     let path = newest_localconfig(steam_root)?;
     std::fs::read_to_string(&path)
-        .inspect_err(|e| log!("steam {}: {e}", path.display()))
+        .inspect_err(|e| tracing::warn!("steam {}: {e}", path.display()))
         .ok()
 }
 
@@ -216,7 +216,7 @@ fn parse_play_stats(text: &str) -> PlayStats {
     let vdf = match keyvalues_parser::parse(text).map(Vdf::from) {
         Ok(vdf) => vdf,
         Err(e) => {
-            log!("steam localconfig.vdf: {e}");
+            tracing::warn!("steam localconfig.vdf: {e}");
             return PlayStats::new();
         }
     };
@@ -273,7 +273,7 @@ fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
             Ok(app) if NOT_GAMES.contains(&app.app_id) => None,
             Ok(app) => Some(to_game(library, &app, librarycache)),
             Err(e) => {
-                log!("steam manifest: {e}");
+                tracing::warn!("steam manifest: {e}");
                 None
             }
         })
@@ -469,7 +469,7 @@ mod tests {
     fn real_localconfig_parses() {
         let steam = SteamDir::locate().unwrap();
         let stats = play_stats(steam.path());
-        log!("{} apps with play stats", stats.len());
+        tracing::info!("{} apps with play stats", stats.len());
         assert!(!stats.is_empty());
     }
 

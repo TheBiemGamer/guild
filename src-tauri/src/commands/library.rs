@@ -324,7 +324,7 @@ pub(crate) fn fill_twins(app: AppHandle) {
                     }
                 }
                 Err(e) => {
-                    log!("{e}");
+                    tracing::warn!("{e}");
                     if e.starts_with(crate::gamesdb::UNREACHABLE) {
                         break;
                     }
@@ -354,7 +354,7 @@ fn refresh_epic_playtime(app: AppHandle) {
                     show_playtime(&state, &conn);
                 }
             }
-            Err(e) => log!("{e}"),
+            Err(e) => tracing::warn!("{e}"),
         }
     });
 }
@@ -397,12 +397,12 @@ pub(super) fn refresh_gog_playtime(app: AppHandle, only: Option<String>) {
                 Ok(minutes) => {
                     let json = minutes.map_or_else(|| "null".to_string(), |m| m.to_string());
                     if let Some(Err(e)) = open_db(&state).map(|c| cache::db::put_info(&c, key, gog::PLAYTIME, &json, super::unix_now())) {
-                        log!("gog playtime save: {e}");
+                        tracing::warn!("gog playtime save: {e}");
                     }
                 }
                 // Reduced to its kind: reqwest's errors carry the URL, which holds the account id.
                 Err(_) => {
-                    log!("gog playtime: GOG unreachable");
+                    tracing::warn!("gog playtime: GOG unreachable");
                     break;
                 }
             }
@@ -428,7 +428,7 @@ fn record_session(state: &AppState, key: &str, played: Duration) {
     let Some(conn) = open_db(state) else { return };
     match cache::db::add_session(&conn, key, super::unix_now() - seconds, seconds) {
         Ok(()) => show_playtime(state, &conn),
-        Err(e) => log!("playtime: {e}"),
+        Err(e) => tracing::warn!("playtime: {e}"),
     }
 }
 
@@ -442,7 +442,7 @@ pub(crate) fn refresh_owned(app: AppHandle, force: bool) {
         let result = steam_owned::fetch(&token).await;
         drop(token);
         if let Err(e) = &result {
-            log!("steam owned: {}", error_kind(e));
+            tracing::warn!("steam owned: {}", error_kind(e));
         }
         let done = app.clone();
         blocking(move || finish_owned(&done, steam_owned::outcome(result))).await;
@@ -591,11 +591,11 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
         Ok(conn) => {
             match cache::db::launches(&conn) {
                 Ok(launches) => view::merge_last_played(&mut merged.games, &launches),
-                Err(e) => log!("launch history: {e}"),
+                Err(e) => tracing::warn!("launch history: {e}"),
             }
             epic_playtime::merge(&conn, &mut merged.games);
         }
-        Err(e) => log!("launch history: {e}"),
+        Err(e) => tracing::warn!("launch history: {e}"),
     }
     // Only a finished scan may claim the library is empty.
     s.status = if merged.errors.is_empty() { vec![msg!(noGamesFound)] } else { merged.errors };
@@ -616,7 +616,7 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
     let saved = cache::db::open(&state.dirs.db)
         .and_then(|mut conn| merged.scanned.iter().try_for_each(|&p| cache::db::replace(&mut conn, p, &merged.games)));
     if let Err(e) = saved {
-        log!("library cache save: {e}");
+        tracing::warn!("library cache save: {e}");
     }
     true
 }
@@ -630,7 +630,7 @@ fn signed_out(state: &AppState, logged_in: [bool; 3]) -> [bool; 3] {
         if *flag && logged_in {
             *flag = false;
             if let Err(e) = settings::set_signed_out(&conn, store, false) {
-                log!("{store} signed out: {e}");
+                tracing::warn!("{store} signed out: {e}");
             }
         }
     }
@@ -710,7 +710,7 @@ fn note_epic_login(state: &AppState, s: &mut Shared, login: Login) {
     });
     match stored {
         Ok(previous) => s.epic_notice = epic_notice(s.epic_notice, previous.as_deref(), login),
-        Err(e) => log!("epic login state: {e}"),
+        Err(e) => tracing::warn!("epic login state: {e}"),
     }
 }
 
@@ -737,7 +737,7 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
                 games.extend(list);
             }
             Err(e) => {
-                log!("{}: {e}", provider.name());
+                tracing::warn!("{}: {e}", provider.name());
                 let text = e.to_string();
                 let quiet = match provider {
                     ProviderKind::Epic => text.starts_with(EPIC_QUIET),
@@ -779,7 +779,7 @@ pub fn show_window(app: &AppHandle, by: &str) {
     if let Some(window) = app.get_webview_window("main")
         && let Err(e) = window.show()
     {
-        log!("show window: {e}");
+        tracing::warn!("show window: {e}");
     }
 }
 
@@ -812,7 +812,7 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
         let (thumbs, thumb_key) = (state.dirs.thumbs.clone(), thumb_key(&game, slot, &src));
         match blocking(move || cache::thumbnail(&src, &thumbs, &thumb_key)).await {
             Ok((path, color)) => return allow(&app, path).map(|src| Cover { src, color }),
-            Err(e) => log!("thumbnail {key}: {e}"),
+            Err(e) => tracing::warn!("thumbnail {key}: {e}"),
         }
     }
     None

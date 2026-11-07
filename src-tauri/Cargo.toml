@@ -7,6 +7,7 @@ license = "GPL-3.0-or-later"
 [dependencies]
 directories = "6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+jiff = "0.2"
 keyring-core = "1"
 keyvalues-parser = "0.2"
 protobuf = "3.5"
@@ -30,6 +31,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["system-proxy"] }
 tauri-specta = { version = "=2.0.0-rc.26", features = ["typescript"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
 windows-native-keyring-store = { version = "1.1", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Threading"] }
 winreg = "0.56"

@@ -19,7 +19,7 @@ pub fn reveal(app: &AppHandle) {
     app.state::<crate::commands::AppState>().mark_shown();
     let shown = window.show().and_then(|()| window.unminimize()).and_then(|()| window.set_focus());
     if let Err(e) = shown {
-        log!("reveal window: {e}");
+        tracing::warn!("reveal window: {e}");
     }
 }
 
@@ -40,7 +40,7 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 pub fn relabel(app: &AppHandle) {
     let Some(tray) = app.tray_by_id("main") else { return };
     if let Err(e) = menu(app).and_then(|m| tray.set_menu(Some(m))).and_then(|()| tray.set_tooltip(Some(native("appName")))) {
-        log!("tray labels: {e}");
+        tracing::warn!("tray labels: {e}");
     }
 }
 
@@ -54,7 +54,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "downloads" => {
                 reveal(app);
                 if let Err(e) = app.emit_to("main", OPEN_DOWNLOADS, ()) {
-                    log!("open downloads: {e}");
+                    tracing::warn!("open downloads: {e}");
                 }
             }
             // Same as closing the window with close-to-tray off.
@@ -81,7 +81,7 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     {
         api.prevent_close();
         if let Err(e) = window.hide() {
-            log!("hide window: {e}");
+            tracing::warn!("hide window: {e}");
         }
     }
 }

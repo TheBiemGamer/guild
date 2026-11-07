@@ -134,7 +134,7 @@ fn run_short(mut command: Command, timeout: Duration) -> Option<Output> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .inspect_err(|e| log!("nile: {e}"))
+        .inspect_err(|e| tracing::warn!("nile: {e}"))
         .ok()?;
     let read = |mut pipe: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
@@ -152,13 +152,13 @@ fn run_short(mut command: Command, timeout: Duration) -> Option<Output> {
             Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(100)),
             other => {
                 if let Err(e) = other {
-                    log!("nile: {e}");
+                    tracing::warn!("nile: {e}");
                 } else {
-                    log!("nile: no answer in {} s", timeout.as_secs());
+                    tracing::warn!("nile: no answer in {} s", timeout.as_secs());
                 }
                 // nile is a PyInstaller build: a bootloader and the real program as its child.
                 if let Err(e) = crate::platform::kill_tree(child.id()) {
-                    log!("stop nile: {e}");
+                    tracing::warn!("stop nile: {e}");
                     _ = child.kill();
                 }
                 _ = child.wait();
@@ -251,7 +251,7 @@ pub fn sign_in() -> Result<SignIn, Error> {
     // stdout carries the verifier: parsed, never logged.
     parse_sign_in(&output.stdout).ok_or_else(|| {
         let log = String::from_utf8_lossy(&output.stderr);
-        log!("nile auth --login: {}", last_error(&log).unwrap_or("no login page"));
+        tracing::warn!("nile auth --login: {}", last_error(&log).unwrap_or("no login page"));
         msg!(cantStartAmazonLogin).into()
     })
 }
@@ -277,7 +277,7 @@ pub fn register(sign_in: &SignIn, code: &str) -> Result<(), Error> {
         set_synced(Login::LoggedIn);
         Ok(())
     } else {
-        log!("nile register: the device wasn't registered ({})", output.status);
+        tracing::warn!("nile register: the device wasn't registered ({})", output.status);
         Err(msg!(amazonLoginRejected).into())
     }
 }
@@ -287,7 +287,7 @@ pub fn register(sign_in: &SignIn, code: &str) -> Result<(), Error> {
 pub fn log_out() -> Result<(), Error> {
     let _nile = lock_between_downloads()?;
     if run_short(nile(["auth", "--logout"]), LOGOUT_TIMEOUT).is_none() {
-        log!("nile auth --logout: no answer");
+        tracing::warn!("nile auth --logout: no answer");
     }
     forget_login(&cfg()).map_err(|e| msg!(cantLogOutAmazon, detail = e.to_string()))?;
     set_synced(Login::LoggedOut);
@@ -369,7 +369,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         set_synced(login);
         if login != Login::LoggedIn {
             if let Some(error) = output.as_ref().and_then(|o| last_error(&String::from_utf8_lossy(&o.stderr)).map(str::to_owned)) {
-                log!("nile library sync: {error}");
+                tracing::warn!("nile library sync: {error}");
             }
             return Err(format!("{login:?}").into());
         }
@@ -523,7 +523,7 @@ pub fn download_size(conn: Option<&Connection>, id: &str) -> Option<u64> {
         let output = run_short(nile(["install", "--info", "--json", id]), INFO_TIMEOUT)?;
         let size = parse_download_size(&output.stdout);
         if size.is_none() {
-            log!("nile install --info {id}: {}", last_error(&String::from_utf8_lossy(&output.stderr)).unwrap_or("no size"));
+            tracing::warn!("nile install --info {id}: {}", last_error(&String::from_utf8_lossy(&output.stderr)).unwrap_or("no size"));
         }
         Some(size?.to_string())
     })?;
@@ -551,7 +551,7 @@ fn cached(conn: &Connection, max_age: i64, now: i64) -> Option<Vec<String>> {
 fn check_updates(conn: Option<&Connection>) -> Option<Vec<String>> {
     let output = run_short(nile(["list-updates", "--json"]), INFO_TIMEOUT)?;
     let Some(ids) = parse_updates(&output.stdout) else {
-        log!("nile list-updates: {}", last_error(&String::from_utf8_lossy(&output.stderr)).unwrap_or("no answer"));
+        tracing::warn!("nile list-updates: {}", last_error(&String::from_utf8_lossy(&output.stderr)).unwrap_or("no answer"));
         return None;
     };
     if let Some(conn) = conn {
@@ -563,7 +563,7 @@ fn check_updates(conn: Option<&Connection>) -> Option<Vec<String>> {
 /// Forgets the last update answer after a change to the installs, so the next scan asks again.
 fn forget_updates(conn: Option<&Connection>) {
     if let Some(Err(e)) = conn.map(|c| db::delete_info(c, UPDATES_KEY, UPDATES)) {
-        log!("amazon updates: {e}");
+        tracing::warn!("amazon updates: {e}");
     }
 }
 
@@ -666,7 +666,7 @@ fn run(args: Vec<OsString>, action: ProgressAction, mut on_event: impl FnMut(Ins
     });
     if fed == Fed::Stalled {
         if let Err(e) = crate::platform::kill_tree(pid) {
-            log!("stop stalled nile: {e}");
+            tracing::warn!("stop stalled nile: {e}");
             _ = child.kill();
         }
         _ = child.wait();
@@ -734,7 +734,7 @@ pub fn install(id: &str, base: &Path, on_event: impl FnMut(InstallEvent)) -> Res
     let dir = recorded.ok_or(msg!(nileNotRecorded))?;
     let steps = read_fuel(&dir).and_then(|f| f["PostInstall"].as_array().map(Vec::len)).unwrap_or(0);
     if steps > 0 {
-        log!("amazon {id}: {steps} setup step(s) skipped");
+        tracing::warn!("amazon {id}: {steps} setup step(s) skipped");
     }
     Ok(dir)
 }
@@ -940,10 +940,10 @@ fn check_sdk(cfg: &Path) {
     if sdk.join("Amazon Games Services").join("Legacy").join("FuelSDK_x64.dll").is_file() {
         return;
     }
-    log!("nile: the Amazon Games SDK is incomplete; the next Nile run fetches it again");
+    tracing::warn!("nile: the Amazon Games SDK is incomplete; the next Nile run fetches it again");
     if let Some(_nile) = try_lock() {
         match std::fs::remove_dir_all(&sdk) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => log!("delete the Amazon Games SDK: {e}"),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => tracing::warn!("delete the Amazon Games SDK: {e}"),
             _ => {}
         }
     }
