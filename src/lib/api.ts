@@ -150,10 +150,12 @@ export const openSteamProperties = (key: string) => invoke<void>('open_steam_pro
 export interface Dlc { id: string; title: string; installed: boolean; copy: string | null }
 /**
  * The Steam copy's owned DLC (Steam logs on for it: connected account only, cached in Rust). Asked once per
- * game and kept, like the other game page answers.
+ * game and kept, like the other game page answers; an empty list (none, or a failure) is null, so it's asked again.
  */
 export const steamDlc = (key: string) =>
-  remembered('steamDlc', key, () => invoke<{ id: string; title: string }[]>('steam_dlc', { key }))
+  remembered('steamDlc', key, () =>
+    invoke<{ id: string; title: string }[]>('steam_dlc', { key }).then((d) => (d.length ? d : null)),
+  )
 /** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
 export const downloadSize = (key: string) => remembered('size', key, () => invoke<string | null>('download_size', { key }))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */

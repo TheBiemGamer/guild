@@ -237,7 +237,6 @@
     border-radius: 50%;
     background: rgb(10 10 16 / 0.62);
     border: 1px solid rgb(255 255 255 / 0.12);
-    pointer-events: none;
   }
 
   .logo img {

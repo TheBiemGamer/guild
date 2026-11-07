@@ -258,7 +258,6 @@ pub(crate) fn art(app_id: u32, librarycache_dir: &Path) -> Art {
     art.cover.url = cdn("library_600x900.jpg");
     art.header.url = cdn("header.jpg");
     art.hero.url = cdn("library_hero.jpg");
-    art.logo.url = cdn("logo.png");
     art
 }
 
@@ -279,7 +278,6 @@ fn local_art(dir: &Path) -> Art {
             Some("library_600x900.jpg" | "library_capsule.jpg") => &mut art.cover,
             Some("header.jpg" | "library_header.jpg") => &mut art.header,
             Some("library_hero.jpg") => &mut art.hero,
-            Some("logo.png") => &mut art.logo,
             _ => continue,
         };
         slot.path.get_or_insert(path);
@@ -385,7 +383,6 @@ mod tests {
         let dir = fixtures().join("appcache/librarycache/10");
         assert_eq!(art.cover.path, Some(dir.join("library_600x900.jpg")));
         assert_eq!(art.header.path, Some(dir.join("header.jpg")));
-        assert_eq!(art.logo.path, Some(dir.join("logo.png")));
         assert_eq!(art.hero.path, None);
     }
 
@@ -403,7 +400,6 @@ mod tests {
         let art = &games()[2].art;
         assert_eq!(art.cover.path, None);
         assert_eq!(art.cover.url.as_deref(), Some(format!("{CDN}/30/library_600x900.jpg").as_str()));
-        assert_eq!(art.logo.url.as_deref(), Some(format!("{CDN}/30/logo.png").as_str()));
     }
 
     #[test]
@@ -469,6 +465,6 @@ mod tests {
     #[test]
     fn no_cache_dir_means_no_local_art() {
         let art = &games()[2].art;
-        assert!([&art.cover, &art.header, &art.hero, &art.logo].iter().all(|i| i.path.is_none()));
+        assert!([&art.cover, &art.header, &art.hero].iter().all(|i| i.path.is_none()));
     }
 }

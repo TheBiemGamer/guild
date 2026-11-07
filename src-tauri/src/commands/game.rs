@@ -74,19 +74,21 @@ pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
 
 fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: SystemTime) -> Detail {
     let (minutes, both) = entries::playtime(entry, games);
+    let chosen = &games[entries::default_copy(entry, games)];
     // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone shows only known playtime.
     let tile_provider = entry
         .copies
         .iter()
         .map(|&i| games[i].provider)
         .find(|&p| p == ProviderKind::Steam)
-        .unwrap_or(games[entries::default_copy(entry, games)].provider);
+        .unwrap_or(chosen.provider);
     let last = entries::last_played(entry, games);
     let stores = entries::stores(entry, games);
     Detail {
         key: entry.key.clone(),
         title: games[entry.copies[0]].title.clone(),
-        stores: stores.clone(),
+        links: links::kinds(&stores, entries::steam_appid(entry, games, twins)),
+        stores,
         installed: entries::installed(entry, games),
         copies: entry
             .copies
@@ -104,12 +106,11 @@ fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: Syst
                 }
             })
             .collect(),
-        chosen: games[entries::default_copy(entry, games)].key(),
+        chosen: chosen.key(),
         playtime_tile: view::playtime_tile(tile_provider, minutes),
         playtime_note: both.then(|| "Steam + Epic".to_string()),
         last_played_tile: view::last_played_tile(last.map(|(t, _)| t), now),
         last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| format!("on {}", p.name())),
-        links: links::kinds(&stores, entries::steam_appid(entry, games, twins)),
         dlc: epic_dlc(&entry.copies.iter().map(|&i| &games[i]).collect::<Vec<_>>()),
     }
 }
@@ -704,11 +705,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
         let (app, key) = (app.clone(), key.clone());
         move || {
             let conn = open_db(&app.state::<AppState>());
-            let fresh = conn.as_ref().and_then(|c| {
-                cache::db::cached_info(c, &key, "size", SIZE_MAX_AGE_SECS, unix_now())
-                    .ok()
-                    .flatten()
-            });
+            let fresh = conn.as_ref().and_then(|c| cached_size(c, &key));
             let token = match (&fresh, steam_id, conn.as_ref()) {
                 (None, Some(_), Some(c)) => steam_token(c),
                 _ => None,
@@ -720,22 +717,34 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
     let bytes = match (cached, steam_id) {
         ((Some(bytes), _), _) => bytes,
         ((None, token), Some(appid)) => {
-            let vdf = {
-                // One Steam logon at a time; Steam rate-limits them and the owned-games fetch logs on too.
-                let state = app.state::<AppState>();
-                let _one = state.steam_size.lock().await;
-                steam_size::fetch_appinfo(&token?, appid).await
-            }
-            .inspect_err(|e| eprintln!("steam size {key}: {e}"))
-            .ok()?;
-            let bytes = steam_size::parse_download_size(&vdf)?.to_string();
-            blocking(move || {
-                if let Some(c) = open_db(&app.state::<AppState>()) {
-                    _ = cache::db::put_info(&c, &key, "size", &bytes, unix_now());
-                }
-                bytes
+            let token = token?;
+            // One Steam logon at a time; Steam rate-limits them and the owned-games fetch logs on too.
+            let state = app.state::<AppState>();
+            let _one = state.steam_size.lock().await;
+            // A caller that queued on the lock may find the size cached by the one before it.
+            let again = blocking({
+                let (app, key) = (app.clone(), key.clone());
+                move || open_db(&app.state::<AppState>()).and_then(|c| cached_size(&c, &key))
             })
-            .await
+            .await;
+            match again {
+                Some(bytes) => bytes,
+                None => {
+                    let vdf = steam_size::fetch_appinfo(&token, appid)
+                        .await
+                        .inspect_err(|e| eprintln!("steam size {key}: {e}"))
+                        .ok()?;
+                    let bytes = steam_size::parse_download_size(&vdf)?.to_string();
+                    let app = app.clone();
+                    blocking(move || {
+                        if let Some(c) = open_db(&app.state::<AppState>()) {
+                            _ = cache::db::put_info(&c, &key, "size", &bytes, unix_now());
+                        }
+                        bytes
+                    })
+                    .await
+                }
+            }
         }
         _ => {
             blocking(move || {
@@ -758,6 +767,11 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
         }
     };
     bytes.parse().ok().map(view::size_label)
+}
+
+/// The cached download size in bytes, if fresh.
+fn cached_size(conn: &Connection, key: &str) -> Option<String> {
+    cache::db::cached_info(conn, key, "size", SIZE_MAX_AGE_SECS, unix_now()).ok().flatten()
 }
 
 /// The saved Steam token. Never connected: no reason to touch Credential Manager.

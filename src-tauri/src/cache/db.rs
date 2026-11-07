@@ -217,7 +217,7 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
             playtime_minutes: r.get::<_, Option<i64>>(5)?.map(|m| m as u64),
             last_played: r.get::<_, Option<i64>>(6)?.map(|s| UNIX_EPOCH + Duration::from_secs(s as u64)),
             size_bytes: r.get::<_, Option<i64>>(13)?.map(|b| b as u64),
-            art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)?, ..Art::default() },
+            art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)? },
             // A list that doesn't parse is a cache miss: the next Epic scan fills it again.
             dlc: r.get::<_, Option<String>>(14)?.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default(),
             update_available: r.get(15)?,

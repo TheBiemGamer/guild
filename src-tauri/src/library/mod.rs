@@ -71,7 +71,6 @@ pub struct Art {
     /// Landscape; the grid's fallback when there is no cover.
     pub header: Image,
     pub hero: Image,
-    pub logo: Image,
 }
 
 #[derive(Debug, Clone, PartialEq)]

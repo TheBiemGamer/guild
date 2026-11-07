@@ -641,17 +641,29 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
         .filter(|g| is_game(g) || g["app_name"].as_str().is_some_and(|n| installed.contains_key(n)))
         .filter_map(|g| g["metadata"]["id"].as_str())
         .collect();
+    // Some DLC (ARK's maps) are listed as games; naming another listed item as its base is what makes a DLC.
+    fn base_of<'a>(g: &'a Value, bases: &HashSet<&str>) -> Option<&'a str> {
+        g["metadata"]["mainGameItem"]["id"]
+            .as_str()
+            .filter(|id| bases.contains(id) && g["metadata"]["id"].as_str() != Some(id))
+    }
+    // A DLC of a DLC (an add-on for an ARK map) goes under the root game, so the chain never hides itself.
+    let parents: HashMap<&str, &str> =
+        items.iter().filter_map(|g| Some((g["metadata"]["id"].as_str()?, base_of(g, &bases)?))).collect();
     let mut dlc: HashMap<&str, Vec<Dlc>> = HashMap::new();
     let items: Vec<&Value> = items
         .into_iter()
         .filter(|g| {
-            // Some DLC (ARK's maps) are listed as games; naming another item as its base is what makes a DLC.
-            let base = g["metadata"]["mainGameItem"]["id"]
-                .as_str()
-                .filter(|id| bases.contains(id) && g["metadata"]["id"].as_str() != Some(id));
-            let (Some(name), Some(base)) = (g["app_name"].as_str(), base) else {
+            let (Some(name), Some(mut base)) = (g["app_name"].as_str(), base_of(g, &bases)) else {
                 return true;
             };
+            // Bounded, so a cycle in the catalog can't hang the scan.
+            for _ in 0..parents.len() {
+                match parents.get(base) {
+                    Some(parent) => base = *parent,
+                    None => break,
+                }
+            }
             let title = g["app_title"].as_str().unwrap_or(name).to_owned();
             dlc.entry(base).or_default().push(Dlc { id: name.to_owned(), title, installed: installed.remove(name).is_some() });
             false
@@ -719,7 +731,6 @@ fn art(metadata: &Value) -> Art {
         cover: image("DieselGameBoxTall"),
         header: image("DieselGameBox"),
         hero: image("DieselGameBox"),
-        logo: image("DieselGameBoxLogo"),
     }
 }
 
@@ -916,6 +927,29 @@ mod tests {
         let all = games(&list, &Value::Null);
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].dlc, [Dlc { id: "ArkRagnarok".into(), title: "ARK Ragnarok".into(), installed: false }]);
+    }
+
+    #[test]
+    fn dlc_of_a_dlc_goes_under_the_root_game() {
+        // ARK, a map naming ARK, and an installed add-on naming the map.
+        let list = serde_json::json!([
+            { "app_name": "Ark", "app_title": "ARK: Survival Evolved",
+              "metadata": { "id": "ark", "categories": [{ "path": "games" }] } },
+            { "app_name": "ArkRagnarok", "app_title": "ARK Ragnarok",
+              "metadata": { "id": "ragnarok", "categories": [{ "path": "games" }], "mainGameItem": { "id": "ark" } } },
+            { "app_name": "RagnarokExtra", "app_title": "Ragnarok Extra",
+              "metadata": { "id": "extra", "categories": [{ "path": "addons" }], "mainGameItem": { "id": "ragnarok" } } }
+        ]);
+        let installed = serde_json::json!([{ "app_name": "RagnarokExtra", "title": "Ragnarok Extra", "is_dlc": true }]);
+        let all = games(&list, &installed);
+        assert_eq!(all.len(), 1);
+        assert_eq!(
+            all[0].dlc,
+            [
+                Dlc { id: "ArkRagnarok".into(), title: "ARK Ragnarok".into(), installed: false },
+                Dlc { id: "RagnarokExtra".into(), title: "Ragnarok Extra".into(), installed: true },
+            ]
+        );
     }
 
     #[test]

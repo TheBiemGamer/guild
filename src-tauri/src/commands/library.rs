@@ -605,7 +605,7 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     let state = app.state::<AppState>();
     let _job = state.cover_jobs.acquire().await.ok()?;
     // The cover comes from the first copy, cached under that copy's key.
-    let game = state.entry(&key)?.1.swap_remove(0);
+    let game = state.first_copy(&key)?;
     let key = game.key();
     let art_dir = state.dirs.art.join(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {

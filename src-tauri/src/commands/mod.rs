@@ -34,7 +34,8 @@ pub struct AppState {
     steam_size: tokio::sync::Mutex<()>,
     /// Twitch app access token for IGDB. Never held across a network call.
     igdb: Mutex<igdb::TokenCache>,
-    /// The Steam QR login in progress, if any. Held across the poll call so a cancel waits for it.
+    /// The Steam QR login in progress, if any. A cancel or newer start bumps `steam_gen` first, which is
+    /// what makes a poll already talking to Steam save nothing.
     steam_qr: tokio::sync::Mutex<Option<crate::steam_login::QrSession>>,
     /// Bumped by every connect start and cancel; a poll that finishes under a newer one is discarded.
     steam_gen: std::sync::atomic::AtomicU64,
@@ -141,12 +142,11 @@ impl AppState {
         self.lock().games.iter().find(|g| g.key() == key).cloned()
     }
 
-    /// The entry with this key or a copy with this key, and clones of its copies in copy order.
-    fn entry(&self, key: &str) -> Option<(Entry, Vec<Game>)> {
+    /// The first copy of the entry with this key or a copy with this key.
+    fn first_copy(&self, key: &str) -> Option<Game> {
         let s = self.lock();
-        let entry = entries::find(&s.entries, &s.games, key)?.clone();
-        let copies = entry.copies.iter().map(|&i| s.games[i].clone()).collect();
-        Some((entry, copies))
+        let entry = entries::find(&s.entries, &s.games, key)?;
+        Some(s.games[entry.copies[0]].clone())
     }
 }
 

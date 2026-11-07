@@ -226,28 +226,19 @@ mod tests {
         assert!(all_cached(&conn, 1000 + 31 * day).is_empty());
     }
 
-    /// Lists same-title Steam/Epic pairs that still aren't one card, with why. Reads a COPY of the
-    /// database (`LAUNCHER_DB`), never writes it and never merges anything. A pair whose Epic game has no
-    /// cached list (an old `twin2` single answer counts as one) is asked from GamesDB, at most 15 times.
+    /// Lists same-title Steam/Epic pairs that still aren't one card, with why. Reads the database
+    /// (`LAUNCHER_DB`, a copy, or else the app's `library.sqlite`) read-only, and never merges anything.
+    /// A pair whose Epic game has no fresh cached `twin3` list is asked from GamesDB, at most 15 times.
     /// `LAUNCHER_DB=<copy> cargo test leftover_same_title_pairs -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn leftover_same_title_pairs() {
         use crate::library::ProviderKind;
-        let path = std::env::var("LAUNCHER_DB").expect("LAUNCHER_DB is the path to a copy of the database");
+        let path = std::env::var_os("LAUNCHER_DB").map_or_else(|| crate::cache::Dirs::new().db, Into::into);
         let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         let games = db::load(&conn).unwrap();
         let mut lists = all_cached(&conn, now);
-        let mut old = conn.prepare("SELECT key, json FROM info WHERE kind = 'twin2'").unwrap();
-        let old: Vec<(String, String)> =
-            old.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect();
-        for (key, json) in old {
-            let single = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|v| v["steam"].as_u64());
-            if let Some(id) = single {
-                lists.entry(key).or_insert_with(|| vec![id as u32]);
-            }
-        }
         let steam = steam_ids(&games);
         let pairs: Vec<(usize, usize)> = games
             .iter()
