@@ -128,6 +128,7 @@ pub(crate) mod tests {
             size_bytes: None,
             art: Art::default(),
             dlc: Vec::new(),
+            update_available: false,
         }
     }
 

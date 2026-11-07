@@ -40,7 +40,7 @@ pub struct Epic;
 
 impl Provider for Epic {
     fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Ok(games(&json(&["list", "--json"])?, &json(&["list-installed", "--json"])?))
+        Ok(games(&json(&["list", "--json"])?, &json(&["list-installed", "--check-updates", "--json"])?))
     }
 
     /// Waits for Legendary, so a failure (e.g. an update is required) reaches the UI.
@@ -75,7 +75,7 @@ pub fn install(
     app_name: &str,
     with_dlc: Option<bool>,
     base_path: Option<&Path>,
-    mut on_event: impl FnMut(InstallEvent),
+    on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
     let mut command = legendary(&["-y", "install", app_name, "--skip-sdl"]);
     if let Some(with_dlc) = with_dlc {
@@ -84,6 +84,15 @@ pub fn install(
     if let Some(dir) = base_path {
         command.arg("--base-path").arg(dir);
     }
+    stream(command, on_event)
+}
+
+/// Updates an installed game (Legendary's app name) like `install`: same events, same cancel.
+pub fn update(app_name: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+    stream(legendary(&["-y", "update", app_name, "--skip-sdl"]), on_event)
+}
+
+fn stream(mut command: Command, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
     let mut child = command
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -326,7 +335,16 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         size_bytes: installed.and_then(|l| l["install_size"].as_u64()),
         art,
         dlc: Vec::new(),
+        update_available: installed.is_some_and(has_update),
     }
+}
+
+/// `list-installed --check-updates --json` marks an update with `update_available`, or by a `remote_version`
+/// that differs from `version`. // shortcut: both spellings are read because no real capture with an update exists yet.
+fn has_update(local: &Value) -> bool {
+    local["update_available"].as_bool().unwrap_or_else(|| {
+        local["remote_version"].as_str().is_some_and(|remote| local["version"].as_str().is_some_and(|v| v != remote))
+    })
 }
 
 /// Epic catalog `keyImages`: tall box art is the cover, the wide one is header and hero.
@@ -399,6 +417,20 @@ mod tests {
 
     const NEW_VEGAS: &str = "5daeb974a22a435988892319b3a4f476";
     const SPOTIFY: &str = "2b04bd96d2c34822b37c91ece7fa5f1c";
+
+    #[test]
+    fn parses_update_available_from_list_installed() {
+        let all = sorted_games();
+        // Fortnite: the store's version differs. Imported: no remote version, so no update.
+        assert!(all[0].update_available);
+        assert!(!all[2].update_available);
+        let flagged = serde_json::json!([{ "app_name": "A", "version": "1", "update_available": true }]);
+        assert!(games(&Value::Null, &flagged)[0].update_available);
+        let same = serde_json::json!([{ "app_name": "A", "version": "1", "remote_version": "1" }]);
+        assert!(!games(&Value::Null, &same)[0].update_available);
+        // Not installed: nothing to update.
+        assert!(!all[1].update_available);
+    }
 
     #[test]
     fn list_keeps_only_games() {

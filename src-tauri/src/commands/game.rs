@@ -54,6 +54,8 @@ pub struct CopyView {
     key: String,
     provider: ProviderKind,
     installed: bool,
+    /// An installed Epic copy has a newer version.
+    update_available: bool,
     /// Size on disk of an installed copy, like `27.3 GB`.
     size: Option<String>,
     /// Only for an installed copy (Steam knows a folder for games it hasn't installed yet).
@@ -92,6 +94,7 @@ fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: Syst
                     key: g.key(),
                     provider: g.provider,
                     installed: g.installed,
+                    update_available: g.installed && g.update_available,
                     size: g.size_bytes.filter(|_| g.installed).map(view::size_label),
                     install_dir: installed_dir(g).map(|p| p.to_string_lossy().into_owned()),
                 }
@@ -160,6 +163,8 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
 pub enum Action {
     Play,
     Install,
+    /// Epic only; Steam updates games itself.
+    Update,
     Uninstall,
 }
 
@@ -191,6 +196,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
         let result = match action {
             Action::Play => store.launch(game).inspect(|()| record_play(&state, &key)),
             Action::Install => store.install(game),
+            Action::Update => Err("Steam updates its games itself.".into()),
             Action::Uninstall => store.uninstall(game),
         };
         return result.map_err(|e| format!("Steam: {e}"));
@@ -205,15 +211,20 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
             });
             state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now() });
         }),
-        Action::Install => {
-            let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
-            let result = epic::install(dlc.unwrap_or(&game.external_id), with_dlc, base.as_deref(), |event| {
+        Action::Install | Action::Update => {
+            let on_event = |event| {
                 let mut s = state.lock();
                 match event {
                     InstallEvent::Started(pid) => _ = s.install_pids.insert(key.clone(), pid),
                     InstallEvent::Progress(p) => _ = s.progress.insert(key.clone(), p),
                 }
-            });
+            };
+            let result = if action == Action::Update {
+                epic::update(&game.external_id, on_event)
+            } else {
+                let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
+                epic::install(dlc.unwrap_or(&game.external_id), with_dlc, base.as_deref(), on_event)
+            };
             let mut s = state.lock();
             s.install_pids.remove(&key);
             s.progress.remove(&key);

@@ -4,13 +4,13 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 export type Store = 'steam' | 'epic'
 export type Sort = 'title' | 'lastPlayed' | 'playtime'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
-export type Action = 'play' | 'install' | 'uninstall'
+export type Action = 'play' | 'install' | 'update' | 'uninstall'
 
 /**
  * `stores`: every store this game is in, the one `key` belongs to first. `chosen`: the copy key Play and
  * Install use. `copyKeys`: every copy's key, which running state and install progress are reported under.
  */
-export interface Card { key: string; chosen: string; copyKeys: string[]; title: string; stores: Store[]; installed: boolean }
+export interface Card { key: string; chosen: string; copyKeys: string[]; title: string; stores: Store[]; installed: boolean; update: boolean }
 export interface Library {
   games: Card[]
   total: number
@@ -30,6 +30,8 @@ export interface CopyView {
   key: string
   provider: Store
   installed: boolean
+  /** An installed Epic copy has a newer version. */
+  updateAvailable: boolean
   /** Size on disk of an installed copy, like "27.3 GB". */
   size: string | null
   /** Only set for an installed copy. */

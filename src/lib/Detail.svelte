@@ -162,7 +162,7 @@
   const running = $derived(runningKey !== null && copyKeys.includes(runningKey))
   const progress = $derived(copyKeys.map((k) => progressByKey[k]).find(Boolean))
 
-  const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', uninstall: 'Uninstalling…' }
+  const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', update: 'Updating…', uninstall: 'Uninstalling…' }
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false
@@ -374,6 +374,9 @@
                           Open install folder
                         </button>
                       {/if}
+                      {#if copy!.updateAvailable}
+                        <button role="menuitem" tabindex="-1" onclick={() => pick(() => act('play'))}>Play without updating</button>
+                      {/if}
                       {#if copy!.installed}
                         <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
                       {/if}
@@ -388,6 +391,7 @@
                 {busy}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
+                onupdate={() => act('update')}
                 oninstall={() => {
                   const key = copy!.key // the copy shown when the popup opens, not when it is confirmed
                   onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), (withDlc) =>
@@ -395,7 +399,7 @@
                   )
                 }}
               />
-              {#if busy === 'Installing…' && copy!.provider === 'epic'}
+              {#if (busy === 'Installing…' || busy === 'Updating…') && copy!.provider === 'epic'}
                 <button class="glass round" onclick={cancel}>Cancel</button>
               {/if}
             {/if}

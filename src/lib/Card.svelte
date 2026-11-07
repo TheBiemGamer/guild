@@ -78,6 +78,11 @@
     <span class="badge">Playing</span>
   {:else if progress}
     <span class="strip"><span style="width: {progress.fraction * 100}%"></span></span>
+  {:else if game.installed && game.update}
+    <span class="chip">
+      <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+      Update
+    </span>
   {:else if !game.installed}
     <span class="chip">
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>

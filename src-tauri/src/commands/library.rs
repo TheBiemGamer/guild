@@ -32,6 +32,8 @@ pub struct Card {
     title: String,
     stores: Vec<ProviderKind>,
     installed: bool,
+    /// The chosen copy has an update to install.
+    update: bool,
 }
 
 /// The key of the copy Play and Install use.
@@ -47,6 +49,7 @@ fn card(e: &Entry, games: &[Game]) -> Card {
         title: games[e.copies[0]].title.clone(),
         stores: entries::stores(e, games),
         installed: entries::installed(e, games),
+        update: games[entries::default_copy(e, games)].update_available,
     }
 }
 

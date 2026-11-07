@@ -4,7 +4,7 @@
   import type { CopyView } from './api'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
-  let { copies, chosen, running, busy, onchoose, onplay, oninstall }: {
+  let { copies, chosen, running, busy, onchoose, onplay, oninstall, onupdate }: {
     copies: CopyView[]
     /** The copy key Play and Install act on. */
     chosen: string
@@ -14,6 +14,7 @@
     onchoose: (key: string) => void
     onplay: () => void
     oninstall: () => void
+    onupdate: () => void
   } = $props()
 
   const copy = $derived(copies.find((c) => c.key === chosen) ?? copies[0])
@@ -41,6 +42,8 @@
     const size = sizes[c.key] ?? null
     return size ? `Not installed · ${size} download` : 'Not installed'
   }
+
+  const go = () => (copy.installed ? (copy.updateAvailable ? onupdate() : onplay()) : oninstall())
 
   let open = $state(false)
   let wrap = $state<HTMLDivElement>()
@@ -108,7 +111,7 @@
 {:else if running}
   <button class="pill big" disabled>Playing</button>
 {:else if !split}
-  <button class="pill big" onclick={copy.installed ? onplay : oninstall}>
+  <button class="pill big" onclick={go}>
     {@render goLabel()}
   </button>
 {:else}
@@ -126,7 +129,7 @@
         <svg class="stroke" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
       <span class="sep"></span>
-      <button class="go" onclick={() => press(copy.installed ? onplay : oninstall)}>
+      <button class="go" onclick={() => press(go)}>
         {@render goLabel()}
       </button>
     </div>
@@ -146,7 +149,10 @@
 {/if}
 
 {#snippet goLabel()}
-  {#if copy.installed}
+  {#if copy.installed && copy.updateAvailable}
+    <svg class="stroke" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+    Update
+  {:else if copy.installed}
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
     Play
   {:else}

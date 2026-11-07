@@ -91,6 +91,7 @@ pub fn owned_games(owned: &[OwnedGame], librarycache: &Path) -> Vec<Game> {
                 size_bytes: None,
                 art: art(o.appid, &librarycache.join(&id)),
                 dlc: Vec::new(),
+                update_available: false,
                 external_id: id,
             }
         })
@@ -243,6 +244,7 @@ fn to_game(library: &Library, app: &App, librarycache: &Path) -> Game {
         size_bytes: app.size_on_disk.filter(|_| installed),
         art: art(app.app_id, &librarycache.join(app.app_id.to_string())),
         dlc: Vec::new(),
+        update_available: false,
     }
 }
 

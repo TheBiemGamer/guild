@@ -89,6 +89,9 @@ pub struct Game {
     /// Owned DLC whose base game this is. Only Epic fills it; Steam's comes from the `dlc` command.
     // shortcut: not saved in SQLite, so it is empty until the first Epic scan after startup.
     pub dlc: Vec<Dlc>,
+    /// An installed Epic game has a newer version. Steam updates itself, so it is always false there.
+    // shortcut: not saved in SQLite either; it is false until the first Epic scan after startup.
+    pub update_available: bool,
 }
 
 /// A DLC under its base game. `id` is the store's id for it (Legendary's app name).
