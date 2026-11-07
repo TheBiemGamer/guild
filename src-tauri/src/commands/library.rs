@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -17,7 +17,7 @@ use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
-use crate::view::{self, Group, Sort};
+use crate::view::{self, Sort};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
 const EPIC_START_GRACE: Duration = Duration::from_secs(30);
@@ -70,9 +70,9 @@ pub struct Section {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Library {
-    /// In order; with a grouping, group after group.
+    /// In order; grouped by the sort, group after group.
     games: Vec<Card>,
-    /// The groups over `games`, in order; empty without a grouping.
+    /// The groups over `games`, in order; empty for Title.
     groups: Vec<Section>,
     total: usize,
     status: String,
@@ -91,11 +91,12 @@ pub fn library(
     store: Option<ProviderKind>,
     installed_only: bool,
     sort: Sort,
-    group: Group,
+    utc_offset_min: i64,
 ) -> Library {
     let s = state.lock();
     let shown = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort, &s.ttb);
-    let (games, groups) = sections(&s.games, &s.entries, &s.ttb, shown, group);
+    let groups = view::group(&shown, &s.entries, &s.games, &s.ttb, sort, SystemTime::now(), utc_offset_min * 60);
+    let (games, groups) = sections(&s.games, &s.entries, &s.ttb, shown, groups);
     Library {
         games,
         groups,
@@ -108,32 +109,30 @@ pub fn library(
     }
 }
 
-/// The cards in group order, and the groups over them (none for `Group::None`).
+/// The cards in group order, and the groups over them; without groups (Title), in `shown` order.
 fn sections(
     games: &[Game],
     entries: &[Entry],
     ttb: &HashMap<String, u64>,
     shown: Vec<usize>,
-    by: Group,
+    groups: Vec<(String, Vec<usize>)>,
 ) -> (Vec<Card>, Vec<Section>) {
     let card = |&i: &usize| card(&entries[i], games, ttb);
-    if by == Group::None {
+    if groups.is_empty() {
         return (shown.iter().map(card).collect(), Vec::new());
     }
-    let groups = view::group(&shown, entries, games, ttb, by);
     let cards = groups.iter().flat_map(|(_, ids)| ids.iter().map(card)).collect();
     (cards, groups.into_iter().map(|(label, ids)| Section { label, count: ids.len() }).collect())
 }
 
-/// The toolbar's group and sort as last saved.
+/// The toolbar's sort as last saved.
 #[derive(Serialize)]
 pub struct ViewPrefs {
     sort: Sort,
-    group: Group,
 }
 
 /// Fills the library from SQLite so the UI renders before the stores are scanned. Answers the saved
-/// group and sort, so the first `library` call already uses them.
+/// sort, so the first `library` call already uses it.
 #[tauri::command]
 pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     blocking(move || {
@@ -158,7 +157,7 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
         refresh_owned(app.clone(), false);
         fill_twins(app.clone());
         let saved = settings::load(&conn);
-        Ok(ViewPrefs { sort: saved.sort, group: saved.group })
+        Ok(ViewPrefs { sort: saved.sort })
     })
     .await
 }

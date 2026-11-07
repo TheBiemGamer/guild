@@ -7,7 +7,7 @@
     game: Card
     /** Place in the grid; covers are asked in this order. */
     index: number
-    /** Which hours the bottom-left badge shows, when nothing else claims that corner. */
+    /** Which hours the bottom-left badge shows; it takes Install's place on a game that isn't installed. */
     stat?: 'playtime' | 'ttb' | null
     running: boolean
     progress: Progress | undefined
@@ -23,12 +23,11 @@
     onresume: () => void
   } = $props()
 
-  /** "38 h played", "45 min played", "Never played", "~25 h to beat"; null when unknown or off. */
+  /** "38 h played", "45 min played", "~25 h to beat"; null when never played, unknown or off. */
   const statText = $derived.by(() => {
     if (stat === 'ttb') return game.ttbHours === null ? null : `~${game.ttbHours} h to beat`
-    if (stat !== 'playtime' || game.playtimeMinutes === null) return null
-    const m = game.playtimeMinutes
-    return m === 0 ? 'Never played' : m < 60 ? `${m} min played` : `${Math.floor(m / 60)} h played`
+    const m = stat === 'playtime' ? game.playtimeMinutes : null
+    return !m ? null : m < 60 ? `${m} min played` : `${Math.floor(m / 60)} h played`
   })
 
   /** Waiting in the queue, or first but paused: the hover shows the busy pill with Cancel or Resume. */
@@ -103,13 +102,13 @@
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       Update
     </span>
+  {:else if statText}
+    <span class="chip stat">{statText}</span>
   {:else if !game.installed}
     <span class="chip">
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       Install
     </span>
-  {:else if statText}
-    <span class="chip stat">{statText}</span>
   {/if}
 
   {#if !running && (!progress || waiting)}

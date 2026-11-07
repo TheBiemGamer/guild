@@ -28,22 +28,6 @@ impl Sort {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Group {
-    None,
-    Store,
-    Playtime,
-    TimeToBeat,
-}
-
-impl Group {
-    /// From the stored setting (serde's spelling).
-    pub fn parse(value: &str) -> Option<Self> {
-        serde_json::from_value(serde_json::Value::String(value.into())).ok()
-    }
-}
-
 /// How long to beat ("normally", seconds) from the cached IGDB answers, by entry key; a copy's key
 /// counts too, so an answer stored before a merge still applies. Zero means unknown.
 pub fn ttb_secs(entry: &Entry, games: &[Game], ttb: &HashMap<String, u64>) -> Option<u64> {
@@ -61,9 +45,29 @@ pub fn ttb_hours(secs: u64) -> u64 {
     ((secs + 1800) / 3600).max(1)
 }
 
+const RECENT_BUCKETS: [&str; 5] = ["Today", "This week", "This month", "Earlier", "Never played"];
 const PLAYTIME_BUCKETS: [&str; 7] = ["500 h+", "100–500 h", "50–100 h", "20–50 h", "10–20 h", "0–10 h", "Never played"];
+/// Shortest first, as Shortest to beat shows them; Longest to beat uses `TTB_LONGEST`. Unknown is last in both.
 const TTB_BUCKETS: [&str; 6] = ["Under 5 h", "5–15 h", "15–40 h", "40–100 h", "100 h+", "Unknown"];
-const STORE_BUCKETS: [&str; 3] = ["Steam + Epic", "Steam", "Epic Games"];
+const TTB_LONGEST: [&str; 6] = ["100 h+", "40–100 h", "15–40 h", "5–15 h", "Under 5 h", "Unknown"];
+
+/// The calendar day of `t` in a time zone `utc_offset_secs` east of UTC.
+fn local_day(t: SystemTime, utc_offset_secs: i64) -> i64 {
+    let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    (secs + utc_offset_secs).div_euclid(86_400)
+}
+
+/// Index into `RECENT_BUCKETS`, by local calendar days before today: none, 1–6 (the rest of the last
+/// 7 days), 7–29 (the rest of the last 30), more. A time after now counts as today.
+fn recent_bucket(last: Option<SystemTime>, now: SystemTime, utc_offset_secs: i64) -> usize {
+    let Some(last) = last else { return 4 };
+    match local_day(now, utc_offset_secs) - local_day(last, utc_offset_secs) {
+        ..=0 => 0,
+        1..=6 => 1,
+        7..=29 => 2,
+        _ => 3,
+    }
+}
 
 /// Index into `PLAYTIME_BUCKETS`. Unknown playtime counts as never played.
 fn playtime_bucket(minutes: Option<u64>) -> usize {
@@ -90,35 +94,35 @@ fn ttb_bucket(secs: Option<u64>) -> usize {
     }
 }
 
-fn store_bucket(entry: &Entry, games: &[Game]) -> usize {
-    match entries::stores(entry, games).as_slice() {
-        [_, _, ..] => 0,
-        [ProviderKind::Steam] => 1,
-        _ => 2,
-    }
-}
-
-/// `shown` (from `arrange`) split into labelled groups in bucket order, each keeping `shown`'s order.
-/// Empty groups are left out; `Group::None` is one unlabelled group.
+/// `shown` (from `arrange`) split into labelled groups by its sort, in bucket order, each keeping
+/// `shown`'s order. Empty groups are left out; Title is one list, so no groups. Recently played counts
+/// local calendar days: `now` in a time zone `utc_offset_secs` east of UTC.
 pub fn group(
     shown: &[usize],
     entries: &[Entry],
     games: &[Game],
     ttb: &HashMap<String, u64>,
-    by: Group,
+    sort: Sort,
+    now: SystemTime,
+    utc_offset_secs: i64,
 ) -> Vec<(String, Vec<usize>)> {
-    let labels: &[&str] = match by {
-        Group::None => return vec![(String::new(), shown.to_vec())],
-        Group::Store => &STORE_BUCKETS,
-        Group::Playtime => &PLAYTIME_BUCKETS,
-        Group::TimeToBeat => &TTB_BUCKETS,
+    let labels: &[&str] = match sort {
+        Sort::Title => return Vec::new(),
+        Sort::LastPlayed => &RECENT_BUCKETS,
+        Sort::MostPlayed => &PLAYTIME_BUCKETS,
+        Sort::LongestToBeat => &TTB_LONGEST,
+        Sort::ShortestToBeat => &TTB_BUCKETS,
     };
     let mut groups: Vec<Vec<usize>> = vec![Vec::new(); labels.len()];
     for &i in shown {
         let e = &entries[i];
-        let bucket = match by {
-            Group::Store => store_bucket(e, games),
-            Group::Playtime => playtime_bucket(entries::playtime(e, games).0),
+        let bucket = match sort {
+            Sort::LastPlayed => recent_bucket(entries::last_played(e, games).map(|(t, _)| t), now, utc_offset_secs),
+            Sort::MostPlayed => playtime_bucket(entries::playtime(e, games).0),
+            Sort::LongestToBeat => match ttb_bucket(ttb_secs(e, games, ttb)) {
+                5 => 5,
+                b => 4 - b,
+            },
             _ => ttb_bucket(ttb_secs(e, games, ttb)),
         };
         groups[bucket].push(i);
@@ -346,33 +350,87 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn group_hides_empty_buckets() {
+    fn recent_buckets_count_local_calendar_days() {
+        // 1000 days after the epoch, 10:00 local time two hours east of UTC.
+        let offset = 2 * 3600;
+        let day = 86_400;
+        let now = UNIX_EPOCH + Duration::from_secs(1_000 * day + 8 * 3600);
+        let at = |secs: u64| RECENT_BUCKETS[recent_bucket(Some(UNIX_EPOCH + Duration::from_secs(secs)), now, offset)];
+        let days_ago = |d: u64| at(1_000 * day + 8 * 3600 - d * day);
+        assert_eq!(RECENT_BUCKETS[recent_bucket(None, now, offset)], "Never played");
+        assert_eq!(days_ago(0), "Today");
+        // 00:30 local today is 22:30 UTC yesterday: still today.
+        assert_eq!(at(1_000 * day - 3600 - 1800), "Today");
+        // 23:30 local yesterday: the week, though under a day ago.
+        assert_eq!(at(1_000 * day - 2 * 3600 - 1800), "This week");
+        assert_eq!(days_ago(1), "This week");
+        assert_eq!(days_ago(6), "This week");
+        assert_eq!(days_ago(7), "This month");
+        assert_eq!(days_ago(29), "This month");
+        assert_eq!(days_ago(30), "Earlier");
+        // A clock that went backwards: today.
+        assert_eq!(at(1_000 * day + 9 * 3600), "Today");
+    }
+
+    fn named<'a>(g: &'a [Game], e: &[Entry], groups: Vec<(String, Vec<usize>)>) -> Vec<(String, Vec<&'a str>)> {
+        groups.into_iter().map(|(l, ids)| (l, ids.into_iter().map(|i| g[e[i].copies[0]].title.as_str()).collect())).collect()
+    }
+
+    /// Groups `library()` the way the `library` command does: `arrange` in `sort` order, then `group`.
+    fn grouped(g: &[Game], e: &[Entry], sort: Sort, ttb: &HashMap<String, u64>, now: u64) -> Vec<(String, Vec<usize>)> {
+        let shown = arrange(g, e, "", None, false, sort, ttb);
+        group(&shown, e, g, ttb, sort, UNIX_EPOCH + Duration::from_secs(now), 0)
+    }
+
+    #[test]
+    fn group_follows_the_sort_and_hides_empty_buckets() {
         let g = library();
         let e = entries::group(&g, &HashMap::new());
-        let shown = arrange(&g, &e, "", None, false, Sort::MostPlayed, &no_ttb());
-        let named = |groups: Vec<(String, Vec<usize>)>| -> Vec<(String, Vec<&str>)> {
-            groups
-                .into_iter()
-                .map(|(l, ids)| (l, ids.into_iter().map(|i| g[e[i].copies[0]].title.as_str()).collect()))
-                .collect()
-        };
         let label = |l: &str| l.to_string();
         // Gamma Beta 8 h, beta and delta 10 min, Alpha unknown; every other bucket is empty and absent.
         assert_eq!(
-            named(group(&shown, &e, &g, &no_ttb(), Group::Playtime)),
+            named(&g, &e, grouped(&g, &e, Sort::MostPlayed, &no_ttb(), 0)),
             [(label("0–10 h"), vec!["Gamma Beta", "beta", "delta"]), (label("Never played"), vec!["Alpha"])]
         );
+        // beta played at 300 s, Gamma Beta at 100 s; now is 8 days in.
         assert_eq!(
-            named(group(&shown, &e, &g, &no_ttb(), Group::Store)),
-            [(label("Steam"), vec!["Gamma Beta", "beta", "Alpha"]), (label("Epic Games"), vec!["delta"])]
+            named(&g, &e, grouped(&g, &e, Sort::LastPlayed, &no_ttb(), 8 * 86_400)),
+            [(label("This month"), vec!["beta", "Gamma Beta"]), (label("Never played"), vec!["Alpha", "delta"])]
         );
-        let ttb = HashMap::from([("steam-beta".to_string(), 20 * 3600)]);
+        let ttb = HashMap::from([("steam-beta".to_string(), 20 * 3600), ("epic-delta".to_string(), 120 * 3600)]);
         assert_eq!(
-            named(group(&shown, &e, &g, &ttb, Group::TimeToBeat)),
-            [(label("15–40 h"), vec!["beta"]), (label("Unknown"), vec!["Gamma Beta", "delta", "Alpha"])]
+            named(&g, &e, grouped(&g, &e, Sort::LongestToBeat, &ttb, 0)),
+            [(label("100 h+"), vec!["delta"]), (label("15–40 h"), vec!["beta"]), (label("Unknown"), vec!["Alpha", "Gamma Beta"])]
         );
-        assert_eq!(group(&shown, &e, &g, &no_ttb(), Group::None), [(String::new(), shown.clone())]);
-        assert!(group(&[], &e, &g, &no_ttb(), Group::Playtime).is_empty());
+        assert!(group(&[], &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, 0).is_empty());
+    }
+
+    #[test]
+    fn shortest_to_beat_groups_shortest_first_with_unknown_last() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        let ttb = HashMap::from([
+            ("steam-beta".to_string(), 20 * 3600),
+            ("epic-delta".to_string(), 3 * 3600),
+            ("steam-Gamma Beta".to_string(), 120 * 3600),
+        ]);
+        let label = |l: &str| l.to_string();
+        assert_eq!(
+            named(&g, &e, grouped(&g, &e, Sort::ShortestToBeat, &ttb, 0)),
+            [
+                (label("Under 5 h"), vec!["delta"]),
+                (label("15–40 h"), vec!["beta"]),
+                (label("100 h+"), vec!["Gamma Beta"]),
+                (label("Unknown"), vec!["Alpha"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn title_has_no_groups() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        assert!(grouped(&g, &e, Sort::Title, &no_ttb(), 0).is_empty());
     }
 
     #[test]
@@ -391,12 +449,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sort_and_group_parse_their_stored_names() {
+    fn sort_parses_its_stored_names() {
         assert_eq!(Sort::parse("longestToBeat"), Some(Sort::LongestToBeat));
         assert_eq!(Sort::parse("playtime"), Some(Sort::MostPlayed));
         assert_eq!(Sort::parse("size"), None);
-        assert_eq!(Group::parse("timeToBeat"), Some(Group::TimeToBeat));
-        assert_eq!(Group::parse("genre"), None);
     }
 
     #[test]

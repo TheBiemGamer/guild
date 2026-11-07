@@ -3,8 +3,8 @@
 
   let { value = $bindable(), options, label, anchor, onclose }: {
     value: T
-    options: { value: T; label: string; hint?: string }[]
-    /** The menu's accessible name, like "Group by". */
+    options: { value: T; label: string }[]
+    /** The menu's accessible name, like "Sort by". */
     label: string
     /** The chip that opened it: clicks on it toggle instead of closing from outside. */
     anchor: HTMLElement | undefined
@@ -43,7 +43,6 @@
   {#each options as o (o.value)}
     <button class="o" role="menuitemradio" aria-checked={o.value === value} onclick={() => pick(o.value)}>
       {o.label}
-      {#if o.hint}<small>{o.hint}</small>{/if}
     </button>
   {/each}
 </div>
@@ -91,9 +90,5 @@
   .o[aria-checked='true']::after {
     content: '✓';
     color: var(--text-2);
-  }
-
-  small {
-    color: var(--text-3);
   }
 </style>

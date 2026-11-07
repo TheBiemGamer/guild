@@ -4,7 +4,7 @@
   import DownloadsPopover from './DownloadsPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, type Filter } from './filters'
-  import type { Card, Group, Progress, QueueView, Sort, Store } from './api'
+  import type { Card, Progress, QueueView, Sort, Store } from './api'
 
   let {
     query = $bindable(),
@@ -12,7 +12,6 @@
     installedOnly = $bindable(),
     filters = $bindable(),
     sort = $bindable(),
-    group = $bindable(),
     popoverOpen = $bindable(),
     attention,
     progress,
@@ -31,7 +30,6 @@
     /** The Filters popover's extra filters. */
     filters: Filter[]
     sort: Sort
-    group: Group
     /** A popover is open; App ignores mouse Back/Forward meanwhile, as for Settings. */
     popoverOpen: boolean
     /** Something in settings needs a look (Epic logged out, Legendary missing…). */
@@ -50,15 +48,22 @@
     onsettings: () => void
   } = $props()
 
-  const stores: Store[] = ['steam', 'epic']
+  /** The store segments, in order; null is All. */
+  const stores: (Store | null)[] = [null, 'steam', 'epic']
+  const storeIndex = $derived(stores.indexOf(store))
+  let segments = $state<HTMLButtonElement[]>([])
   const chips = $derived(filterChips(filters))
 
-  const groups: { value: Group; label: string; hint?: string }[] = [
-    { value: 'none', label: 'None' },
-    { value: 'store', label: 'Store' },
-    { value: 'playtime', label: 'Your playtime', hint: '0–10 h, 10–20 h…' },
-    { value: 'timeToBeat', label: 'How long to beat', hint: 'short → endless' },
-  ]
+  /** Arrow keys move to the next or previous store and pick it, wrapping around (radio group). */
+  function onSegmentKey(e: KeyboardEvent) {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+    if (!step) return
+    e.preventDefault()
+    const i = (storeIndex + step + stores.length) % stores.length
+    store = stores[i]
+    segments[i]?.focus()
+  }
+
   const sorts: { value: Sort; label: string }[] = [
     { value: 'lastPlayed', label: 'Recently played' },
     { value: 'mostPlayed', label: 'Most played' },
@@ -66,14 +71,12 @@
     { value: 'shortestToBeat', label: 'Shortest to beat' },
     { value: 'title', label: 'Title' },
   ]
-  const groupName = $derived(groups.find((g) => g.value === group)?.label)
   const sortName = $derived(sorts.find((s) => s.value === sort)?.label)
 
-  let open = $state<'filters' | 'downloads' | 'group' | 'sort' | null>(null)
+  let open = $state<'filters' | 'downloads' | 'sort' | null>(null)
   let search = $state<HTMLInputElement>()
   let filtersChip = $state<HTMLButtonElement>()
   let downloadsChip = $state<HTMLButtonElement>()
-  let groupChip = $state<HTMLButtonElement>()
   let sortChip = $state<HTMLButtonElement>()
   $effect(() => {
     popoverOpen = open !== null
@@ -92,7 +95,7 @@
   })
 
   function close(refocus: boolean) {
-    const chip = { filters: filtersChip, downloads: downloadsChip, group: groupChip, sort: sortChip }[open ?? 'filters']
+    const chip = { filters: filtersChip, downloads: downloadsChip, sort: sortChip }[open ?? 'filters']
     open = null
     if (refocus) chip?.focus()
   }
@@ -126,17 +129,24 @@
   </label>
 
   <div class="chips" role="group" aria-label="Filter">
-    <button class="chip" aria-pressed={store === null} onclick={() => (store = null)}>All</button>
-    {#each stores as s (s)}
-      <button
-        class="chip icon"
-        aria-pressed={store === s}
-        title={s === 'steam' ? 'Steam' : 'Epic Games'}
-        onclick={() => (store = store === s ? null : s)}
-      >
-        <StoreIcon provider={s} size={18} />
-      </button>
-    {/each}
+    <div class="seg" role="radiogroup" aria-label="Store" style="--at: {storeIndex}">
+      <span class="thumb" aria-hidden="true"></span>
+      {#each stores as s, i (s ?? 'all')}
+        {@const name = s === null ? undefined : s === 'steam' ? 'Steam' : 'Epic Games'}
+        <button
+          role="radio"
+          aria-checked={store === s}
+          aria-label={name}
+          title={name}
+          tabindex={store === s ? 0 : -1}
+          bind:this={segments[i]}
+          onclick={() => (store = s)}
+          onkeydown={onSegmentKey}
+        >
+          {#if s === null}All{:else}<StoreIcon provider={s} size={18} />{/if}
+        </button>
+      {/each}
+    </div>
     <button class="chip" aria-pressed={installedOnly} onclick={() => (installedOnly = !installedOnly)}>
       Installed
     </button>
@@ -166,22 +176,6 @@
   </div>
 
   <span class="spacer"></span>
-
-  <div class="dd">
-    <button
-      class="chip"
-      bind:this={groupChip}
-      aria-haspopup="menu"
-      aria-expanded={open === 'group'}
-      onclick={() => (open = open === 'group' ? null : 'group')}
-    >
-      Group: {groupName}
-      <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-    </button>
-    {#if open === 'group'}
-      <ChoiceMenu bind:value={group} options={groups} label="Group by" anchor={groupChip} onclose={close} />
-    {/if}
-  </div>
 
   <div class="dd">
     <button
@@ -306,6 +300,52 @@
 
   .dd {
     position: relative;
+  }
+
+  /* Store picker: one chip-sized segmented control; the selected segment's pill slides under it. */
+  .seg {
+    position: relative;
+    display: flex;
+    height: 36px;
+    padding: 2px;
+    border-radius: 10px;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+  }
+
+  .seg button {
+    position: relative;
+    width: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-2);
+  }
+
+  .seg button:hover,
+  .seg button[aria-checked='true'] {
+    color: var(--text);
+  }
+
+  .seg button:hover:not([aria-checked='true']) {
+    background: var(--glass-hover);
+  }
+
+  .thumb {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    width: 36px;
+    border-radius: 8px;
+    background: var(--glass-on);
+    border: 1px solid var(--glass-on-line);
+    transform: translateX(calc(var(--at) * 36px));
+    transition: transform 150ms ease-out;
   }
 
   .chip {

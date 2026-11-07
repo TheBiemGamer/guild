@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Featured, Group, Library, Progress, QueueView, Section, SettingsView, Sort, Store } from './lib/api'
+  import type { Action, Featured, Library, Progress, QueueView, Section, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -37,7 +37,6 @@
   let query = $state('')
   let store = $state<Store | null>(null)
   let sort = $state<Sort>('title')
-  let group = $state<Group>('none')
   let installedOnly = $state(false)
   /** The Filters popover's extra filters, applied here to the loaded list. */
   let filters = $state<Filter[]>([])
@@ -66,7 +65,7 @@
   let ready = $state(false)
 
   async function load() {
-    lib = await api.library(query, store, installedOnly, sort, group)
+    lib = await api.library(query, store, installedOnly, sort)
     version++
   }
 
@@ -77,19 +76,17 @@
   }
 
   $effect(() => {
-    void [query, store, sort, group, installedOnly]
+    void [query, store, sort, installedOnly]
     load()
   })
 
-  /** The group and sort as saved; null until the saved ones are restored at start. */
-  let savedView: { sort: Sort; group: Group } | null = null
+  /** The sort as saved; null until the saved one is restored at start. */
+  let savedSort: Sort | null = null
   $effect(() => {
-    const now = { sort, group }
-    if (!savedView) return
-    const quiet = (e: unknown) => console.error('saving the library view', e)
-    if (now.sort !== savedView.sort) api.updateSetting('library_sort', now.sort).catch(quiet)
-    if (now.group !== savedView.group) api.updateSetting('library_group', now.group).catch(quiet)
-    savedView = now
+    const now = sort
+    if (savedSort === null) return
+    if (now !== savedSort) api.updateSetting('library_sort', now).catch((e) => console.error('saving the library sort', e))
+    savedSort = now
   })
 
   /** The Epic copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
@@ -206,11 +203,8 @@
     ;(async () => {
       benchSpeed = await api.benchSpeed()
       const saved = await api.loadCache().catch((e) => console.error('library cache', e))
-      if (saved) {
-        sort = saved.sort
-        group = saved.group
-      }
-      savedView = { sort, group }
+      if (saved) sort = saved.sort
+      savedSort = sort
       await reload()
       started = true
       await firstCovers()
@@ -313,14 +307,8 @@
     return { games, sections: kept }
   })
   const shown = $derived(view.games)
-  /** The hours a card's badge shows: how long to beat or playtime, while grouping or sorting by it. */
-  const stat = $derived(
-    group === 'timeToBeat' || sort === 'longestToBeat' || sort === 'shortestToBeat'
-      ? 'ttb'
-      : group === 'playtime' || sort === 'mostPlayed'
-        ? 'playtime'
-        : null,
-  )
+  /** The hours every card's badge shows while sorting by them: how long to beat or playtime. */
+  const stat = $derived(sort === 'longestToBeat' || sort === 'shortestToBeat' ? 'ttb' : sort === 'mostPlayed' ? 'playtime' : null)
 
   /** Queue changes answer with the queue as it is now, so it shows before the next poll. Resolves to whether it worked. */
   async function changeQueue(f: () => Promise<QueueView>) {
@@ -356,7 +344,6 @@
     bind:installedOnly
     bind:filters
     bind:sort
-    bind:group
     bind:popoverOpen
     attention={lib.epicAttention || lib.steamAttention}
     {progress}
@@ -409,7 +396,7 @@
         games={shown}
         sections={view.sections}
         {stat}
-        resetKey={`${query}|${store}|${sort}|${group}|${installedOnly}|${filters.join()}`}
+        resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
         {running}
         {progress}
         {queue}
