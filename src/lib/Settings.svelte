@@ -12,6 +12,7 @@
   let {
     view,
     section = null,
+    attention,
     refreshedAt,
     refreshing,
     loggingIn,
@@ -29,6 +30,8 @@
     view: SettingsView
     /** The section to open at; null is the top. */
     section?: string | null
+    /** A store needs the owner: the Settings button's dot, repeated on Accounts. */
+    attention: boolean
     /** When the last full refresh finished (ms), or null if none has this session. */
     refreshedAt: number | null
     refreshing: boolean
@@ -49,8 +52,28 @@
   } = $props()
 
   /** Section ids; `settings.section.<id>` names them. */
-  const sections = ['general', 'accounts', 'appearance', 'metadata', 'storage', 'about']
-  let active = $state(sections[0])
+  const sections = ['accounts', 'general', 'services', 'about'] as const
+  /** 24px stroke icons, one path each: the section list and the row tiles. */
+  const icons = {
+    accounts: 'M8 8a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6',
+    general: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 7a2 2 0 1 0 4 0a2 2 0 1 0-4 0M8 17a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
+    services: 'M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5',
+    about: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 11v6M12 7.5h.01',
+    power: 'M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0',
+    tray: 'M4 14h4l1 3h6l1-3h4M4 14l2-9h12l2 9v5H4z',
+    bell: 'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
+    palette:
+      'M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2s-1-2 0-3 2-1 4-1a3 3 0 0 0 3-3c0-5-4-9-9-9zM7 10a1 1 0 1 0 2 0a1 1 0 1 0-2 0M11 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0M15 10a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
+    banner: 'M5 5h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM6 19h12',
+    globe: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
+    hash: 'M5 9h14M5 15h14M10 4 8 20M16 4l-2 16',
+    key: 'M4 15a4 4 0 1 0 8 0a4 4 0 1 0-8 0M10.8 12.2 20 3M16 7l3 3M14 9l2 2',
+    check: 'M20 6 9 17l-5-5',
+    disk: 'M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM7 15h.01M11 15h6',
+    file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+  }
+  type Icon = keyof typeof icons
+  let active = $state<string>(sections[0])
   let main: HTMLElement
   let closeButton: HTMLButtonElement
 
@@ -494,13 +517,45 @@
 
 <svelte:window {onkeydown} />
 
+{#snippet icon(name: Icon)}
+  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d={icons[name]} /></svg>
+{/snippet}
+
+{#snippet tile(name: Icon)}
+  <span class="tile">{@render icon(name)}</span>
+{/snippet}
+
+{#snippet switchRow(name: Icon, setting: string, on: boolean, label: string, hint?: string)}
+  <div class="r">
+    {@render tile(name)}
+    <div class="what"><span id="{setting}-label">{label}</span>{#if hint}<small>{hint}</small>{/if}</div>
+    <button class="toggle" role="switch" aria-checked={on} aria-labelledby="{setting}-label" onclick={() => toggle(setting, !on)}></button>
+  </div>
+{/snippet}
+
+{#snippet chevron()}
+  <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+{/snippet}
+
+{#snippet who(store: string, card: { name: string | null; problem: string | null })}
+  <div class="what">
+    {store}
+    {#if card.problem}<small class="problem">{card.problem}</small>
+    {:else if card.name}<small>{card.name}</small>{/if}
+  </div>
+{/snippet}
+
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
   <div class="panel" role="dialog" aria-modal="true" aria-label={t('toolbar.settings')}>
     <nav aria-label={t('settings.sectionsLabel')}>
       <h2>{t('toolbar.settings')}</h2>
       {#each sections as name (name)}
-        <button class="item" class:on={active === name} onclick={() => go(name)}>{t(`settings.section.${name}`)}</button>
+        <button class="item" class:on={active === name} onclick={() => go(name)}>
+          {@render icon(name)}
+          {t(`settings.section.${name}`)}
+          {#if name === 'accounts' && attention}<i class="dot"></i>{/if}
+        </button>
       {/each}
     </nav>
 
@@ -511,72 +566,9 @@
         <p class="error" role="alert">{error}</p>
       {/if}
 
-      <section id={id('general')}>
-        <h4>{t('settings.section.general')}</h4>
-        <div class="row">
-          <div id="startup-label">{t('settings.startup')}</div>
-          <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.startWithWindows}
-            aria-labelledby="startup-label"
-            onclick={() => toggle('start_with_windows', !view.startWithWindows)}
-          ></button>
-        </div>
-        <div class="row">
-          <div id="tray-label">{t('settings.tray')}</div>
-          <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.closeToTray}
-            aria-labelledby="tray-label"
-            onclick={() => toggle('close_to_tray', !view.closeToTray)}
-          ></button>
-        </div>
-        <div class="row">
-          <div id="notify-label">{t('settings.notify')}</div>
-          <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.notifyDownloads}
-            aria-labelledby="notify-label"
-            onclick={() => toggle('notify_downloads', !view.notifyDownloads)}
-          ></button>
-        </div>
-        <div class="row">
-          <div id="language-label">{t('settings.language')}</div>
-          <div class="choice">
-            <button
-              class="btn opt"
-              class:open={languageOpen}
-              bind:this={languageButton}
-              aria-haspopup="menu"
-              aria-expanded={languageOpen}
-              aria-label={t('settings.languageNow', { name: languageName })}
-              onclick={() => (languageOpen = !languageOpen)}
-            >
-              {languageName}
-              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-            </button>
-            {#if languageOpen}
-              <ChoiceMenu
-                bind:value={() => view.language, (v) => change(() => api.updateSetting('language', v))}
-                options={languages}
-                label={t('settings.language')}
-                anchor={languageButton}
-                onclose={(refocus) => {
-                  languageOpen = false
-                  if (refocus) languageButton?.focus()
-                }}
-              />
-            {/if}
-          </div>
-        </div>
-      </section>
-
       <section id={id('accounts')}>
         <div class="head">
-          <h4>{t('settings.section.accounts')}</h4>
+          <h3>{t('settings.section.accounts')}</h3>
           {#if refreshing}<span class="ago still">{t('settings.refreshing')}</span>{/if}
           <span class="ago" class:moving={refreshing}>{ago(refreshedAt, now)}</span>
           <button
@@ -590,27 +582,17 @@
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
           </button>
         </div>
-        <div class="acct">
-          <div class="top">
-            <div class="logo steam"><StoreIcon provider="steam" size={24} /></div>
-            <div class="who">
-              <b>Steam</b>
-              {#if steam.problem}<span class="problem"><i class="dot"></i>{steam.problem}</span>
-              {:else if steam.name}<span>{steam.name}</span>{/if}
-            </div>
+        <div class="group">
+          <div class="r">
+            <div class="logo steam"><StoreIcon provider="steam" size={17} /></div>
+            {@render who('Steam', steam)}
             {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
             {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>{t('settings.logOut')}</button>{/if}
           </div>
-        </div>
 
-        <div class="acct">
-          <div class="top">
-            <div class="logo epic"><StoreIcon provider="epic" size={24} /></div>
-            <div class="who">
-              <b>Epic Games</b>
-              {#if epic.problem}<span class="problem"><i class="dot"></i>{epic.problem}</span>
-              {:else if epic.name}<span>{epic.name}</span>{/if}
-            </div>
+          <div class="r">
+            <div class="logo epic"><StoreIcon provider="epic" size={17} /></div>
+            {@render who('Epic Games', epic)}
             {#if view.epic !== 'noLegendary'}
               <button
                 class="btn opt"
@@ -620,7 +602,7 @@
                 onclick={() => (epicOptions = !epicOptions)}
               >
                 {t('settings.options')}
-                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                {@render chevron()}
               </button>
             {/if}
             {#if view.epic === 'noLegendary'}
@@ -705,16 +687,10 @@
               {/if}
             </div>
           {/if}
-        </div>
 
-        <div class="acct">
-          <div class="top">
-            <div class="logo gog"><StoreIcon provider="gog" size={24} /></div>
-            <div class="who">
-              <b>GOG</b>
-              {#if gog.problem}<span class="problem"><i class="dot"></i>{gog.problem}</span>
-              {:else if gog.name}<span>{gog.name}</span>{/if}
-            </div>
+          <div class="r">
+            <div class="logo gog"><StoreIcon provider="gog" size={17} /></div>
+            {@render who('GOG', gog)}
             {#if view.gog !== 'noGogdl'}
               <button
                 class="btn opt"
@@ -724,7 +700,7 @@
                 onclick={() => (gogOptions = !gogOptions)}
               >
                 {t('settings.options')}
-                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                {@render chevron()}
               </button>
             {/if}
             {#if view.gog === 'noGogdl'}
@@ -792,16 +768,10 @@
               {/if}
             </div>
           {/if}
-        </div>
 
-        <div class="acct">
-          <div class="top">
-            <div class="logo amazon"><StoreIcon provider="amazon" size={24} /></div>
-            <div class="who">
-              <b>Amazon Games</b>
-              {#if amazon.problem}<span class="problem"><i class="dot"></i>{amazon.problem}</span>
-              {:else if amazon.name}<span>{amazon.name}</span>{/if}
-            </div>
+          <div class="r">
+            <div class="logo amazon"><StoreIcon provider="amazon" size={17} /></div>
+            {@render who('Amazon Games', amazon)}
             {#if view.amazon !== 'noNile'}
               <button
                 class="btn opt"
@@ -811,7 +781,7 @@
                 onclick={() => (amazonOptions = !amazonOptions)}
               >
                 {t('settings.options')}
-                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                {@render chevron()}
               </button>
             {/if}
             {#if view.amazon === 'noNile'}
@@ -884,114 +854,145 @@
         </div>
       </section>
 
-      <section id={id('appearance')}>
-        <h4>{t('settings.section.appearance')}</h4>
-        <div class="row">
-          <div id="ambient-label">{t('settings.ambient')}</div>
-          <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.ambient}
-            aria-labelledby="ambient-label"
-            onclick={() => toggle('ambient', !view.ambient)}
-          ></button>
+      <section id={id('general')}>
+        <h3>{t('settings.section.general')}</h3>
+        <h4>{t('settings.group.startup')}</h4>
+        <div class="group">
+          {@render switchRow('power', 'start_with_windows', view.startWithWindows, t('settings.startup'))}
+          {@render switchRow('tray', 'close_to_tray', view.closeToTray, t('settings.tray'), t('settings.trayHint'))}
+          {@render switchRow('bell', 'notify_downloads', view.notifyDownloads, t('settings.notify'))}
         </div>
-        <div class="row">
-          <div id="banner-label">{t('settings.banner')}</div>
-          <button
-            class="toggle"
-            role="switch"
-            aria-checked={view.showBanner}
-            aria-labelledby="banner-label"
-            onclick={() => toggle('show_banner', !view.showBanner)}
-          ></button>
+        <h4>{t('settings.group.look')}</h4>
+        <div class="group">
+          {@render switchRow('palette', 'ambient', view.ambient, t('settings.ambient'))}
+          {@render switchRow('banner', 'show_banner', view.showBanner, t('settings.banner'))}
+          <div class="r">
+            {@render tile('globe')}
+            <div class="what">{t('settings.language')}</div>
+            <div class="choice">
+              <button
+                class="btn opt"
+                class:open={languageOpen}
+                bind:this={languageButton}
+                aria-haspopup="menu"
+                aria-expanded={languageOpen}
+                aria-label={t('settings.languageNow', { name: languageName })}
+                onclick={() => (languageOpen = !languageOpen)}
+              >
+                {languageName}
+                {@render chevron()}
+              </button>
+              {#if languageOpen}
+                <ChoiceMenu
+                  bind:value={() => view.language, (v) => change(() => api.updateSetting('language', v))}
+                  options={languages}
+                  label={t('settings.language')}
+                  anchor={languageButton}
+                  onclose={(refocus) => {
+                    languageOpen = false
+                    if (refocus) languageButton?.focus()
+                  }}
+                />
+              {/if}
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id={id('metadata')}>
-        <h4>{t('settings.section.metadata')}</h4>
+      <section id={id('services')}>
+        <h3>{t('settings.section.services')}</h3>
+        <h4>IGDB</h4>
         <p class="hint">{igdbHint[0]}<button class="link" onclick={() => api.openTwitchConsole()}>{t('settings.igdbLink')}</button>{igdbHint[1]}</p>
-        <div class="row stack">
-          <label for="igdb-id">{t('settings.clientId')}</label>
-          <div class="field">
-            <input
-              id="igdb-id"
-              type="text"
-              spellcheck="false"
-              autocomplete="off"
-              bind:value={clientId}
-              onblur={saveClientId}
-              onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            />
+        <div class="group">
+          <div class="r">
+            {@render tile('hash')}
+            <div class="what">
+              <label for="igdb-id">{t('settings.clientId')}</label>
+              <div class="field">
+                <input
+                  id="igdb-id"
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  bind:value={clientId}
+                  onblur={saveClientId}
+                  onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                />
+              </div>
+            </div>
+          </div>
+          <div class="r">
+            {@render tile('key')}
+            <div class="what">
+              <label for="igdb-secret">{t('settings.clientSecret')}</label>
+              <div class="field">
+                {#if showSecretField}
+                  <input
+                    id="igdb-secret"
+                    type="password"
+                    autocomplete="off"
+                    placeholder={t('settings.pasteSecret')}
+                    bind:value={secret}
+                    onkeydown={(e) => e.key === 'Enter' && saveSecret()}
+                  />
+                  <button class="btn" disabled={busy || !secret.trim()} onclick={saveSecret}>{t('common.save')}</button>
+                  {#if replacing}<button class="btn" onclick={() => ((replacing = false), (secret = ''))}>{t('common.cancel')}</button>{/if}
+                {:else}
+                  <span class="saved" id="igdb-secret">{t('settings.savedCheck')}</span>
+                  <button class="btn" onclick={() => (replacing = true)}>{t('settings.replace')}</button>
+                  <button class="btn danger" disabled={busy} onclick={removeSecret}>{t('menu.remove')}</button>
+                {/if}
+              </div>
+            </div>
+          </div>
+          <div class="r">
+            {@render tile('check')}
+            <div class="what">
+              {t('settings.test')}
+              {#if testPassed}<small class="ok">{t('settings.testPassed')}</small>{/if}
+            </div>
+            <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
+              {testing ? t('settings.testing') : t('settings.testButton')}
+            </button>
           </div>
         </div>
-        <div class="row stack">
-          <label for="igdb-secret">{t('settings.clientSecret')}</label>
-          <div class="field">
-            {#if showSecretField}
-              <input
-                id="igdb-secret"
-                type="password"
-                autocomplete="off"
-                placeholder={t('settings.pasteSecret')}
-                bind:value={secret}
-                onkeydown={(e) => e.key === 'Enter' && saveSecret()}
-              />
-              <button class="btn" disabled={busy || !secret.trim()} onclick={saveSecret}>{t('common.save')}</button>
-              {#if replacing}<button class="btn" onclick={() => ((replacing = false), (secret = ''))}>{t('common.cancel')}</button>{/if}
-            {:else}
-              <span class="saved" id="igdb-secret">{t('settings.savedCheck')}</span>
-              <button class="btn" onclick={() => (replacing = true)}>{t('settings.replace')}</button>
-              <button class="btn danger" disabled={busy} onclick={removeSecret}>{t('menu.remove')}</button>
-            {/if}
+        <h4>SteamGridDB</h4>
+        <p class="hint">{gridHint[0]}<button class="link" onclick={() => run(api.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}</p>
+        <div class="group">
+          <div class="r">
+            {@render tile('key')}
+            <div class="what">
+              <label for="grid-key">{t('settings.gridKey')}</label>
+              <div class="field">
+                {#if showGridField}
+                  <input
+                    id="grid-key"
+                    type="password"
+                    autocomplete="off"
+                    placeholder={t('settings.pasteKey')}
+                    bind:value={gridKey}
+                    onkeydown={(e) => e.key === 'Enter' && saveGridKey()}
+                  />
+                  <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>{t('common.save')}</button>
+                  {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>{t('common.cancel')}</button>{/if}
+                {:else}
+                  <span class="saved" id="grid-key">{t('settings.savedCheck')}</span>
+                  <button class="btn" onclick={() => (gridReplacing = true)}>{t('settings.replace')}</button>
+                  <button class="btn danger" disabled={busy} onclick={removeGridKey}>{t('menu.remove')}</button>
+                {/if}
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="row">
-          <div>
-            {t('settings.test')}
-            {#if testPassed}<span class="ok">{t('settings.testPassed')}</span>{/if}
-          </div>
-          <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
-            {testing ? t('settings.testing') : t('settings.testButton')}
-          </button>
-        </div>
-        <p class="hint gap">{gridHint[0]}<button class="link" onclick={() => run(api.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}</p>
-        <div class="row stack">
-          <label for="grid-key">{t('settings.gridKey')}</label>
-          <div class="field">
-            {#if showGridField}
-              <input
-                id="grid-key"
-                type="password"
-                autocomplete="off"
-                placeholder={t('settings.pasteKey')}
-                bind:value={gridKey}
-                onkeydown={(e) => e.key === 'Enter' && saveGridKey()}
-              />
-              <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>{t('common.save')}</button>
-              {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>{t('common.cancel')}</button>{/if}
-            {:else}
-              <span class="saved" id="grid-key">{t('settings.savedCheck')}</span>
-              <button class="btn" onclick={() => (gridReplacing = true)}>{t('settings.replace')}</button>
-              <button class="btn danger" disabled={busy} onclick={removeGridKey}>{t('menu.remove')}</button>
-            {/if}
-          </div>
-        </div>
-      </section>
-
-      <section id={id('storage')}>
-        <h4>{t('settings.section.storage')}</h4>
-        <div class="row">
-          <div>{t('settings.cache')}<span>{sizeLabel(view.cacheBytes)}</span></div>
-          <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>{t('settings.clearCache')}</button>
         </div>
       </section>
 
       <section id={id('about')}>
-        <h4>{t('settings.section.about')}</h4>
-        <div class="row">
-          <div>{t('settings.version', { version: view.appVersion })}{#if versionNote}<span class="quiet">{versionNote}</span>{/if}</div>
-          <div class="field">
+        <h3>{t('settings.section.about')}</h3>
+        <h4>{t('settings.group.version')}</h4>
+        <div class="group">
+          <div class="r">
+            {@render tile('about')}
+            <div class="what">{t('settings.version', { version: view.appVersion })}{#if versionNote}<small>{versionNote}</small>{/if}</div>
             {#if notes}
               <button class="btn" bind:this={notesButton} aria-haspopup="dialog" aria-expanded={notesOpen} onclick={() => (notesOpen = !notesOpen)}>
                 {t('app.whatsNew')}
@@ -1006,13 +1007,19 @@
             {/if}
           </div>
         </div>
-        <div class="row">
-          <div>Legendary (Epic Games)</div>
-          <span class="value">{view.legendaryVersion ?? t('play.notInstalled')}</span>
+        <h4>{t('settings.group.storage')}</h4>
+        <div class="group">
+          <div class="r">
+            {@render tile('disk')}
+            <div class="what">{t('settings.cache')}<small>{sizeLabel(view.cacheBytes)}</small></div>
+            <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>{t('settings.clearCache')}</button>
+          </div>
         </div>
-        <div class="row">
-          <div>{t('settings.troubleshooting')}</div>
-          <div class="field">
+        <h4>{t('settings.group.troubleshooting')}</h4>
+        <div class="group">
+          <div class="r">
+            {@render tile('file')}
+            <div class="what">{t('settings.logFile')}</div>
             <button class="btn" onclick={() => run(api.openLogFolder)}>{t('settings.openLog')}</button>
             <button class="btn" onclick={() => run(api.reportProblem)}>{t('settings.report')}</button>
           </div>
@@ -1065,8 +1072,8 @@
   nav {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 18px 12px;
+    gap: 2px;
+    padding: 16px 10px;
     border-right: 1px solid var(--glass-line);
   }
 
@@ -1078,10 +1085,13 @@
   }
 
   .item {
-    padding: 9px 12px;
-    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
     background: transparent;
-    color: rgb(255 255 255 / 0.78);
+    color: var(--text-2);
     text-align: left;
   }
 
@@ -1112,21 +1122,41 @@
     background: rgb(255 255 255 / 0.08);
   }
 
+  section + section {
+    margin-top: 32px;
+  }
+
+  /* A section opened from the list keeps the top padding above its title. */
+  section {
+    scroll-margin-top: 20px;
+  }
+
+  h3 {
+    margin: 0 0 14px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
   h4 {
-    margin: 26px 0 10px;
+    margin: 18px 0 8px;
     font-size: 12px;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--text-2);
+    color: var(--text-3);
+  }
+
+  h3 + h4 {
+    margin-top: 0;
   }
 
   .head {
     display: flex;
     align-items: center;
-    margin: 4px 0 10px;
+    margin-bottom: 14px;
   }
 
-  .head h4 {
+  .head h3 {
     flex: 1;
     margin: 0;
   }
@@ -1190,19 +1220,72 @@
     color: #fecaca;
   }
 
-  .acct {
-    margin-bottom: 10px;
+  /* One rounded group per heading; its rows (and an open Options panel) are split by thin lines. No overflow
+     clip: the Language menu hangs out of its group. */
+  .group {
     border-radius: 12px;
     background: var(--glass);
     border: 1px solid var(--glass-line);
-    overflow: hidden;
   }
 
-  .top {
+  .group > * + * {
+    border-top: 1px solid var(--glass-line);
+  }
+
+  .r {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
-    gap: 14px;
-    padding: 12px 14px;
+    gap: 8px 12px;
+    padding: 11px 14px;
+  }
+
+  .tile,
+  .logo {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+  }
+
+  .tile {
+    background: rgb(255 255 255 / 0.06);
+    color: var(--text-2);
+  }
+
+  .item svg,
+  .tile svg {
+    stroke-width: 1.8;
+  }
+
+  /* Long account names break anywhere, but a label keeps room for a word: at the narrowest, buttons wrap
+     to a second line, right-aligned. */
+  .what {
+    flex: 1 1 6em;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .what small {
+    display: block;
+    margin-top: 1px;
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  .what small.problem {
+    color: var(--warn);
+  }
+
+  .what label {
+    display: block;
+  }
+
+  .what .field {
+    margin-top: 8px;
   }
 
   .btn.opt {
@@ -1232,10 +1315,9 @@
     position: relative;
   }
 
-  /* Indented to line up with the store name (14px padding + 40px logo + 12px). */
+  /* Indented to line up with the store name (14px padding + 30px logo + 12px). */
   .opts {
-    padding: 4px 14px 8px 66px;
-    border-top: 1px solid var(--glass-line);
+    padding: 4px 14px 8px 56px;
   }
 
   .opts .row {
@@ -1252,12 +1334,6 @@
   }
 
   .logo {
-    flex: none;
-    width: 40px;
-    height: 40px;
-    display: grid;
-    place-items: center;
-    border-radius: 12px;
     color: #fff;
   }
 
@@ -1277,35 +1353,12 @@
     background: #232f3e;
   }
 
-  .who {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .who b {
-    display: block;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .who span {
-    display: block;
-    color: var(--text-3);
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
-  .who .problem {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-2);
-  }
-
+  /* Accounts in the section list: a store needs the owner. */
   .dot {
     flex: none;
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
+    margin-left: auto;
     border-radius: 50%;
     background: var(--warn);
   }
@@ -1357,16 +1410,6 @@
     color: var(--text-2);
   }
 
-  .row > div > span.quiet {
-    font-size: 12px;
-    color: var(--text-3);
-  }
-
-  .value {
-    color: var(--text-2);
-    font-variant-numeric: tabular-nums;
-  }
-
   .field {
     display: flex;
     align-items: center;
@@ -1407,18 +1450,14 @@
     color: #4ade80;
   }
 
-  span.ok {
+  .what small.ok {
     color: #4ade80;
   }
 
   .hint {
-    margin: 0;
-    color: var(--text-2);
-    font-size: 13px;
-  }
-
-  .hint.gap {
-    margin-top: 16px;
+    margin: 0 0 8px;
+    color: var(--text-3);
+    font-size: 12px;
   }
 
   .link {

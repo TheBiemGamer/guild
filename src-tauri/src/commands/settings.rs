@@ -295,7 +295,6 @@ pub struct SettingsView {
     close_to_tray: bool,
     notify_downloads: bool,
     app_version: String,
-    legendary_version: Option<String>,
     tools: Vec<tools::ToolView>,
     cache_bytes: u64,
 }
@@ -343,7 +342,6 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
-            legendary_version: tools::version(&tools::LEGENDARY),
             tools: tools::view(),
             cache_bytes,
         })

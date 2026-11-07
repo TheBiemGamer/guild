@@ -150,7 +150,6 @@ export interface SettingsView {
   closeToTray: boolean
   notifyDownloads: boolean
   appVersion: string
-  legendaryVersion: string | null
   tools: ToolView[]
   cacheBytes: number
 }

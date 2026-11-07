@@ -430,6 +430,8 @@
   const cancelDownload = (key: string) => changeQueue(() => api.cancelInstall(key))
   const resumeDownloads = () => changeQueue(api.resumeDownloads)
 
+  /** A store needs the owner: the dot on the Settings button and on Settings' Accounts. */
+  const attention = $derived(lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention)
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
@@ -454,7 +456,7 @@
     oncollections={reload}
     bind:sort
     bind:popoverOpen
-    attention={lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention}
+    {attention}
     {progress}
     {queue}
     games={lib.games}
@@ -636,7 +638,7 @@
       onsaved={reload}
       onsettings={() => {
         closeAddGame(false)
-        openSettings('metadata')
+        openSettings('services')
       }}
     />
   {/key}
@@ -646,6 +648,7 @@
   <Settings
     view={settings}
     section={settingsSection}
+    {attention}
     {refreshedAt}
     {refreshing}
     {loggingIn}
