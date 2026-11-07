@@ -121,6 +121,13 @@ export const saves = (key: string) => invoke<SavesView | null>('saves', { key })
 export const setSaves = (key: string, choice: boolean | null) => invoke<void>('set_saves', { key, choice })
 /** The newer save wins; the outcome shows in `saves`. */
 export const syncSavesNow = (key: string) => invoke<void>('sync_saves_now', { key })
+/** An installed Epic copy's Launch options tab. `exe`: relative to the install folder; null runs the default. */
+export interface LaunchOptions { args: string; offline: boolean; skipVersionCheck: boolean; exe: string | null }
+export const launchOptions = (key: string) => invoke<LaunchOptions | null>('launch_options', { key })
+/** `exe` may be absolute; resolves to what was stored (`exe` made relative). Fails for an exe outside the install folder. */
+export const setLaunchOptions = (key: string, options: LaunchOptions) => invoke<LaunchOptions>('set_launch_options', { key, options })
+/** A Steam copy's properties in Steam, where its launch options live. */
+export const openSteamProperties = (key: string) => invoke<void>('open_steam_properties', { key })
 /** A DLC under its game. `copy` is the Epic copy's key for Install and Uninstall; null for Steam, which installs DLC itself. */
 export interface Dlc { id: string; title: string; installed: boolean; copy: string | null }
 /**
@@ -205,6 +212,11 @@ export const epicEglSync = () => invoke<void>('epic_egl_sync')
 /** The system folder picker; null when it was closed without picking. */
 export async function pickFolder(): Promise<string | null> {
   const path = await open({ directory: true })
+  return typeof path === 'string' ? path : null
+}
+/** An .exe picked from `folder` (it opens there); null when cancelled. */
+export async function pickExe(folder: string): Promise<string | null> {
+  const path = await open({ defaultPath: folder, filters: [{ name: 'Programs', extensions: ['exe'] }] })
   return typeof path === 'string' ? path : null
 }
 export const dismissEpicNotice = () => invoke<void>('dismiss_epic_notice')

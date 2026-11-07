@@ -39,7 +39,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './api'
-  import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LinkKind, Progress, QueueView, SavesView, TimeToBeat } from './api'
+  import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LaunchOptions, LinkKind, Progress, QueueView, SavesView, TimeToBeat } from './api'
   import PlayButton from './PlayButton.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
@@ -87,12 +87,16 @@
   let backButton = $state<HTMLButtonElement>()
   let confirmCancel = $state<HTMLButtonElement>()
   let actionsEl = $state<HTMLDivElement>()
-  type Tab = 'overview' | 'dlc' | 'saves' | 'installation'
+  type Tab = 'overview' | 'dlc' | 'saves' | 'launch' | 'installation'
   let tab = $state<Tab>('overview')
   let tabList = $state<HTMLDivElement>()
   /** The chosen copy's Saves tab; null without cloud saves. */
   let saves = $state<SavesView | null>(null)
   let syncing = $state(false)
+  /** The chosen installed Epic copy's launch options; null for others. */
+  let launch = $state<LaunchOptions | null>(null)
+  let argsText = $state('')
+  let argsSaved = $state(false)
   /** A Play that stopped at a cloud save conflict, asked in the hero. */
   let asking = $state<{ conflict: Conflict; action: Action; key: string } | null>(null)
   let askCancel = $state<HTMLButtonElement>()
@@ -222,6 +226,55 @@
     await run(() => api.syncSavesNow(key))
     await loadSaves(key)
     syncing = false
+  }
+
+  // A string, so a library reload that keeps the copy doesn't reload the options under the cursor.
+  const launchKey = $derived(copy?.installed && copy.provider === 'epic' ? copy.key : null)
+  $effect(() => {
+    const key = launchKey
+    launch = null
+    argsSaved = false
+    if (!key) return
+    let alive = true
+    api.launchOptions(key).then(
+      (o) => {
+        if (!alive) return
+        launch = o
+        argsText = o?.args ?? ''
+      },
+      () => {},
+    )
+    return () => {
+      alive = false
+    }
+  })
+
+  /** Saves a change to the launch options; true when it was stored. */
+  async function setLaunch(change: Partial<LaunchOptions>) {
+    const key = copy!.key
+    try {
+      const stored = await api.setLaunchOptions(key, { ...launch!, ...change })
+      if (copy?.key === key) launch = stored
+      return true
+    } catch (e) {
+      onerror(api.message(e))
+      return false
+    }
+  }
+
+  let savedTimer: ReturnType<typeof setTimeout> | undefined
+  async function saveArgs() {
+    if (!launch || argsText === launch.args) return
+    if (await setLaunch({ args: argsText })) {
+      argsSaved = true
+      clearTimeout(savedTimer)
+      savedTimer = setTimeout(() => (argsSaved = false), 2000)
+    }
+  }
+
+  async function chooseExe() {
+    const path = await api.pickExe(copy!.installDir ?? '').catch((e) => (onerror(api.message(e)), null))
+    if (path) setLaunch({ exe: path })
   }
 
   const labels: Record<Action, string> = {
@@ -398,11 +451,12 @@
     keepFocus(() => dlcCancel)
   }
 
-  // Launch options (Task 25) joins when it exists; a tab with nothing for this game is hidden.
+  // A tab with nothing for this game is hidden.
   const tabs = $derived.by(() => {
     const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
     if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
     if (copy?.cloudSaves) list.push({ id: 'saves', label: 'Saves' })
+    if (copy?.installed) list.push({ id: 'launch', label: 'Launch options' })
     if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
     return list
   })
@@ -620,6 +674,53 @@
             <div class="what">Sync now<small>The newer save wins.</small></div>
             <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}>{syncing ? 'Syncing…' : 'Sync now'}</button>
           </div>
+        </section>
+      {:else if current === 'launch'}
+        <!-- The chosen copy's own options; Epic applies them on Play. -->
+        <section class="panel rows" aria-label="Launch options">
+          {#if copy!.provider === 'steam'}
+            <div class="row">
+              <div class="what">Steam keeps its own launch options.</div>
+              <button class="chip" onclick={() => run(() => api.openSteamProperties(copy!.key))}>Open in Steam</button>
+            </div>
+          {:else if launch}
+            <div class="row">
+              <label class="what" for="launch-args">Extra arguments<small>Passed to the game. Quotes keep words together.</small></label>
+              {#if argsSaved}<span class="saved-note" role="status">Saved</span>{/if}
+              <input
+                id="launch-args"
+                class="args"
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                bind:value={argsText}
+                onblur={saveArgs}
+                onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              />
+            </div>
+            <div class="row">
+              <div class="what" id="launch-offline">Offline mode<small>Starts without signing in to Epic.</small></div>
+              <button class="chip" aria-pressed={launch.offline} aria-labelledby="launch-offline" onclick={() => setLaunch({ offline: !launch!.offline })}>
+                {launch.offline ? 'On' : 'Off'}
+              </button>
+            </div>
+            <div class="row">
+              <div class="what" id="launch-skip">Skip version check<small>Starts without asking Epic for updates first.</small></div>
+              <button
+                class="chip"
+                aria-pressed={launch.skipVersionCheck}
+                aria-labelledby="launch-skip"
+                onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
+              >
+                {launch.skipVersionCheck ? 'On' : 'Off'}
+              </button>
+            </div>
+            <div class="row">
+              <div class="what">Alternative executable<small class="path">{launch.exe ?? 'Default'}</small></div>
+              <button class="chip" onclick={chooseExe}>Choose…</button>
+              {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>Reset</button>{/if}
+            </div>
+          {/if}
         </section>
       {:else if current === 'installation'}
         <!-- Acts on the chosen copy, like the ⋯ menu. -->
@@ -1256,6 +1357,23 @@
   .what {
     flex: 1;
     min-width: 0;
+  }
+
+  .args {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 13px;
+    border-radius: 10px;
+    border: 1px solid var(--glass-line);
+    background: var(--glass);
+    color: var(--text);
+  }
+
+  .saved-note {
+    font-size: 12px;
+    color: var(--text-3);
   }
 
   .what small {

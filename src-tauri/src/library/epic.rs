@@ -46,7 +46,7 @@ impl Provider for Epic {
 
     /// Waits for Legendary, so a failure (e.g. an update is required) reaches the UI.
     fn launch(&self, game: &Game) -> Result<(), Error> {
-        launch(&game.external_id, false)
+        launch(&game.external_id, &LaunchOptions::default(), false)
     }
 
     fn install(&self, game: &Game) -> Result<(), Error> {
@@ -68,12 +68,72 @@ impl Provider for Epic {
     }
 }
 
-/// Starts a game and waits for Legendary. `skip_version_check` starts an out-of-date game anyway.
-pub fn launch(app_name: &str, skip_version_check: bool) -> Result<(), Error> {
-    let mut command = legendary(&["launch", app_name]);
-    if skip_version_check {
-        command.arg("--skip-version-check");
+/// A copy's own launch options, kept in `game_prefs` as JSON. `exe` is relative to the install folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LaunchOptions {
+    /// Extra game arguments as typed; split by `split_args`.
+    pub args: String,
+    pub offline: bool,
+    pub skip_version_check: bool,
+    pub exe: Option<String>,
+}
+
+/// Splits typed arguments on whitespace; double quotes group. No shell, no variables.
+pub fn split_args(text: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    // Some once a token has started, so `""` gives an empty argument.
+    let mut arg: Option<String> = None;
+    let mut quoted = false;
+    for c in text.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                arg.get_or_insert_default();
+            }
+            c if c.is_whitespace() && !quoted => args.extend(arg.take()),
+            c => arg.get_or_insert_default().push(c),
+        }
     }
+    args.extend(arg);
+    args
+}
+
+/// `legendary launch` arguments. Flags from `legendary launch --help` (0.21.1); its "additional arguments
+/// are passed to the game" go after them. `skip_version_check` also comes from Play without updating.
+// shortcut: a game argument that spells a Legendary flag (or its prefix, like `--off`) is taken by Legendary.
+pub fn launch_args(app_name: &str, options: &LaunchOptions, skip_version_check: bool) -> Vec<String> {
+    let mut args = vec!["launch".to_string(), app_name.to_string()];
+    if options.offline {
+        args.push("--offline".into());
+    }
+    if skip_version_check || options.skip_version_check {
+        args.push("--skip-version-check".into());
+    }
+    if let Some(exe) = &options.exe {
+        args.extend(["--override-exe".into(), exe.clone()]);
+    }
+    args.extend(split_args(&options.args));
+    args
+}
+
+/// `exe` (absolute, or relative to `install_dir`) as a path relative to `install_dir`, only when it is an
+/// existing file inside it.
+pub fn override_exe(install_dir: &Path, exe: &str) -> Result<String, Error> {
+    const OUTSIDE: &str = "The executable must be a file inside the game's install folder.";
+    let dir = install_dir.canonicalize().map_err(|_| "The game's install folder is missing.")?;
+    // Both canonical, so `..`, links and other drives can't slip past the prefix check.
+    let file = install_dir.join(exe).canonicalize().map_err(|_| OUTSIDE)?;
+    match file.strip_prefix(&dir) {
+        Ok(relative) if file.is_file() => Ok(relative.to_string_lossy().into_owned()),
+        _ => Err(OUTSIDE.into()),
+    }
+}
+
+/// Starts a game and waits for Legendary. `skip_version_check` starts an out-of-date game anyway.
+pub fn launch(app_name: &str, options: &LaunchOptions, skip_version_check: bool) -> Result<(), Error> {
+    let mut command = Command::new(legendary_exe());
+    command.args(launch_args(app_name, options, skip_version_check)).creation_flags(CREATE_NO_WINDOW);
     run(command)
 }
 
@@ -668,6 +728,61 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    fn opts(args: &str) -> LaunchOptions {
+        LaunchOptions { args: args.into(), ..LaunchOptions::default() }
+    }
+
+    #[test]
+    fn split_args_groups_quotes_and_skips_spaces() {
+        assert!(split_args("").is_empty());
+        assert!(split_args("   ").is_empty());
+        assert_eq!(split_args("  -windowed   -w 1280 "), ["-windowed", "-w", "1280"]);
+        assert_eq!(split_args(r#"-name "Big Boss" x"#), ["-name", "Big Boss", "x"]);
+        assert_eq!(split_args(r#"--path="C:\My Games\x" %APPDATA% & del"#), [r"--path=C:\My Games\x", "%APPDATA%", "&", "del"]);
+        assert_eq!(split_args(r#"a "" b"#), ["a", "", "b"]);
+        assert_eq!(split_args(r#""unclosed quote"#), ["unclosed quote"]);
+    }
+
+    #[test]
+    fn launch_args_from_options() {
+        assert_eq!(launch_args("Fn", &LaunchOptions::default(), false), ["launch", "Fn"]);
+        assert_eq!(launch_args("Fn", &LaunchOptions::default(), true), ["launch", "Fn", "--skip-version-check"]);
+        let all = LaunchOptions {
+            args: r#"-windowed "-name=Big Boss""#.into(),
+            offline: true,
+            skip_version_check: true,
+            exe: Some(r"bin\game.exe".into()),
+        };
+        assert_eq!(
+            launch_args("Fn", &all, false),
+            ["launch", "Fn", "--offline", "--skip-version-check", "--override-exe", r"bin\game.exe", "-windowed", "-name=Big Boss"]
+        );
+        assert_eq!(launch_args("Fn", &all, true).iter().filter(|a| *a == "--skip-version-check").count(), 1);
+        assert_eq!(launch_args("Fn", &opts("-dx11"), false), ["launch", "Fn", "-dx11"]);
+    }
+
+    #[test]
+    fn override_exe_must_be_inside_install_dir() {
+        let root = std::env::temp_dir().join(format!("launcher-exe-{}", std::process::id()));
+        let game = root.join("Game");
+        std::fs::create_dir_all(game.join("bin")).unwrap();
+        std::fs::write(game.join("bin").join("game.exe"), b"").unwrap();
+        std::fs::write(root.join("outside.exe"), b"").unwrap();
+        assert_eq!(override_exe(&game, r"bin\game.exe").unwrap(), r"bin\game.exe");
+        assert_eq!(override_exe(&game, "bin/game.exe").unwrap(), r"bin\game.exe");
+        let absolute = game.join("bin").join("game.exe");
+        assert_eq!(override_exe(&game, &absolute.to_string_lossy()).unwrap(), r"bin\game.exe");
+        assert!(override_exe(&game, r"..\outside.exe").is_err());
+        assert!(override_exe(&game, r"bin\..\..\outside.exe").is_err());
+        assert!(override_exe(&game, &root.join("outside.exe").to_string_lossy()).is_err());
+        assert!(override_exe(&game, r"bin\missing.exe").is_err());
+        assert!(override_exe(&game, "bin").is_err());
+        assert!(override_exe(&game, "").is_err());
+        assert!(override_exe(&game, r"Z:\elsewhere\game.exe").is_err());
+        assert!(override_exe(&root.join("Gone"), "game.exe").is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     fn fixture(name: &str) -> Value {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legendary").join(name);

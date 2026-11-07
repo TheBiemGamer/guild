@@ -16,7 +16,7 @@ use crate::entries::{self, Entry};
 use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
-use crate::library::epic::{self, InstallEvent, SaveSync, SyncOutcome};
+use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
 use crate::library::{Game, Image, ProviderKind};
 use crate::links::{self, LinkKind};
 use crate::settings;
@@ -269,14 +269,19 @@ fn act_blocking(
                 Ok(upload) => upload,
                 Err(conflict) => return Ok(Some(conflict)),
             };
-            epic::launch(&game.external_id, action == Action::PlayOutdated).map(|()| {
+            let options = checked_launch_options(open_db(&state).as_ref(), game)?;
+            epic::launch(&game.external_id, &options, action == Action::PlayOutdated).map(|()| {
                 record_play(&state, &key);
                 // The game started either way; without its exe name it just isn't shown as running.
                 // shortcut: unwatched, its saves aren't uploaded either; the next Play asks about the newer local save.
-                let exe = epic::executable(game).unwrap_or_else(|e| {
-                    eprintln!("legendary list-installed {key}: {e}");
-                    None
-                });
+                let alternative = options.exe.as_deref().and_then(|e| std::path::Path::new(e).file_name());
+                let exe = match alternative {
+                    Some(name) => Some(name.to_string_lossy().into_owned()),
+                    None => epic::executable(game).unwrap_or_else(|e| {
+                        eprintln!("legendary list-installed {key}: {e}");
+                        None
+                    }),
+                };
                 state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), upload });
             })
         }
@@ -455,6 +460,65 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
             on_event,
         ),
     }
+}
+
+/// `game_prefs` name for an Epic copy's launch options, as `LaunchOptions` JSON; none is all defaults.
+const LAUNCH_OPTIONS: &str = "launch_options";
+
+fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
+    let json = cache::db::pref(conn, key, LAUNCH_OPTIONS).ok().flatten();
+    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+}
+
+fn store_launch_options(conn: &Connection, key: &str, options: &LaunchOptions) -> Res<()> {
+    let json = (*options != LaunchOptions::default()).then(|| serde_json::to_string(options).unwrap_or_default());
+    cache::db::set_pref(conn, key, LAUNCH_OPTIONS, json.as_deref()).map_err(|e| e.to_string())
+}
+
+/// An installed Epic copy's launch options, with the alternative executable checked again: the folder
+/// may have changed since it was saved.
+fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchOptions> {
+    let mut options = conn.map(|c| launch_options_of(c, &game.key())).unwrap_or_default();
+    if let Some(exe) = &options.exe {
+        let dir = installed_dir(game).ok_or("This game has no install folder.")?;
+        options.exe = Some(epic::override_exe(dir, exe).map_err(|e| format!("Alternative executable: {e}"))?);
+    }
+    Ok(options)
+}
+
+/// The Launch options tab of an installed Epic copy; `None` for others (Steam keeps its own).
+#[tauri::command]
+pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions> {
+    app.state::<AppState>().game(&key).filter(|g| g.installed && g.provider == ProviderKind::Epic)?;
+    blocking(move || Some(launch_options_of(&open_db(&app.state::<AppState>())?, &key))).await
+}
+
+/// Saves an installed Epic copy's launch options. `exe` may be absolute (from the file picker); it is
+/// stored relative to the install folder, and only when it is a file inside it. Returns what was stored.
+#[tauri::command]
+pub async fn set_launch_options(app: AppHandle, key: String, mut options: LaunchOptions) -> Res<LaunchOptions> {
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| g.installed && g.provider == ProviderKind::Epic)
+        .ok_or("This game isn't installed from Epic.")?;
+    blocking(move || {
+        if let Some(exe) = &options.exe {
+            let dir = installed_dir(&game).ok_or("This game has no install folder.")?;
+            options.exe = Some(epic::override_exe(dir, exe).map_err(|e| e.to_string())?);
+        }
+        let conn = open_db(&app.state::<AppState>()).ok_or("The settings database can't be opened.")?;
+        store_launch_options(&conn, &key, &options)?;
+        Ok(options)
+    })
+    .await
+}
+
+/// Opens a Steam copy's properties in Steam, where its launch options live.
+#[tauri::command]
+pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()> {
+    let game = state.game(&key).filter(|g| g.provider == ProviderKind::Steam).ok_or("This game isn't from Steam.")?;
+    crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id)).map_err(|e| e.to_string())
 }
 
 /// `game_prefs` name for an Epic copy's own cloud save choice, `on` or `off`; none follows the setting.
@@ -1165,6 +1229,23 @@ pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> Queue
 mod tests {
     use super::*;
     use crate::view::tests::game;
+
+    #[test]
+    fn launch_options_round_trip() {
+        let dir = std::env::temp_dir().join(format!("launcher-launch-options-{}", std::process::id()));
+        let conn = cache::db::open(&dir.join("library.sqlite")).unwrap();
+        assert_eq!(launch_options_of(&conn, "epic-A"), LaunchOptions::default());
+        let options = LaunchOptions { args: "-dx11".into(), offline: true, skip_version_check: false, exe: Some(r"bin\game.exe".into()) };
+        store_launch_options(&conn, "epic-A", &options).unwrap();
+        assert_eq!(launch_options_of(&conn, "epic-A"), options);
+        assert_eq!(launch_options_of(&conn, "epic-B"), LaunchOptions::default());
+        let json = cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS).unwrap().unwrap();
+        assert_eq!(json, r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe"}"#);
+        store_launch_options(&conn, "epic-A", &LaunchOptions::default()).unwrap();
+        assert_eq!(cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS).unwrap(), None);
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn pumpkin(steam_last: Option<u64>, epic_last: Option<u64>) -> Vec<Game> {
         let steam = Game { external_id: "635320".into(), ..game("Pumpkin Jack", true, Some(120), steam_last) };
