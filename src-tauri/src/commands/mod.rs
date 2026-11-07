@@ -50,7 +50,7 @@ pub struct AppState {
 struct Shared {
     /// Sorted by title.
     games: Vec<Game>,
-    /// One per game across stores, in title order. Rebuilt by `regroup` whenever `games` or `twins` change.
+    /// One per game across stores, in title order. Rebuilt by `regroup` whenever `games` or `twin_lists` change.
     entries: Vec<Entry>,
     /// Shown when nothing is listed.
     status: String,
@@ -74,7 +74,9 @@ struct Shared {
     owned_attempt: Option<Instant>,
     /// The library changed outside a UI call (owned games arrived); the next poll reports it.
     library_changed: bool,
-    /// Steam twin (app id) of an Epic game, by Epic game key.
+    /// Every Steam app GamesDB lists for an Epic game, by Epic game key.
+    twin_lists: HashMap<String, Vec<u32>>,
+    /// Steam twin (app id) of an Epic game, by Epic game key. Resolved from `twin_lists` by `regroup`.
     twins: HashMap<String, u32>,
     /// A twin lookup run is in flight.
     twins_running: bool,
@@ -131,8 +133,10 @@ impl AppState {
     }
 }
 
-/// Rebuilds the entries. Call after every change to `games` or `twins`.
+/// Resolves the twins against the Steam games in `games` and rebuilds the entries. Call after every
+/// change to `games` or `twin_lists`.
 fn regroup(s: &mut Shared) {
+    s.twins = crate::gamesdb::resolve_all(&s.twin_lists, &crate::gamesdb::steam_ids(&s.games));
     s.entries = entries::group(&s.games, &s.twins);
 }
 

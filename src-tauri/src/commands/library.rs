@@ -100,13 +100,13 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         let mut games = cache::db::load(&conn).map_err(|e| e.to_string())?;
         view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(|e| e.to_string())?);
         view::sort_by_title(&mut games);
-        let twins = crate::gamesdb::all_cached(&conn, super::unix_now());
+        let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
         let mut s = state.lock();
         // A scan that already finished wins over the cache.
         if s.games.is_empty() {
             s.games = games;
         }
-        s.twins = twins;
+        s.twin_lists = twin_lists;
         regroup(&mut s);
         drop(s);
         refresh_owned(app.clone(), false);
@@ -141,10 +141,10 @@ impl Drop for Running {
     }
 }
 
-/// Looks up the Steam twin of every Epic game without a fresh cached answer, one request per
+/// Looks up the Steam apps of every Epic game without a fresh cached answer, one request per
 /// `TWIN_GAP`, in the background. Answers are cached; errors are skipped and retried on a later run, and
 /// an unreachable GamesDB (offline) ends the run.
-/// Only one run at a time. Each new twin regroups the library and tells the next poll.
+/// Only one run at a time. Each answer with Steam apps regroups the library and tells the next poll.
 pub(crate) fn fill_twins(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
@@ -166,7 +166,7 @@ pub(crate) fn fill_twins(app: AppHandle) {
                 .collect();
             let Some(conn) = open_db(&state) else { return };
             let now = super::unix_now();
-            // Cached answers are already in `twins` (load_cache), so only the unanswered remain.
+            // Cached answers are already in `twin_lists` (load_cache), so only the unanswered remain.
             epic.into_iter()
                 .filter(|app_name| crate::gamesdb::cached(&conn, &format!("epic-{app_name}"), now).is_none())
                 .collect::<Vec<_>>()
@@ -176,14 +176,14 @@ pub(crate) fn fill_twins(app: AppHandle) {
                 tokio::time::sleep(crate::gamesdb::TWIN_GAP).await;
             }
             match crate::gamesdb::look_up(&state.http, app_name).await {
-                Ok(twin) => {
+                Ok(apps) => {
                     let key = format!("epic-{app_name}");
                     if let Some(conn) = open_db(&state) {
-                        crate::gamesdb::remember(&conn, &key, twin, super::unix_now());
+                        crate::gamesdb::remember(&conn, &key, &apps, super::unix_now());
                     }
-                    if let Some(id) = twin {
+                    if !apps.is_empty() {
                         let mut s = state.lock();
-                        s.twins.insert(key, id);
+                        s.twin_lists.insert(key, apps);
                         regroup(&mut s);
                         // The next poll tells the UI to re-ask the library.
                         s.library_changed = true;
