@@ -180,7 +180,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 - **Pill White** (`pill` #fff, hover #e4e6ee): the primary action only. The code writes these two as literals in `app.css` (`button.pill`), not as custom properties.
 
 ### Status
-- **Play Green** (`play` #22c55e): running state only (the "Playing" badge, the running-card ring, the Playing chip's dot).
+- **Play Green** (`play` #22c55e): running state only (the "Playing" badge, the running-card ring).
 - **Amber** (`warn` #f5b942): Epic needs attention (settings dot, "Not logged in").
 - **Red** (`danger` #ef4444): destructive actions and error notices. **Soft Red** (`danger-text` #fca5a5): destructive text on dark glass (Settings "Remove", the game page's Uninstall); plain `danger` is too dark for small text there.
 - **Scrim** (`scrim`, rgb(10 10 16 / 0.9)): the bottom stop of a gradient over art, so titles on photos stay readable (game page hero).
@@ -248,7 +248,6 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Active filter chip:** a filter turned on in the Filters popover also shows in the toolbar, after Installed, as a selected chip with its name and a `text-3` 11px ✕ (8px gap); clicking it clears exactly that filter (`removeChip` in `src/lib/filters.ts`).
 - **Filters chip:** a 15px sliders icon plus "Filters"; opens the Filters popover.
 - **Group and Sort:** chips with a 14px chevron after the text, each opening a menu popover (mockup v7). Group reads "Group: <choice>": None, Store, Your playtime ("0–10 h, 10–20 h…"), How long to beat ("short → endless"). Sort shows just the current sort: Recently played, Most played, Longest to beat, Shortest to beat, Title; games without the value go last, in title order. Both are saved in settings (`library_group`, `library_sort`) and restored at start. How long to beat always comes from the cache, never from a lookup.
-- **Playing chip:** only while a game runs, just left of Downloads: a chip with an 8px `play` dot that pulses (opacity 1 → 0.35 → 1, 2 s, ease-in-out; still under reduced motion; no glow) and the game's title in `text-2` (max 200px, ellipsis), 8px gap. `title` "Playing <title>", `aria-label` "Playing <title>, open game page"; clicking it opens that game's page.
 - **Downloads chip:** a 36px icon chip (17px download arrow), shown only while `poll` reports an install or update, or the Epic download queue has a job (active, waiting or paused). A 2px `accent-2` ring inset 3px inside its edge fills clockwise with the active Epic job's progress, else the average progress (a conic gradient masked to a ring; it changes with each 2 s poll, never per frame). `aria-label` "Downloads, 42%".
 
 ### Popovers (Filters, Downloads, Group, Sort)
@@ -269,7 +268,7 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 36px high, 10px radius, `glass` fill, `glass-line` border, `text-3` placeholder, 2px focus outline. The search field's border brightens to `glass-on-line` on focus. It carries a `Ctrl K` hint at the right (11px, `text-2`, 5px radius, `glass-on-line` border), hidden while focused or filled; Ctrl K focuses it (not while Settings is open). Secrets are shown only as "Saved ✓" with Replace and Remove (owner decision).
 
 ### Navigation
-Top bar only, left to right (mockup v7): search, quick chips (All, Steam, Epic, Installed), active filter chips, Filters, spacer, Group, Sort, Playing (while a game runs), Downloads (only while something downloads), settings. The bar sits above the content (`z-index: 5`) so its popovers hang over the grid and the game page. Settings has a left section list (active = white 10% fill) in the modal. There is no sidebar.
+Top bar only, left to right (mockup v7): search, quick chips (All, Steam, Epic, Installed), active filter chips, Filters, spacer, Group, Sort, Downloads (only while something downloads), settings. The bar sits above the content (`z-index: 5`) so its popovers hang over the grid and the game page. Settings has a left section list (active = white 10% fill) in the modal. There is no sidebar.
 
 ### Toggle
 40x22 pill switch, white 18% off, `accent` on, white knob; `role="switch"`.

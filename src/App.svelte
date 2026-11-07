@@ -336,10 +336,6 @@
   const resumeDownloads = () => changeQueue(api.resumeDownloads)
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
-  const runningCard = $derived(running ? lib.games.find((g) => g.copyKeys.includes(running!)) : undefined)
-  const runningTitle = $derived(runningCard?.title)
-  /** The running game's page: its card, else the copy key (the game page resolves either). */
-  const runningKey = $derived(runningCard?.key ?? running)
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
   const LABEL_H = 18
@@ -368,9 +364,6 @@
     {queue}
     games={lib.games}
     modal={settingsOpen}
-    {runningKey}
-    {runningTitle}
-    onopenrunning={openGame}
     oncancel={cancelDownload}
     onpause={() => changeQueue(api.pauseDownloads)}
     onresume={resumeDownloads}

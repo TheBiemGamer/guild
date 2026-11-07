@@ -20,9 +20,6 @@
     queue,
     games,
     modal,
-    runningKey,
-    runningTitle,
-    onopenrunning,
     oncancel,
     onpause,
     onresume,
@@ -48,10 +45,6 @@
     games: Card[]
     /** A modal (Settings) is open: Ctrl K leaves focus where it is. */
     modal: boolean
-    /** The running game's entry (or copy) key and title; null while nothing runs. */
-    runningKey: string | null
-    runningTitle: string | undefined
-    onopenrunning: (key: string) => void
     oncancel: (key: string) => void
     onpause: () => void
     onresume: () => void
@@ -208,14 +201,6 @@
       <ChoiceMenu bind:value={sort} options={sorts} label="Sort by" anchor={sortChip} onclose={close} />
     {/if}
   </div>
-
-  {#if runningKey}
-    {@const label = `Playing ${runningTitle ?? 'a game'}`}
-    <button class="chip playing" title={label} aria-label="{label}, open game page" onclick={() => onopenrunning(runningKey)}>
-      <span class="live" aria-hidden="true"></span>
-      <span class="name">{runningTitle ?? 'Playing'}</span>
-    </button>
-  {/if}
 
   {#if downloading}
     <div class="dd">
@@ -382,33 +367,6 @@
 
   .spacer {
     flex: 1;
-  }
-
-  /* The running game: a pulsing green dot and its title. */
-  .playing {
-    gap: 8px;
-  }
-
-  .live {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--play);
-    animation: live 2s ease-in-out infinite;
-  }
-
-  /* app.css turns animations off under prefers-reduced-motion. */
-  @keyframes live {
-    50% {
-      opacity: 0.35;
-    }
-  }
-
-  .playing .name {
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .dot {
