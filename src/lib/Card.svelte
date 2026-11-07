@@ -39,8 +39,12 @@
   let loaded = $state(false)
   let portrait = $state(false)
 
+  // The grid hands every card a fresh `game` each time a row scrolls in or out; only a new key may
+  // reset the cover, or every card drops and refades its art on each row.
+  const gameKey = $derived(game.key)
+
   $effect(() => {
-    const key = game.key
+    const key = gameKey
     art = undefined
     loaded = false
     // A card recycled for another game must not show the old game's cover.
