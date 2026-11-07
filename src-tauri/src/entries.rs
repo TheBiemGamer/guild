@@ -1,5 +1,5 @@
 //! One library entry (card) per game: an Epic copy joins its Steam twin when that match is exact and
-//! one-to-one. Never on title: a wrong merge is worse than a duplicate card. Pure functions, unit tested.
+//! one-to-one. Never on title alone: a wrong merge is worse than a duplicate card. Pure functions, unit tested.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -15,7 +15,8 @@ pub struct Entry {
 }
 
 /// Entries in `games` order (title order). An Epic game joins `steam-<twin>` only when that Steam game
-/// is in `games` and no other Epic game in `games` has the same twin.
+/// is in `games` and no other Epic game in `games` has the same twin. When several do, the one whose
+/// title equals the Steam title (trimmed, case-insensitive) joins if it is the only such one.
 pub fn group(games: &[Game], twins: &HashMap<String, u32>) -> Vec<Entry> {
     let twin = |g: &Game| (g.provider == ProviderKind::Epic).then(|| twins.get(&g.key()).copied()).flatten();
     let mut claims: HashMap<u32, Vec<usize>> = HashMap::new();
@@ -25,10 +26,13 @@ pub fn group(games: &[Game], twins: &HashMap<String, u32>) -> Vec<Entry> {
         }
     }
     // Steam app id -> its one Epic copy.
+    let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
     let mut pairs: HashMap<String, usize> = HashMap::new();
     for g in games.iter().filter(|g| g.provider == ProviderKind::Steam) {
-        if let Some(&[epic]) = g.external_id.parse().ok().and_then(|id: u32| claims.get(&id)).map(Vec::as_slice) {
-            pairs.insert(g.external_id.clone(), epic);
+        let Some(claimants) = g.external_id.parse().ok().and_then(|id: u32| claims.get(&id)) else { continue };
+        let exact: Vec<usize> = claimants.iter().copied().filter(|&i| same(&games[i].title, &g.title)).collect();
+        if let [epic] = if claimants.len() == 1 { claimants.as_slice() } else { exact.as_slice() } {
+            pairs.insert(g.external_id.clone(), *epic);
         }
     }
     let merged: Vec<usize> = pairs.values().copied().collect();
@@ -132,6 +136,34 @@ mod tests {
     fn no_merge_when_two_epic_games_share_a_twin() {
         let games = vec![epic("A", "A"), epic("B", "B"), steam("635320", "C")];
         let twins = HashMap::from([("epic-A".to_string(), 635320), ("epic-B".to_string(), 635320)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().all(|e| e.copies.len() == 1));
+    }
+
+    #[test]
+    fn two_epic_claimants_merge_the_exact_title() {
+        let games = vec![epic("CrabEA", "Satisfactory"), epic("CrabTest", "Satisfactory Experimental"), steam("526870", " satisfactory ")];
+        let twins = HashMap::from([("epic-CrabEA".to_string(), 526870), ("epic-CrabTest".to_string(), 526870)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key, "epic-CrabTest");
+        assert_eq!(keys(&games, &entries[1]), ["steam-526870", "epic-CrabEA"]);
+    }
+
+    #[test]
+    fn two_claimants_without_exact_title_stay_separate() {
+        let games = vec![epic("A", "Satisfactory Early Access"), epic("B", "Satisfactory Experimental"), steam("526870", "Satisfactory")];
+        let twins = HashMap::from([("epic-A".to_string(), 526870), ("epic-B".to_string(), 526870)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().all(|e| e.copies.len() == 1));
+    }
+
+    #[test]
+    fn two_exact_title_claimants_stay_separate() {
+        let games = vec![epic("A", "Satisfactory"), epic("B", "SATISFACTORY"), steam("526870", "Satisfactory")];
+        let twins = HashMap::from([("epic-A".to_string(), 526870), ("epic-B".to_string(), 526870)]);
         let entries = group(&games, &twins);
         assert_eq!(entries.len(), 3);
         assert!(entries.iter().all(|e| e.copies.len() == 1));

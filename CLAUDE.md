@@ -23,7 +23,7 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
   - `info` is cache only: use it with a new `kind` for new cached data, never for anything the owner chose or built up.
 - **Keys:**
   - A store copy is keyed `steam-<appid>` or `epic-<app_name>`.
-  - `entries.rs` groups copies into one card, and merges only on an exact, one-to-one Steam appid match (from GOG GamesDB twins).
+  - `entries.rs` groups copies into one card, and merges only on an exact, one-to-one Steam appid match (from GOG GamesDB twins). When several Epic games claim one appid, only the single one whose title equals the Steam title (trimmed, case-insensitive) merges; never on title alone.
   - Launch history stays keyed by copy key.
 - **Network** work runs in the background and is throttled, and it fails quietly: a dot in Settings, no banners.
   - Steam CM logons must not fan out. Use the single-flight guards.

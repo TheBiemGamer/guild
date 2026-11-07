@@ -148,7 +148,9 @@ Notes on SteamKit2 (LGPL): it was used only as a reference for the protocol. Rei
 - GamesDB lists exactly one Steam release for the Epic game, and
 - no other Epic game in the library maps to that same appid.
 
-Any ambiguity means no merge: the games stay separate cards. An example is a base game and a "Definitive Edition" both pointing at one appid. The Steam twin can still be used for that game's links and How long to beat when it is unique for that Epic game.
+One tie-break (owner-approved): when several Epic games map to one appid, the single one whose title equals the Steam game's title (trimmed, case-insensitive) merges and the rest stay separate. If none or several match exactly, nothing merges. Title only breaks a tie among appid matches.
+
+Any other ambiguity means no merge: the games stay separate cards. An example is a base game and a "Definitive Edition" both pointing at one appid. The Steam twin can still be used for that game's links and How long to beat when it is unique for that Epic game.
 
 **Without a Steam connection**, merges can still happen with installed Steam games.
 
