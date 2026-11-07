@@ -205,7 +205,7 @@ pub(crate) fn fill_twins(app: AppHandle) {
 }
 
 /// Asks Epic's playtime service in the background after an Epic refresh, while logged in. Only one at a
-/// time. Quiet: a failure keeps Epic's last answer, and games without one show the sessions timed here.
+/// time. Quiet: a failure keeps Epic's last answer; the sessions timed here count either way.
 fn refresh_epic_playtime(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();

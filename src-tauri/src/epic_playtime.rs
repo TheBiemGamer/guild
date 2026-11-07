@@ -1,5 +1,5 @@
-//! Epic playtime: Epic's own figure from its playtime service (cached in the `info` table), else the
-//! sessions this app timed (the `playtime` table).
+//! Epic playtime: Epic's own figure from its playtime service (cached in the `info` table) plus the
+//! sessions this app timed (the `playtime` table), which Legendary's launches never report to Epic.
 //! Legendary's access token is read from its session file only for the request; it never reaches a
 //! log line, error string, Debug output or the frontend, and is never stored here.
 
@@ -107,13 +107,13 @@ pub fn merge(conn: &Connection, games: &mut [Game]) -> bool {
     apply(games, &cached(conn), &own)
 }
 
-/// An Epic copy gets Epic's minutes when Epic has them, else the minutes timed here when there is at least
-/// one, else unknown. Steam copies are left alone. Returns whether anything changed.
+/// An Epic copy gets Epic's minutes plus the minutes timed here, either alone when the other is missing,
+/// unknown when both are. Steam copies are left alone. Returns whether anything changed.
 pub fn apply(games: &mut [Game], service: &HashMap<String, u64>, own: &HashMap<String, i64>) -> bool {
     let mut changed = false;
     for g in games.iter_mut().filter(|g| g.provider == ProviderKind::Epic) {
-        let timed = own.get(&g.key()).map(|&s| s.max(0) as u64 / 60).filter(|&m| m > 0);
-        let minutes = service.get(&g.external_id).copied().or(timed);
+        let timed = own.get(&g.key()).map(|&s| s.max(0) as u64 / 60);
+        let minutes = [service.get(&g.external_id).copied(), timed].into_iter().flatten().reduce(|a, b| a + b);
         changed |= g.playtime_minutes != minutes;
         g.playtime_minutes = minutes;
     }
@@ -147,18 +147,18 @@ mod tests {
     }
 
     #[test]
-    fn epic_playtime_prefers_service_then_own() {
+    fn epic_playtime_adds_service_and_own() {
         let mut games = vec![epic("Both"), epic("OwnOnly"), epic("ShortOwn"), epic("Neither")];
         let service = HashMap::from([("Both".to_string(), 120)]);
         let own = HashMap::from([
             ("epic-Both".to_string(), 3_600),
             ("epic-OwnOnly".to_string(), 600),
-            // Under a minute: nothing to show yet.
+            // Under a minute: known, but no whole minute yet.
             ("epic-ShortOwn".to_string(), 59),
         ]);
         assert!(apply(&mut games, &service, &own));
         let minutes: Vec<_> = games.iter().map(|g| g.playtime_minutes).collect();
-        assert_eq!(minutes, [Some(120), Some(10), None, None]);
+        assert_eq!(minutes, [Some(180), Some(10), Some(0), None]);
         // Nothing new: nothing changed.
         assert!(!apply(&mut games, &service, &own));
         // Epic's answer gone (none cached yet): the own total shows.
