@@ -1,0 +1,84 @@
+---
+source: src/commands/library.rs
+expression: library
+---
+{
+  "games": [
+    {
+      "key": "steam-635320",
+      "chosen": "steam-635320",
+      "copyKeys": [
+        "steam-635320",
+        "epic-Pumpkin"
+      ],
+      "title": "Pumpkin Jack",
+      "stores": [
+        "steam",
+        "epic"
+      ],
+      "installed": true,
+      "update": false,
+      "playtimeMinutes": 150,
+      "ttbHours": 6,
+      "favorite": true,
+      "hidden": false,
+      "collections": [
+        3
+      ]
+    },
+    {
+      "key": "gog-1425609977",
+      "chosen": "gog-1425609977",
+      "copyKeys": [
+        "gog-1425609977"
+      ],
+      "title": "Last Day of June",
+      "stores": [
+        "gog"
+      ],
+      "installed": false,
+      "update": false,
+      "playtimeMinutes": null,
+      "ttbHours": null,
+      "favorite": false,
+      "hidden": false,
+      "collections": []
+    }
+  ],
+  "groups": [
+    {
+      "group": "favorites",
+      "count": 1
+    },
+    {
+      "group": "neverPlayed",
+      "count": 1
+    }
+  ],
+  "total": 2,
+  "status": [
+    {
+      "code": "storeError",
+      "params": {
+        "reason": {
+          "code": "cantReachGog",
+          "params": {}
+        },
+        "store": "GOG"
+      }
+    }
+  ],
+  "epic": "loggedIn",
+  "epicAttention": false,
+  "steamAttention": false,
+  "epicNotice": false,
+  "gog": "unreachable",
+  "gogAttention": true,
+  "amazon": null,
+  "amazonAttention": false,
+  "stores": [
+    "steam",
+    "epic",
+    "gog"
+  ]
+}

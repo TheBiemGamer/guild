@@ -34,6 +34,20 @@ pwsh scripts/bench.ps1 15000
 
 It passes with 0–2 frames slower than 1.5× the median frame time.
 
+### Snapshot tests
+
+Some Rust tests compare their output with a saved snapshot, using [insta](https://insta.rs). These tests cover what the store tools print (Legendary, gogdl and Nile, parsed from the files in `src-tauri/tests/fixtures/`) and the JSON the commands send to the UI. Snapshots live in `snapshots/` folders next to the code, as `.snap` files. Paths, times and versions in them are replaced with placeholders like `[path]`.
+
+When a change alters a snapshot, `cargo test` fails and writes the new output next to the old one as a `.snap.new` file. To accept the new output:
+
+```bash
+cd src-tauri && cargo insta review              # if cargo-insta is installed: step through each change
+cd src-tauri && INSTA_UPDATE=always cargo test  # without it: overwrite the snapshots
+git diff -- '*.snap'                            # then read what changed
+```
+
+On PowerShell, set the variable first with `$env:INSTA_UPDATE='always'`. Commit the changed `.snap` files with the code. In review, a changed command snapshot means the UI now gets different JSON, so `src/lib/bindings.ts` and the UI code that reads it may need changes too.
+
 ## Code layout
 
 ```

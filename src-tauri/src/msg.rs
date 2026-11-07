@@ -218,4 +218,16 @@ mod tests {
         assert!(EN.iter().all(|(code, _)| !text("nl", code).is_empty()));
         assert_eq!(text("en", "noSuchCode"), "");
     }
+
+    #[test]
+    fn error_payload_snapshot() {
+        // What a failed command hands the UI: a plain code, one with params, a nested message, and a raw error.
+        let errors = [
+            msg!(gameNotInLibrary),
+            msg!(installFolderMissing, path = r"C:\Games\Goo"),
+            msg!(storeError, store = "GOG", reason = msg!(cantReachGog)),
+            Msg::system("access denied"),
+        ];
+        insta::assert_json_snapshot!(errors);
+    }
 }

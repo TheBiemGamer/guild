@@ -1,0 +1,35 @@
+---
+source: src/commands/library.rs
+expression: poll
+---
+{
+  "running": "steam-635320",
+  "progress": {
+    "epic-Pumpkin": {
+      "fraction": 0.5,
+      "action": "update",
+      "doneBytes": 1073741824,
+      "totalBytes": null,
+      "secsLeft": 65,
+      "doneFiles": null,
+      "totalFiles": null
+    }
+  },
+  "changed": false,
+  "queue": {
+    "jobs": [
+      {
+        "key": "epic-Pumpkin",
+        "action": "update",
+        "title": "Pumpkin Jack"
+      },
+      {
+        "key": "gog-1425609977",
+        "action": "install",
+        "title": "Last Day of June"
+      }
+    ],
+    "paused": false,
+    "active": "epic-Pumpkin"
+  }
+}

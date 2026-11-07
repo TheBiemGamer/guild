@@ -1,0 +1,56 @@
+---
+source: src/commands/game.rs
+expression: detail
+---
+{
+  "key": "steam-635320",
+  "title": "Pumpkin Jack",
+  "stores": [
+    "steam",
+    "epic"
+  ],
+  "installed": true,
+  "copies": [
+    {
+      "key": "steam-635320",
+      "provider": "steam",
+      "installed": true,
+      "updateAvailable": false,
+      "sizeBytes": 4294967296,
+      "installDir": "[path]",
+      "cloudSaves": false
+    },
+    {
+      "key": "epic-Pumpkin",
+      "provider": "epic",
+      "installed": false,
+      "updateAvailable": false,
+      "sizeBytes": null,
+      "installDir": null,
+      "cloudSaves": false
+    }
+  ],
+  "chosen": "steam-635320",
+  "playtimeMinutes": 120,
+  "playtimeBoth": false,
+  "lastPlayed": "[time]",
+  "lastPlayedStore": "epic",
+  "links": [
+    "steamStore",
+    "epicStore",
+    "pcGamingWiki",
+    "steamDb",
+    "protonDb"
+  ],
+  "dlc": [
+    {
+      "id": "PumpkinDlc",
+      "title": "Pumpkin Hat",
+      "installed": false,
+      "copy": "epic-Pumpkin"
+    }
+  ],
+  "favorite": false,
+  "hidden": false,
+  "collections": []
+}

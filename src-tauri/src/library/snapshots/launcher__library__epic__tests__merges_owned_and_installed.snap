@@ -1,0 +1,99 @@
+---
+source: src/library/epic.rs
+expression: sorted_games()
+---
+[
+    Game {
+        provider: Epic,
+        external_id: "Fortnite",
+        title: "Fortnite",
+        installed: true,
+        install_dir: Some(
+            "C:\\Games\\Fortnite",
+        ),
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: Some(
+            1234,
+        ),
+        art: Art {
+            cover: Image {
+                path: None,
+                url: Some(
+                    "https://cdn1.epicgames.com/tall.jpg",
+                ),
+            },
+            header: Image {
+                path: None,
+                url: Some(
+                    "https://cdn1.epicgames.com/wide.jpg",
+                ),
+            },
+            hero: Image {
+                path: None,
+                url: Some(
+                    "https://cdn1.epicgames.com/wide.jpg",
+                ),
+            },
+        },
+        dlc: [],
+        update_available: true,
+        cloud_saves: true,
+    },
+    Game {
+        provider: Epic,
+        external_id: "Goo",
+        title: "World of Goo",
+        installed: false,
+        install_dir: None,
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: None,
+        art: Art {
+            cover: Image {
+                path: None,
+                url: None,
+            },
+            header: Image {
+                path: None,
+                url: None,
+            },
+            hero: Image {
+                path: None,
+                url: None,
+            },
+        },
+        dlc: [],
+        update_available: false,
+        cloud_saves: false,
+    },
+    Game {
+        provider: Epic,
+        external_id: "Imported",
+        title: "Imported Game",
+        installed: true,
+        install_dir: Some(
+            "D:\\Games\\Imported",
+        ),
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: None,
+        art: Art {
+            cover: Image {
+                path: None,
+                url: None,
+            },
+            header: Image {
+                path: None,
+                url: None,
+            },
+            hero: Image {
+                path: None,
+                url: None,
+            },
+        },
+        dlc: [],
+        update_available: false,
+        cloud_saves: false,
+    },
+]

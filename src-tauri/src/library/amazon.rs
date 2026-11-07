@@ -1089,20 +1089,8 @@ mod tests {
         ]);
         let covers = HashMap::from([(format!("amazon-{ldoj}"), "https://images.gog.com/c.jpg".to_string())]);
         let games = games(&library, &installed, &covers, &HashSet::new());
-        // The untitled third entitlement is left out.
-        assert_eq!(games.len(), 2);
-        let (ldoj_game, dote) = (&games[0], &games[1]);
-        assert_eq!(ldoj_game.key(), format!("amazon-{ldoj}"));
-        assert_eq!(ldoj_game.title, "Last Day of June");
-        assert!(ldoj_game.installed);
-        assert_eq!((ldoj_game.install_dir.as_deref(), ldoj_game.size_bytes), (Some(dir.as_path()), Some(4_200_000_000)));
-        assert_eq!(ldoj_game.art.cover.url.as_deref(), Some("https://images.gog.com/c.jpg"));
-        assert_eq!(ldoj_game.art.header.url.as_deref(), Some("https://example.invalid/TEST-SKU-1/bg2.jpg"));
-        assert_eq!(ldoj_game.art.hero.url.as_deref(), Some("https://example.invalid/TEST-SKU-1/bg1.jpg"));
-        assert!(!ldoj_game.update_available && !ldoj_game.cloud_saves && ldoj_game.dlc.is_empty());
-        assert_eq!(dote.title, "Dungeon of the ENDLESS - Definitive Edition");
-        assert!(!dote.installed && dote.install_dir.is_none() && dote.size_bytes.is_none());
-        assert_eq!(dote.art.cover.url, None);
+        // The untitled third entitlement is left out. The temp folder differs per machine and run.
+        insta::assert_snapshot!(format!("{games:#?}").replace(&format!("{dir:?}"), "\"[temp dir]\""));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1125,12 +1113,7 @@ mod tests {
     #[test]
     fn details_map_onto_the_game_page() {
         let library: Value = serde_json::from_slice(&fixture("sample-library.json")).unwrap();
-        let parsed = parse_details(&library[0]["product"]["productDetail"]["details"]);
-        assert_eq!(parsed.description, "Sample description.");
-        assert_eq!(parsed.genres, ["Adventure"]);
-        assert_eq!((parsed.developer.as_deref(), parsed.publisher.as_deref()), (Some("Sample Developer"), Some("Sample Publisher")));
-        assert_eq!(parsed.released.as_deref(), Some("2017-08-31"));
-        assert_eq!(parsed.screenshots, ["https://example.invalid/TEST-SKU-1/shot1.jpg"]);
+        insta::assert_yaml_snapshot!(parse_details(&library[0]["product"]["productDetail"]["details"]));
         assert_eq!(parse_details(&Value::Null), GameInfo::default());
     }
 
@@ -1186,10 +1169,6 @@ mod tests {
         assert_eq!(verify.line(&line(0)), (None, false));
         let (p, grew) = verify.line(&line(1000));
         assert!(grew && p.unwrap().action == ProgressAction::Repair);
-        // The fixture's lines, in order.
-        let mut tracker = Tracker { action: ProgressAction::Install, most: 0 };
-        let grew: Vec<bool> = text("nile-install-ok-stderr.txt").lines().map(|l| tracker.line(l).1).collect();
-        assert_eq!(grew.iter().filter(|g| **g).count(), 1);
     }
 
     fn ran(success: bool, stdout: &str, log: &str) -> Run {
@@ -1290,15 +1269,8 @@ mod tests {
 
     #[test]
     fn fuel_json_parses_as_json5() {
-        let fuel = |name| serde_json::from_str::<Value>(&strip_json5(&text(name))).map(|v| fuel_main(&v));
-        assert_eq!(
-            fuel("sample-fuel.json").unwrap(),
-            Some(Fuel { command: r"Binaries\Win64\Game.exe".into(), args: vec!["-windowed".into()], working_dir: Some(r"Binaries\Win64".into()) })
-        );
-        assert_eq!(
-            fuel("sample-fuel-json5.json").unwrap(),
-            Some(Fuel { command: "Game.exe".into(), args: vec!["-url".into(), "https://example.invalid/x".into()], working_dir: None })
-        );
+        let fuel = |name| serde_json::from_str::<Value>(&strip_json5(&text(name))).map(|v| fuel_main(&v)).unwrap();
+        insta::assert_debug_snapshot!([fuel("sample-fuel.json"), fuel("sample-fuel-json5.json")]);
         // Slashes and commas inside strings stay.
         let tricky = strip_json5("{\"a\": \"x // y, ]\", /* \"b\": 1, */ \"c\": [1, 2,], \"d\": \"\\\"/*\" }");
         assert_eq!(serde_json::from_str::<Value>(&tricky).unwrap(), serde_json::json!({"a": "x // y, ]", "c": [1, 2], "d": "\"/*"}));
@@ -1402,5 +1374,19 @@ mod tests {
         let sign_in = parse_sign_in(&login.stdout).expect("a sign-in answer");
         assert!(crate::amazon_login::sign_in_page(&sign_in.url).is_some());
         std::fs::remove_dir_all(&config).unwrap();
+    }
+
+    #[test]
+    fn install_log_progress_snapshot() {
+        // Each progress line of a real `nile install`, and whether it counted as new bytes.
+        let mut tracker = Tracker { action: ProgressAction::Install, most: 0 };
+        let seen: Vec<_> = text("nile-install-ok-stderr.txt")
+            .lines()
+            .filter_map(|l| match tracker.line(l) {
+                (Some(p), grew) => Some((p, grew)),
+                (None, _) => None,
+            })
+            .collect();
+        insta::assert_yaml_snapshot!(seen);
     }
 }

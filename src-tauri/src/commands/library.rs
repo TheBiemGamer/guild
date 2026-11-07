@@ -1180,4 +1180,75 @@ mod tests {
         assert!(s.progress.is_empty());
         assert!(apply_steam_progress(&mut s, vec![("dl".into(), None, false)]).is_empty());
     }
+
+    /// Pumpkin Jack on Steam and Epic (one card, a favorite in a collection), and Last Day of June on GOG.
+    fn payload_games() -> (Vec<Game>, Vec<Entry>, Lists) {
+        let games = vec![
+            Game { external_id: "1425609977".into(), provider: ProviderKind::Gog, ..game("Last Day of June", false, None, None) },
+            Game { external_id: "635320".into(), ..game("Pumpkin Jack", true, Some(120), Some(100)) },
+            Game {
+                provider: ProviderKind::Epic,
+                external_id: "Pumpkin".into(),
+                update_available: true,
+                ..game("Pumpkin Jack", true, Some(30), Some(50))
+            },
+        ];
+        let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let lists = Lists {
+            favorite: HashSet::from(["epic-Pumpkin".to_string()]),
+            collections: HashMap::from([("steam-635320".to_string(), vec![3])]),
+            ..Lists::default()
+        };
+        (games, entries, lists)
+    }
+
+    #[test]
+    fn library_payload_snapshot() {
+        let (games, entries, lists) = payload_games();
+        let ttb = HashMap::from([("steam-635320".to_string(), 6 * 3600)]);
+        let shown = view::arrange(&games, &entries, "", None, false, Sort::MostPlayed, &ttb);
+        let groups = view::group(&shown, &entries, &games, &ttb, Sort::MostPlayed, SystemTime::UNIX_EPOCH, &jiff::tz::TimeZone::UTC);
+        let groups = view::favorites_first(&shown, groups, &entries, &games, &lists);
+        let (cards, groups) = sections(&games, &entries, &ttb, &lists, shown, groups);
+        let library = Library {
+            games: cards,
+            groups,
+            total: entries.len(),
+            status: vec![msg!(storeError, store = "GOG", reason = msg!(cantReachGog))],
+            epic: Some(Login::LoggedIn),
+            epic_attention: false,
+            steam_attention: false,
+            epic_notice: false,
+            gog: Some(gog::Login::Unreachable),
+            gog_attention: true,
+            amazon: None,
+            amazon_attention: false,
+            stores: stores_in_use(&games),
+        };
+        insta::assert_json_snapshot!(library);
+    }
+
+    #[test]
+    fn poll_payload_snapshot() {
+        let progress = Progress {
+            fraction: 0.5,
+            action: ProgressAction::Update,
+            done_bytes: Some(1 << 30),
+            total_bytes: None,
+            secs_left: Some(65),
+            done_files: None,
+            total_files: None,
+        };
+        let mut queue = crate::downloads::Queue::default();
+        queue.push(crate::downloads::Job::new("epic-Pumpkin", crate::downloads::QueuedAction::Update));
+        queue.push(crate::downloads::Job::new("gog-1425609977", crate::downloads::QueuedAction::Install));
+        let titles = HashMap::from([("epic-Pumpkin", "Pumpkin Jack"), ("gog-1425609977", "Last Day of June")]);
+        let poll = Poll {
+            running: Some("steam-635320".into()),
+            progress: HashMap::from([("epic-Pumpkin".to_string(), progress)]),
+            changed: false,
+            queue: crate::downloads::view(&queue, |key| titles.get(key).map(|t| t.to_string())),
+        };
+        insta::assert_json_snapshot!(poll);
+    }
 }

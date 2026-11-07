@@ -807,29 +807,8 @@ mod tests {
 
     #[test]
     fn merges_owned_and_installed() {
-        let all = sorted_games();
-        let ids: Vec<_> = all.iter().map(|g| g.external_id.as_str()).collect();
-        // Goo is owned only, Fortnite owned and installed, Imported installed only.
-        assert_eq!(ids, ["Fortnite", "Goo", "Imported"]);
-
-        let fortnite = &all[0];
-        assert!(fortnite.installed);
-        assert_eq!(fortnite.size_bytes, Some(1234));
-        assert_eq!(fortnite.install_dir, Some(PathBuf::from(r"C:\Games\Fortnite")));
-        assert_eq!(fortnite.key(), "epic-Fortnite");
-        assert_eq!(fortnite.art.cover.url.as_deref(), Some("https://cdn1.epicgames.com/tall.jpg"));
-        assert_eq!(fortnite.art.hero.url.as_deref(), Some("https://cdn1.epicgames.com/wide.jpg"));
-
-        let goo = &all[1];
-        assert_eq!(goo.title, "World of Goo");
-        assert!(!goo.installed);
-        assert_eq!(goo.install_dir, None);
-        // No keyImages at all.
-        assert_eq!(goo.art, Art::default());
-
-        let imported = &all[2];
-        assert_eq!(imported.title, "Imported Game");
-        assert!(imported.installed);
+        // Goo is owned only, Fortnite owned and installed, Imported installed only. Goo has no keyImages at all.
+        insta::assert_debug_snapshot!(sorted_games());
     }
 
     /// Trimmed from real Legendary metadata: a game, its DLC, an Unreal Engine plugin, an engine,
@@ -1011,69 +990,32 @@ mod tests {
 
     #[test]
     fn sync_output_decides_the_outcome() {
-        use SyncOutcome::*;
         let log = |lines: &[&str]| lines.iter().map(|l| format!("[cli] INFO: {l}")).collect::<Vec<_>>().join("\n");
-        let same = log(&["Got 1 remote save game(s)", r#"Checking "Goo" (Goo)"#, r#"Save game for "Goo" is up to date, skipping..."#]);
-        assert_eq!(parse_sync(true, &same), Synced);
-        let none = log(&["No cloud or local savegame found."]);
-        assert_eq!(parse_sync(true, &none), Synced);
-        let downloaded = log(&[
-            r#"Cloud save for "Goo" is newer:"#,
-            "- Cloud save date: 2026-11-02 10:00:00",
-            "- Local save date: 2026-11-01 10:00:00",
-            "Downloading remote savegame...",
-        ]);
-        assert_eq!(parse_sync(true, &downloaded), Synced);
-        let uploaded = log(&[
-            r#"Local save for "Goo" is newer"#,
-            "- Cloud save date: 2026-11-01 10:00:00",
-            "- Local save date: 2026-11-02 10:00:00",
-            "Uploading local savegame...",
-        ]);
-        assert_eq!(parse_sync(true, &uploaded), Synced);
-
-        // Before launch (`--skip-upload`): a newer local save is a conflict, unless the cloud has none yet.
-        let local_newer = log(&[
-            r#"Local save for "Goo" is newer"#,
-            "- Cloud save date: 2026-11-01 10:00:00",
-            "- Local save date: 2026-11-02 10:00:00",
-            "Save game uploading is disabled, skipping...",
-        ]);
-        assert_eq!(parse_sync(true, &local_newer), LocalNewer);
-        let cloud_empty = log(&[
-            r#"Local save for "Goo" is newer"#,
-            "- Cloud save date: N/A",
-            "- Local save date: 2026-11-02 10:00:00",
-            "Save game uploading is disabled, skipping...",
-        ]);
-        assert_eq!(parse_sync(true, &cloud_empty), Synced);
-
-        // After the game (`--skip-download`): a newer cloud save is a conflict, unless there's no local save.
-        let cloud_newer = log(&[
-            r#"Cloud save for "Goo" is newer:"#,
-            "- Cloud save date: 2026-11-02 10:00:00",
-            "- Local save date: 2026-11-01 10:00:00",
-            "Save game downloading is disabled, skipping...",
-        ]);
-        assert_eq!(parse_sync(true, &cloud_newer), CloudNewer);
-        let local_empty = log(&[
-            r#"Cloud save for "Goo" is newer:"#,
-            "- Cloud save date: 2026-11-02 10:00:00",
-            "- Local save date: N/A",
-            "Save game downloading is disabled, skipping...",
-        ]);
-        assert_eq!(parse_sync(true, &local_empty), Synced);
-
-        // Offline, or another Legendary error: its last message.
-        let offline = "[cli] INFO: Logging in...\n[cli] ERROR: Login failed! Cannot continue with download process.\n";
-        assert_eq!(parse_sync(false, offline), Failed(Msg::system("Login failed! Cannot continue with download process.")));
-        assert_eq!(parse_sync(false, ""), Failed(msg!(legendaryNoReason)));
-        // A save folder with variables Legendary can't fill in: the empty answer skips the game.
-        let no_folder = log(&[
-            r#"Computed save path: "{AppData}/Goo""#,
-            "Empty input, skipping...",
-        ]);
-        assert_eq!(parse_sync(true, &no_folder), Failed(msg!(legendaryNoSaveFolder)));
+        // Legendary ends the cloud line with a colon and the local one without.
+        let newer = |which: &str, cloud: &str, local: &str, last: &str| {
+            let head = if which == "Cloud" { r#"Cloud save for "Goo" is newer:"# } else { r#"Local save for "Goo" is newer"# };
+            log(&[head, &format!("- Cloud save date: {cloud}"), &format!("- Local save date: {local}"), last])
+        };
+        let (old, new) = ("2026-11-01 10:00:00", "2026-11-02 10:00:00");
+        let cases = [
+            ("up to date", true, log(&["Got 1 remote save game(s)", r#"Checking "Goo" (Goo)"#, r#"Save game for "Goo" is up to date, skipping..."#])),
+            ("no saves anywhere", true, log(&["No cloud or local savegame found."])),
+            ("downloaded", true, newer("Cloud", new, old, "Downloading remote savegame...")),
+            ("uploaded", true, newer("Local", old, new, "Uploading local savegame...")),
+            // Before launch (`--skip-upload`): a newer local save is a conflict, unless the cloud has none yet.
+            ("before launch, local newer", true, newer("Local", old, new, "Save game uploading is disabled, skipping...")),
+            ("before launch, cloud empty", true, newer("Local", "N/A", new, "Save game uploading is disabled, skipping...")),
+            // After the game (`--skip-download`): a newer cloud save is a conflict, unless there's no local save.
+            ("after the game, cloud newer", true, newer("Cloud", new, old, "Save game downloading is disabled, skipping...")),
+            ("after the game, local empty", true, newer("Cloud", new, "N/A", "Save game downloading is disabled, skipping...")),
+            // Offline, or another Legendary error: its last message.
+            ("offline", false, "[cli] INFO: Logging in...\n[cli] ERROR: Login failed! Cannot continue with download process.\n".into()),
+            ("failed silently", false, String::new()),
+            // A save folder with variables Legendary can't fill in: the empty answer skips the game.
+            ("no save folder", true, log(&[r#"Computed save path: "{AppData}/Goo""#, "Empty input, skipping..."])),
+        ];
+        let outcomes: Vec<_> = cases.iter().map(|(name, ok, out)| format!("{name}: {:?}", parse_sync(*ok, out))).collect();
+        insta::assert_debug_snapshot!(outcomes);
     }
 
     #[test]
@@ -1149,14 +1091,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_progress_lines() {
-        let p = parse_verify_progress("\nVerification progress: 12/345 (3.5%) [10.0 MiB/s]\t\r").unwrap();
-        assert!((p.fraction - 0.035).abs() < 1e-6);
-        assert_eq!((p.action, p.done_files, p.total_files, p.done_bytes), (ProgressAction::Verify, Some(12), Some(345), None));
-        assert_eq!(parse_verify_progress("Checking for importable games..."), None);
-    }
-
-    #[test]
     fn log_decides_moves_imports_and_syncs() {
         // `move`, `import` and `egl-sync` exit 0 after their errors in 0.21, so the log decides.
         let moved = "[cli] INFO: Moving \"Goo\" from \"C:/Games\" to \"D:\\Games\"\n[cli] INFO: Finished.\n";
@@ -1206,5 +1140,34 @@ mod tests {
             stderr: b"[cli] INFO: Logging in...\n[cli] ERROR: Login failed, cannot continue!\n\n".to_vec(),
         };
         assert_eq!(failure(&output), msg!(legendaryFailed, status = "exit code: 1", detail = "[cli] ERROR: Login failed, cannot continue!"));
+    }
+
+    #[test]
+    fn list_categories_snapshot() {
+        // A game with its DLC; plugins, engines, apps and orphan DLC are left out.
+        insta::assert_debug_snapshot!(games(&categories(), &Value::Null));
+    }
+
+    #[test]
+    fn progress_lines_snapshot() {
+        // A download as Legendary 0.21 logs it, then a verify.
+        let lines = [
+            "[DLManager] INFO: = Progress: 0.00% (0/456), Running for 00:00:00, ETA: 00:00:00",
+            "[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB",
+            "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05",
+            "[DLManager] INFO:  + Download\t- 10.00 MiB/s (raw)",
+            "[DLManager] INFO: = Progress: 100.00% (456/456), Running for 00:01:15, ETA: 00:00:00",
+        ];
+        let mut mib = 0.0;
+        let download: Vec<_> = lines.iter().map(|l| (*l, parse_progress(l, ProgressAction::Install, &mut mib))).collect();
+        let verify: Vec<_> = [
+            "Checking for importable games...",
+            "\nVerification progress: 12/345 (3.5%) [10.0 MiB/s]\t\r",
+            "Verification progress: 345/345 (100.0%) [0.0 MiB/s]",
+        ]
+        .into_iter()
+        .map(|l| (l, parse_verify_progress(l)))
+        .collect();
+        insta::assert_yaml_snapshot!((download, verify));
     }
 }

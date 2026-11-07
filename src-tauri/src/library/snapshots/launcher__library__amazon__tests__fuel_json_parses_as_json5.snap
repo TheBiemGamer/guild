@@ -1,0 +1,27 @@
+---
+source: src/library/amazon.rs
+expression: "[fuel(\"sample-fuel.json\"), fuel(\"sample-fuel-json5.json\")]"
+---
+[
+    Some(
+        Fuel {
+            command: "Binaries\\Win64\\Game.exe",
+            args: [
+                "-windowed",
+            ],
+            working_dir: Some(
+                "Binaries\\Win64",
+            ),
+        },
+    ),
+    Some(
+        Fuel {
+            command: "Game.exe",
+            args: [
+                "-url",
+                "https://example.invalid/x",
+            ],
+            working_dir: None,
+        },
+    ),
+]

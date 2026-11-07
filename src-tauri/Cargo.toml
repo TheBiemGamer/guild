@@ -39,3 +39,6 @@ winreg = "0.56"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+insta = { version = "1.49", features = ["yaml", "json", "redactions"] }

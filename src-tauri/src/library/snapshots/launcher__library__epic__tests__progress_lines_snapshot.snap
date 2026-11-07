@@ -1,0 +1,50 @@
+---
+source: src/library/epic.rs
+expression: "(download, verify)"
+---
+- - - "[DLManager] INFO: = Progress: 0.00% (0/456), Running for 00:00:00, ETA: 00:00:00"
+    - fraction: 0
+      action: install
+      doneBytes: 0
+      totalBytes: ~
+      secsLeft: 0
+      doneFiles: ~
+      totalFiles: ~
+  - - "[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB"
+    - ~
+  - - "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05"
+    - fraction: 0.1234
+      action: install
+      doneBytes: 2147483648
+      totalBytes: ~
+      secsLeft: 65
+      doneFiles: ~
+      totalFiles: ~
+  - - "[DLManager] INFO:  + Download\t- 10.00 MiB/s (raw)"
+    - ~
+  - - "[DLManager] INFO: = Progress: 100.00% (456/456), Running for 00:01:15, ETA: 00:00:00"
+    - fraction: 1
+      action: install
+      doneBytes: 2147483648
+      totalBytes: ~
+      secsLeft: 0
+      doneFiles: ~
+      totalFiles: ~
+- - - Checking for importable games...
+    - ~
+  - - "\nVerification progress: 12/345 (3.5%) [10.0 MiB/s]\t\r"
+    - fraction: 0.035
+      action: verify
+      doneBytes: ~
+      totalBytes: ~
+      secsLeft: ~
+      doneFiles: 12
+      totalFiles: 345
+  - - "Verification progress: 345/345 (100.0%) [0.0 MiB/s]"
+    - fraction: 1
+      action: verify
+      doneBytes: ~
+      totalBytes: ~
+      secsLeft: ~
+      doneFiles: 345
+      totalFiles: 345
