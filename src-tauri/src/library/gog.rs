@@ -1267,20 +1267,7 @@ mod tests {
     fn games_keep_only_owned_games() {
         let products = products("products.json");
         // Last Day of June (a game), The Witcher 3 Complete Edition (a pack), The Witcher 3 (a game).
-        let all = games(&[1207664663, 1425609977, 1495134320], &products, &HashMap::new(), &HashMap::new(), &HashMap::new());
-        let ids: Vec<&str> = all.iter().map(|g| g.external_id.as_str()).collect();
-        assert_eq!(ids, ["1425609977", "1495134320"]);
-        let june = &all[0];
-        assert_eq!(june.key(), "gog-1425609977");
-        assert_eq!(june.title, "Last Day of June");
-        assert!(!june.installed);
-        assert_eq!(june.install_dir, None);
-        assert_eq!(
-            june.art.header.url.as_deref(),
-            Some("https://images-1.gog-statics.com/5f8705f07a91568cdd622e0961e6a4526e7035bc4bfef5ce440d41c4e2e7f563_glx_logo.jpg")
-        );
-        assert!(june.art.hero.url.as_deref().is_some_and(|u| u.starts_with("https://images-4.gog-statics.com/")));
-        assert_eq!(june.art.cover, Image::default());
+        insta::assert_debug_snapshot!(games(&[1207664663, 1425609977, 1495134320], &products, &HashMap::new(), &HashMap::new(), &HashMap::new()));
         // Not owned: not listed, even with a cached product.
         assert!(games(&[1], &products, &HashMap::new(), &HashMap::new(), &HashMap::new()).is_empty());
         // An id GOG didn't answer for (`null`) is left out.
@@ -1735,5 +1722,24 @@ mod tests {
         assert!(info["size"]["en-US"]["download_size"].is_u64());
         assert_eq!(info["folder_name"], "Last Day of June");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn progress_lines_snapshot() {
+        // A gogdl download: no total at first, then bytes, with other log lines between.
+        let lines = [
+            "[PROGRESS] INFO: = Progress: 0.00 0/0, Running for: 00:00:00, ETA: 00:00:00",
+            "[PROGRESS] INFO: = Downloaded: 1.18 MiB, Written: 2.00 MiB",
+            "[PROGRESS] INFO: = Progress: 12.34 123456/1000000, Running for: 00:00:10, ETA: 01:02:03",
+            "[V2] INFO: Found 3 broken files, repairing...",
+            "[PROGRESS] INFO: = Progress: 100.00 1000000/1000000, Running for: 00:01:00, ETA: 00:00:00",
+        ];
+        let parsed: Vec<_> = lines.iter().map(|l| (*l, parse_progress(l, ProgressAction::Install))).collect();
+        insta::assert_yaml_snapshot!(parsed);
+    }
+
+    #[test]
+    fn remote_config_save_locations_snapshot() {
+        insta::assert_yaml_snapshot!(save_locations(&fixture("remote-config-1425609977.json")));
     }
 }

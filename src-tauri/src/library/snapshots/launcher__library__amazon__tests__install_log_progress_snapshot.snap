@@ -1,0 +1,20 @@
+---
+source: src/library/amazon.rs
+expression: seen
+---
+- - fraction: 0
+    action: install
+    doneBytes: 0
+    totalBytes: 4200000000
+    secsLeft: 0
+    doneFiles: ~
+    totalFiles: ~
+  - false
+- - fraction: 0.1145
+    action: install
+    doneBytes: 480900000
+    totalBytes: 4200000000
+    secsLeft: 77
+    doneFiles: ~
+    totalFiles: ~
+  - true

@@ -1687,4 +1687,18 @@ mod tests {
         let single = pumpkin_detail(&games, &HashMap::new());
         assert_eq!(single.last_played_store, None);
     }
+
+    #[test]
+    fn detail_payload_snapshot() {
+        let mut games = pumpkin(Some(86_400), Some(2 * 86_400));
+        games[1].install_dir = Some(r"C:\Games\Pumpkin Jack".into());
+        games[1].size_bytes = Some(4 << 30);
+        games[0].dlc = vec![crate::library::Dlc { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: false }];
+        let detail = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        // Paths and times stand in as placeholders; a missing one stays null.
+        let placeholder = |text: &'static str| {
+            insta::dynamic_redaction(move |value, _| if value.is_nil() { value } else { text.into() })
+        };
+        insta::assert_json_snapshot!(detail, { ".copies[].installDir" => placeholder("[path]"), ".lastPlayed" => placeholder("[time]") });
+    }
 }

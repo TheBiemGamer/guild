@@ -1,0 +1,74 @@
+---
+source: src/library/amazon.rs
+expression: "format!(\"{games:#?}\").replace(&format!(\"{dir:?}\"), \"\\\"[temp dir]\\\"\")"
+---
+[
+    Game {
+        provider: Amazon,
+        external_id: "amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633",
+        title: "Last Day of June",
+        installed: true,
+        install_dir: Some(
+            "[temp dir]",
+        ),
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: Some(
+            4200000000,
+        ),
+        art: Art {
+            cover: Image {
+                path: None,
+                url: Some(
+                    "https://images.gog.com/c.jpg",
+                ),
+            },
+            header: Image {
+                path: None,
+                url: Some(
+                    "https://example.invalid/TEST-SKU-1/bg2.jpg",
+                ),
+            },
+            hero: Image {
+                path: None,
+                url: Some(
+                    "https://example.invalid/TEST-SKU-1/bg1.jpg",
+                ),
+            },
+        },
+        dlc: [],
+        update_available: false,
+        cloud_saves: false,
+    },
+    Game {
+        provider: Amazon,
+        external_id: "amzn1.adg.product.e9b762cd-e130-4c5b-aaf5-070d785d1cd2",
+        title: "Dungeon of the ENDLESS - Definitive Edition",
+        installed: false,
+        install_dir: None,
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: None,
+        art: Art {
+            cover: Image {
+                path: None,
+                url: None,
+            },
+            header: Image {
+                path: None,
+                url: Some(
+                    "https://example.invalid/TEST-SKU-2/bg2.jpg",
+                ),
+            },
+            hero: Image {
+                path: None,
+                url: Some(
+                    "https://example.invalid/TEST-SKU-2/bg1.jpg",
+                ),
+            },
+        },
+        dlc: [],
+        update_available: false,
+        cloud_saves: false,
+    },
+]

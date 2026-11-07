@@ -1,0 +1,12 @@
+---
+source: src/library/amazon.rs
+expression: "parse_details(&library[0][\"product\"][\"productDetail\"][\"details\"])"
+---
+description: Sample description.
+genres:
+  - Adventure
+developer: Sample Developer
+publisher: Sample Publisher
+released: 2017-08-31
+screenshots:
+  - "https://example.invalid/TEST-SKU-1/shot1.jpg"

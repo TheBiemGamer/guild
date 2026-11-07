@@ -1,0 +1,39 @@
+---
+source: src/library/epic.rs
+expression: "games(&categories(), &Value::Null)"
+---
+[
+    Game {
+        provider: Epic,
+        external_id: "5daeb974a22a435988892319b3a4f476",
+        title: "Fallout: New Vegas",
+        installed: false,
+        install_dir: None,
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: None,
+        art: Art {
+            cover: Image {
+                path: None,
+                url: None,
+            },
+            header: Image {
+                path: None,
+                url: None,
+            },
+            hero: Image {
+                path: None,
+                url: None,
+            },
+        },
+        dlc: [
+            Dlc {
+                id: "4fa3d8d9b2cb4714a19a38d1a598be8f",
+                title: "Fallout New Vegas®: Lonesome Road™",
+                installed: false,
+            },
+        ],
+        update_available: false,
+        cloud_saves: false,
+    },
+]

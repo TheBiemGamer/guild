@@ -1,0 +1,6 @@
+---
+source: src/library/gog.rs
+expression: "save_locations(&fixture(\"remote-config-1425609977.json\"))"
+---
+- location: "<?APPLICATION_DATA_LOCAL_LOW?>\\\\Ovosonico\\\\Last Day of June"
+  name: saves

@@ -1,0 +1,17 @@
+---
+source: src/library/epic.rs
+expression: outcomes
+---
+[
+    "up to date: Synced",
+    "no saves anywhere: Synced",
+    "downloaded: Synced",
+    "uploaded: Synced",
+    "before launch, local newer: LocalNewer",
+    "before launch, cloud empty: Synced",
+    "after the game, cloud newer: CloudNewer",
+    "after the game, local empty: Synced",
+    "offline: Failed(Msg { code: \"system\", params: {\"detail\": Text(\"Login failed! Cannot continue with download process.\")} })",
+    "failed silently: Failed(Msg { code: \"legendaryNoReason\", params: {} })",
+    "no save folder: Failed(Msg { code: \"legendaryNoSaveFolder\", params: {} })",
+]

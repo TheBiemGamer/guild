@@ -847,4 +847,38 @@ mod tests {
         assert_eq!(msg(LoginError::RateLimited.into()), msg!(tooManyTries));
         assert_eq!(msg(NetworkError::ApiError(EResult::TwoFactorCodeMismatch).into()), msg!(codeDidntWork));
     }
+
+    #[test]
+    fn settings_payload_snapshot() {
+        // `ToolView`'s shape is snapshotted in `tools`. Secrets only ever show as `…Set` flags.
+        let view = SettingsView {
+            language: "system".into(),
+            ui_language: "en",
+            steam: true,
+            steam_library: SteamLibrary { account: Some("test-account".into()), attention: false },
+            epic: Some(Login::LoggedIn),
+            epic_account: Some("Test".into()),
+            epic_install_dir: Some(r"D:\Games\Epic".into()),
+            gog: Some(gog::Login::LoggedOut),
+            gog_account: None,
+            gog_install_dir: None,
+            amazon: None,
+            amazon_account: None,
+            amazon_install_dir: None,
+            igdb_client_id: Some("test-client-id".into()),
+            igdb_secret_set: true,
+            steamgriddb_key_set: false,
+            show_banner: true,
+            ambient: true,
+            cloud_saves: true,
+            gog_cloud_saves: false,
+            start_with_windows: false,
+            close_to_tray: true,
+            notify_downloads: true,
+            app_version: env!("CARGO_PKG_VERSION").into(),
+            tools: Vec::new(),
+            cache_bytes: 1 << 20,
+        };
+        insta::assert_json_snapshot!(view, { ".appVersion" => "[version]", ".epicInstallDir" => "[path]" });
+    }
 }

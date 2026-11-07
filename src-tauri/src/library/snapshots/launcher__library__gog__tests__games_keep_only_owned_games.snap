@@ -1,0 +1,68 @@
+---
+source: src/library/gog.rs
+expression: "games(&[1207664663, 1425609977, 1495134320], &products, &HashMap::new(),\n&HashMap::new(), &HashMap::new())"
+---
+[
+    Game {
+        provider: Gog,
+        external_id: "1425609977",
+        title: "Last Day of June",
+        installed: false,
+        install_dir: None,
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: None,
+        art: Art {
+            cover: Image {
+                path: None,
+                url: None,
+            },
+            header: Image {
+                path: None,
+                url: Some(
+                    "https://images-1.gog-statics.com/5f8705f07a91568cdd622e0961e6a4526e7035bc4bfef5ce440d41c4e2e7f563_glx_logo.jpg",
+                ),
+            },
+            hero: Image {
+                path: None,
+                url: Some(
+                    "https://images-4.gog-statics.com/4f9ed71c262e854e5356bfa3c867f30b9250bd7a2cddc1ba89b873404b72a5a9.jpg",
+                ),
+            },
+        },
+        dlc: [],
+        update_available: false,
+        cloud_saves: false,
+    },
+    Game {
+        provider: Gog,
+        external_id: "1495134320",
+        title: "The Witcher 3: Wild Hunt — Remastered",
+        installed: false,
+        install_dir: None,
+        playtime_minutes: None,
+        last_played: None,
+        size_bytes: None,
+        art: Art {
+            cover: Image {
+                path: None,
+                url: None,
+            },
+            header: Image {
+                path: None,
+                url: Some(
+                    "https://images-4.gog-statics.com/ee9c88c3af91027d9121906fd0e838f11e890fbf74c9c9412e54622abc299f0a_glx_logo.jpg",
+                ),
+            },
+            hero: Image {
+                path: None,
+                url: Some(
+                    "https://images-2.gog-statics.com/6aaaff4449b2069175265ae1cf5b8b41e602e64c61aee12719883bcc9d44876f.jpg",
+                ),
+            },
+        },
+        dlc: [],
+        update_available: false,
+        cloud_saves: false,
+    },
+]

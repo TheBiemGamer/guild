@@ -1,0 +1,35 @@
+---
+source: src/commands/settings.rs
+expression: view
+---
+{
+  "language": "system",
+  "uiLanguage": "en",
+  "steam": true,
+  "steamLibrary": {
+    "account": "test-account",
+    "attention": false
+  },
+  "epic": "loggedIn",
+  "epicAccount": "Test",
+  "epicInstallDir": "[path]",
+  "gog": "loggedOut",
+  "gogAccount": null,
+  "gogInstallDir": null,
+  "amazon": null,
+  "amazonAccount": null,
+  "amazonInstallDir": null,
+  "igdbClientId": "test-client-id",
+  "igdbSecretSet": true,
+  "steamgriddbKeySet": false,
+  "showBanner": true,
+  "ambient": true,
+  "cloudSaves": true,
+  "gogCloudSaves": false,
+  "startWithWindows": false,
+  "closeToTray": true,
+  "notifyDownloads": true,
+  "appVersion": "[version]",
+  "tools": [],
+  "cacheBytes": 1048576
+}

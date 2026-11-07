@@ -355,4 +355,11 @@ mod tests {
         });
         fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[test]
+    fn tool_view_payload_snapshot() {
+        let view = ToolView { name: LEGENDARY.name, installed: true, version: Some("0.0.1".into()), managed: true, pinned: LEGENDARY.version, update: true };
+        // The pinned version moves with every tool bump.
+        insta::assert_json_snapshot!(view, { ".pinned" => "[version]" });
+    }
 }

@@ -1,0 +1,12 @@
+---
+source: src/tools.rs
+expression: view
+---
+{
+  "name": "legendary",
+  "installed": true,
+  "version": "0.0.1",
+  "managed": true,
+  "pinned": "[version]",
+  "update": true
+}

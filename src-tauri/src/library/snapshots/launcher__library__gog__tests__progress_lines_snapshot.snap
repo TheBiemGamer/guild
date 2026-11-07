@@ -1,0 +1,32 @@
+---
+source: src/library/gog.rs
+expression: parsed
+---
+- - "[PROGRESS] INFO: = Progress: 0.00 0/0, Running for: 00:00:00, ETA: 00:00:00"
+  - fraction: 0
+    action: install
+    doneBytes: 0
+    totalBytes: 0
+    secsLeft: 0
+    doneFiles: ~
+    totalFiles: ~
+- - "[PROGRESS] INFO: = Downloaded: 1.18 MiB, Written: 2.00 MiB"
+  - ~
+- - "[PROGRESS] INFO: = Progress: 12.34 123456/1000000, Running for: 00:00:10, ETA: 01:02:03"
+  - fraction: 0.123456
+    action: install
+    doneBytes: 123456
+    totalBytes: 1000000
+    secsLeft: 3723
+    doneFiles: ~
+    totalFiles: ~
+- - "[V2] INFO: Found 3 broken files, repairing..."
+  - ~
+- - "[PROGRESS] INFO: = Progress: 100.00 1000000/1000000, Running for: 00:01:00, ETA: 00:00:00"
+  - fraction: 1
+    action: install
+    doneBytes: 1000000
+    totalBytes: 1000000
+    secsLeft: 0
+    doneFiles: ~
+    totalFiles: ~

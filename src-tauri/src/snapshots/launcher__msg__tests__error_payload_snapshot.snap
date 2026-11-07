@@ -1,0 +1,32 @@
+---
+source: src/msg.rs
+expression: errors
+---
+[
+  {
+    "code": "gameNotInLibrary",
+    "params": {}
+  },
+  {
+    "code": "installFolderMissing",
+    "params": {
+      "path": "C:\\Games\\Goo"
+    }
+  },
+  {
+    "code": "storeError",
+    "params": {
+      "reason": {
+        "code": "cantReachGog",
+        "params": {}
+      },
+      "store": "GOG"
+    }
+  },
+  {
+    "code": "system",
+    "params": {
+      "detail": "access denied"
+    }
+  }
+]
