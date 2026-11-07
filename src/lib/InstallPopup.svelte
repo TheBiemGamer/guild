@@ -4,13 +4,13 @@
   import { sizeLabel } from './format'
 
   let { game, anchor, folder, onconfirm, oncancel }: {
-    /** The Epic or GOG copy's key and the game's title. */
+    /** The Epic, GOG or Amazon copy's key and the game's title. */
     game: { key: string; title: string }
     /** The cover's rectangle; the popup opens beside it. */
     anchor: DOMRect
     /** The store's saved install folder; null means its default, undefined that settings aren't read yet. */
     folder: string | null | undefined
-    /** `withDlc`: the "Include DLC" box, on by default. */
+    /** `withDlc`: the "Include DLC" box, on by default; Amazon has no DLC, so no box. */
     onconfirm: (withDlc: boolean) => void
     oncancel: () => void
   } = $props()
@@ -73,7 +73,9 @@
   <h4>Install {game.title}?</h4>
   <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${sizeLabel(size)} download`}</p>
   <p class="folder">{folder === undefined ? '' : `To ${folder ?? "the default folder"}`}</p>
-  <label class="dlc"><input type="checkbox" bind:checked={withDlc} />Include DLC</label>
+  {#if !game.key.startsWith('amazon-')}
+    <label class="dlc"><input type="checkbox" bind:checked={withDlc} />Include DLC</label>
+  {/if}
   <div class="buttons">
     <button class="pill" bind:this={installButton} onclick={() => onconfirm(withDlc)}>Install</button>
     <button class="glass" onclick={oncancel}>Cancel</button>

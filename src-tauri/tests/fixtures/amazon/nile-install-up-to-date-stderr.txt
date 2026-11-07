@@ -1,0 +1,3 @@
+INFO [CLI]:	 Found: Last Day of June
+INFO [DOWNLOAD]:	 Game is up to date
+INFO [CLI]:	 Download complete

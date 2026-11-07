@@ -152,12 +152,12 @@
     savedSort = now
   })
 
-  /** The Epic or GOG copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
+  /** The Epic, GOG or Amazon copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
   let confirming = $state<{ game: { key: string; title: string }; anchor: DOMRect; go: (withDlc: boolean) => void } | null>(null)
 
-  /** Steam installs in its own dialog; an Epic or GOG copy asks here first, with size and folder. */
+  /** Steam installs in its own dialog; the other stores' copies ask here first, with size and folder. */
   function confirmInstall(key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) {
-    if (key.startsWith('epic-') || key.startsWith('gog-')) confirming = { game: { key, title }, anchor, go }
+    if (key.startsWith('epic-') || key.startsWith('gog-') || key.startsWith('amazon-')) confirming = { game: { key, title }, anchor, go }
     else go(true)
   }
 
@@ -502,7 +502,11 @@
     <InstallPopup
       game={confirming.game}
       anchor={confirming.anchor}
-      folder={confirming.game.key.startsWith('gog-') ? settings?.gogInstallDir : settings?.epicInstallDir}
+      folder={confirming.game.key.startsWith('gog-')
+        ? settings?.gogInstallDir
+        : confirming.game.key.startsWith('amazon-')
+          ? settings?.amazonInstallDir
+          : settings?.epicInstallDir}
       oncancel={() => (confirming = null)}
       onconfirm={(withDlc) => {
         const { go } = confirming!

@@ -1,0 +1,2 @@
+WARNING [UNINSTALL]:	 Missing file "C:\Users\Test\Games\Last Day of June\readme.txt" - skipping
+INFO [UNINSTALL]:	 Game removed successfully

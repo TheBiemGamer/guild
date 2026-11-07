@@ -118,18 +118,47 @@ pub struct Importable {
     title: String,
 }
 
-/// Owned Epic games that aren't installed, by title.
-#[tauri::command]
-pub fn epic_importable(state: State<'_, AppState>) -> Vec<Importable> {
+/// Owned games of `provider` that aren't installed, by title.
+fn importable(state: &AppState, provider: ProviderKind) -> Vec<Importable> {
     let mut games: Vec<Importable> = state
         .lock()
         .games
         .iter()
-        .filter(|g| g.provider == ProviderKind::Epic && !g.installed)
+        .filter(|g| g.provider == provider && !g.installed)
         .map(|g| Importable { key: g.key(), title: g.title.clone() })
         .collect();
     games.sort_by_key(|g| g.title.to_lowercase());
     games
+}
+
+/// Owned Epic games that aren't installed, by title.
+#[tauri::command]
+pub fn epic_importable(state: State<'_, AppState>) -> Vec<Importable> {
+    importable(&state, ProviderKind::Epic)
+}
+
+/// Owned Amazon games that aren't installed, by title.
+#[tauri::command]
+pub fn amazon_importable(state: State<'_, AppState>) -> Vec<Importable> {
+    importable(&state, ProviderKind::Amazon)
+}
+
+/// Makes Nile take an existing install of an owned Amazon game (`key`) at `path`, then rescans. Nile checks every
+/// file first, so this can take minutes.
+#[tauri::command]
+pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()> {
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| g.provider == ProviderKind::Amazon && !g.installed)
+        .ok_or("This game can't be imported.")?;
+    blocking(move || {
+        let conn = cache::db::open(&app.state::<AppState>().dirs.db).ok();
+        let result = amazon::import(conn.as_ref(), &game.external_id, std::path::Path::new(&path)).map_err(|e| e.to_string());
+        rescan(&app, true);
+        result
+    })
+    .await
 }
 
 /// Makes Legendary take an existing install of an owned Epic game (`key`) at `path`, then rescans Epic.

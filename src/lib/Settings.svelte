@@ -315,6 +315,43 @@
     gogLoggingIn = false
   }
 
+  /** Amazon's Import, like Epic's: the picked folder, then which game it holds. */
+  let amazonImport = $state<{ path: string; games: { key: string; title: string }[] } | null>(null)
+  let amazonImportKey = $state('')
+  let amazonImporting = $state(false)
+  let amazonImportNote = $state('')
+
+  async function pickAmazonImport() {
+    amazonImportNote = ''
+    try {
+      const path = await api.pickFolder()
+      if (!path) return
+      const games = await api.amazonImportable()
+      if (games.length === 0) {
+        amazonImportNote = 'Every owned Amazon game is already installed.'
+        return
+      }
+      amazonImport = { path, games }
+      amazonImportKey = games[0].key
+    } catch (e) {
+      amazonImportNote = api.message(e)
+    }
+  }
+
+  async function runAmazonImport() {
+    const { path, games } = amazonImport!
+    amazonImporting = true
+    try {
+      await api.amazonImport(amazonImportKey, path)
+      amazonImportNote = `Imported ${games.find((g) => g.key === amazonImportKey)?.title ?? 'the game'}.`
+      amazonImport = null
+    } catch (e) {
+      amazonImportNote = api.message(e)
+    }
+    amazonImporting = false
+    await onchange()
+  }
+
   async function installNile() {
     nileError = ''
     nileJob = { percent: null }
@@ -770,6 +807,23 @@
                   {/if}
                 </div>
               </div>
+              <div class="row">
+                <div>Import an existing install</div>
+                <button class="btn" disabled={amazonImporting || amazonImport !== null} onclick={pickAmazonImport}>Import…</button>
+              </div>
+              {#if amazonImport}
+                <div class="row stack">
+                  <label for="amazon-import-game">Which game is in {amazonImport.path}?</label>
+                  <div class="field">
+                    <select id="amazon-import-game" bind:value={amazonImportKey}>
+                      {#each amazonImport.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
+                    </select>
+                    <button class="btn" disabled={amazonImporting} onclick={runAmazonImport}>{amazonImporting ? 'Importing…' : 'Import'}</button>
+                    <button class="btn" disabled={amazonImporting} onclick={() => (amazonImport = null)}>Cancel</button>
+                  </div>
+                </div>
+              {/if}
+              {#if amazonImportNote}<p class="note" title={amazonImportNote}>{amazonImportNote}</p>{/if}
               {#if nile?.update}
                 <div class="row">
                   <div>Nile {nile.version ?? ''}<span>{nile.pinned} is available.</span></div>

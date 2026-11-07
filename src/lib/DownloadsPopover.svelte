@@ -8,7 +8,7 @@
   let { progress, queue, games, anchor, onclose, oncancel, onpause, onresume, onmove }: {
     /** `poll`'s map, by copy key. */
     progress: Record<string, Progress>
-    /** The Epic and GOG download queue; its first job is the active one. */
+    /** The Epic, GOG and Amazon download queue; its first job is the active one. */
     queue: QueueView
     /** The library as loaded, for titles; a game hidden by the search is asked for once. */
     games: Card[]
@@ -39,7 +39,8 @@
   const active = $derived(queue.jobs[0])
   const next = $derived(queue.jobs.slice(1))
   const jobs = $derived(Object.entries(progress))
-  const storeOf = (key: string): Store => (key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : 'steam')
+  const storeOf = (key: string): Store =>
+    key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : key.startsWith('amazon-') ? 'amazon' : 'steam'
   // Epic and GOG jobs outside the queue (Move, a GOG DLC uninstall) show their progress only; Steam's run in Steam.
   const other = $derived(jobs.filter(([k]) => storeOf(k) !== 'steam' && k !== active?.key))
   const steam = $derived(jobs.filter(([k]) => storeOf(k) === 'steam'))

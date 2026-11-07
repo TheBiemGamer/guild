@@ -616,8 +616,8 @@ fn job_args(verb: &str, id: &str, path: &Path, lang: &str, dlcs: &Dlcs) -> Vec<O
 }
 
 /// `[PROGRESS] INFO: = Progress: 12.34 123456/1000000, Running for: 00:00:10, ETA: 00:01:00` (stderr, about once
-/// a second): bytes written of the bytes the install takes, with no `%`.
-fn parse_progress(line: &str, action: ProgressAction) -> Option<Progress> {
+/// a second): bytes written of the bytes the install takes, with no `%`. nile prints the same after its own head.
+pub(crate) fn parse_progress(line: &str, action: ProgressAction) -> Option<Progress> {
     let (_, rest) = line.split_once("= Progress: ")?;
     let mut words = rest.split_whitespace();
     let percent: f32 = words.next()?.parse().ok()?;
@@ -644,14 +644,14 @@ fn repairing(line: &str) -> bool {
 }
 
 #[derive(Debug, PartialEq)]
-enum Fed {
+pub(crate) enum Fed {
     Ended,
     Stalled,
 }
 
 /// Hands each line to `on_line` until the sender is gone. Once armed (from the start, or by the first line
 /// `on_line` says was progress), `stall` without progress ends it early.
-fn feed(lines: &Receiver<String>, stall: Duration, mut armed: bool, mut on_line: impl FnMut(&str) -> bool) -> Fed {
+pub(crate) fn feed(lines: &Receiver<String>, stall: Duration, mut armed: bool, mut on_line: impl FnMut(&str) -> bool) -> Fed {
     let mut last = Instant::now();
     loop {
         let line = if armed {
@@ -907,7 +907,7 @@ fn play_task(info: &Value) -> Option<Task> {
 }
 
 /// `relative` inside `dir`, whichever slashes it uses.
-fn inside(dir: &Path, relative: &str) -> PathBuf {
+pub(crate) fn inside(dir: &Path, relative: &str) -> PathBuf {
     relative.split(['/', '\\']).filter(|p| !p.is_empty()).fold(dir.to_path_buf(), |path, part| path.join(part))
 }
 

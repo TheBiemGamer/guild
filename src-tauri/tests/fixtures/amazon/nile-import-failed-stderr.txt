@@ -1,0 +1,4 @@
+INFO [CLI]:	 Searching for amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633
+INFO [IMPORT]:	 	Verifying local files
+ERROR [IMPORT]:	 C:\Users\Test\Games\Last Day of June\Data\level1.pak is missing or corrupted
+ERROR [IMPORT]:	 There are missing or corrupted files for Last Day of June. Failed import.

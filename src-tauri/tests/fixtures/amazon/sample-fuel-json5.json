@@ -1,0 +1,9 @@
+﻿{
+  // synthetic: BOM, comments and trailing commas
+  "SchemaVersion": "2",
+  "Main": {
+    "Command": "Game.exe", /* block comment */
+    "Args": ["-url", "https://example.invalid/x",],
+  },
+  "PostInstall": [],
+}

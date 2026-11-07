@@ -1,0 +1,4 @@
+INFO [CLI]:	 Found: Last Day of June
+INFO [DOWNLOAD]:	 Download size: 3.91GB
+ERROR [DOWNLOAD]:	 Not enough space available
+INFO [CLI]:	 Download complete

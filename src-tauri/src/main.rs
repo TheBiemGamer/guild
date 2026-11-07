@@ -98,6 +98,8 @@ fn main() {
             commands::settings::gog_log_in,
             commands::settings::gog_log_out,
             commands::settings::gog_import,
+            commands::settings::amazon_importable,
+            commands::settings::amazon_import,
             commands::settings::amazon_log_in,
             commands::settings::amazon_log_out,
             commands::settings::install_tool,

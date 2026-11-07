@@ -51,7 +51,7 @@
     /** Copy keys, as `poll` reports them. */
     runningKey: string | null
     progressByKey: Record<string, Progress>
-    /** The Epic and GOG download queue; this game's job in it decides the busy pill. */
+    /** The Epic, GOG and Amazon download queue; this game's job in it decides the busy pill. */
     queue: QueueView
     /** Stops or removes a queued job, by copy key; resolves to whether it worked. */
     oncancel: (key: string) => Promise<boolean>
@@ -63,7 +63,7 @@
     onchanged: () => void
     /** This game's art for the window tint; null when it has none. */
     ontint: (url: string | null) => void
-    /** Install through the library's flow: an Epic or GOG copy asks in the install popup first, then calls `go`. */
+    /** Install through the library's flow: an Epic, GOG or Amazon copy asks in the install popup first, then calls `go`. */
     onconfirminstall: (key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) => void
     /** Opens the Edit dialog for a game the owner added. */
     onedit: (key: string) => void
@@ -234,7 +234,9 @@
   }
 
   // A string, so a library reload that keeps the copy doesn't reload the options under the cursor.
-  const launchKey = $derived(copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog') ? copy.key : null)
+  const launchKey = $derived(
+    copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon') ? copy.key : null,
+  )
   $effect(() => {
     const key = launchKey
     launch = null
@@ -336,7 +338,7 @@
     if (!(await oncancel(key))) cancelling = null
   }
 
-  /** Epic and GOG move into a picked folder; Steam opens its own storage manager. */
+  /** Epic, GOG and Amazon move into a picked folder; Steam opens its own storage manager. */
   async function move() {
     const key = copy!.key
     if (copy!.provider === 'steam') return act('move', key)
@@ -344,7 +346,7 @@
     if (dest) act('move', key, { dest })
   }
 
-  // Steam asks in its own dialog; Legendary and gogdl don't, so Epic and GOG ask here first.
+  // Steam asks in its own dialog; Legendary, gogdl and Nile don't, so the other stores ask here first.
   function uninstall() {
     if (copy?.provider === 'steam') {
       act('uninstall')
@@ -382,9 +384,6 @@
     closeMenu(true)
     f()
   }
-
-  /** The copies Play and Install can act on. */
-  const playable = $derived(game?.copies.filter((c) => api.actionable(c.key)) ?? [])
 
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
@@ -560,9 +559,8 @@
                   />
                 {/if}
               </div>
-              {#if playable.length}
               <PlayButton
-                copies={playable}
+                copies={game.copies}
                 chosen={chosenKey}
                 {running}
                 busy={shown}
@@ -576,7 +574,6 @@
                   )
                 }}
               />
-              {/if}
               {#if job?.state === 'paused'}
                 <button class="glass round" onclick={onresume}>Resume</button>
               {/if}
@@ -667,7 +664,7 @@
           </div>
         </section>
       {:else if current === 'launch'}
-        <!-- The chosen copy's own options; Epic and GOG apply them on Play. GOG takes only the arguments and executable. -->
+        <!-- The chosen copy's own options; Epic, GOG and Amazon apply them on Play. GOG and Amazon take only the arguments and executable. -->
         <section class="panel rows" aria-label="Launch options">
           {#if copy!.provider === 'steam'}
             <div class="row">
@@ -748,7 +745,7 @@
               <div class="what">
                 Uninstall{#if copy!.provider === 'steam'}<small>Opens in Steam.</small>{/if}
               </div>
-              <!-- The Epic and GOG confirm is in the hero; this chip stays, so focus is moved there by hand. -->
+              <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
               <button
                 class="chip danger"
                 disabled={!!shown || running}

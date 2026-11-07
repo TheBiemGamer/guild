@@ -1,0 +1,11 @@
+INFO [CLI]:	 Found: Last Day of June
+INFO [DOWNLOAD]:	 Download size: 3.91GB
+INFO [PROGRESS]:	 = Progress: 0.00 0/4200000000, Running for: 00:00:00, ETA: 00:00:00
+INFO [PROGRESS]:	 = Downloaded: 0.00 MiB, Written: 0.00 MiB
+INFO [PROGRESS]:	  + Download	- 0.00 MiB/s
+INFO [PROGRESS]:	  + Disk	- 0.00 MiB/s
+INFO [PROGRESS]:	 = Progress: 11.45 480900000/4200000000, Running for: 00:00:10, ETA: 00:01:17
+INFO [PROGRESS]:	 = Downloaded: 458.62 MiB, Written: 458.62 MiB
+INFO [PROGRESS]:	  + Download	- 45.86 MiB/s
+INFO [PROGRESS]:	  + Disk	- 45.86 MiB/s
+INFO [CLI]:	 Download complete

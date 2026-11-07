@@ -1,0 +1,1 @@
+ERROR [UNINSTALL]:	 Game isn't installed

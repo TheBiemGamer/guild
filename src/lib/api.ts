@@ -14,8 +14,6 @@ export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'sh
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type GogLogin = 'noGogdl' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type AmazonLogin = 'noNile' | 'loggedOut' | 'loggedIn' | 'unreachable'
-/** Amazon copies are listed only: nothing installs or plays them here yet, so Install and Play leave them out. */
-export const actionable = (key: string) => !key.startsWith('amazon-')
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
@@ -71,7 +69,7 @@ export interface CopyView {
   key: string
   provider: Store
   installed: boolean
-  /** An installed Epic or GOG copy has a newer version. */
+  /** An installed Epic, GOG or Amazon copy has a newer version. */
   updateAvailable: boolean
   /** Size on disk of an installed copy. */
   sizeBytes: number | null
@@ -159,7 +157,7 @@ export interface ToolView {
   update: boolean
 }
 export type QueuedAction = 'install' | 'update' | 'verify'
-/** The Epic and GOG download queue in order. `active` is the first job's key, also while `paused`. */
+/** The Epic, GOG and Amazon download queue in order. `active` is the first job's key, also while `paused`. */
 export interface QueueView { jobs: { key: string; action: QueuedAction; title: string }[]; paused: boolean; active: string | null }
 export interface Poll { running: string | null; progress: Record<string, Progress>; changed: boolean; queue: QueueView }
 export const emptyQueue: QueueView = { jobs: [], paused: false, active: null }
@@ -196,7 +194,7 @@ export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refre
 export const game = (key: string) => invoke<Detail | null>('game', { key })
 /**
  * `withDlc`: an Epic or GOG install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the copy `key`.
- * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic or GOG Move goes to.
+ * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic, GOG or Amazon Move goes to.
  */
 export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: 'cloud' | 'local'; dest?: string }
 /** Which save is newer when an Epic or GOG Play stopped to ask before launching. */
@@ -214,8 +212,8 @@ export const setSaves = (key: string, choice: boolean | null) => invoke<void>('s
 /** The newer save wins; the outcome shows in `saves`. */
 export const syncSavesNow = (key: string) => invoke<void>('sync_saves_now', { key })
 /**
- * An installed Epic or GOG copy's Launch options tab. `exe`: relative to the install folder; null runs the default.
- * GOG uses only `args` and `exe`.
+ * An installed Epic, GOG or Amazon copy's Launch options tab. `exe`: relative to the install folder; null runs the default.
+ * GOG and Amazon use only `args` and `exe`.
  */
 export interface LaunchOptions { args: string; offline: boolean; skipVersionCheck: boolean; exe: string | null }
 export const launchOptions = (key: string) => invoke<LaunchOptions | null>('launch_options', { key })
@@ -312,6 +310,10 @@ export const gogLogOut = () => invoke<void>('gog_log_out')
 export const gogImport = (path: string) => invoke<string>('gog_import', { path })
 export const amazonLogIn = () => invoke<void>('amazon_log_in')
 export const amazonLogOut = () => invoke<void>('amazon_log_out')
+/** Owned Amazon games that aren't installed, by title, for "Import an existing install". */
+export const amazonImportable = () => invoke<{ key: string; title: string }[]>('amazon_importable')
+/** Nile checks every file of the game first, so this can take minutes. */
+export const amazonImport = (key: string, path: string) => invoke<void>('amazon_import', { key, path })
 /** Downloads and checks a store tool; `onPercent` hears each new whole percent once the size is known. */
 export function installTool(name: ToolView['name'], onPercent: (percent: number) => void) {
   const channel = new Channel<number>()

@@ -267,18 +267,19 @@ fn act_blocking(
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
     }
-    // shortcut: Amazon copies are listed only; the UI offers no action for them until the Amazon install and launch land.
-    if game.provider == ProviderKind::Amazon {
-        return Err("Amazon games can't be installed or played here yet.".into());
-    }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
         Action::Update => Some(QueuedAction::Update),
         Action::Verify => Some(QueuedAction::Verify),
         _ => None,
     };
-    if game.provider == ProviderKind::Gog && action == Action::Install && dlc.is_none() && game.installed {
-        return Err("GOG: This game is already installed.".into());
+    let name = game.provider.name();
+    if matches!(game.provider, ProviderKind::Gog | ProviderKind::Amazon) && action == Action::Install && dlc.is_none() && game.installed {
+        return Err(format!("{name}: This game is already installed."));
+    }
+    // The job checks again with a fresh answer.
+    if game.provider == ProviderKind::Amazon && action == Action::Verify && game.update_available {
+        return Err(format!("{name}: Update first, then verify."));
     }
     if let Some(queued) = queued {
         let dest = (queued == QueuedAction::Install).then(|| install_base(&state, game.provider)).flatten();
@@ -304,6 +305,13 @@ fn act_blocking(
         let result = act_gog(&state, action, game, dlc, dest);
         rescan(app, true);
         return result.map(|()| None).map_err(|e| format!("GOG: {e}"));
+    }
+    if game.provider == ProviderKind::Amazon {
+        let result = act_amazon(&state, action, game, dest);
+        if !matches!(action, Action::Play | Action::PlayOutdated) {
+            rescan(app, true);
+        }
+        return result.map(|()| None).map_err(|e| format!("{name}: {e}"));
     }
     let result = match action {
         Action::Play | Action::PlayOutdated => {
@@ -349,11 +357,13 @@ fn act_blocking(
 }
 
 /// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
-/// the setting, else Legendary's default (`None`). GOG: the setting, else `%USERPROFILE%\Games` (gogdl has no default).
+/// the setting, else Legendary's default (`None`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
+/// (gogdl has no default, and nile's is `~/Games/nile`).
 fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     let saved = open_db(state).map(|c| settings::load(&c));
     let dir = match provider {
         ProviderKind::Gog => saved.and_then(|s| s.gog_install_dir).or_else(gog::default_base),
+        ProviderKind::Amazon => saved.and_then(|s| s.amazon_install_dir).or_else(gog::default_base),
         _ => saved.and_then(|s| s.epic_install_dir),
     };
     dir.map(|p| p.to_string_lossy().into_owned())
@@ -377,6 +387,25 @@ fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, des
             result
         }
         (Action::Install | Action::Update | Action::Verify, _) => unreachable!("queued"),
+    }
+}
+
+/// An Amazon copy's actions outside the queue. Play starts its `fuel.json` program and watches it to time the session:
+/// Amazon keeps no playtime and has no cloud saves. Play without updating is Play.
+fn act_amazon(state: &AppState, action: Action, game: &Game, dest: Option<&str>) -> Result<(), crate::library::Error> {
+    let key = game.key();
+    let dir = installed_dir(game).ok_or("This game isn't installed.")?;
+    match action {
+        Action::Play | Action::PlayOutdated => {
+            let options = checked_launch_options(open_db(state).as_ref(), game)?;
+            let exe = amazon::launch(&game.external_id, dir, &options)?;
+            record_play(state, &key);
+            state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload: None });
+            Ok(())
+        }
+        Action::Move => amazon::move_to(&game.external_id, dir, std::path::Path::new(dest.ok_or("Pick a folder to move the game to.")?)),
+        Action::Uninstall => amazon::uninstall(open_db(state).as_ref(), &game.external_id),
+        Action::Install | Action::Update | Action::Verify => unreachable!("queued"),
     }
 }
 
@@ -560,6 +589,9 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
     if game.provider == ProviderKind::Gog {
         return run_gog_job(state, game, job, on_event);
     }
+    if game.provider == ProviderKind::Amazon {
+        return run_amazon_job(state, game, job, on_event);
+    }
     match job.action {
         QueuedAction::Update => epic::update(&game.external_id, on_event),
         QueuedAction::Verify => epic::verify(&game.external_id, on_event),
@@ -588,8 +620,22 @@ fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(In
     }
 }
 
-/// `game_prefs` name for an Epic or GOG copy's launch options, as `LaunchOptions` JSON; none is all defaults. GOG
-/// uses only the arguments and the alternative executable.
+/// A queued Amazon job; each holds nile for its whole run.
+fn run_amazon_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(InstallEvent)) -> Result<(), crate::library::Error> {
+    let id = &game.external_id;
+    let dir = || installed_dir(game).ok_or("This game isn't installed.");
+    match job.action {
+        QueuedAction::Install => {
+            let base = job.dest.as_deref().map(PathBuf::from).ok_or("There's no folder to install into.")?;
+            amazon::install(id, &base, on_event).map(drop)
+        }
+        QueuedAction::Update => amazon::update(open_db(state).as_ref(), id, dir()?, on_event),
+        QueuedAction::Verify => amazon::verify(open_db(state).as_ref(), id, dir()?, on_event),
+    }
+}
+
+/// `game_prefs` name for an Epic, GOG or Amazon copy's launch options, as `LaunchOptions` JSON; none is all defaults.
+/// GOG and Amazon use only the arguments and the alternative executable.
 const LAUNCH_OPTIONS: &str = "launch_options";
 
 fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
@@ -602,7 +648,7 @@ fn store_launch_options(conn: &Connection, key: &str, options: &LaunchOptions) -
     cache::db::set_pref(conn, key, LAUNCH_OPTIONS, json.as_deref()).map_err(|e| e.to_string())
 }
 
-/// An installed Epic or GOG copy's launch options, with the alternative executable checked again: the folder
+/// An installed copy's launch options, with the alternative executable checked again: the folder
 /// may have changed since it was saved.
 fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchOptions> {
     let mut options = conn.map(|c| launch_options_of(c, &game.key())).unwrap_or_default();
@@ -613,19 +659,19 @@ fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchO
     Ok(options)
 }
 
-/// Whether the copy has launch options here: an installed Epic or GOG copy (Steam keeps its own).
+/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own).
 fn has_launch_options(g: &Game) -> bool {
-    g.installed && matches!(g.provider, ProviderKind::Epic | ProviderKind::Gog)
+    g.installed && matches!(g.provider, ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon)
 }
 
-/// The Launch options tab of an installed Epic or GOG copy; `None` for others.
+/// The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others.
 #[tauri::command]
 pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions> {
     app.state::<AppState>().game(&key).filter(has_launch_options)?;
     blocking(move || Some(launch_options_of(&open_db(&app.state::<AppState>())?, &key))).await
 }
 
-/// Saves an installed Epic or GOG copy's launch options. `exe` may be absolute (from the file picker); it is
+/// Saves an installed Epic, GOG or Amazon copy's launch options. `exe` may be absolute (from the file picker); it is
 /// stored relative to the install folder, and only when it is a file inside it. Returns what was stored.
 #[tauri::command]
 pub async fn set_launch_options(app: AppHandle, key: String, mut options: LaunchOptions) -> Res<LaunchOptions> {
@@ -633,7 +679,7 @@ pub async fn set_launch_options(app: AppHandle, key: String, mut options: Launch
         .state::<AppState>()
         .game(&key)
         .filter(has_launch_options)
-        .ok_or("This game isn't installed from Epic or GOG.")?;
+        .ok_or("This game isn't installed from Epic, GOG or Amazon Games.")?;
     blocking(move || {
         if let Some(exe) = &options.exe {
             let dir = installed_dir(&game).ok_or("This game has no install folder.")?;
@@ -841,7 +887,8 @@ const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// Download size of a game that isn't installed, like `27.3 GB`, for the install popup and game page.
 /// Epic asks Legendary and Steam asks its servers (slow, seconds), so the bytes are cached for a week. GOG's comes
-/// from `gogdl info`, also cached for a week, with the owned DLC an install takes by default.
+/// from `gogdl info`, also cached for a week, with the owned DLC an install takes by default; Amazon's from
+/// `nile install --info`, also cached for a week.
 /// None if unknown, or for Steam when no account is connected.
 #[tauri::command]
 pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
@@ -860,8 +907,10 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
             })
             .await;
         }
-        // shortcut: Amazon sizes come with the Amazon install (`nile install --info`).
-        ProviderKind::Amazon | ProviderKind::Custom => return None,
+        ProviderKind::Amazon => {
+            return blocking(move || amazon::download_size(open_db(&app.state::<AppState>()).as_ref(), &game.external_id)).await;
+        }
+        ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());

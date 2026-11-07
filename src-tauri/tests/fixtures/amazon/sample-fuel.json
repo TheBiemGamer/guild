@@ -1,0 +1,25 @@
+{
+  "SchemaVersion": "2",
+  "Main": {
+    "Command": "Binaries\\Win64\\Game.exe",
+    "Args": [
+      "-windowed"
+    ],
+    "WorkingSubdirOverride": "Binaries\\Win64"
+  },
+  "PostInstall": [
+    {
+      "Command": "__Installer\\vcredist_x64.exe",
+      "Args": [
+        "/quiet",
+        "/norestart"
+      ],
+      "ValidReturns": [
+        0,
+        1638,
+        3010
+      ],
+      "AlwaysRun": false
+    }
+  ]
+}
