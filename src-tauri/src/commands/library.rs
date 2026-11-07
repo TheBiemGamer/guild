@@ -142,10 +142,12 @@ fn sections(
     (cards, groups.into_iter().map(|(group, ids)| Section { group, count: ids.len() }).collect())
 }
 
-/// The toolbar's sort as last saved.
+/// The toolbar's sort as last saved, and the version this start updated to (`settings::take_updated`).
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ViewPrefs {
     sort: Sort,
+    updated_to: Option<String>,
 }
 
 /// Fills the library from SQLite so the UI renders before the stores are scanned. Answers the saved
@@ -176,7 +178,8 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
         refresh_owned(app.clone(), false);
         fill_twins(app.clone());
         let saved = settings::load(&conn);
-        Ok(ViewPrefs { sort: saved.sort })
+        let updated_to = settings::take_updated(&conn, &app.package_info().version.to_string());
+        Ok(ViewPrefs { sort: saved.sort, updated_to })
     })
     .await
 }

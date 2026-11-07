@@ -2,10 +2,11 @@
   import StoreIcon from './StoreIcon.svelte'
   import FilterPopover from './FilterPopover.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
+  import UpdatePopover from './UpdatePopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, type Collection, type Filter } from './filters'
   import { onMount } from 'svelte'
-  import { onOpenDownloads, type Card, type Progress, type QueueView, type Sort, type Store } from './api'
+  import { onOpenDownloads, type Card, type Progress, type QueueView, type Sort, type Store, type UpdateInfo } from './api'
 
   let {
     query = $bindable(),
@@ -27,6 +28,12 @@
     onsettings,
     onadd,
     oncollections,
+    update,
+    appVersion,
+    running,
+    installing,
+    installError,
+    oninstall,
   }: {
     query: string
     store: Store | null
@@ -56,6 +63,14 @@
     onadd: () => void
     /** A collection was renamed or deleted in the Filters popover. */
     oncollections: () => void
+    /** A newer release: the Update chip shows while it's set. */
+    update: UpdateInfo | null
+    appVersion: string
+    /** A game is running; the update waits for it. */
+    running: boolean
+    installing: boolean
+    installError: string | null
+    oninstall: () => void
   } = $props()
 
   /** The store segments, in order; null is All. */
@@ -83,11 +98,12 @@
   ]
   const sortName = $derived(sorts.find((s) => s.value === sort)?.label)
 
-  let open = $state<'filters' | 'downloads' | 'sort' | null>(null)
+  let open = $state<'filters' | 'downloads' | 'sort' | 'update' | null>(null)
   let search = $state<HTMLInputElement>()
   let filtersChip = $state<HTMLButtonElement>()
   let downloadsChip = $state<HTMLButtonElement>()
   let sortChip = $state<HTMLButtonElement>()
+  let updateChip = $state<HTMLButtonElement>()
   $effect(() => {
     popoverOpen = open !== null
   })
@@ -112,7 +128,7 @@
   })
 
   function close(refocus: boolean) {
-    const chip = { filters: filtersChip, downloads: downloadsChip, sort: sortChip }[open ?? 'filters']
+    const chip = { filters: filtersChip, downloads: downloadsChip, sort: sortChip, update: updateChip }[open ?? 'filters']
     open = null
     if (refocus) chip?.focus()
   }
@@ -210,6 +226,33 @@
       <ChoiceMenu bind:value={sort} options={sorts} label="Sort by" anchor={sortChip} onclose={close} />
     {/if}
   </div>
+
+  {#if update}
+    <div class="dd">
+      <button
+        class="chip"
+        bind:this={updateChip}
+        aria-haspopup="dialog"
+        aria-expanded={open === 'update'}
+        onclick={() => (open = open === 'update' ? null : 'update')}
+      >
+        <svg class="line up" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+        Update
+      </button>
+      {#if open === 'update'}
+        <UpdatePopover
+          {update}
+          current={appVersion}
+          {running}
+          {installing}
+          error={installError}
+          anchor={updateChip}
+          onclose={close}
+          {oninstall}
+        />
+      {/if}
+    </div>
+  {/if}
 
   {#if downloading}
     <div class="dd">
@@ -422,6 +465,10 @@
       linear-gradient(#000 0 0) content-box exclude,
       linear-gradient(#000 0 0);
     pointer-events: none;
+  }
+
+  .up {
+    color: var(--accent-2);
   }
 
   .spacer {

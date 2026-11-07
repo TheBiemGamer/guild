@@ -54,9 +54,18 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<(
         move || super::game::stop_queue_for_restart(&app)
     })
     .await;
+    // The exit skips the tray's cleanup and would leave a dead icon behind until hovered.
+    let tray = app.tray_by_id("main");
+    let show_tray = |on: bool| {
+        if let Some(Err(e)) = tray.as_ref().map(|t| t.set_visible(on)) {
+            log!("tray: {e}");
+        }
+    };
+    show_tray(false);
     // On Windows this starts the installer and exits; it only returns on failure.
     if let Err(e) = update.install(bytes) {
         log!("update install: {e}");
+        show_tray(true);
         if !was_paused {
             super::game::resume_downloads(app);
         }

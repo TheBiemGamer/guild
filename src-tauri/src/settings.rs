@@ -22,6 +22,8 @@ pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
 pub const LIBRARY_SORT: &str = "library_sort";
 /// Name of the signed-in Steam account. Not a secret; the refresh token is in Credential Manager.
 pub const STEAM_ACCOUNT: &str = "steam_account";
+/// The newest app version that has started here, for the "Updated to" notice. Internal: not in `validate`.
+const SEEN_VERSION: &str = "seen_version";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
@@ -77,6 +79,22 @@ pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), 
     let value = value.map(str::trim).filter(|v| !v.is_empty());
     validate(name, value)?;
     db::set_setting(conn, name, value).map_err(|e| e.to_string())
+}
+
+/// `current` when it is newer than the version that last started here, so the UI says "Updated to" once.
+/// A first start and an older build (a dev build) say nothing; an older build also leaves the stored one.
+pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
+    let parse = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|n| n.parse().ok()).collect() };
+    let now = parse(current)?;
+    let seen = db::setting(conn, SEEN_VERSION).ok().flatten().and_then(|v| parse(&v));
+    if seen.as_ref().is_some_and(|seen| *seen >= now) {
+        return None;
+    }
+    if let Err(e) = db::set_setting(conn, SEEN_VERSION, Some(current)) {
+        log!("saving the seen version: {e}");
+        return None;
+    }
+    seen.map(|_| current.to_string())
 }
 
 const SERVICE: &str = "dev.noah.gamelauncher";
@@ -227,6 +245,22 @@ mod tests {
         let conn = memory();
         assert!(update(&conn, "igdb_secret", Some("x")).is_err());
         assert_eq!(db::setting(&conn, "igdb_secret").unwrap(), None);
+    }
+
+    #[test]
+    fn updated_is_said_once_and_only_after_an_older_version() {
+        let conn = memory();
+        // First start: nothing to announce, but remembered.
+        assert_eq!(take_updated(&conn, "0.2.0"), None);
+        assert_eq!(take_updated(&conn, "0.2.0"), None);
+        // Numeric, not text: 0.10.0 is newer than 0.9.0.
+        db::set_setting(&conn, SEEN_VERSION, Some("0.9.0")).unwrap();
+        assert_eq!(take_updated(&conn, "0.10.0").as_deref(), Some("0.10.0"));
+        assert_eq!(take_updated(&conn, "0.10.0"), None);
+        // An older dev build says nothing and keeps the installed version.
+        assert_eq!(take_updated(&conn, "0.3.0"), None);
+        assert_eq!(db::setting(&conn, SEEN_VERSION).unwrap().as_deref(), Some("0.10.0"));
+        assert!(validate(SEEN_VERSION, Some("9.9.9")).is_err());
     }
 
     #[test]

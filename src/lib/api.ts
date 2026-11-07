@@ -154,8 +154,8 @@ export const renameCollection = (id: number, name: string) => invoke<void>('rena
 /** The games stay in the library. */
 export const deleteCollection = (id: number) => invoke<void>('delete_collection', { id })
 export const setInCollection = (key: string, id: number, on: boolean) => invoke<void>('set_in_collection', { key, id, on })
-/** Resolves to the saved sort. */
-export const loadCache = () => invoke<{ sort: Sort }>('load_cache')
+/** Resolves to the saved sort, and `updatedTo`: the version this start updated to, once; null otherwise. */
+export const loadCache = () => invoke<{ sort: Sort; updatedTo: string | null }>('load_cache')
 /** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */
 export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })

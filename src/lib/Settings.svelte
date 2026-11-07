@@ -5,8 +5,25 @@
   import { sizeLabel } from './format'
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
+  import NotesPopover, { installedNotes } from './NotesPopover.svelte'
 
-  let { view, section = null, refreshedAt, refreshing, loggingIn, onclose, onchange, onrefresh, onlogin }: {
+  let {
+    view,
+    section = null,
+    refreshedAt,
+    refreshing,
+    loggingIn,
+    update,
+    updateChecked,
+    installing,
+    installError,
+    oncheck,
+    oninstall,
+    onclose,
+    onchange,
+    onrefresh,
+    onlogin,
+  }: {
     view: SettingsView
     /** The section to open at; null is the top. */
     section?: string | null
@@ -14,6 +31,14 @@
     refreshedAt: number | null
     refreshing: boolean
     loggingIn: boolean
+    /** A newer release, from the app's last check. */
+    update: api.UpdateInfo | null
+    /** A check answered this session, so "Up to date" is known. */
+    updateChecked: boolean
+    installing: boolean
+    installError: string | null
+    oncheck: () => Promise<void>
+    oninstall: () => void
     onclose: () => void
     /** A setting changed: the app re-reads settings and the library. */
     onchange: () => Promise<void>
@@ -38,6 +63,26 @@
   let connecting = $state(false)
   /** The Epic card's Options panel; folded each time Settings opens. */
   let epicOptions = $state(false)
+  let checking = $state(false)
+  let checkError = $state<string | null>(null)
+  const notes = $derived(installedNotes(view.appVersion))
+  let notesOpen = $state(false)
+  let notesButton = $state<HTMLButtonElement>()
+  const versionNote = $derived(
+    checkError ?? installError ?? (update ? `${update.version} available` : updateChecked ? 'Up to date' : null),
+  )
+
+  async function checkNow() {
+    checking = true
+    checkError = null
+    try {
+      await oncheck()
+    } catch (e) {
+      checkError = api.message(e)
+    }
+    checking = false
+  }
+
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -529,7 +574,23 @@
 
       <section id={id('About')}>
         <h4>About</h4>
-        <div class="row"><div>App version</div><span class="value">{view.appVersion}</span></div>
+        <div class="row">
+          <div>Version {view.appVersion}{#if versionNote}<span class="quiet">{versionNote}</span>{/if}</div>
+          <div class="field">
+            {#if notes}
+              <button class="btn" bind:this={notesButton} aria-haspopup="dialog" aria-expanded={notesOpen} onclick={() => (notesOpen = !notesOpen)}>
+                What's new
+              </button>
+            {/if}
+            {#if update}
+              <button class="btn" aria-disabled={installing} onclick={() => installing || oninstall()}>
+                {installing ? 'Downloading…' : 'Update and restart'}
+              </button>
+            {:else}
+              <button class="btn" disabled={checking} onclick={checkNow}>{checking ? 'Checking…' : 'Check for updates'}</button>
+            {/if}
+          </div>
+        </div>
         <div class="row">
           <div>Legendary (Epic Games)</div>
           <span class="value">{view.legendaryVersion ?? 'Not installed'}</span>
@@ -545,6 +606,19 @@
     </div>
   </div>
 </div>
+
+{#if notesOpen && notes}
+  <!-- Outside the panel: its backdrop blur would trap a fixed popover inside it. -->
+  <NotesPopover
+    version={view.appVersion}
+    {notes}
+    anchor={notesButton}
+    onclose={(refocus) => {
+      notesOpen = false
+      if (refocus) notesButton?.focus()
+    }}
+  />
+{/if}
 
 {#if connecting}
   <SteamLogin onclose={() => (connecting = false)} onconnected={steamConnected} />
@@ -825,6 +899,11 @@
     cursor: pointer;
   }
 
+  .btn[aria-disabled='true'] {
+    cursor: default;
+    opacity: 0.6;
+  }
+
   .btn.danger {
     color: var(--danger-text);
   }
@@ -848,6 +927,11 @@
     display: block;
     margin-top: 2px;
     color: var(--text-2);
+  }
+
+  .row > div > span.quiet {
+    font-size: 12px;
+    color: var(--text-3);
   }
 
   .value {

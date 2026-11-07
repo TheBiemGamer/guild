@@ -34,6 +34,7 @@
   import InstallPopup from './lib/InstallPopup.svelte'
   import GameMenu from './lib/GameMenu.svelte'
   import AddGame from './lib/AddGame.svelte'
+  import NotesPopover, { installedNotes } from './lib/NotesPopover.svelte'
   import { collectionFilter, isList, matches, type Filter } from './lib/filters'
 
   let query = $state('')
@@ -70,6 +71,40 @@
   let benchSpeed = $state<number | null>(null)
   /** The benchmark waits for both stores, so it scrolls the whole library. */
   let ready = $state(false)
+  /** A newer release, from the last check. */
+  let update = $state<api.UpdateInfo | null>(null)
+  /** A check answered this session. */
+  let updateChecked = $state(false)
+  let installing = $state(false)
+  let installError = $state<string | null>(null)
+  /** The version this start updated to, for the notice; null once dismissed. */
+  let updatedTo = $state<string | null>(null)
+  let updatedNotesOpen = $state(false)
+  let updatedNotesButton = $state<HTMLButtonElement>()
+
+  async function checkUpdate() {
+    update = await api.checkUpdate()
+    updateChecked = true
+  }
+
+  /** The schedule's check: failures are logged in Rust and only show when Settings checks. */
+  function quietCheck() {
+    if (import.meta.env.DEV || benchSpeed !== null) return
+    checkUpdate().catch(() => {})
+  }
+
+  /** On success the installer closes the app and starts the new version. */
+  async function installUpdate() {
+    installing = true
+    installError = null
+    try {
+      await api.installUpdate()
+    } catch (e) {
+      installError = api.message(e)
+    } finally {
+      installing = false
+    }
+  }
 
   async function load() {
     // Rust needs the Lists filters: Hidden brings hidden games back, and they decide whether favorites go on top.
@@ -256,7 +291,10 @@
     ;(async () => {
       benchSpeed = await api.benchSpeed()
       const saved = await api.loadCache().catch((e) => console.error('library cache', e))
-      if (saved) sort = saved.sort
+      if (saved) {
+        sort = saved.sort
+        updatedTo = saved.updatedTo
+      }
       savedSort = sort
       await reload()
       started = true
@@ -273,6 +311,7 @@
       }
       await reload()
       ready = true
+      quietCheck()
     })()
 
     const poller = setInterval(async () => {
@@ -287,12 +326,14 @@
       if (await api.refresh(false, false)) await reload()
     }, 60_000)
     const full = setInterval(backgroundRefresh, FULL_REFRESH_EVERY_MS)
+    const updates = setInterval(quietCheck, FULL_REFRESH_EVERY_MS)
     document.addEventListener('visibilitychange', returned)
     window.addEventListener('focus', returned)
     return () => {
       clearInterval(poller)
       clearInterval(steam)
       clearInterval(full)
+      clearInterval(updates)
       document.removeEventListener('visibilitychange', returned)
       window.removeEventListener('focus', returned)
     }
@@ -412,8 +453,35 @@
     onmove={(key, up) => changeQueue(() => api.moveDownload(key, up))}
     onsettings={() => openSettings()}
     onadd={() => openAddGame()}
+    {update}
+    appVersion={settings?.appVersion ?? ''}
+    running={running !== null}
+    {installing}
+    {installError}
+    oninstall={installUpdate}
   />
 
+  {#if updatedTo}
+    {@const notes = installedNotes(updatedTo)}
+    <div class="notice">
+      <span>Updated to <b>{updatedTo}</b></span>
+      {#if notes}
+        <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>What's new</button>
+        {#if updatedNotesOpen}
+          <NotesPopover
+            version={updatedTo}
+            {notes}
+            anchor={updatedNotesButton}
+            onclose={(refocus) => {
+              updatedNotesOpen = false
+              if (refocus) updatedNotesButton?.focus()
+            }}
+          />
+        {/if}
+      {/if}
+      <button class="close" onclick={() => (updatedTo = null)} aria-label="Dismiss">✕</button>
+    </div>
+  {/if}
   {#if lib.epicNotice}
     <div class="notice">
       <span>You were logged out of Epic Games. Log in again in Settings.</span>
@@ -563,6 +631,12 @@
     {refreshedAt}
     {refreshing}
     {loggingIn}
+    {update}
+    {updateChecked}
+    {installing}
+    {installError}
+    oncheck={checkUpdate}
+    oninstall={installUpdate}
     onclose={() => (settingsOpen = false)}
     onchange={settingsChanged}
     onrefresh={refreshNow}
@@ -597,6 +671,10 @@
 
   .notice > span:first-child {
     flex: 1;
+  }
+
+  .notice b {
+    font-weight: 600;
   }
 
   .notice.error {
