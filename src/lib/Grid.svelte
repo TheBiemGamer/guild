@@ -1,10 +1,14 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import CardView from './Card.svelte'
-  import { benchDone, queueState, type Card, type Progress, type QueueView } from './api'
+  import { benchDone, queueState, type Card, type Progress, type QueueView, type Section } from './api'
 
-  let { games, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, benchSpeed, header, headerHeight = 0 }: {
+  let { games, sections = null, stat = null, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, benchSpeed, header, headerHeight = 0 }: {
     games: Card[]
+    /** Labelled runs of `games`, each starting on its own row under a label row; null for one plain run. */
+    sections?: Section[] | null
+    /** The hours each card's badge shows, if any. */
+    stat?: 'playtime' | 'ttb' | null
     /** Changes when search, filters or sort change; background reloads keep the scroll position. */
     resetKey: string
     /** Copy keys, as `poll` reports them. */
@@ -30,6 +34,10 @@
   const ROW_H = CARD_H + GAP
   /** Off-screen rows rendered on each side, so fast scrolling doesn't show gaps. */
   const BUFFER = 2
+  /** A group label row: the 18px label, then the card gap. */
+  const LABEL_H = 18
+  /** Extra space above every group label but the first: with the row gap, 24px. */
+  const SECTION_GAP = 8
 
   let el: HTMLDivElement
   let width = $state(0)
@@ -38,11 +46,53 @@
 
   // Only rows near the viewport exist in the DOM; one tall sizer keeps the scrollbar honest.
   const cols = $derived(Math.max(1, Math.floor((width - GAP) / (CARD_W + GAP))))
-  const rows = $derived(Math.ceil(games.length / cols))
-  const top = $derived(headerHeight + GAP)
-  const first = $derived(Math.max(0, Math.floor((scrollTop - top) / ROW_H) - BUFFER))
-  const last = $derived(Math.min(rows, Math.ceil((scrollTop - top + height) / ROW_H) + BUFFER))
-  const visible = $derived(games.slice(first * cols, last * cols))
+
+  /** A row of cards (`games[start..start + count]`), or a group label (`label` set). */
+  interface Row { y: number; start: number; count: number; label?: string }
+
+  // Groups flatten into label rows and card rows. Rebuilt when the list or the width changes, not on scroll.
+  const layout = $derived.by(() => {
+    const rows: Row[] = []
+    const runs = sections ?? [{ label: undefined, count: games.length }]
+    let y = sections ? headerHeight : headerHeight + GAP
+    let start = 0
+    runs.forEach((run, i) => {
+      if (run.label !== undefined) {
+        if (i > 0) y += SECTION_GAP
+        rows.push({ y, start, count: run.count, label: run.label })
+        y += LABEL_H + GAP
+      }
+      for (let at = 0; at < run.count; at += cols) {
+        rows.push({ y, start: start + at, count: Math.min(cols, run.count - at) })
+        y += ROW_H
+      }
+      start += run.count
+    })
+    return { rows, height: y + GAP }
+  })
+
+  /** The first row whose bottom is below `y`. */
+  function rowAt(y: number) {
+    const rows = layout.rows
+    let lo = 0
+    let hi = rows.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (rows[mid].y + ROW_H <= y) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+
+  const first = $derived(Math.max(0, rowAt(scrollTop) - BUFFER))
+  const last = $derived(Math.min(layout.rows.length, rowAt(scrollTop + height) + 1 + BUFFER))
+  const visibleRows = $derived(layout.rows.slice(first, last))
+  const labels = $derived(visibleRows.filter((r) => r.label !== undefined))
+  const visible = $derived(
+    visibleRows.flatMap((r) =>
+      r.label !== undefined ? [] : games.slice(r.start, r.start + r.count).map((game, col) => ({ game, index: r.start + col, col, y: r.y })),
+    ),
+  )
   const left = $derived(Math.max(GAP, (width - cols * (CARD_W + GAP) + GAP) / 2))
   const span = $derived(cols * (CARD_W + GAP) - GAP)
 
@@ -79,21 +129,23 @@
   bind:clientHeight={height}
   onscroll={() => (scrollTop = el.scrollTop)}
 >
-  <div class="sizer" style="height: {top + rows * ROW_H + GAP}px">
+  <div class="sizer" style="height: {layout.height}px">
     {#if header && width > 0}
       <div class="header" style="left: {left}px; width: {span}px; height: {headerHeight}px">
         {@render header()}
       </div>
     {/if}
-    {#each visible as game, i (game.key)}
-      {@const index = first * cols + i}
-      <div
-        class="slot"
-        style="transform: translate({left + (index % cols) * (CARD_W + GAP)}px, {top + Math.floor(index / cols) * ROW_H}px)"
-      >
+    {#each labels as row (row.label)}
+      <h2 class="label slot" style="transform: translate({left}px, {row.y}px); width: {span}px">
+        {row.label}<span>{row.count}</span>
+      </h2>
+    {/each}
+    {#each visible as { game, index, col, y } (game.key)}
+      <div class="slot" style="transform: translate({left + col * (CARD_W + GAP)}px, {y}px)">
         <CardView
           {game}
           {index}
+          {stat}
           running={running !== null && game.copyKeys.includes(running)}
           progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
           queued={queue.jobs.length ? queueState(queue, game.copyKeys) : null}
@@ -128,5 +180,25 @@
     position: absolute;
     top: 0;
     left: 0;
+  }
+
+  /* The section label style, as App's "Library" label. */
+  .label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    height: 18px;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+  }
+
+  .label span {
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
   }
 </style>

@@ -92,6 +92,9 @@ struct Shared {
     twins_running: bool,
     /// An Epic playtime fetch is in flight.
     playtime_running: bool,
+    /// Cached how-long-to-beat "normally" seconds by key (`igdb::all_normally`), for sort, group,
+    /// filters and the card badge. Loaded once by `load_cache`; `time_to_beat` keeps it current.
+    ttb: HashMap<String, u64>,
     /// Every owned Steam game as a `Game`, built once per owned list so a rescan does no art lookups.
     /// `None` until built from the cached list (or after Disconnect).
     owned: Option<Vec<Game>>,

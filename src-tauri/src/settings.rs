@@ -6,12 +6,16 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::cache::db;
+use crate::view::{Group, Sort};
 
 pub const SHOW_BANNER: &str = "show_banner";
 pub const AMBIENT: &str = "ambient";
 pub const CLOUD_SAVES: &str = "cloud_saves";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
+/// The library's sort and grouping, as the toolbar last left them (serde names: `mostPlayed`, `timeToBeat`).
+pub const LIBRARY_SORT: &str = "library_sort";
+pub const LIBRARY_GROUP: &str = "library_group";
 /// Name of the signed-in Steam account. Not a secret; the refresh token is in Credential Manager.
 pub const STEAM_ACCOUNT: &str = "steam_account";
 
@@ -23,6 +27,8 @@ pub struct Settings {
     pub cloud_saves: bool,
     pub epic_install_dir: Option<PathBuf>,
     pub igdb_client_id: Option<String>,
+    pub sort: Sort,
+    pub group: Group,
 }
 
 /// Unset or unreadable values fall back to the defaults: banner, ambient color and cloud saves on.
@@ -34,6 +40,8 @@ pub fn load(conn: &Connection) -> Settings {
         cloud_saves: get(CLOUD_SAVES).is_none_or(|v| v != "false"),
         epic_install_dir: get(EPIC_INSTALL_DIR).map(PathBuf::from),
         igdb_client_id: get(IGDB_CLIENT_ID),
+        sort: get(LIBRARY_SORT).and_then(|v| Sort::parse(&v)).unwrap_or(Sort::Title),
+        group: get(LIBRARY_GROUP).and_then(|v| Group::parse(&v)).unwrap_or(Group::None),
     }
 }
 
@@ -49,6 +57,9 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), String> {
             _ => Ok(()),
         },
         IGDB_CLIENT_ID => Ok(()),
+        LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => Err(format!("Unknown sort: {value:?}")),
+        LIBRARY_GROUP if value.is_some_and(|v| Group::parse(v).is_none()) => Err(format!("Unknown group: {value:?}")),
+        LIBRARY_SORT | LIBRARY_GROUP => Ok(()),
         "igdb_secret" => Err("The IGDB secret is saved through its own command.".into()),
         _ => Err(format!("Unknown setting: {name}")),
     }
@@ -136,6 +147,18 @@ mod tests {
         let s = load(&memory());
         assert!(s.show_banner && s.ambient && s.cloud_saves);
         assert_eq!((s.epic_install_dir, s.igdb_client_id), (None, None));
+        assert_eq!((s.sort, s.group), (Sort::Title, Group::None));
+    }
+
+    #[test]
+    fn group_and_sort_load_back_and_reject_unknown_names() {
+        let conn = memory();
+        update(&conn, LIBRARY_SORT, Some("longestToBeat")).unwrap();
+        update(&conn, LIBRARY_GROUP, Some("playtime")).unwrap();
+        assert!(update(&conn, LIBRARY_GROUP, Some("genre")).is_err());
+        assert!(update(&conn, LIBRARY_SORT, Some("size")).is_err());
+        let s = load(&conn);
+        assert_eq!((s.sort, s.group), (Sort::LongestToBeat, Group::Playtime));
     }
 
     #[test]

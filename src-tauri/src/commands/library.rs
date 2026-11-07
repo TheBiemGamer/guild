@@ -17,7 +17,7 @@ use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
-use crate::view::{self, Sort};
+use crate::view::{self, Group, Sort};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
 const EPIC_START_GRACE: Duration = Duration::from_secs(30);
@@ -35,6 +35,10 @@ pub struct Card {
     installed: bool,
     /// The chosen copy has an update to install.
     update: bool,
+    /// Summed over the copies; `None` when no store knows.
+    playtime_minutes: Option<u64>,
+    /// How long to beat ("normally") in shown hours, from the cache; `None` when unknown.
+    ttb_hours: Option<u64>,
 }
 
 /// The key of the copy Play and Install use.
@@ -42,7 +46,7 @@ fn chosen(e: &Entry, games: &[Game]) -> String {
     games[entries::default_copy(e, games)].key()
 }
 
-fn card(e: &Entry, games: &[Game]) -> Card {
+fn card(e: &Entry, games: &[Game], ttb: &HashMap<String, u64>) -> Card {
     Card {
         key: e.key.clone(),
         chosen: chosen(e, games),
@@ -51,13 +55,25 @@ fn card(e: &Entry, games: &[Game]) -> Card {
         stores: entries::stores(e, games),
         installed: entries::installed(e, games),
         update: games[entries::default_copy(e, games)].update_available,
+        playtime_minutes: entries::playtime(e, games).0,
+        ttb_hours: view::ttb_secs(e, games, ttb).map(view::ttb_hours),
     }
+}
+
+/// A labelled run of `count` cards in `Library::games`.
+#[derive(Serialize)]
+pub struct Section {
+    label: String,
+    count: usize,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Library {
+    /// In order; with a grouping, group after group.
     games: Vec<Card>,
+    /// The groups over `games`, in order; empty without a grouping.
+    groups: Vec<Section>,
     total: usize,
     status: String,
     epic: Option<Login>,
@@ -75,14 +91,14 @@ pub fn library(
     store: Option<ProviderKind>,
     installed_only: bool,
     sort: Sort,
+    group: Group,
 ) -> Library {
     let s = state.lock();
-    let games = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort)
-        .into_iter()
-        .map(|i| card(&s.entries[i], &s.games))
-        .collect();
+    let shown = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort, &s.ttb);
+    let (games, groups) = sections(&s.games, &s.entries, &s.ttb, shown, group);
     Library {
         games,
+        groups,
         total: s.entries.len(),
         status: s.status.clone(),
         epic: s.epic_login,
@@ -92,9 +108,34 @@ pub fn library(
     }
 }
 
-/// Fills the library from SQLite so the UI renders before the stores are scanned.
+/// The cards in group order, and the groups over them (none for `Group::None`).
+fn sections(
+    games: &[Game],
+    entries: &[Entry],
+    ttb: &HashMap<String, u64>,
+    shown: Vec<usize>,
+    by: Group,
+) -> (Vec<Card>, Vec<Section>) {
+    let card = |&i: &usize| card(&entries[i], games, ttb);
+    if by == Group::None {
+        return (shown.iter().map(card).collect(), Vec::new());
+    }
+    let groups = view::group(&shown, entries, games, ttb, by);
+    let cards = groups.iter().flat_map(|(_, ids)| ids.iter().map(card)).collect();
+    (cards, groups.into_iter().map(|(label, ids)| Section { label, count: ids.len() }).collect())
+}
+
+/// The toolbar's group and sort as last saved.
+#[derive(Serialize)]
+pub struct ViewPrefs {
+    sort: Sort,
+    group: Group,
+}
+
+/// Fills the library from SQLite so the UI renders before the stores are scanned. Answers the saved
+/// group and sort, so the first `library` call already uses them.
 #[tauri::command]
-pub async fn load_cache(app: AppHandle) -> Res<()> {
+pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     blocking(move || {
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
@@ -103,7 +144,9 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         epic_playtime::merge(&conn, &mut games);
         view::sort_by_title(&mut games);
         let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
+        let ttb = crate::igdb::all_normally(&conn);
         let mut s = state.lock();
+        s.ttb = ttb;
         // A scan that already finished wins over the cache.
         if s.games.is_empty() {
             s.games = games;
@@ -114,7 +157,8 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         super::game::restore_queue(&app, &conn);
         refresh_owned(app.clone(), false);
         fill_twins(app.clone());
-        Ok(())
+        let saved = settings::load(&conn);
+        Ok(ViewPrefs { sort: saved.sort, group: saved.group })
     })
     .await
 }
@@ -608,7 +652,7 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
 /// The featured entry as a card, and its first copy (for the art).
 fn featured_pick(games: &[Game], entries: &[Entry]) -> Option<(Card, Game)> {
     let e = view::featured(games, entries)?;
-    Some((card(e, games), games[e.copies[0]].clone()))
+    Some((card(e, games, &HashMap::new()), games[e.copies[0]].clone()))
 }
 
 #[derive(Serialize)]
@@ -734,7 +778,7 @@ mod tests {
         };
         let games = vec![epic, steam];
         let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
-        let c = card(&entries[0], &games);
+        let c = card(&entries[0], &games, &HashMap::new());
         assert_eq!(c.key, "steam-635320");
         assert_eq!(c.chosen, "epic-Pumpkin");
         assert_eq!(c.copy_keys, ["steam-635320", "epic-Pumpkin"]);

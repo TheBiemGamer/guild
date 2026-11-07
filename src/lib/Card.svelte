@@ -3,10 +3,12 @@
   import { logoFile, storeNames } from './StoreIcon.svelte'
   import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
 
-  let { game, index, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume }: {
+  let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume }: {
     game: Card
     /** Place in the grid; covers are asked in this order. */
     index: number
+    /** Which hours the bottom-left badge shows, when nothing else claims that corner. */
+    stat?: 'playtime' | 'ttb' | null
     running: boolean
     progress: Progress | undefined
     /** Where this game is in the Epic download queue; null when it isn't. */
@@ -20,6 +22,14 @@
     oncancel: (key: string) => void
     onresume: () => void
   } = $props()
+
+  /** "38 h played", "45 min played", "Never played", "~25 h to beat"; null when unknown or off. */
+  const statText = $derived.by(() => {
+    if (stat === 'ttb') return game.ttbHours === null ? null : `~${game.ttbHours} h to beat`
+    if (stat !== 'playtime' || game.playtimeMinutes === null) return null
+    const m = game.playtimeMinutes
+    return m === 0 ? 'Never played' : m < 60 ? `${m} min played` : `${Math.floor(m / 60)} h played`
+  })
 
   /** Waiting in the queue, or first but paused: the hover shows the busy pill with Cancel or Resume. */
   const waiting = $derived(queued && queued.state !== 'active' ? queued : null)
@@ -98,6 +108,8 @@
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       Install
     </span>
+  {:else if statText}
+    <span class="chip stat">{statText}</span>
   {/if}
 
   {#if !running && (!progress || waiting)}
@@ -251,6 +263,11 @@
     background: rgb(10 10 16 / 0.68);
     border: 1px solid rgb(255 255 255 / 0.12);
     color: #fff;
+  }
+
+  .stat {
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
   }
 
   .badge {

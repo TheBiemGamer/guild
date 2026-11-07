@@ -4,24 +4,135 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::entries::{self, Entry};
 use crate::library::{Game, ProviderKind};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Sort {
     Title,
     LastPlayed,
+    /// Was `playtime`; the old name still parses.
+    #[serde(alias = "playtime")]
+    MostPlayed,
+    LongestToBeat,
+    ShortestToBeat,
+}
+
+impl Sort {
+    /// From the stored setting (serde's spelling).
+    pub fn parse(value: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(value.into())).ok()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Group {
+    None,
+    Store,
     Playtime,
+    TimeToBeat,
+}
+
+impl Group {
+    /// From the stored setting (serde's spelling).
+    pub fn parse(value: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(value.into())).ok()
+    }
+}
+
+/// How long to beat ("normally", seconds) from the cached IGDB answers, by entry key; a copy's key
+/// counts too, so an answer stored before a merge still applies. Zero means unknown.
+pub fn ttb_secs(entry: &Entry, games: &[Game], ttb: &HashMap<String, u64>) -> Option<u64> {
+    if ttb.is_empty() {
+        return None;
+    }
+    ttb.get(&entry.key)
+        .or_else(|| entry.copies.iter().find_map(|&i| ttb.get(&games[i].key())))
+        .copied()
+        .filter(|&s| s > 0)
+}
+
+/// How long to beat in whole hours, as cards, groups and filters show it: nearest hour, at least 1.
+pub fn ttb_hours(secs: u64) -> u64 {
+    ((secs + 1800) / 3600).max(1)
+}
+
+const PLAYTIME_BUCKETS: [&str; 7] = ["500 h+", "100–500 h", "50–100 h", "20–50 h", "10–20 h", "0–10 h", "Never played"];
+const TTB_BUCKETS: [&str; 6] =
+    ["Short · under 5 h", "Medium · 5–15 h", "Long · 15–40 h", "Very long · 40–100 h", "Endless · 100 h+", "Unknown"];
+const STORE_BUCKETS: [&str; 3] = ["Steam + Epic", "Steam", "Epic Games"];
+
+/// Index into `PLAYTIME_BUCKETS`. Unknown playtime counts as never played.
+fn playtime_bucket(minutes: Option<u64>) -> usize {
+    match minutes.unwrap_or(0) {
+        0 => 6,
+        m if m < 10 * 60 => 5,
+        m if m < 20 * 60 => 4,
+        m if m < 50 * 60 => 3,
+        m if m < 100 * 60 => 2,
+        m if m < 500 * 60 => 1,
+        _ => 0,
+    }
+}
+
+/// Index into `TTB_BUCKETS`, on the shown hours (`ttb_hours`).
+fn ttb_bucket(secs: Option<u64>) -> usize {
+    match secs.map(ttb_hours) {
+        None => 5,
+        Some(h) if h < 5 => 0,
+        Some(h) if h < 15 => 1,
+        Some(h) if h < 40 => 2,
+        Some(h) if h < 100 => 3,
+        Some(_) => 4,
+    }
+}
+
+fn store_bucket(entry: &Entry, games: &[Game]) -> usize {
+    match entries::stores(entry, games).as_slice() {
+        [_, _, ..] => 0,
+        [ProviderKind::Steam] => 1,
+        _ => 2,
+    }
+}
+
+/// `shown` (from `arrange`) split into labelled groups in bucket order, each keeping `shown`'s order.
+/// Empty groups are left out; `Group::None` is one unlabelled group.
+pub fn group(
+    shown: &[usize],
+    entries: &[Entry],
+    games: &[Game],
+    ttb: &HashMap<String, u64>,
+    by: Group,
+) -> Vec<(String, Vec<usize>)> {
+    let labels: &[&str] = match by {
+        Group::None => return vec![(String::new(), shown.to_vec())],
+        Group::Store => &STORE_BUCKETS,
+        Group::Playtime => &PLAYTIME_BUCKETS,
+        Group::TimeToBeat => &TTB_BUCKETS,
+    };
+    let mut groups: Vec<Vec<usize>> = vec![Vec::new(); labels.len()];
+    for &i in shown {
+        let e = &entries[i];
+        let bucket = match by {
+            Group::Store => store_bucket(e, games),
+            Group::Playtime => playtime_bucket(entries::playtime(e, games).0),
+            _ => ttb_bucket(ttb_secs(e, games, ttb)),
+        };
+        groups[bucket].push(i);
+    }
+    labels.iter().zip(groups).filter(|(_, g)| !g.is_empty()).map(|(l, g)| (l.to_string(), g)).collect()
 }
 
 pub fn sort_by_title(games: &mut [Game]) {
     games.sort_by_cached_key(|g| g.title.to_lowercase());
 }
 
-/// Indices of `entries` (in title order) matching the search and filters, in `sort` order. `store: None`
+/// Indices of `entries` (in title order) matching the search and filters, in `sort` order (how long
+/// to beat from `ttb`, as in `ttb_secs`). `store: None`
 /// means every store; the store filter matches any copy and installed means any copy. Stable sorts keep
 /// title order among ties; entries without stats go last.
 pub fn arrange(
@@ -31,6 +142,7 @@ pub fn arrange(
     store: Option<ProviderKind>,
     installed_only: bool,
     sort: Sort,
+    ttb: &HashMap<String, u64>,
 ) -> Vec<usize> {
     let query = query.trim().to_lowercase();
     let mut shown: Vec<usize> = (0..entries.len())
@@ -44,7 +156,12 @@ pub fn arrange(
     match sort {
         Sort::Title => {}
         Sort::LastPlayed => shown.sort_by_key(|&i| Reverse(entries::last_played(&entries[i], games).map(|(t, _)| t))),
-        Sort::Playtime => shown.sort_by_cached_key(|&i| Reverse(entries::playtime(&entries[i], games).0)),
+        Sort::MostPlayed => shown.sort_by_cached_key(|&i| Reverse(entries::playtime(&entries[i], games).0)),
+        Sort::LongestToBeat => shown.sort_by_cached_key(|&i| Reverse(ttb_secs(&entries[i], games, ttb))),
+        Sort::ShortestToBeat => shown.sort_by_cached_key(|&i| {
+            let secs = ttb_secs(&entries[i], games, ttb);
+            (secs.is_none(), secs)
+        }),
     }
     shown
 }
@@ -167,26 +284,120 @@ pub(crate) mod tests {
     fn arrange_searches_case_insensitively() {
         let g = library();
         let e = entries::group(&g, &HashMap::new());
-        assert_eq!(titles(&g, arrange(&g, &e, " BETA ", None, false, Sort::Title)), ["beta", "Gamma Beta"]);
-        assert!(arrange(&g, &e, "zzz", None, false, Sort::Title).is_empty());
+        assert_eq!(titles(&g, arrange(&g, &e, " BETA ", None, false, Sort::Title, &no_ttb())), ["beta", "Gamma Beta"]);
+        assert!(arrange(&g, &e, "zzz", None, false, Sort::Title, &no_ttb()).is_empty());
     }
 
     #[test]
     fn arrange_filters_installed_and_store() {
         let g = library();
         let e = entries::group(&g, &HashMap::new());
-        assert_eq!(titles(&g, arrange(&g, &e, "", None, true, Sort::Title)), ["beta", "delta", "Gamma Beta"]);
-        assert_eq!(titles(&g, arrange(&g, &e, "", Some(ProviderKind::Epic), false, Sort::Title)), ["delta"]);
-        assert_eq!(arrange(&g, &e, "", Some(ProviderKind::Steam), false, Sort::Title).len(), 3);
+        assert_eq!(titles(&g, arrange(&g, &e, "", None, true, Sort::Title, &no_ttb())), ["beta", "delta", "Gamma Beta"]);
+        assert_eq!(titles(&g, arrange(&g, &e, "", Some(ProviderKind::Epic), false, Sort::Title, &no_ttb())), ["delta"]);
+        assert_eq!(arrange(&g, &e, "", Some(ProviderKind::Steam), false, Sort::Title, &no_ttb()).len(), 3);
     }
 
     #[test]
     fn arrange_sorts_with_missing_stats_last_and_title_ties() {
         let g = library();
         let e = entries::group(&g, &HashMap::new());
-        assert_eq!(titles(&g, arrange(&g, &e, "", None, false, Sort::LastPlayed)), ["beta", "Gamma Beta", "Alpha", "delta"]);
+        assert_eq!(titles(&g, arrange(&g, &e, "", None, false, Sort::LastPlayed, &no_ttb())), ["beta", "Gamma Beta", "Alpha", "delta"]);
         // beta and delta tie on playtime: title order decides.
-        assert_eq!(titles(&g, arrange(&g, &e, "", None, false, Sort::Playtime)), ["Gamma Beta", "beta", "delta", "Alpha"]);
+        assert_eq!(titles(&g, arrange(&g, &e, "", None, false, Sort::MostPlayed, &no_ttb())), ["Gamma Beta", "beta", "delta", "Alpha"]);
+    }
+
+    fn no_ttb() -> HashMap<String, u64> {
+        HashMap::new()
+    }
+
+    #[test]
+    fn playtime_buckets_edges() {
+        let minutes = |m: Option<u64>| PLAYTIME_BUCKETS[playtime_bucket(m)];
+        let hours = |h: u64| minutes(Some(h * 60));
+        assert_eq!(minutes(None), "Never played");
+        assert_eq!(hours(0), "Never played");
+        assert_eq!(minutes(Some(1)), "0–10 h");
+        assert_eq!(hours(9), "0–10 h");
+        assert_eq!(minutes(Some(10 * 60 - 1)), "0–10 h");
+        assert_eq!(hours(10), "10–20 h");
+        assert_eq!(hours(20), "20–50 h");
+        assert_eq!(hours(50), "50–100 h");
+        assert_eq!(hours(100), "100–500 h");
+        assert_eq!(hours(499), "100–500 h");
+        assert_eq!(hours(500), "500 h+");
+    }
+
+    #[test]
+    fn hltb_buckets_edges() {
+        let bucket = |secs: Option<u64>| TTB_BUCKETS[ttb_bucket(secs)];
+        let h = |h: u64| Some(h * 3600);
+        assert_eq!(bucket(None), "Unknown");
+        // Ten minutes shows as 1 h.
+        assert_eq!(bucket(Some(600)), "Short · under 5 h");
+        assert_eq!(bucket(h(4)), "Short · under 5 h");
+        // On the shown (rounded) hours: 4 h 40 min shows as 5 h, so medium.
+        assert_eq!(bucket(Some(4 * 3600 + 40 * 60)), "Medium · 5–15 h");
+        assert_eq!(bucket(h(5)), "Medium · 5–15 h");
+        assert_eq!(bucket(h(14)), "Medium · 5–15 h");
+        assert_eq!(bucket(h(15)), "Long · 15–40 h");
+        assert_eq!(bucket(h(39)), "Long · 15–40 h");
+        assert_eq!(bucket(h(40)), "Very long · 40–100 h");
+        assert_eq!(bucket(h(99)), "Very long · 40–100 h");
+        assert_eq!(bucket(h(100)), "Endless · 100 h+");
+    }
+
+    #[test]
+    fn group_hides_empty_buckets() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        let shown = arrange(&g, &e, "", None, false, Sort::MostPlayed, &no_ttb());
+        let named = |groups: Vec<(String, Vec<usize>)>| -> Vec<(String, Vec<&str>)> {
+            groups
+                .into_iter()
+                .map(|(l, ids)| (l, ids.into_iter().map(|i| g[e[i].copies[0]].title.as_str()).collect()))
+                .collect()
+        };
+        let label = |l: &str| l.to_string();
+        // Gamma Beta 8 h, beta and delta 10 min, Alpha unknown; every other bucket is empty and absent.
+        assert_eq!(
+            named(group(&shown, &e, &g, &no_ttb(), Group::Playtime)),
+            [(label("0–10 h"), vec!["Gamma Beta", "beta", "delta"]), (label("Never played"), vec!["Alpha"])]
+        );
+        assert_eq!(
+            named(group(&shown, &e, &g, &no_ttb(), Group::Store)),
+            [(label("Steam"), vec!["Gamma Beta", "beta", "Alpha"]), (label("Epic Games"), vec!["delta"])]
+        );
+        let ttb = HashMap::from([("steam-beta".to_string(), 20 * 3600)]);
+        assert_eq!(
+            named(group(&shown, &e, &g, &ttb, Group::TimeToBeat)),
+            [(label("Long · 15–40 h"), vec!["beta"]), (label("Unknown"), vec!["Gamma Beta", "delta", "Alpha"])]
+        );
+        assert_eq!(group(&shown, &e, &g, &no_ttb(), Group::None), [(String::new(), shown.clone())]);
+        assert!(group(&[], &e, &g, &no_ttb(), Group::Playtime).is_empty());
+    }
+
+    #[test]
+    fn sort_longest_to_beat_puts_unknown_last() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        // Zero is unknown; unknowns keep title order.
+        let ttb = HashMap::from([
+            ("steam-beta".to_string(), 3600),
+            ("epic-delta".to_string(), 90_000),
+            ("steam-Alpha".to_string(), 0),
+        ]);
+        let sorted = |sort| titles(&g, arrange(&g, &e, "", None, false, sort, &ttb));
+        assert_eq!(sorted(Sort::LongestToBeat), ["delta", "beta", "Alpha", "Gamma Beta"]);
+        assert_eq!(sorted(Sort::ShortestToBeat), ["beta", "delta", "Alpha", "Gamma Beta"]);
+    }
+
+    #[test]
+    fn sort_and_group_parse_their_stored_names() {
+        assert_eq!(Sort::parse("longestToBeat"), Some(Sort::LongestToBeat));
+        assert_eq!(Sort::parse("playtime"), Some(Sort::MostPlayed));
+        assert_eq!(Sort::parse("size"), None);
+        assert_eq!(Group::parse("timeToBeat"), Some(Group::TimeToBeat));
+        assert_eq!(Group::parse("genre"), None);
     }
 
     #[test]
@@ -197,7 +408,7 @@ pub(crate) mod tests {
         let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
         assert_eq!(entries.len(), 1);
         for store in [ProviderKind::Steam, ProviderKind::Epic] {
-            assert_eq!(arrange(&games, &entries, "", Some(store), false, Sort::Title), [0], "{store:?}");
+            assert_eq!(arrange(&games, &entries, "", Some(store), false, Sort::Title, &no_ttb()), [0], "{store:?}");
         }
     }
 

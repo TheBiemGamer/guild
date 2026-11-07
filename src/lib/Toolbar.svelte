@@ -3,7 +3,7 @@
   import FilterPopover from './FilterPopover.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
   import { filterChips, removeChip, type Filter } from './filters'
-  import type { Card, Progress, QueueView, Sort, Store } from './api'
+  import type { Card, Group, Progress, QueueView, Sort, Store } from './api'
 
   let {
     query = $bindable(),
@@ -11,6 +11,7 @@
     installedOnly = $bindable(),
     filters = $bindable(),
     sort = $bindable(),
+    group = $bindable(),
     popoverOpen = $bindable(),
     total,
     attention,
@@ -30,6 +31,7 @@
     /** The Filters popover's extra filters. */
     filters: Filter[]
     sort: Sort
+    group: Group
     /** A popover is open; App ignores mouse Back/Forward meanwhile, as for Settings. */
     popoverOpen: boolean
     total: number
@@ -149,10 +151,23 @@
   <span class="spacer"></span>
 
   <label class="sort">
+    <span class="prefix" aria-hidden="true">Group:</span>
+    <select bind:value={group} aria-label="Group by">
+      <option value="none">None</option>
+      <option value="store">Store</option>
+      <option value="playtime">Your playtime</option>
+      <option value="timeToBeat">How long to beat</option>
+    </select>
+    <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+  </label>
+
+  <label class="sort">
     <select bind:value={sort} aria-label="Sort by">
+      <option value="lastPlayed">Recently played</option>
+      <option value="mostPlayed">Most played</option>
+      <option value="longestToBeat">Longest to beat</option>
+      <option value="shortestToBeat">Shortest to beat</option>
       <option value="title">Title</option>
-      <option value="lastPlayed">Last played</option>
-      <option value="playtime">Playtime</option>
     </select>
     <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
   </label>
@@ -347,6 +362,17 @@
     background: transparent;
     color: var(--text);
     cursor: pointer;
+  }
+
+  /* "Group:" before the chosen grouping, as one chip. */
+  .sort .prefix {
+    padding-left: 12px;
+    color: var(--text-2);
+    pointer-events: none;
+  }
+
+  .prefix + select {
+    padding-left: 4px;
   }
 
   .sort select:focus-visible {

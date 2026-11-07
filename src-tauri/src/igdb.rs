@@ -3,6 +3,7 @@
 //!
 //! IGDB asks for visible attribution where its data is shown (see `commands::time_to_beat`).
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -290,6 +291,21 @@ pub fn cached(conn: &Connection, key: &str, now_secs: i64) -> Option<Option<Time
     (stored.is_some() || fresh_missing()).then_some(stored)
 }
 
+/// Every cached "normally" (seconds) by key, whatever its age: sorting and grouping use these and
+/// never ask IGDB. One query, at start.
+pub fn all_normally(conn: &Connection) -> HashMap<String, u64> {
+    let Ok(mut stmt) = conn.prepare("SELECT key, json FROM info WHERE kind = 'ttb'") else { return HashMap::new() };
+    let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else {
+        return HashMap::new();
+    };
+    rows.flatten()
+        .filter_map(|(key, json)| {
+            let t: TimeToBeat = serde_json::from_str::<Option<TimeToBeat>>(&json).ok()??;
+            Some((key, t.normally.filter(|&s| s > 0)?))
+        })
+        .collect()
+}
+
 /// Remembers the answer; "not found" is stored as `null` so it isn't asked again on every visit.
 pub fn remember(conn: &Connection, key: &str, answer: Option<TimeToBeat>, now_secs: i64) {
     if let Ok(json) = serde_json::to_string(&answer) {
@@ -443,5 +459,16 @@ mod tests {
         assert_eq!(cached(&conn, "steam-1", 31 * day), None);
         assert_eq!(cached(&conn, "steam-2", 6 * day), Some(None), "not found is remembered");
         assert_eq!(cached(&conn, "steam-2", 8 * day), None, "and retried after a week");
+    }
+
+    #[test]
+    fn all_normally_keeps_known_times_of_any_age() {
+        let conn = temp_db("all-normally");
+        let ttb = |normally| Some(TimeToBeat { hastily: Some(60), normally, completely: None });
+        remember(&conn, "steam-1", ttb(Some(3600)), 0);
+        remember(&conn, "steam-2", ttb(None), 0);
+        remember(&conn, "steam-3", None, 0);
+        remember(&conn, "steam-4", ttb(Some(0)), 0);
+        assert_eq!(all_normally(&conn), HashMap::from([("steam-1".to_string(), 3600)]));
     }
 }

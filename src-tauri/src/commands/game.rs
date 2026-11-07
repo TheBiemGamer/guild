@@ -1115,6 +1115,18 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
         })
         .await;
     }
+    {
+        let normally = answer.and_then(|t| t.normally).filter(|&s| s > 0);
+        let mut s = state.lock();
+        let before = match normally {
+            Some(secs) => s.ttb.insert(key, secs),
+            None => s.ttb.remove(&key),
+        };
+        // The library sorts, groups and badges on it: the next poll re-asks.
+        if before != normally {
+            s.library_changed = true;
+        }
+    }
     answer.and_then(time_to_beat_view)
 }
 

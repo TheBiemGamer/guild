@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Featured, Library, Progress, QueueView, SettingsView, Sort, Store } from './lib/api'
+  import type { Action, Featured, Group, Library, Progress, QueueView, Section, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -37,12 +37,13 @@
   let query = $state('')
   let store = $state<Store | null>(null)
   let sort = $state<Sort>('title')
+  let group = $state<Group>('none')
   let installedOnly = $state(false)
   /** The Filters popover's extra filters, applied here to the loaded list. */
   let filters = $state<Filter[]>([])
   let popoverOpen = $state(false)
 
-  let lib = $state<Library>({ games: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false })
+  let lib = $state<Library>({ games: [], groups: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false })
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
@@ -65,7 +66,7 @@
   let ready = $state(false)
 
   async function load() {
-    lib = await api.library(query, store, installedOnly, sort)
+    lib = await api.library(query, store, installedOnly, sort, group)
     version++
   }
 
@@ -76,8 +77,19 @@
   }
 
   $effect(() => {
-    void [query, store, sort, installedOnly]
+    void [query, store, sort, group, installedOnly]
     load()
+  })
+
+  /** The group and sort as saved; null until the saved ones are restored at start. */
+  let savedView: { sort: Sort; group: Group } | null = null
+  $effect(() => {
+    const now = { sort, group }
+    if (!savedView) return
+    const quiet = (e: unknown) => console.error('saving the library view', e)
+    if (now.sort !== savedView.sort) api.updateSetting('library_sort', now.sort).catch(quiet)
+    if (now.group !== savedView.group) api.updateSetting('library_group', now.group).catch(quiet)
+    savedView = now
   })
 
   /** The Epic copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
@@ -193,7 +205,12 @@
     // Saved library first, then a quiet rescan: Steam is quick, Legendary can take a while.
     ;(async () => {
       benchSpeed = await api.benchSpeed()
-      await api.loadCache().catch((e) => console.error('library cache', e))
+      const saved = await api.loadCache().catch((e) => console.error('library cache', e))
+      if (saved) {
+        sort = saved.sort
+        group = saved.group
+      }
+      savedView = { sort, group }
       await reload()
       started = true
       await firstCovers()
@@ -277,11 +294,33 @@
   }
 
   // Worked out when the list, the filters or (with "Downloading" on) the progress change; never per frame.
-  const shown = $derived.by(() => {
-    if (filters.length === 0) return lib.games
+  // Filtering keeps each group's cards together and drops groups left empty.
+  const view = $derived.by((): { games: Library['games']; sections: Section[] | null } => {
+    const sections = lib.groups.length ? lib.groups : null
+    if (filters.length === 0) return { games: lib.games, sections }
     const p = filters.includes('downloading') ? progress : {}
-    return lib.games.filter((g) => matches(g, filters, p))
+    const keep = (g: Library['games'][number]) => matches(g, filters, p)
+    if (!sections) return { games: lib.games.filter(keep), sections }
+    const games: Library['games'] = []
+    const kept: Section[] = []
+    let at = 0
+    for (const s of sections) {
+      const before = games.length
+      for (const g of lib.games.slice(at, at + s.count)) if (keep(g)) games.push(g)
+      at += s.count
+      if (games.length > before) kept.push({ label: s.label, count: games.length - before })
+    }
+    return { games, sections: kept }
   })
+  const shown = $derived(view.games)
+  /** The hours a card's badge shows: how long to beat or playtime, while grouping or sorting by it. */
+  const stat = $derived(
+    group === 'timeToBeat' || sort === 'longestToBeat' || sort === 'shortestToBeat'
+      ? 'ttb'
+      : group === 'playtime' || sort === 'mostPlayed'
+        ? 'playtime'
+        : null,
+  )
 
   /** Queue changes answer with the queue as it is now, so it shows before the next poll. Resolves to whether it worked. */
   async function changeQueue(f: () => Promise<QueueView>) {
@@ -301,7 +340,8 @@
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
   const LABEL_H = 18
-  const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + LABEL_H)
+  // Grouped, each group has its own label row in the grid instead of the one "Library" label.
+  const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + (view.sections ? 0 : LABEL_H))
   /** The Epic filter with no Epic games at all: say why and offer the fix. */
   const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
 </script>
@@ -317,6 +357,7 @@
     bind:installedOnly
     bind:filters
     bind:sort
+    bind:group
     bind:popoverOpen
     total={lib.total}
     attention={lib.epicAttention || lib.steamAttention}
@@ -371,7 +412,9 @@
     {#if shown.length > 0}
       <Grid
         games={shown}
-        resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
+        sections={view.sections}
+        {stat}
+        resetKey={`${query}|${store}|${sort}|${group}|${installedOnly}|${filters.join()}`}
         {running}
         {progress}
         {queue}
@@ -394,10 +437,12 @@
               />
             </div>
           {/if}
-          <h2 class="label">
-            {query || store || installedOnly || filters.length ? 'Results' : 'Library'}
-            <span>{shown.length}</span>
-          </h2>
+          {#if !view.sections}
+            <h2 class="label">
+              {query || store || installedOnly || filters.length ? 'Results' : 'Library'}
+              <span>{shown.length}</span>
+            </h2>
+          {/if}
         {/snippet}
       </Grid>
     {:else if epicEmpty && lib.epic === 'noLegendary'}

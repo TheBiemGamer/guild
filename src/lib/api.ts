@@ -3,17 +3,34 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
 export type Store = 'steam' | 'epic'
-export type Sort = 'title' | 'lastPlayed' | 'playtime'
+export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
+export type Group = 'none' | 'store' | 'playtime' | 'timeToBeat'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
  * `stores`: every store this game is in, the one `key` belongs to first. `chosen`: the copy key Play and
  * Install use. `copyKeys`: every copy's key, which running state and install progress are reported under.
+ * `playtimeMinutes`: summed over the copies, null when unknown. `ttbHours`: how long to beat in shown hours, null when unknown.
  */
-export interface Card { key: string; chosen: string; copyKeys: string[]; title: string; stores: Store[]; installed: boolean; update: boolean }
+export interface Card {
+  key: string
+  chosen: string
+  copyKeys: string[]
+  title: string
+  stores: Store[]
+  installed: boolean
+  update: boolean
+  playtimeMinutes: number | null
+  ttbHours: number | null
+}
+/** A labelled run of `count` cards. */
+export interface Section { label: string; count: number }
 export interface Library {
+  /** With a grouping, group after group. */
   games: Card[]
+  /** The groups over `games`, in order; empty without a grouping. */
+  groups: Section[]
   total: number
   status: string
   epic: Login | null
@@ -99,9 +116,10 @@ export function queueState(queue: QueueView, keys: string[]): QueueState | null 
   return { key, action, state: at > 0 ? 'queued' : queue.paused ? 'paused' : 'active' }
 }
 
-export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort) =>
-  invoke<Library>('library', { query, store, installedOnly, sort })
-export const loadCache = () => invoke<void>('load_cache')
+export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort, group: Group) =>
+  invoke<Library>('library', { query, store, installedOnly, sort, group })
+/** Resolves to the saved group and sort. */
+export const loadCache = () => invoke<{ sort: Sort; group: Group }>('load_cache')
 /** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */
 export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
