@@ -46,7 +46,7 @@
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
   import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
 
-  let { gameKey, runningKey, progressByKey, queue, oncancel, onresume, version, onback, onerror, onchanged, ontint, onconfirminstall, conflict = null }: {
+  let { gameKey, runningKey, progressByKey, queue, oncancel, onresume, version, onback, onerror, onchanged, ontint, onconfirminstall, onedit, conflict = null }: {
     gameKey: string
     /** Copy keys, as `poll` reports them. */
     runningKey: string | null
@@ -65,6 +65,8 @@
     ontint: (url: string | null) => void
     /** Install through the library's flow: an Epic copy asks in the install popup first, then calls `go`. */
     onconfirminstall: (key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) => void
+    /** Opens the Edit dialog for a game the owner added. */
+    onedit: (key: string) => void
     /** A Play from a card stopped at this cloud save conflict (`key`: the copy played); the hero asks. */
     conflict?: { key: string; conflict: Conflict } | null
   } = $props()
@@ -187,6 +189,8 @@
     }
   })
   const copy = $derived(game && (game.copies.find((c) => c.key === chosenKey) ?? game.copies[0]))
+  /** Added by the owner: no store, so no store details, links or store actions. */
+  const custom = $derived(game?.stores[0] === 'custom')
   // Running state and progress arrive under copy keys.
   const copyKeys = $derived(game ? game.copies.map((c) => c.key) : [gameKey])
   const running = $derived(runningKey !== null && copyKeys.includes(runningKey))
@@ -404,9 +408,11 @@
   const installedOn = $derived(game && (copy!.installed ? copy! : game.copies.find((c) => c.installed)))
   const meta = $derived(
     game
-      ? [installedOn ? `Installed on ${storeNames[installedOn.provider]}` : 'Not installed', info?.developer, year].filter(
-          (s): s is string => !!s,
-        )
+      ? custom
+        ? ['Added by you', ...(game.installed ? [] : ['Not installed'])]
+        : [installedOn ? `Installed on ${storeNames[installedOn.provider]}` : 'Not installed', info?.developer, year].filter(
+            (s): s is string => !!s,
+          )
       : [],
   )
   // Epic's DLC first; a Steam DLC named like one of them is shown once. Steam installs owned DLC with the game.
@@ -430,7 +436,7 @@
     const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
     if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
     if (copy?.cloudSaves) list.push({ id: 'saves', label: 'Saves' })
-    if (copy?.installed) list.push({ id: 'launch', label: 'Launch options' })
+    if (copy?.installed && !custom) list.push({ id: 'launch', label: 'Launch options' })
     if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
     return list
   })
@@ -449,8 +455,8 @@
   }
 
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
-  // Every game has a store page, so Details always has something to show.
-  const showDetails = $derived(!!game)
+  // Every store game has a store page, so Details always has something to show.
+  const showDetails = $derived(!!game && !custom)
   const storeLinks = $derived(game?.links.filter((k) => k === 'steamStore' || k === 'epicStore') ?? [])
   const infoLinks = $derived(game?.links.filter((k) => k !== 'steamStore' && k !== 'epicStore') ?? [])
 </script>
@@ -459,7 +465,7 @@
   {#if copy!.installDir}
     <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>Open install folder</button>
   {/if}
-  {#if copy!.installed}
+  {#if copy!.installed && !custom}
     <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
   {/if}
 {/snippet}
@@ -492,7 +498,7 @@
           <div class="name">
             <h1>{game.title}</h1>
             <div class="meta">
-              {#each game.stores as store}<StoreIcon provider={store} size={14} />{/each}
+              {#if !custom}{#each game.stores as store}<StoreIcon provider={store} size={14} />{/each}{/if}
               {#each meta as item}<span>{item}</span>{/each}
             </div>
             {#if progress}
@@ -545,6 +551,8 @@
                     onclose={closeMenu}
                     {onchanged}
                     {onerror}
+                    {onedit}
+                    onremoved={onback}
                     extra={copyActions ? copyItems : undefined}
                   />
                 {/if}
@@ -716,7 +724,7 @@
               <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
             </div>
           {/if}
-          {#if copy!.installed}
+          {#if copy!.installed && !custom}
             <div class="row">
               <div class="what">
                 Verify files<small>{copy!.provider === 'steam' ? 'Opens in Steam.' : 'Repairs bad or missing files.'}</small>
@@ -775,6 +783,7 @@
         </div>
       {/if}
 
+      {#if !custom}
       <div class="cols">
         <!-- Skeleton lines hold the panels' places while the store details load. -->
         {#if info === undefined}
@@ -822,6 +831,7 @@
           </section>
         {/if}
       </div>
+      {/if}
       {/if}
       </div>
     {/if}
@@ -936,6 +946,11 @@
     content: '·';
     margin-right: 8px;
     color: var(--text-3);
+  }
+
+  /* No store logo before it (a game the owner added). */
+  .meta span:first-child::before {
+    content: none;
   }
 
   .progress {

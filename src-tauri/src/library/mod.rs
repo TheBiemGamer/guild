@@ -1,5 +1,6 @@
 //! Normalized game model shared by all stores.
 
+pub mod custom;
 pub mod epic;
 pub mod steam;
 
@@ -13,15 +14,18 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub enum ProviderKind {
     Steam,
     Epic,
+    /// A program the owner added (`custom_games`); never merged with a store copy.
+    Custom,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 2] = [ProviderKind::Steam, ProviderKind::Epic];
+    pub const ALL: [ProviderKind; 3] = [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Custom];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Steam => "steam",
             Self::Epic => "epic",
+            Self::Custom => "custom",
         }
     }
 
@@ -33,6 +37,7 @@ impl ProviderKind {
         match self {
             Self::Steam => "Steam",
             Self::Epic => "Epic Games",
+            Self::Custom => "added games",
         }
     }
 
@@ -40,6 +45,7 @@ impl ProviderKind {
         match self {
             Self::Steam => &steam::Steam,
             Self::Epic => &epic::Epic,
+            Self::Custom => &custom::Custom,
         }
     }
 

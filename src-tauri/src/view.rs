@@ -238,11 +238,11 @@ pub fn arrange(
     shown
 }
 
-/// The game page's Playtime tile in minutes, zero being Steam's `Never played`. `None` for an Epic copy
-/// without playtime: Epic's zero only means nothing is known, so the tile hides.
+/// The game page's Playtime tile in minutes, zero being Steam's `Never played`. `None` for an Epic or added
+/// game without playtime: only Steam's zero is a fact, so the tile hides.
 pub fn playtime_tile(provider: ProviderKind, minutes: Option<u64>) -> Option<u64> {
     match minutes.unwrap_or(0) {
-        0 if provider == ProviderKind::Epic => None,
+        0 if provider != ProviderKind::Steam => None,
         m => Some(m),
     }
 }

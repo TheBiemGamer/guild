@@ -1,5 +1,5 @@
-// Every label made from the numbers Rust sends: progress, sizes, times and group names. No imports,
-// so `node --test scripts/` can load it as plain TypeScript.
+// Every label made from the numbers Rust sends: progress, sizes, times and group names, plus the name a
+// picked program suggests. No imports, so `node --test scripts/` can load it as plain TypeScript.
 
 export type ProgressAction = 'download' | 'install' | 'update' | 'repair' | 'verify'
 /** A job in progress. Steam's are all `download`, with `totalBytes`; Epic's bytes have no total; verify counts files. */
@@ -130,4 +130,10 @@ export function syncedLabel(at: number | null, now = Date.now() / 1000): string 
 /** How long to beat: "32 h" (nearest hour), "45 min" under an hour. */
 export function ttbLabel(secs: number): string {
   return secs < 3600 ? `${Math.floor(secs / 60)} min` : `${Math.floor((secs + 1800) / 3600)} h`
+}
+
+/** The name the Add a game dialog suggests for a program: its file name without the extension. */
+export function nameFromExe(path: string): string {
+  const file = path.split(/[\\/]/).pop() ?? ''
+  return file.replace(/\.[^.]*$/, '')
 }

@@ -6,8 +6,10 @@
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
 
-  let { view, refreshedAt, refreshing, loggingIn, onclose, onchange, onrefresh, onlogin }: {
+  let { view, section = null, refreshedAt, refreshing, loggingIn, onclose, onchange, onrefresh, onlogin }: {
     view: SettingsView
+    /** The section to open at; null is the top. */
+    section?: string | null
     /** When the last full refresh finished (ms), or null if none has this session. */
     refreshedAt: number | null
     refreshing: boolean
@@ -30,6 +32,8 @@
   let clientId = $state(untrack(() => view.igdbClientId ?? ''))
   let secret = $state('')
   let replacing = $state(false)
+  let gridKey = $state('')
+  let gridReplacing = $state(false)
   let busy = $state(false)
   let connecting = $state(false)
   /** The Epic card's Options panel; folded each time Settings opens. */
@@ -39,6 +43,7 @@
 
   const id = (name: string) => `settings-${name.replace(' ', '-').toLowerCase()}`
   const showSecretField = $derived(!view.igdbSecretSet || replacing)
+  const showGridField = $derived(!view.steamgriddbKeySet || gridReplacing)
 
   /** Runs a change, shows its error, then refreshes the app's copy. Returns whether it worked. */
   async function change(work: () => Promise<unknown>) {
@@ -87,6 +92,14 @@
     if (await change(() => api.setIgdbSecret(secret))) {
       secret = ''
       replacing = false
+    }
+  }
+
+  async function saveGridKey() {
+    if (!gridKey.trim()) return
+    if (await change(() => api.setSteamgriddbKey(gridKey))) {
+      gridKey = ''
+      gridReplacing = false
     }
   }
 
@@ -168,6 +181,7 @@
   }
 
   const removeSecret = () => change(() => api.setIgdbSecret(null))
+  const removeGridKey = () => change(() => api.setSteamgriddbKey(null))
   const logOut = () => change(() => api.epicLogOut())
   const clearCache = () => change(() => api.clearCache())
 
@@ -223,6 +237,7 @@
 
   onMount(() => {
     closeButton.focus()
+    if (section) go(section)
     const tick = setInterval(() => (now = Date.now()), 30_000)
     return () => clearInterval(tick)
   })
@@ -442,6 +457,31 @@
           <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
             {testing ? 'Testing…' : 'Test'}
           </button>
+        </div>
+        <p class="hint gap">
+          SteamGridDB has covers for games you add yourself. It needs a free API key:
+          <button class="link" onclick={() => run(api.openSteamgriddb)}>get one on SteamGridDB</button>.
+        </p>
+        <div class="row stack">
+          <label for="grid-key">SteamGridDB API key</label>
+          <div class="field">
+            {#if showGridField}
+              <input
+                id="grid-key"
+                type="password"
+                autocomplete="off"
+                placeholder="Paste the key"
+                bind:value={gridKey}
+                onkeydown={(e) => e.key === 'Enter' && saveGridKey()}
+              />
+              <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>Save</button>
+              {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>Cancel</button>{/if}
+            {:else}
+              <span class="saved" id="grid-key">Saved ✓</span>
+              <button class="btn" onclick={() => (gridReplacing = true)}>Replace</button>
+              <button class="btn danger" disabled={busy} onclick={removeGridKey}>Remove</button>
+            {/if}
+          </div>
         </div>
       </section>
 
@@ -829,6 +869,10 @@
     margin: 0;
     color: var(--text-2);
     font-size: 13px;
+  }
+
+  .hint.gap {
+    margin-top: 16px;
   }
 
   .link {

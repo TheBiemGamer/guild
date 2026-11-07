@@ -45,6 +45,7 @@ A Steam and an Epic copy merge only when [GOG GamesDB](https://gamesdb.gog.com) 
 - **Epic Games:** through Legendary
 - **GOG GamesDB:** links Epic games to their Steam versions
 - **IGDB (via Twitch):** how long to beat, only if you add credentials
+- **SteamGridDB:** covers for games you add yourself, only if you add an API key
 - **Store image servers** (Steam, Epic, GOG): cover art and screenshots
 
 Some of these connections are unofficial and can break when a store changes its API. When one fails, a dot appears on the Settings button.

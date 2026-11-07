@@ -33,6 +33,7 @@
   import Settings from './lib/Settings.svelte'
   import InstallPopup from './lib/InstallPopup.svelte'
   import GameMenu from './lib/GameMenu.svelte'
+  import AddGame from './lib/AddGame.svelte'
   import { collectionFilter, isList, matches, type Filter } from './lib/filters'
 
   let query = $state('')
@@ -57,6 +58,10 @@
   let loggingIn = $state(false)
   let settings = $state<SettingsView | null>(null)
   let settingsOpen = $state(false)
+  /** The Settings section to open at; null is the top. */
+  let settingsSection = $state<string | null>(null)
+  /** The Add a game dialog: 'new', or the added game being edited. */
+  let adding = $state<'new' | ({ key: string } & api.CustomGame) | null>(null)
   let refreshing = $state(false)
   /** When the last full refresh finished (ms since epoch). */
   let refreshedAt = $state<number | null>(null)
@@ -163,10 +168,35 @@
     }
   }
 
-  async function openSettings() {
+  async function openSettings(section: string | null = null) {
     // Read fresh each time: the Epic state and cache size change while the panel is closed.
     await loadSettings()
+    settingsSection = section
     settingsOpen = settings !== null
+  }
+
+  /** What had focus before the Add a game dialog opened. */
+  let addOpener: HTMLElement | null = null
+
+  /** Adds a game, or edits the added game `key`. */
+  async function openAddGame(key?: string) {
+    addOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (!key) {
+      adding = 'new'
+      return
+    }
+    try {
+      const found = await api.customGame(key)
+      if (found) adding = { key, ...found }
+    } catch (e) {
+      error = api.message(e)
+    }
+  }
+
+  function closeAddGame(refocus: boolean) {
+    adding = null
+    if (refocus && addOpener?.isConnected) addOpener.focus({ preventScroll: true })
+    addOpener = null
   }
 
   /** After a setting changed: the panel, the tint and the banner follow, and a logout changes the library. */
@@ -296,7 +326,7 @@
     e.preventDefault()
     // mouseup and auxclick both arrive for one press; only mouseup acts. Settings (and the Steam log in
     // inside it) is modal: the page behind it stays put and focus stays in the dialog.
-    if (e.type !== 'mouseup' || settingsOpen || popoverOpen) return
+    if (e.type !== 'mouseup' || settingsOpen || popoverOpen || adding) return
     const step = navStep(e.button, open, lastClosed)
     if (!step) return
     if (step.open === null) {
@@ -375,18 +405,19 @@
     {progress}
     {queue}
     games={lib.games}
-    modal={settingsOpen}
+    modal={settingsOpen || adding !== null}
     oncancel={cancelDownload}
     onpause={() => changeQueue(api.pauseDownloads)}
     onresume={resumeDownloads}
     onmove={(key, up) => changeQueue(() => api.moveDownload(key, up))}
-    onsettings={openSettings}
+    onsettings={() => openSettings()}
+    onadd={() => openAddGame()}
   />
 
   {#if lib.epicNotice}
     <div class="notice">
       <span>You were logged out of Epic Games. Log in again in Settings.</span>
-      <button class="glass" onclick={openSettings}>Settings</button>
+      <button class="glass" onclick={() => openSettings()}>Settings</button>
       <button class="close" onclick={dismissNotice} aria-label="Dismiss">✕</button>
     </div>
   {/if}
@@ -490,6 +521,7 @@
         onchanged={reload}
         ontint={(url) => (tint = url)}
         onconfirminstall={confirmInstall}
+        onedit={openAddGame}
         conflict={saveConflict}
       />
     {/if}
@@ -505,6 +537,21 @@
       onclose={closeCardMenu}
       onchanged={reload}
       onerror={(m) => (error = m)}
+      onedit={openAddGame}
+    />
+  {/key}
+{/if}
+
+{#if adding}
+  {#key adding}
+    <AddGame
+      edit={adding === 'new' ? null : adding}
+      onclose={closeAddGame}
+      onsaved={reload}
+      onsettings={() => {
+        closeAddGame(false)
+        openSettings('Extra metadata')
+      }}
     />
   {/key}
 {/if}
@@ -512,6 +559,7 @@
 {#if settingsOpen && settings}
   <Settings
     view={settings}
+    section={settingsSection}
     {refreshedAt}
     {refreshing}
     {loggingIn}

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   groupLabel,
   lastPlayedLabel,
+  nameFromExe,
   playtimeLabel,
   progressLong,
   progressShort,
@@ -113,4 +114,10 @@ test('group names', () => {
   assert.equal(groupLabel('neverPlayed'), 'Never played')
   assert.equal(groupLabel('favorites'), 'Favorites')
   assert.equal(groupLabel('allGames'), 'All games')
+})
+
+test('a picked program suggests its file name', () => {
+  assert.equal(nameFromExe('D:\\Games\\Hollow Knight\\hollow_knight.exe'), 'hollow_knight')
+  assert.equal(nameFromExe('C:/Games/Celeste/Celeste.EXE'), 'Celeste')
+  assert.equal(nameFromExe('D:\\Emu\\pcsx2-qt.v1.7.exe'), 'pcsx2-qt.v1.7')
 })

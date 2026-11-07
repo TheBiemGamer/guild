@@ -1,5 +1,5 @@
-//! User settings: plain values live in the SQLite `settings` table; the IGDB Client Secret lives
-//! in Windows Credential Manager and never touches SQLite, a file, a log or the UI.
+//! User settings: plain values live in the SQLite `settings` table; the IGDB Client Secret and the
+//! SteamGridDB API key live in Windows Credential Manager and never touch SQLite, a file, a log or the UI.
 
 use std::path::{Path, PathBuf};
 
@@ -71,6 +71,7 @@ pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), 
 
 const SERVICE: &str = "dev.noah.gamelauncher";
 const SECRET_USER: &str = "igdb-client-secret";
+const GRID_KEY_USER: &str = "steamgriddb";
 pub const STEAM_TOKEN_USER: &str = "steam-refresh-token";
 
 /// The IGDB Client Secret, if one is saved.
@@ -81,6 +82,16 @@ pub fn secret() -> Option<String> {
 /// Saves the secret, or deletes it for `None`. Errors never include the value.
 pub fn set_secret(value: Option<&str>) -> Result<(), String> {
     write(SECRET_USER, value)
+}
+
+/// The SteamGridDB API key, if one is saved.
+pub fn grid_key() -> Option<String> {
+    read(GRID_KEY_USER)
+}
+
+/// Saves the SteamGridDB API key, or deletes it for `None`. Errors never include the value.
+pub fn set_grid_key(value: Option<&str>) -> Result<(), String> {
+    write(GRID_KEY_USER, value)
 }
 
 /// The Steam refresh token, if one is saved.

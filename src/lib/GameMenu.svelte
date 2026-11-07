@@ -3,7 +3,7 @@
   import * as api from './api'
   import type { Collection, Listed } from './api'
 
-  let { game, at = null, anchor, label, onclose, onchanged, onerror, extra }: {
+  let { game, at = null, anchor, label, onclose, onchanged, onerror, onedit, onremoved, extra }: {
     game: Listed
     /** Opens at the pointer (a card's right-click); otherwise it hangs below its parent, right-aligned. */
     at?: { x: number; y: number } | null
@@ -14,9 +14,35 @@
     /** After a change, so the library and the page reload. */
     onchanged: () => void
     onerror: (message: string) => void
+    /** Opens the Edit dialog for a game the owner added. */
+    onedit?: (key: string) => void
+    /** A game the owner added was removed from the library. */
+    onremoved?: () => void
     /** The page's own items, after a separator. */
     extra?: Snippet
   } = $props()
+
+  /** Added by the owner: it can be edited and removed. */
+  const custom = $derived(game.key.startsWith('custom-'))
+  /** Remove asks first, in the menu. */
+  let removing = $state(false)
+  let removeCancel = $state<HTMLButtonElement>()
+
+  async function askRemove() {
+    removing = true
+    await tick()
+    removeCancel?.focus()
+  }
+
+  async function remove() {
+    await change(() => api.removeCustomGame(game.key))
+    onremoved?.()
+  }
+
+  function edit() {
+    onclose(true)
+    onedit?.(game.key)
+  }
 
   let menu: HTMLDivElement
   let sub = $state<HTMLDivElement>()
@@ -151,6 +177,14 @@
   bind:this={menu}
   {onkeydown}
 >
+  {#if removing}
+    <!-- Asks inline, like the Epic uninstall. -->
+    <p class="ask">Remove {game.title} from your library? The game's files stay on disk.</p>
+    <div class="confirm">
+      <button class="danger" tabindex="-1" onclick={remove}>Remove</button>
+      <button tabindex="-1" bind:this={removeCancel} onclick={() => onclose(true)}>Cancel</button>
+    </div>
+  {:else}
   <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => api.setFavorite(game.key, !game.favorite))}>
     {#if game.favorite}<span class="check" aria-hidden="true">✓</span>{/if}
     Favorite
@@ -187,9 +221,18 @@
   <button role="menuitem" tabindex="-1" onclick={() => change(() => api.setHidden(game.key, !game.hidden))}>
     {game.hidden ? 'Show in library' : 'Hide from library'}
   </button>
-  {#if extra}
+  {#if custom || extra}
     <div class="sep" role="separator"></div>
+  {/if}
+  {#if custom}
+    <button role="menuitem" tabindex="-1" onclick={edit}>Edit game…</button>
+  {/if}
+  {#if extra}
     {@render extra()}
+  {/if}
+  {#if custom}
+    <button role="menuitem" tabindex="-1" onclick={askRemove}>Remove from library</button>
+  {/if}
   {/if}
 </div>
 
@@ -282,6 +325,37 @@
     height: 1px;
     margin: 4px 6px;
     background: var(--glass-line);
+  }
+
+  .ask {
+    max-width: 280px;
+    margin: 4px 10px 8px;
+    color: var(--text-2);
+    font-size: 13px;
+  }
+
+  /* Remove and Cancel: round chips, like the collection delete confirm. */
+  .confirm {
+    display: flex;
+    gap: 8px;
+    padding: 0 10px 4px;
+  }
+
+  .menu .confirm button {
+    width: auto;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--glass-hover);
+    border: 1px solid var(--glass-line);
+  }
+
+  .menu .confirm button:hover:not(:disabled) {
+    background: var(--glass-on);
+  }
+
+  .confirm .danger {
+    color: var(--danger-text);
   }
 
   input {

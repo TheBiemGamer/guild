@@ -14,15 +14,15 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
 - Every commit must pass check, test, cargo test and clippy.
 
 ## Rules that aren't obvious from the code
-- **Secrets** live only in Windows Credential Manager (service `dev.noah.gamelauncher`): the Steam refresh token and the IGDB secret.
+- **Secrets** live only in Windows Credential Manager (service `dev.noah.gamelauncher`): the Steam refresh token, the IGDB secret and the SteamGridDB API key.
   - Never put them in SQLite, files, logs, error strings or `Debug` output, and never send them to the frontend.
   - Steam passwords and Steam Guard codes are never stored.
 - **The database** file is `library.sqlite`; never change the file name. Schema changes are new migration steps at the end of `STEPS` in `cache/db.rs` (`PRAGMA user_version` counts the ones run); never edit a step that shipped.
   - Open it only through `cache::db::open`, which sets WAL and the busy timeout and runs the migrations.
-  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections` and `collection_games` (members by copy key).
+  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections`, `collection_games` (members by copy key) and `custom_games` (games the owner added). Their covers are owner data too: files in `<data_local_dir>/custom/<id>/`, never the cache folder.
   - `info` is cache only: use it with a new `kind` for new cached data, never for anything the owner chose or built up.
 - **Keys:**
-  - A store copy is keyed `steam-<appid>` or `epic-<app_name>`.
+  - A store copy is keyed `steam-<appid>` or `epic-<app_name>`; a game the owner added is `custom-<id>` and never merges.
   - `entries.rs` groups copies into one card, and merges only on an exact, one-to-one Steam appid match (from GOG GamesDB twins). When several Epic games claim one appid, only the single one whose title equals the Steam title (trimmed, case-insensitive) merges; never on title alone.
   - Launch history stays keyed by copy key.
 - **Network** work runs in the background and is throttled, and it fails quietly: a dot in Settings, no banners.

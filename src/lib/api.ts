@@ -7,7 +7,8 @@ import type { Collection, ListFilter } from './filters'
 // Rust sends numbers and ids; `format.ts` turns them into labels.
 export type { Collection, GroupId, Progress }
 
-export type Store = 'steam' | 'epic'
+/** `custom`: a game the owner added (key `custom-<id>`); it never shares a card with a store copy. */
+export type Store = 'steam' | 'epic' | 'custom'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
@@ -107,6 +108,8 @@ export interface SettingsView {
   igdbClientId: string | null
   /** The secret itself never reaches the UI. */
   igdbSecretSet: boolean
+  /** Whether a SteamGridDB API key is saved; the key itself never reaches the UI. */
+  steamgriddbKeySet: boolean
   showBanner: boolean
   ambient: boolean
   /** Epic games sync cloud saves around play unless the game's Saves tab says otherwise. */
@@ -275,6 +278,44 @@ export const settingsView = () => invoke<SettingsView>('settings_view')
 /** `null` resets a setting to its default. Booleans travel as "true" / "false". */
 export const updateSetting = (name: string, value: string | null) => invoke<void>('update_setting', { name, value })
 export const setIgdbSecret = (value: string | null) => invoke<void>('set_igdb_secret', { value })
+export const setSteamgriddbKey = (value: string | null) => invoke<void>('set_steamgriddb_key', { value })
+/** SteamGridDB's API key page. */
+export const openSteamgriddb = () => invoke<void>('open_steamgriddb')
+
+/** A game the owner added, as the Edit dialog starts from it. */
+export interface CustomGame { name: string; exe: string; args: string }
+export const customGame = (key: string) => invoke<CustomGame | null>('custom_game', { key })
+/** A cover picked in the dialog: a SteamGridDB image (its `url`) or a local file. */
+export type CoverPick = { url: string } | { file: string }
+/**
+ * Adds a game (`key` null) or saves the one with `key`; `cover` null keeps its cover. Resolves to the game's key.
+ * `args` are split on spaces; double quotes keep words together. No shell.
+ */
+export async function saveCustomGame(key: string | null, game: CustomGame, cover: CoverPick | null) {
+  const saved = await invoke<string>('save_custom_game', { key, ...game, cover })
+  // A new cover: the card asks again.
+  if (cover) covers.delete(saved)
+  return saved
+}
+/** Its files stay on disk. */
+export const removeCustomGame = (key: string) => invoke<void>('remove_custom_game', { key })
+/** `thumb` is ready for an `<img>`; `url` is what `saveCustomGame` downloads. */
+export interface GridCover { url: string; thumb: string }
+/** Up to four SteamGridDB covers for `name`; null when no API key is saved. A failed search is an empty list. */
+export async function gridSearch(name: string): Promise<GridCover[] | null> {
+  const found = await invoke<GridCover[] | null>('grid_search', { name })
+  return found && found.map((c) => ({ url: c.url, thumb: convertFileSrc(c.thumb) }))
+}
+/** A program (.exe) to add; null when cancelled. */
+export async function pickProgram(): Promise<string | null> {
+  const path = await open({ filters: [{ name: 'Programs', extensions: ['exe'] }] })
+  return typeof path === 'string' ? path : null
+}
+/** A PNG or JPEG cover; null when cancelled. */
+export async function pickImage(): Promise<string | null> {
+  const path = await open({ filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }] })
+  return typeof path === 'string' ? path : null
+}
 export type ConnectStep =
   | { step: 'waiting' }
   | { step: 'rotated'; svg: string }

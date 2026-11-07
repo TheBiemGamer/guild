@@ -1,6 +1,7 @@
 //! SQLite library cache so startup can render before the stores are scanned. The same file keeps
 //! user data that is not a cache: settings, launch history, per-game choices (`game_prefs`, favorites and
-//! hidden games among them), playtime and collections. The `info` table is cache only.
+//! hidden games among them), playtime, collections and the games the owner added (`custom_games`). The `info`
+//! table is cache only.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 
+use crate::library::custom::CustomGame;
 use crate::library::{Art, Error, Game, Image, ProviderKind};
 use crate::view::Lists;
 
@@ -76,6 +78,14 @@ const STEPS: &[&str] = &[
         collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
         key TEXT NOT NULL,
         PRIMARY KEY (collection_id, key)
+    );",
+    // 4: games the owner added (keys `custom-<id>`); their covers are files in the data folder.
+    "CREATE TABLE custom_games (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        exe TEXT NOT NULL,
+        args TEXT NOT NULL DEFAULT '',
+        added INTEGER NOT NULL
     );",
 ];
 
@@ -371,6 +381,36 @@ pub fn set_in_collection(conn: &mut Connection, id: i64, keys: &[String], on: bo
     Ok(())
 }
 
+fn custom_row(r: &Row) -> rusqlite::Result<CustomGame> {
+    Ok(CustomGame { id: r.get(0)?, name: r.get(1)?, exe: r.get(2)?, args: r.get(3)?, added: r.get(4)? })
+}
+
+/// Every game the owner added, oldest first.
+pub fn custom_games(conn: &Connection) -> Result<Vec<CustomGame>, Error> {
+    let mut stmt = conn.prepare("SELECT id, name, exe, args, added FROM custom_games ORDER BY added, id")?;
+    let rows = stmt.query_map([], custom_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn custom_game(conn: &Connection, id: &str) -> Result<Option<CustomGame>, Error> {
+    Ok(conn.query_row("SELECT id, name, exe, args, added FROM custom_games WHERE id = ?1", [id], custom_row).optional()?)
+}
+
+/// Adds the game, or updates it when its id is there; an update keeps its `added` time.
+pub fn save_custom_game(conn: &Connection, g: &CustomGame) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO custom_games (id, name, exe, args, added) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, exe = excluded.exe, args = excluded.args",
+        params![g.id, g.name, g.exe, g.args, g.added],
+    )?;
+    Ok(())
+}
+
+pub fn delete_custom_game(conn: &Connection, id: &str) -> Result<(), Error> {
+    conn.execute("DELETE FROM custom_games WHERE id = ?1", [id])?;
+    Ok(())
+}
+
 /// Cached JSON for `(key, kind)` if it was fetched within `max_age_secs` of `now_secs`.
 pub fn cached_info(
     conn: &Connection,
@@ -590,6 +630,7 @@ mod tests {
         assert_eq!(columns(&conn, "playtime"), ["key", "started", "seconds"]);
         assert_eq!(columns(&conn, "collections"), ["id", "name"]);
         assert_eq!(columns(&conn, "collection_games"), ["collection_id", "key"]);
+        assert_eq!(columns(&conn, "custom_games"), ["id", "name", "exe", "args", "added"]);
         set_pref(&conn, "epic-A", "cloud_saves", Some("on")).unwrap();
         set_pref(&conn, "epic-A", "cloud_saves", Some("off")).unwrap();
         assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap().as_deref(), Some("off"));
@@ -702,6 +743,47 @@ mod tests {
         assert!(collections(&conn).unwrap().is_empty());
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn step_three_file_gets_custom_games_and_keeps_collections() {
+        let dir = temp_dir("step4");
+        let path = dir.join("library.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            for step in &STEPS[..3] {
+                conn.execute_batch(step).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 3).unwrap();
+            create_collection(&conn, "Backlog").unwrap();
+        }
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), STEPS.len());
+        assert_eq!(collections(&conn).unwrap().len(), 1);
+        assert!(custom_games(&conn).unwrap().is_empty());
+        // `args` may be left out.
+        conn.execute("INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)", []).unwrap();
+        assert_eq!(custom_game(&conn, "a").unwrap().unwrap().args, "");
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn custom_games_save_update_and_delete() {
+        let conn = memory();
+        let mut g = CustomGame { id: "b".into(), name: "Hollow Knight".into(), exe: r"D:\hk.exe".into(), args: String::new(), added: 20 };
+        let first = CustomGame { id: "a".into(), name: "Zork".into(), exe: r"C:\zork.exe".into(), args: "-x".into(), added: 10 };
+        save_custom_game(&conn, &g).unwrap();
+        save_custom_game(&conn, &first).unwrap();
+        assert_eq!(custom_games(&conn).unwrap(), [first.clone(), g.clone()]);
+        // An edit keeps the time it was added.
+        g.name = "Hollow Knight: Voidheart".into();
+        g.args = "-windowed".into();
+        save_custom_game(&conn, &CustomGame { added: 99, ..g.clone() }).unwrap();
+        assert_eq!(custom_game(&conn, "b").unwrap(), Some(g));
+        delete_custom_game(&conn, "b").unwrap();
+        assert_eq!(custom_game(&conn, "b").unwrap(), None);
+        assert_eq!(custom_games(&conn).unwrap(), [first]);
     }
 
     #[test]

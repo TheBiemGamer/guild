@@ -97,6 +97,7 @@ pub fn steam_appid(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) 
     match first.provider {
         ProviderKind::Steam => first.external_id.parse().ok(),
         ProviderKind::Epic => twins.get(&first.key()).copied(),
+        ProviderKind::Custom => None,
     }
 }
 
@@ -218,6 +219,22 @@ mod tests {
         assert_eq!(playtime(&entry, &games), (Some(120), false));
         games[1].playtime_minutes = None;
         assert_eq!(playtime(&entry, &games), (None, false));
+    }
+
+    #[test]
+    fn custom_games_never_merge() {
+        let custom = |id: &str| Game { provider: ProviderKind::Custom, ..steam(id, "Pumpkin Jack") };
+        let (mut games, mut twins) = pumpkin();
+        games.extend([custom("635320"), custom("Pumpkin")]);
+        // Even a twin listed under a custom key, or a custom id that spells the Steam app id, merges nothing.
+        twins.insert("custom-Pumpkin".into(), 635320);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(keys(&games, &entries[0]), ["steam-635320", "epic-Pumpkin"]);
+        assert_eq!(keys(&games, &entries[1]), ["custom-635320"]);
+        assert_eq!(keys(&games, &entries[2]), ["custom-Pumpkin"]);
+        assert_eq!(steam_appid(&entries[1], &games, &twins), None);
+        assert_eq!(find(&entries, &games, "custom-Pumpkin").map(|e| e.key.as_str()), Some("custom-Pumpkin"));
     }
 
     #[test]

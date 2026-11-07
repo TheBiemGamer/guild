@@ -1,5 +1,6 @@
 //! Epic playtime: Epic's own figure from its playtime service (cached in the `info` table) plus the
-//! sessions this app timed (the `playtime` table), which Legendary's launches never report to Epic.
+//! sessions this app timed (the `playtime` table), which Legendary's launches never report to Epic. Games the
+//! owner added get their timed sessions the same way.
 //! Legendary's access token is read from its session file only for the request; it never reaches a
 //! log line, error string, Debug output or the frontend, and is never stored here.
 
@@ -125,12 +126,14 @@ pub fn merge(conn: &Connection, games: &mut [Game]) -> bool {
 }
 
 /// An Epic copy gets Epic's minutes plus the minutes timed here, either alone when the other is missing,
-/// unknown when both are. Steam copies are left alone. Returns whether anything changed.
+/// unknown when both are. A game the owner added has only the minutes timed here. Steam copies are left
+/// alone. Returns whether anything changed.
 pub fn apply(games: &mut [Game], service: &HashMap<String, u64>, own: &HashMap<String, i64>) -> bool {
     let mut changed = false;
-    for g in games.iter_mut().filter(|g| g.provider == ProviderKind::Epic) {
+    for g in games.iter_mut().filter(|g| g.provider != ProviderKind::Steam) {
         let timed = own.get(&g.key()).map(|&s| s.max(0) as u64 / 60);
-        let minutes = [service.get(&g.external_id).copied(), timed].into_iter().flatten().reduce(|a, b| a + b);
+        let epic = service.get(&g.external_id).copied().filter(|_| g.provider == ProviderKind::Epic);
+        let minutes = [epic, timed].into_iter().flatten().reduce(|a, b| a + b);
         changed |= g.playtime_minutes != minutes;
         g.playtime_minutes = minutes;
     }
@@ -197,5 +200,16 @@ mod tests {
         // Own totals are keyed `epic-<app_name>`, not by the bare app name.
         assert_eq!(games[1].playtime_minutes, None);
         assert_eq!(games[2], steam);
+    }
+
+    #[test]
+    fn added_games_count_only_their_own_sessions() {
+        let custom = |id: &str| Game { provider: ProviderKind::Custom, external_id: id.into(), ..game(id, true, None, None) };
+        let mut games = vec![custom("18f2a"), custom("Fortnite")];
+        // Epic's answer for a matching name never counts for an added game.
+        let service = HashMap::from([("Fortnite".to_string(), 500)]);
+        let own = HashMap::from([("custom-18f2a".to_string(), 7_200)]);
+        assert!(apply(&mut games, &service, &own));
+        assert_eq!(games.iter().map(|g| g.playtime_minutes).collect::<Vec<_>>(), [Some(120), None]);
     }
 }

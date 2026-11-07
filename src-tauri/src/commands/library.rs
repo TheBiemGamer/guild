@@ -19,8 +19,8 @@ use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
 use crate::view::{self, Lists, Sort};
 
-/// How long a launched Epic game may take to show up as a process before we stop looking.
-const EPIC_START_GRACE: Duration = Duration::from_secs(30);
+/// How long a launched Epic or added game may take to show up as a process before we stop looking.
+const START_GRACE: Duration = Duration::from_secs(30);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -448,7 +448,7 @@ fn owned(state: &AppState) -> Option<Vec<Game>> {
 pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
-    let (results, login) = scan(with_epic, owned.as_deref());
+    let (results, login) = scan(with_epic, owned.as_deref(), &state.dirs);
     let mut s = state.lock();
     if let Some(login) = login {
         s.epic_login = Some(login);
@@ -489,12 +489,13 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
     true
 }
 
-fn scan(with_epic: bool, owned: Option<&[Game]>) -> (ScanResults, Option<Login>) {
+fn scan(with_epic: bool, owned: Option<&[Game]>, dirs: &cache::Dirs) -> (ScanResults, Option<Login>) {
     let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string()).map(|installed| match owned {
         Some(owned) => with_owned(installed, owned),
         None => installed,
     });
-    let mut results = vec![(ProviderKind::Steam, steam)];
+    let custom = crate::library::custom::list(dirs).map_err(|e| e.to_string());
+    let mut results = vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)];
     if !with_epic {
         return (results, None);
     }
@@ -628,13 +629,23 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     let art_dir = state.dirs.art.join(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {
         let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else { continue };
-        let (thumbs, thumb_key) = (state.dirs.thumbs.clone(), format!("{key}-{slot}"));
+        let (thumbs, thumb_key) = (state.dirs.thumbs.clone(), thumb_key(&game, slot, &src));
         match blocking(move || cache::thumbnail(&src, &thumbs, &thumb_key)).await {
             Ok((path, color)) => return allow(&app, path).map(|src| Cover { src, color }),
             Err(e) => log!("thumbnail {key}: {e}"),
         }
     }
     None
+}
+
+/// The thumbnail's cache key. An added game's cover can be replaced under the same path, so its key carries
+/// the file's modified time; store art never changes under its key.
+fn thumb_key(game: &Game, slot: &str, src: &std::path::Path) -> String {
+    let modified = || src.metadata().and_then(|m| m.modified()).ok()?.duration_since(std::time::UNIX_EPOCH).ok();
+    match modified().filter(|_| game.provider == ProviderKind::Custom) {
+        Some(at) => format!("{}-{slot}-{}", game.key(), at.as_millis()),
+        None => format!("{}-{slot}", game.key()),
+    }
 }
 
 #[derive(Serialize)]
@@ -676,7 +687,7 @@ fn featured_pick(games: &[Game], entries: &[Entry], lists: &Lists) -> Option<(Ca
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Poll {
-    /// Key of the game running in either store.
+    /// Key of the game running: Steam's, or the Epic or added game watched since its launch here.
     running: Option<String>,
     progress: HashMap<String, Progress>,
     /// The library changed (a Steam download finished), so the UI should re-ask `library`.
@@ -693,10 +704,10 @@ pub async fn poll(app: AppHandle) -> Poll {
 fn poll_blocking(app: &AppHandle) -> Poll {
     let state = app.state::<AppState>();
     let steam_running = ProviderKind::Steam.provider().running_game().map(|id| ProviderKind::Steam.key(&id));
-    let watch = state.lock().epic_watch.as_ref().map(|w| (w.key.clone(), w.exe.clone(), w.since));
-    let epic_running = watch.and_then(|(key, exe, since)| {
+    let watch = state.lock().watch.as_ref().map(|w| (w.key.clone(), w.exe.clone(), w.since));
+    let watched = watch.and_then(|(key, exe, since)| {
         if epic::is_running(&exe) {
-            if let Some(w) = state.lock().epic_watch.as_mut().filter(|w| w.since == since) {
+            if let Some(w) = state.lock().watch.as_mut().filter(|w| w.since == since) {
                 w.seen = true;
             }
             return Some(key);
@@ -704,8 +715,8 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         // Gone, or never showed up: stop watching once it had time to start, time the session if it ran,
         // and upload its saves.
         // shortcut: one that never showed up (a bootstrapper exe) has its saves uploaded while it may still run.
-        if since.elapsed() > EPIC_START_GRACE {
-            let ended = state.lock().epic_watch.take();
+        if since.elapsed() > START_GRACE {
+            let ended = state.lock().watch.take();
             if let Some(w) = ended {
                 if w.seen {
                     record_session(&state, &w.key, w.since.elapsed());
@@ -731,7 +742,7 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         let queue = super::queue_view(&s);
         (s.progress.clone(), take_changed(&mut s, finished), queue)
     };
-    Poll { running: steam_running.or(epic_running), progress, changed, queue }
+    Poll { running: steam_running.or(watched), progress, changed, queue }
 }
 
 /// Records polled Steam progress. Returns whether a download that was showing progress just ended.

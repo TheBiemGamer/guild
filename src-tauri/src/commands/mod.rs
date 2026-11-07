@@ -1,6 +1,7 @@
 //! Everything the UI can call. Store work runs on the blocking pool; shared state sits behind one mutex.
 //! The UI polls `poll` every 2 s (progress, running game, download queue) and re-asks `library` when something changed.
 
+pub mod custom;
 pub mod game;
 pub mod library;
 pub mod lists;
@@ -77,7 +78,7 @@ struct Shared {
     interrupted: bool,
     /// The `act` call waiting for a queued job's outcome, by copy key.
     waiters: HashMap<String, std::sync::mpsc::Sender<Res<()>>>,
-    epic_watch: Option<EpicWatch>,
+    watch: Option<Watch>,
     /// Steam rejected the saved token; the Settings dot asks the owner to connect again.
     steam_attention: bool,
     /// An owned-games fetch is in flight.
@@ -104,14 +105,14 @@ struct Shared {
     lists: crate::view::Lists,
 }
 
-/// An Epic game launched from here, watched through its process.
-struct EpicWatch {
+/// An Epic or added game launched from here, watched through its process to time the session.
+struct Watch {
     key: String,
     exe: String,
     since: Instant,
     /// Its process was seen running, so its end times a play session.
     seen: bool,
-    /// How its cloud saves are uploaded once it exits; `None` doesn't sync.
+    /// How its cloud saves are uploaded once it exits; `None` doesn't sync (always for an added game).
     upload: Option<crate::library::epic::SaveSync>,
 }
 

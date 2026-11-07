@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use super::library::rescan;
-use super::{allow, blocking, open_db, queue_view, unix_now, AppState, EpicWatch, Res, Shared};
+use super::{allow, blocking, open_db, queue_view, unix_now, AppState, Res, Shared, Watch};
 use crate::cache;
 use crate::downloads::{Job, Queue, QueueView, QueuedAction, DOWNLOAD_QUEUE};
 use crate::entries::{self, Entry};
@@ -254,6 +254,9 @@ fn act_blocking(
         };
         return result.map(|()| None).map_err(|e| format!("Steam: {e}"));
     }
+    if game.provider == ProviderKind::Custom {
+        return act_custom(&state, action, game).map(|()| None);
+    }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
         Action::Update => Some(QueuedAction::Update),
@@ -290,7 +293,7 @@ fn act_blocking(
                         None
                     }),
                 };
-                state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), seen: false, upload });
+                state.lock().watch = exe.map(|exe| Watch { key: key.clone(), exe, since: Instant::now(), seen: false, upload });
             })
         }
         // Not cancellable: stopped halfway, Legendary's record and the folder disagree.
@@ -312,6 +315,28 @@ fn act_blocking(
         rescan(app, true);
     }
     result.map(|()| None).map_err(|e| format!("Epic Games: {e}"))
+}
+
+/// A game the owner added only plays: its program starts, watched like an Epic game to time the session.
+fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
+    let store = game.provider.provider();
+    let result = match action {
+        Action::Play | Action::PlayOutdated => {
+            let conn = open_db(state).ok_or("The settings database can't be opened.")?;
+            let row = cache::db::custom_game(&conn, &game.external_id)
+                .map_err(|e| e.to_string())?
+                .ok_or("This game is no longer in the library.")?;
+            let key = game.key();
+            crate::library::custom::launch(&row).map(|exe| {
+                record_play(state, &key);
+                state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload: None });
+            })
+        }
+        Action::Install => store.install(game),
+        Action::Uninstall => store.uninstall(game),
+        Action::Update | Action::Verify | Action::Move => Err("Games you added can only be played.".into()),
+    };
+    result.map_err(|e| e.to_string())
 }
 
 /// Records a Legendary job's pid or progress under its copy key. Returns the pid of a queued job that
@@ -707,6 +732,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
     let steam_id = match game.provider {
         ProviderKind::Epic => None,
         ProviderKind::Steam => Some(game.external_id.parse::<u32>().ok()?),
+        ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());
@@ -944,7 +970,8 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
-    let game = app.state::<AppState>().game(&key)?;
+    // A game the owner added has no store to ask.
+    let game = app.state::<AppState>().game(&key).filter(|g| g.provider != ProviderKind::Custom)?;
     let twin = {
         let state = app.state::<AppState>();
         let s = state.lock();
@@ -1103,6 +1130,10 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
             epic.map(|g| g.key()),
         )
     };
+    // Nothing to match on: a game the owner added.
+    if appid.is_none() && epic_key.is_none() {
+        return None;
+    }
     let now = unix_now();
     let (cached, credentials) = {
         let (app, key) = (app.clone(), key.clone());

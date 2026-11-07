@@ -123,6 +123,8 @@ pub struct SettingsView {
     igdb_client_id: Option<String>,
     /// Whether a secret is saved; its value never leaves Credential Manager.
     igdb_secret_set: bool,
+    /// Whether a SteamGridDB API key is saved; like the secret, it never leaves Credential Manager.
+    steamgriddb_key_set: bool,
     show_banner: bool,
     ambient: bool,
     cloud_saves: bool,
@@ -153,6 +155,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
             igdb_secret_set: settings::secret().is_some(),
+            steamgriddb_key_set: settings::grid_key().is_some(),
             show_banner: saved.show_banner,
             ambient: saved.ambient,
             cloud_saves: saved.cloud_saves,
@@ -204,6 +207,18 @@ pub async fn set_igdb_secret(app: AppHandle, value: Option<String>) -> Res<()> {
         Ok(())
     })
     .await
+}
+
+/// Saves the SteamGridDB API key in Credential Manager, or removes it for `None`.
+#[tauri::command]
+pub async fn set_steamgriddb_key(value: Option<String>) -> Res<()> {
+    blocking(move || settings::set_grid_key(value.as_deref().map(str::trim).filter(|v| !v.is_empty()))).await
+}
+
+/// SteamGridDB's API key page, where the owner gets a free key.
+#[tauri::command]
+pub fn open_steamgriddb() -> Res<()> {
+    crate::library::open_url("https://www.steamgriddb.com/profile/preferences/api").map_err(|e| e.to_string())
 }
 
 /// Deletes downloaded art and thumbnails; they come back on demand. The database stays.

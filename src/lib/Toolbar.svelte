@@ -24,6 +24,7 @@
     onresume,
     onmove,
     onsettings,
+    onadd,
     oncollections,
   }: {
     query: string
@@ -43,13 +44,15 @@
     /** The Epic download queue, active, waiting or paused. */
     queue: QueueView
     games: Card[]
-    /** A modal (Settings) is open: Ctrl K leaves focus where it is. */
+    /** A modal (Settings, Add a game) is open: Ctrl K leaves focus where it is. */
     modal: boolean
     oncancel: (key: string) => void
     onpause: () => void
     onresume: () => void
     onmove: (key: string, up: boolean) => void
     onsettings: () => void
+    /** Opens the Add a game dialog. */
+    onadd: () => void
     /** A collection was renamed or deleted in the Filters popover. */
     oncollections: () => void
   } = $props()
@@ -219,6 +222,10 @@
       {/if}
     </div>
   {/if}
+
+  <button class="chip icon" onclick={onadd} aria-label="Add a game" title="Add a game">
+    <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+  </button>
 
   <button class="chip icon settings" onclick={onsettings} aria-label={attention ? 'Settings (needs attention)' : 'Settings'} title="Settings">
     <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">

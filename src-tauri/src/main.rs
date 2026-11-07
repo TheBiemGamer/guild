@@ -21,6 +21,7 @@ mod settings;
 mod steam_login;
 mod steam_owned;
 mod steam_size;
+mod steamgriddb;
 mod view;
 
 fn main() {
@@ -80,6 +81,12 @@ fn main() {
             commands::settings::settings_view,
             commands::settings::update_setting,
             commands::settings::set_igdb_secret,
+            commands::settings::set_steamgriddb_key,
+            commands::settings::open_steamgriddb,
+            commands::custom::custom_game,
+            commands::custom::save_custom_game,
+            commands::custom::remove_custom_game,
+            commands::custom::grid_search,
             commands::settings::clear_cache,
             commands::settings::steam_connect_start,
             commands::settings::steam_connect_poll,

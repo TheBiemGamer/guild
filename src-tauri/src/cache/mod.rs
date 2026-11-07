@@ -17,6 +17,8 @@ pub struct Dirs {
     pub art: PathBuf,
     pub thumbs: PathBuf,
     pub logs: PathBuf,
+    /// Covers of the games the owner added: owner data, so not under the cache folder.
+    pub custom: PathBuf,
 }
 
 impl Dirs {
@@ -28,6 +30,7 @@ impl Dirs {
             art: dirs.cache_dir().join("art"),
             thumbs: dirs.cache_dir().join("thumbs"),
             logs: dirs.data_local_dir().join("logs"),
+            custom: dirs.data_local_dir().join("custom"),
         }
     }
 }

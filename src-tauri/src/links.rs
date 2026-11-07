@@ -20,9 +20,10 @@ pub enum LinkKind {
 pub fn kinds(stores: &[ProviderKind], steam_appid: Option<u32>) -> Vec<LinkKind> {
     let mut kinds: Vec<_> = stores
         .iter()
-        .map(|s| match s {
-            ProviderKind::Steam => LinkKind::SteamStore,
-            ProviderKind::Epic => LinkKind::EpicStore,
+        .filter_map(|s| match s {
+            ProviderKind::Steam => Some(LinkKind::SteamStore),
+            ProviderKind::Epic => Some(LinkKind::EpicStore),
+            ProviderKind::Custom => None,
         })
         .collect();
     if steam_appid.is_some() {
