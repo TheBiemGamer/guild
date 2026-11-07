@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_autostart::ManagerExt;
 
 use super::library::{refresh_owned, rescan};
 use super::{blocking, AppState, Res};
@@ -128,6 +129,10 @@ pub struct SettingsView {
     show_banner: bool,
     ambient: bool,
     cloud_saves: bool,
+    /// Read from the autostart entry itself, so it can't drift from what Windows runs.
+    start_with_windows: bool,
+    close_to_tray: bool,
+    notify_downloads: bool,
     app_version: String,
     legendary_version: Option<String>,
     cache_bytes: u64,
@@ -159,6 +164,9 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             show_banner: saved.show_banner,
             ambient: saved.ambient,
             cloud_saves: saved.cloud_saves,
+            start_with_windows: app.autolaunch().is_enabled().unwrap_or(false),
+            close_to_tray: saved.close_to_tray,
+            notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
             legendary_version: epic::legendary_version(),
             cache_bytes,
@@ -185,6 +193,12 @@ fn dir_size(dir: &std::path::Path) -> u64 {
 #[tauri::command]
 pub async fn update_setting(app: AppHandle, name: String, value: Option<String>) -> Res<()> {
     blocking(move || {
+        if name == settings::START_WITH_WINDOWS {
+            settings::validate(&name, value.as_deref())?;
+            let autostart = app.autolaunch();
+            let done = if value.as_deref() == Some("true") { autostart.enable() } else { autostart.disable() };
+            return done.map_err(|e| format!("Couldn't change the Windows startup entry: {e}"));
+        }
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
         settings::update(&conn, &name, value.as_deref())?;

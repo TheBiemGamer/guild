@@ -13,6 +13,7 @@
 - Sort and filter by store, install status, playtime and how long to beat.
 - Favorites, hidden games and your own collections.
 - Add your own games, with covers from SteamGridDB.
+- Start with Windows, keep running in the tray, and get a notification when a download finishes.
 - Works offline from its local cache.
 - Settings → Report a problem opens a GitHub bug report with your app and Windows versions filled in.
 - A Windows installer, and updates that install themselves.

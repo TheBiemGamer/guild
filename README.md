@@ -12,6 +12,7 @@ A Windows launcher that shows your Steam and Epic Games libraries as one library
 - **Game pages** with the description, screenshots, playtime, last played, how long to beat, and links to the store, PCGamingWiki, SteamDB and ProtonDB.
 - **Sort and filter** by store, install status, playtime and how long to beat.
 - **Works offline** from its local cache.
+- **Runs in the tray** if you like, starts with Windows, and shows a Windows notification when a download finishes.
 
 ## Requirements
 

@@ -21,7 +21,7 @@
     onlogin: () => void
   } = $props()
 
-  const sections = ['Accounts', 'Appearance', 'Extra metadata', 'Storage', 'About']
+  const sections = ['General', 'Accounts', 'Appearance', 'Extra metadata', 'Storage', 'About']
   let active = $state(sections[0])
   let main: HTMLElement
   let closeButton: HTMLButtonElement
@@ -261,6 +261,40 @@
       {#if error}
         <p class="error" role="alert">{error}</p>
       {/if}
+
+      <section id={id('General')}>
+        <h4>General</h4>
+        <div class="row">
+          <div id="startup-label">Start with Windows</div>
+          <button
+            class="toggle"
+            role="switch"
+            aria-checked={view.startWithWindows}
+            aria-labelledby="startup-label"
+            onclick={() => toggle('start_with_windows', !view.startWithWindows)}
+          ></button>
+        </div>
+        <div class="row">
+          <div id="tray-label">Keep running in the tray when closed</div>
+          <button
+            class="toggle"
+            role="switch"
+            aria-checked={view.closeToTray}
+            aria-labelledby="tray-label"
+            onclick={() => toggle('close_to_tray', !view.closeToTray)}
+          ></button>
+        </div>
+        <div class="row">
+          <div id="notify-label">Notify when a download finishes</div>
+          <button
+            class="toggle"
+            role="switch"
+            aria-checked={view.notifyDownloads}
+            aria-labelledby="notify-label"
+            onclick={() => toggle('notify_downloads', !view.notifyDownloads)}
+          ></button>
+        </div>
+      </section>
 
       <section id={id('Accounts')}>
         <div class="head">
