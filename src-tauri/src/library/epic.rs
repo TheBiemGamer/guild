@@ -7,11 +7,12 @@
 //! - `status --json`: `{account: "<not logged in>" | name, …}`
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -123,21 +124,45 @@ fn sync_args(app_name: &str, sync: SaveSync) -> Vec<&str> {
 /// asks for a path instead, where an empty line skips the game.
 const SYNC_ANSWERS: &[u8] = b"\n\n\n\n";
 
+/// Longest a `sync-saves` run may take; a stalled network call must not hold the launch.
+const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Runs `legendary sync-saves` for one installed game. Never fails: a failure is an outcome.
 pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
-    let run = || -> std::io::Result<std::process::Output> {
-        let mut child = legendary(&sync_args(app_name, sync))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        // Closed after the answers, so a prompt beyond them ends Legendary with an error instead of hanging.
-        child.stdin.take().expect("stdin is piped").write_all(SYNC_ANSWERS)?;
-        child.wait_with_output()
-    };
-    match run() {
-        Ok(output) => parse_sync(output.status.success(), &String::from_utf8_lossy(&output.stderr)),
+    match run_with_timeout(legendary(&sync_args(app_name, sync)), SYNC_ANSWERS, SYNC_TIMEOUT) {
+        Ok(Some((success, log))) => parse_sync(success, &log),
+        Ok(None) => SyncOutcome::Failed("Cloud saves timed out.".into()),
         Err(e) => SyncOutcome::Failed(e.to_string()),
+    }
+}
+
+/// Runs `command` with `input` on stdin (then closed, so a prompt beyond it ends the process instead of
+/// hanging) and returns whether it succeeded and its stderr. `None` when it outlives `timeout`: its process
+/// tree is killed (legendary.exe unpacks itself into a child process).
+fn run_with_timeout(mut command: Command, input: &[u8], timeout: Duration) -> std::io::Result<Option<(bool, String)>> {
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn()?;
+    child.stdin.take().expect("stdin is piped").write_all(input)?;
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    // Read aside, so a full pipe never stalls the process while this waits.
+    let reader = std::thread::spawn(move || {
+        let mut log = Vec::new();
+        _ = stderr.read_to_end(&mut log);
+        String::from_utf8_lossy(&log).into_owned()
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some((status.success(), reader.join().unwrap_or_default())));
+        }
+        if Instant::now() >= deadline {
+            if let Err(e) = cancel(child.id()) {
+                eprintln!("stop timed-out legendary: {e}");
+                _ = child.kill();
+            }
+            _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -663,6 +688,22 @@ mod tests {
         // No `-y`: Legendary 0.21 skips a game whose save folder isn't set yet under it. Empty lines on stdin
         // take each prompt's default (yes) instead, and skip a folder Legendary can't work out.
         assert!(SYNC_ANSWERS.iter().all(|&b| b == b'\n'));
+    }
+
+    #[test]
+    fn sync_run_gives_up_after_its_timeout() {
+        let cmd = |script: &str| {
+            let mut command = Command::new("cmd");
+            command.args(["/C", script]).creation_flags(CREATE_NO_WINDOW);
+            command
+        };
+        let started = Instant::now();
+        let stalled = run_with_timeout(cmd("ping -n 30 127.0.0.1 >nul"), b"\n", Duration::from_millis(300)).unwrap();
+        assert_eq!(stalled, None);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let done = run_with_timeout(cmd("echo hi 1>&2"), b"\n", Duration::from_secs(10)).unwrap().unwrap();
+        assert!(done.0);
+        assert_eq!(done.1.trim(), "hi");
     }
 
     #[test]
