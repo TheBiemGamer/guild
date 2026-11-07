@@ -902,3 +902,62 @@ Owner request, 2026-11-07. Approved look: mockup v7 in the brainstorm companion 
 - [ ] **Step 2:** Benchmark 4000 and 15000 with grouping on: 0 slow frames.
 - [ ] **Step 3:** VERIFY-LATER: each grouping and sort works on the full library.
 - [ ] **Step 4: Commit:** `feat(library): group and sort by playtime and how long to beat`.
+
+### Task 28: Library toolbar and game page tabs (layout v5/v7)
+
+Owner request, 2026-11-07. The owner approved the layout direction in two mockups:
+- `docs/superpowers/specs/2026-11-07-layout-mockup-v5.html`
+- `docs/superpowers/specs/2026-11-07-grouping-mockup.html` (v7)
+
+The direction stays in DESIGN.md's "Afterglow": quiet dark glass, chips, colour only from the art, and the white pill as the one bright thing. There is no Home page and no sidebar. The library stays the start page, with the Continue-playing banner unchanged.
+
+**Order:** run this task before Tasks 20b–25 where possible, so their UI lands in the tabs and the toolbar. If some of those tasks already landed, move their UI into the tabs here.
+
+**Files:** `src/lib/Toolbar.svelte`, `src/App.svelte`, `src/lib/Grid.svelte`, `src/lib/Detail.svelte`, and a new `src/lib/FilterPopover.svelte`, `src/lib/LibraryList.svelte` and `src/lib/DownloadsPopover.svelte` (or Task 24's panel), plus `DESIGN.md`.
+
+**Interfaces and look (match the mockups; DESIGN.md tokens win on values):**
+- **Toolbar, left to right:**
+  - the search field (36px, glass) with a `Ctrl K` hint;
+  - the quick chips All / Steam / Epic / Installed, as today;
+  - the active extra filters as glass-on chips with ✕;
+  - a **Filters** chip;
+  - a spacer;
+  - Group (from Task 27) and Sort;
+  - a list/grid toggle chip;
+  - a **Downloads** chip;
+  - the Settings gear with its attention dot, as today.
+- **Filters chip:** opens a glass popover (`surface-2`, radius 12, the same shadow as the ⋯ menu) with groups of toggle chips:
+  - Status: Not installed, Update available, Downloading;
+  - Your playtime and How long to beat ranges (from Task 27);
+  - Has: DLC, Cloud saves, On both stores;
+  - Genre (once genres are cached).
+  - Each chip turned on there also appears in the toolbar as an active chip with ✕.
+  - The popover footer has **Clear**.
+  - Collections and "Save as collection" are left for later; leave the footer slot for them.
+  - The popover closes on Escape and on a click outside, and keeps keyboard focus inside while open.
+- **List view:** a dense table with Name, Stores (logos), Size, Playtime, How long to beat, Last played and Status. Rows open the game page.
+  - It must stay virtualised for about 1,300 rows.
+  - The choice of list or grid is kept in settings.
+- **Downloads chip:**
+  - It shows **only while something is downloading, updating or queued**, as a 36px icon chip with a progress ring (accent-2) around the icon.
+  - Clicking it opens a glass popover: the active job with its progress, size and time left, Pause and Cancel; then "Up next" with reorder and remove; then Steam downloads, read-only, as "in Steam".
+  - It uses Task 24's queue model. If Task 24 hasn't landed yet, it shows the existing per-game progress only.
+- **Game page tabs:** under the hero, a tab row: **Overview · DLC · Saves · Installation · Launch options**.
+  - Overview is exactly today's page: tiles, About and Details.
+  - DLC, Saves, Installation and Launch options hold the UI from Tasks 20b, 22, 23 and 25. A tab whose feature doesn't exist yet, or doesn't apply to this game (no DLC, or no cloud saves for a Steam-only game), is hidden.
+  - The tab row uses the label style. The active tab gets a 2px `text` underline.
+  - Keyboard: arrow keys move between tabs (roving tabindex).
+  - The ⋯ menu keeps only quick actions: Open folder, Uninstall.
+- **Settings** stays a modal with its section list. "Accounts" comes first, with one card per source: Steam and Epic, each with status, the account name and Log in / Log out. Other sections stay as they are.
+- **Mouse Back** (Task 17) closes the game page, as before.
+
+**Tests:**
+- `npm run check`;
+- a pure helper for filter state ↔ toolbar chips (`filterChips(state) -> Chip[]`, removing one chip clears exactly that filter);
+- the Rust side is unchanged, apart from any sort or group fields from Task 27.
+
+- [ ] **Step 1:** Implement, then run `npm run check`, `cargo test` and clippy.
+- [ ] **Step 2:** Benchmark 4000 and 15000 in grid view, and in list view with 1,300 entries: 0 slow frames.
+- [ ] **Step 3:** VERIFY-LATER: the Filters popover, active chips, list view, the Downloads chip appearing only during downloads, the tabs and their keyboard behaviour.
+- [ ] **Step 4:** Update DESIGN.md: the toolbar, filter popover, downloads chip, list view and game page tabs.
+- [ ] **Step 5: Commit:** `feat(ui): library toolbar with filters, list view, downloads chip and game page tabs`.

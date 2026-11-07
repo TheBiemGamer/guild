@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launcher layout v2</title>
+<style>
+  :root{--bg:#0e0e14;--surface:#16161f;--surface-2:#1f1f2a;--line:#2c2c3a;--text:#eef0f6;--text-2:rgb(255 255 255/.75);--text-3:rgb(255 255 255/.5);
+    --glass:rgb(0 0 0/.32);--glass-strong:rgb(10 10 16/.6);--glass-hover:rgb(255 255 255/.09);--glass-line:rgb(255 255 255/.08);--glass-on:rgb(255 255 255/.16);--glass-on-line:rgb(255 255 255/.22);--accent:#7c5cff;--accent-2:#a48bff;--radius:10px}
+  *{box-sizing:border-box}
+  body{margin:0;height:100vh;overflow:hidden;color:var(--text);font:14px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;background:var(--bg)}
+  /* ambient tint, like Ambient.svelte */
+  .ambient{position:fixed;inset:-10%;background:radial-gradient(60% 50% at 30% 10%,hsl(270 45% 30%/.75),transparent 70%),radial-gradient(50% 40% at 80% 20%,hsl(220 45% 25%/.6),transparent 70%);filter:blur(40px);z-index:0}
+  button{font:inherit;color:inherit;border:0;cursor:pointer;background:none}
+  :focus-visible{outline:2px solid rgb(255 255 255/.85);outline-offset:2px}
+  svg{flex:none} .line{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .shell{position:relative;z-index:1;height:100vh;display:flex}
+  .side{width:68px;flex:none;display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 0;background:rgb(10 10 16/.45);border-right:1px solid var(--glass-line)}
+  .side .nb{position:relative;width:46px;height:46px;border-radius:12px;display:grid;place-items:center;color:var(--text-2)}
+  .side .nb:hover{background:var(--glass-hover);color:var(--text)} .side .nb.on{background:var(--glass-on);color:var(--text)}
+  .side .nb.on::before{content:'';position:absolute;left:-11px;top:12px;bottom:12px;width:3px;border-radius:2px;background:var(--text)}
+  .side .tip{position:absolute;left:56px;white-space:nowrap;background:var(--surface-2);padding:4px 8px;border-radius:6px;font-size:12px;opacity:0;pointer-events:none;z-index:4}
+  .side .nb:hover .tip{opacity:1} .side .sp{flex:1}
+  .side .src{position:relative;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--glass);border:1px solid var(--glass-line)}
+  .side .src i{position:absolute;right:-1px;top:-1px;width:9px;height:9px;border-radius:50%;background:#22c55e;border:2px solid #111}
+  .row{display:grid;grid-auto-flow:column;grid-auto-columns:180px;gap:18px;overflow:hidden;margin-bottom:24px}
+  .h1{margin:4px 0 18px;font-size:26px;font-weight:700}
+  .srcc{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:12px;background:var(--glass);border:1px solid var(--glass-line);margin-bottom:10px}
+  .af{display:contents}
+  .chip.on-x{background:var(--glass-on);border-color:var(--glass-on-line);color:var(--text);gap:8px} .chip.on-x i{font-style:normal;color:var(--text-3);font-size:11px}
+  .fpop{position:absolute;top:44px;left:0;width:340px;padding:12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--glass-on-line);box-shadow:0 30px 80px rgb(0 0 0/.6);display:none;z-index:6}
+  .fpop.on{display:block}
+  .fh{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:10px 4px 6px} .fh:first-child{margin-top:2px}
+  .fc{display:flex;flex-wrap:wrap;gap:6px}
+  .fc button{height:30px;padding:0 12px;border-radius:999px;background:var(--glass);border:1px solid var(--glass-line);color:var(--text-2);font-size:13px}
+  .fc button:hover{background:var(--glass-hover);color:var(--text)} .fc button.on{background:var(--glass-on);border-color:var(--glass-on-line);color:var(--text)} .fc .ghost{color:var(--text-3)}
+  .ff{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--glass-line)} .lnk{color:var(--text-2);font-size:13px} .lnk:hover{color:var(--text)}
+  .modal{position:fixed;inset:0;background:rgb(10 10 16/.55);display:none;align-items:center;justify-content:center;z-index:8} .modal.on{display:flex}
+  .mp{position:relative;display:flex;width:min(760px,calc(100vw - 48px));height:min(560px,calc(100vh - 48px));border-radius:18px;background:var(--surface);border:1px solid var(--glass-on-line);box-shadow:0 30px 80px rgb(0 0 0/.6);overflow:hidden}
+  .mnav{width:190px;padding:16px 8px;border-right:1px solid var(--glass-line);display:flex;flex-direction:column;gap:2px}
+  .mnav button{text-align:left;padding:8px 10px;border-radius:8px;color:var(--text-2)} .mnav button.on{background:var(--glass-on);color:var(--text)}
+  .mbody{flex:1;padding:20px 24px;overflow-y:auto} .mx{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;color:var(--text-2)}
+  .libwrap{display:flex;gap:20px;align-items:flex-start}
+  .filters{width:220px;flex:none;position:sticky;top:0;max-height:calc(100vh - 90px);overflow-y:auto;padding:4px 4px 16px}
+  .filters.off{display:none}
+  .fg{padding:10px 0;border-bottom:1px solid var(--glass-line)} .fg:last-child{border:0}
+  .fg h4{margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3)}
+  .fg label{display:flex;align-items:center;gap:8px;padding:4px 0;color:var(--text-2);font-size:13px;cursor:pointer} .fg label span{margin-left:auto;color:var(--text-3);font-size:12px}
+  .fg input{accent-color:#a48bff}
+  .addc{color:var(--text-3);font-size:12px;padding:4px 0}
+  .tagz{display:flex;flex-wrap:wrap;gap:4px} .tagz span{padding:3px 9px;border-radius:999px;background:var(--glass);border:1px solid var(--glass-line);font-size:12px;color:var(--text-2);cursor:pointer} .tagz span.on{background:var(--glass-on);border-color:var(--glass-on-line);color:var(--text)}
+  .range{position:relative;height:4px;border-radius:2px;background:var(--glass-on);margin:8px 0} .range span{position:absolute;top:0;bottom:0;background:#a48bff;border-radius:2px}
+  .active{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .ac{height:26px;display:inline-flex;align-items:center;padding:0 10px;border-radius:999px;background:var(--glass-on);border:1px solid var(--glass-on-line);font-size:12px;cursor:pointer}
+  .clr{font-size:12px;color:var(--text-3)} .clr:hover{color:var(--text)}
+  .app{position:relative;z-index:1;height:100vh;display:flex;flex-direction:column;flex:1;min-width:0}
+  /* toolbar: same as Toolbar.svelte, plus downloads + view toggle */
+  .bar{display:flex;align-items:center;gap:12px;padding:16px 24px 12px}
+  .search{flex:0 1 380px;min-width:160px;height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:10px;background:var(--glass);border:1px solid var(--glass-line);color:var(--text-3)}
+  kbd{font:11px inherit;padding:1px 6px;border-radius:5px;border:1px solid var(--glass-on-line);color:var(--text-2);margin-left:auto}
+  .chips{display:flex;gap:6px}
+  .chip{position:relative;height:36px;min-width:36px;padding:0 12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:10px;background:var(--glass);border:1px solid var(--glass-line);color:var(--text-2)}
+  .chip.icon{padding:0} .chip:hover{background:var(--glass-hover);color:var(--text)}
+  .chip[aria-pressed=true]{background:var(--glass-on);border-color:var(--glass-on-line);color:var(--text)}
+  .spacer{flex:1}
+  .ring{position:absolute;inset:3px;border-radius:8px;background:conic-gradient(var(--accent-2) 0 42%,transparent 42%);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;padding:2px}
+  .dot{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:#f5b942}
+  .new{}
+  main{flex:1;overflow-y:auto;padding:4px 24px 24px}
+  /* continue banner: 1:1 Continue.svelte */
+  .continue{position:relative;height:180px;margin-bottom:24px;overflow:hidden;border-radius:14px;background:linear-gradient(120deg,#3b2f52,#24304a 55%,#1b1b28);box-shadow:0 10px 30px rgb(0 0 0/.45)}
+  .continue .open{position:absolute;inset:0;background:linear-gradient(90deg,rgb(10 10 16/.85) 0%,rgb(10 10 16/.35) 45%,rgb(10 10 16/.05) 75%)}
+  .continue .text{position:absolute;left:24px;bottom:20px;right:24px}
+  .continue small{color:var(--text-2);text-transform:uppercase;letter-spacing:.08em;font-size:11px;font-weight:600}
+  .continue h2{margin:2px 0 12px;font-size:26px;font-weight:700;line-height:1.15;text-shadow:0 1px 12px rgb(0 0 0/.5)}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:9px 22px;border-radius:999px;background:#fff;color:var(--bg);font-weight:700}
+  .pill svg{fill:currentColor}
+  .label{display:flex;align-items:baseline;gap:8px;height:18px;margin:0 0 14px;font-size:12px;font-weight:600;line-height:18px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-2)}
+  .label span{color:var(--text-3)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,180px);gap:20px 18px;justify-content:space-between}
+  .card{position:relative;width:180px;height:270px;border-radius:var(--radius);box-shadow:0 4px 12px rgb(0 0 0/.45);transition:transform 160ms ease-out;cursor:pointer;overflow:hidden}
+  .card:hover{transform:translateY(-4px) scale(1.03)}
+  .card .logo{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgb(10 10 16/.6);border:1px solid var(--glass-line)}
+  .card .logos{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:4px}
+  .card .logos .logo{position:static}
+  .card.dim{filter:saturate(.5) brightness(.75)}
+  .card .ins{position:absolute;left:8px;bottom:8px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;background:#fff;color:var(--bg)}
+  .card .upd{position:absolute;left:8px;bottom:8px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--accent);color:#fff}
+  .card b{position:absolute;left:10px;right:10px;top:46%;text-align:center;font-size:13px;color:rgb(255 255 255/.85)}
+  table{width:100%;border-collapse:collapse;font-size:13px} th{text-align:left;color:var(--text-3);font-weight:600;padding:8px;border-bottom:1px solid var(--glass-line)}
+  td{padding:9px 8px;border-bottom:1px solid var(--glass-line)} tr:hover td{background:var(--glass-hover);cursor:pointer}
+  /* game page: as today, plus tabs */
+  .page{display:none} .page.on{display:block}
+  .hero{position:relative;height:300px;border-radius:14px;overflow:hidden;background:linear-gradient(160deg,#4a3a5e,#2b2f4a 45%,#16161f);box-shadow:0 10px 30px rgb(0 0 0/.45)}
+  .hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgb(0 0 0/.32) 0%,transparent 30%,transparent 35%,rgb(10 10 16/.9) 100%)}
+  .back{position:absolute;top:16px;left:16px;z-index:1;padding:8px 16px;border-radius:10px;background:var(--glass-strong);border:1px solid var(--glass-line)}
+  .hb{position:absolute;left:24px;right:24px;bottom:20px;z-index:1;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+  .hb h1{margin:0;font-size:34px;line-height:1.1;text-shadow:0 1px 12px rgb(0 0 0/.5)}
+  .meta{display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--text-2)}
+  .more{width:44px;height:44px;border-radius:999px;background:var(--glass-on);border:1px solid var(--glass-on-line)}
+  .split{display:flex;height:44px;border-radius:999px;overflow:hidden;background:#fff;color:var(--bg);font-weight:700}
+  .split span{display:flex;align-items:center;gap:6px;padding:0 12px 0 16px}.split span+span{border-left:1px solid rgb(14 14 20/.18);padding:0 28px 0 18px}
+  .tabs{display:flex;gap:4px;margin:16px 0 16px;border-bottom:1px solid var(--glass-line)}
+  .tabs button{padding:10px 14px;color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-1px} .tabs button.on{color:var(--text);border-color:var(--text)}
+  .tabs .n{font-size:11px;padding:1px 6px;border-radius:999px;background:var(--glass-on);margin-left:6px}
+  .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:16px}
+  .tile,.panel{padding:12px 16px;border-radius:12px;background:var(--glass);border:1px solid var(--glass-line)}
+  .tile h3,.panel h3{margin:0 0 4px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-2)} .tile b{font-size:20px;font-weight:600}
+  .cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:16px} .panel{padding:16px}
+  .li{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--glass-line)} .li:last-child{border:0}
+  .li .g{flex:1} .li small{display:block;color:var(--text-3);font-size:12px}
+  .gb{height:32px;padding:0 14px;border-radius:999px;background:var(--glass-on);border:1px solid var(--glass-on-line)}
+  .bar2{height:6px;border-radius:3px;background:var(--glass-on);overflow:hidden;margin-top:6px} .bar2 i{display:block;height:100%;background:var(--accent)}
+  /* downloads: a popover from the toolbar, not a page */
+  .pop{position:absolute;right:72px;top:58px;width:380px;padding:6px;border-radius:12px;background:var(--surface-2);border:1px solid var(--glass-on-line);box-shadow:0 30px 80px rgb(0 0 0/.6);display:none;z-index:5}
+  .pop.on{display:block} .pop .li{padding:10px} .pop h3{margin:8px 10px 0;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3)}
+  .pal{position:fixed;inset:0;background:rgb(0 0 0/.5);display:none;align-items:flex-start;justify-content:center;padding-top:12vh;z-index:10} .pal.on{display:flex}
+  .pal .box{width:560px;border-radius:14px;background:var(--surface-2);border:1px solid var(--glass-on-line);box-shadow:0 30px 80px rgb(0 0 0/.6);overflow:hidden}
+  .pal input{width:100%;height:50px;padding:0 16px;background:none;border:0;border-bottom:1px solid var(--glass-line);color:var(--text);font:16px inherit;outline:none}
+  .pal .it{display:flex;gap:10px;align-items:center;padding:10px 16px;color:var(--text-2)} .pal .it.sel{background:var(--glass-hover);color:var(--text)} .pal .k{margin-left:auto;font-size:12px;color:var(--text-3)}
+  .pal .grp{padding:8px 16px 2px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3)}
+  .note{position:fixed;right:16px;bottom:16px;max-width:320px;padding:10px 14px;border-radius:10px;background:var(--surface-2);border:1px solid var(--glass-on-line);color:var(--text-2);font-size:12px;z-index:9}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="steam" viewBox="0 0 24 24"><path fill="currentColor" d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0z"/></symbol>
+  <symbol id="epic" viewBox="0 0 24 24"><path fill="currentColor" d="M3.537 0C2.165 0 1.66.506 1.66 1.879V18.44c0 .3.04.59.336 1.353l9.054 3.936c.433.199.614.276.928.27.314.006.495-.071.928-.27l9.054-3.936c.296-.763.336-1.053.336-1.353V1.879C22.296.506 21.79 0 20.418 0z"/></symbol>
+</svg>
+<div class="ambient"></div>
+<div class="shell">
+<nav class="side" aria-label="Main">
+  <button class="nb on" data-go="home" aria-label="Home"><svg class="line" viewBox="0 0 24 24" width="21" height="21"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span class="tip">Home</span></button>
+  <button class="nb" data-go="lib" aria-label="Library"><svg class="line" viewBox="0 0 24 24" width="21" height="21"><rect x="4" y="4" width="6" height="7" rx="1"/><rect x="14" y="4" width="6" height="7" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><span class="tip">Library</span></button>
+  <button class="nb" data-go="dl" aria-label="Downloads"><span class="ring" style="inset:5px"></span><svg class="line" viewBox="0 0 24 24" width="19" height="19"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="tip">Downloads · 42%</span></button>
+  <div class="sp"></div>
+  <button class="src" data-go="set" aria-label="Steam: logged in"><svg width="16" height="16"><use href="#steam"/></svg><i></i></button>
+  <button class="src" data-go="set" aria-label="Epic: logged in"><svg width="16" height="16"><use href="#epic"/></svg><i></i></button>
+  <button class="nb" data-go="set" aria-label="Settings"><svg class="line" viewBox="0 0 24 24" width="19" height="19"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span class="tip">Settings</span></button>
+</nav>
+<div class="app">
+  <nav class="bar">
+    <button class="search new" id="openpal"><svg class="line" viewBox="0 0 24 24" width="16" height="16"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search your library<kbd>Ctrl K</kbd></button>
+    <div class="chips">
+      <button class="chip" aria-pressed="true">All</button>
+      <button class="chip icon" aria-label="Steam"><svg width="16" height="16"><use href="#steam"/></svg></button>
+      <button class="chip icon" aria-label="Epic"><svg width="16" height="16"><use href="#epic"/></svg></button>
+      <button class="chip">Installed</button>
+      <span class="af" id="act"><button class="chip on-x">Adventure <i>✕</i></button><button class="chip on-x">Never played <i>✕</i></button></span>
+      <div style="position:relative">
+        <button class="chip" id="ftog" aria-haspopup="true"><svg class="line" viewBox="0 0 24 24" width="15" height="15"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Filters</button>
+        <div class="fpop" id="fpop">
+          <div class="fh">Collections</div>
+          <div class="fc"><button>Favourites</button><button>Co-op night</button><button>Short games</button><button class="ghost">+ New</button></div>
+          <div class="fh">Status</div>
+          <div class="fc"><button>Not installed</button><button>Update available</button><button>Downloading</button></div>
+          <div class="fh">Played</div>
+          <div class="fc"><button class="on">Never played</button><button>Last 30 days</button><button>10+ hours</button></div>
+          <div class="fh">Genre</div>
+          <div class="fc"><button class="on">Adventure</button><button>Action</button><button>Indie</button><button>RPG</button><button>Strategy</button><button>Puzzle</button><button>Co-op</button></div>
+          <div class="fh">Has</div>
+          <div class="fc"><button>DLC</button><button>Cloud saves</button><button>On both stores</button></div>
+          <div class="ff"><button class="lnk">Clear</button><button class="lnk">Save as collection</button></div>
+        </div>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <button class="chip icon" id="vt" aria-label="Show as list"><svg class="line" viewBox="0 0 24 24" width="16" height="16"><path d="M5 6h14M5 12h14M5 18h14"/></svg></button>
+    <button class="chip">Recently played <svg class="line" viewBox="0 0 24 24" width="14" height="14"><path d="m7 10 5 5 5-5"/></svg></button>
+  </nav>
+
+  <main>
+    <section class="page on" id="home">
+      <section class="continue">
+        <button class="open" data-open aria-label="Open Last Day of June"></button>
+        <div class="text"><small>Continue playing</small><h2>Last Day of June</h2><button class="pill"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 4.5v15l12.5-7.5z"/></svg>Play</button></div>
+      </section>
+      <h2 class="label">Updates ready <span>3</span></h2><div class="row" data-row="3" data-up="1"></div>
+      <h2 class="label">Recently added <span>12</span></h2><div class="row" data-row="8"></div>
+      <h2 class="label">Installed, never played <span>9</span></h2><div class="row" data-row="8"></div>
+    </section>
+
+    <section class="page" id="dl">
+      <div class="h1">Downloads</div>
+      <h2 class="label">Downloading</h2>
+      <div class="panel" style="margin-bottom:22px"><div class="li"><div class="g">Alan Wake's American Nightmare<small>Epic · 2.1 of 5.0 GB · 18 MB/s · 3 min left</small><div class="bar2"><i style="width:42%"></i></div></div><button class="gb">Pause</button><button class="gb">Cancel</button></div></div>
+      <h2 class="label">Up next <span>2</span></h2>
+      <div class="panel" style="margin-bottom:22px"><div class="li"><div class="g">Cassette Beasts<small>Epic · update · 1.2 GB</small></div><button class="gb">↑</button><button class="gb">✕</button></div><div class="li"><div class="g">Backpack Hero<small>Epic · install · 0.9 GB</small></div><button class="gb">↑</button><button class="gb">✕</button></div></div>
+      <h2 class="label">In Steam</h2>
+      <div class="panel"><div class="li"><div class="g">Portal 2<small>Steam handles this download · 61%</small><div class="bar2"><i style="width:61%"></i></div></div></div></div>
+    </section>
+
+    <section class="page" id="lib">
+      <h2 class="label">Results <span>184</span></h2>
+      <div class="grid" id="grid"></div>
+      <table id="list" style="display:none"><thead><tr><th>Name</th><th>Stores</th><th>Size</th><th>Playtime</th><th>Last played</th><th>Status</th></tr></thead><tbody id="tb"></tbody></table>
+
+    </section>
+
+    <section class="page" id="game">
+      <div class="hero">
+        <button class="back" id="back">← Library</button>
+        <div class="hb">
+          <div><h1>Last Day of June</h1><div class="meta"><svg width="14" height="14"><use href="#steam"/></svg><svg width="14" height="14"><use href="#epic"/></svg><span>· Installed on Steam · Ovosonico · 2017</span></div></div>
+          <div style="display:flex;gap:8px;align-items:center"><button class="more">⋯</button><div class="split"><span><svg width="18" height="18"><use href="#steam"/></svg>▾</span><span>▶ Play</span></div></div>
+        </div>
+      </div>
+      <div class="tabs new" id="tabs">
+        <button class="on" data-t="ov">Overview</button><button data-t="dlc">DLC<span class="n">3</span></button><button data-t="sv">Saves</button><button data-t="in">Installation</button><button data-t="op">Launch options</button>
+      </div>
+      <div class="tp" id="ov">
+        <div class="tiles"><div class="tile"><h3>Playtime</h3><b>3h 12m</b></div><div class="tile"><h3>Last played</h3><b>2 weeks ago</b></div><div class="tile"><h3>How long to beat</h3><b>4h</b></div></div>
+        <div class="cols"><div class="panel"><h3>About</h3><p style="margin:0;color:var(--text-2);line-height:1.55">[Store description and screenshots, as today]</p></div><div class="panel"><h3>Details</h3><p style="margin:0;color:var(--text-2)">Genres · Developer · Publisher · Released · Size · Store pages · Info</p></div></div>
+      </div>
+      <div class="tp panel" id="dlc" hidden>
+        <div class="li"><div class="g">Soundtrack<small>Epic · Installed · 210 MB</small></div><button class="gb">Uninstall</button></div>
+        <div class="li"><div class="g">Artbook<small>Epic · Not installed · 80 MB</small></div><button class="gb">Install</button></div>
+        <div class="li"><div class="g">Director's commentary<small>Steam · managed by Steam</small></div></div>
+      </div>
+      <div class="tp panel" id="sv" hidden>
+        <div class="li"><div class="g">Cloud saves<small>Synced 2 weeks ago · before and after playing</small></div><button class="gb">Sync now</button></div>
+        <div class="li"><div class="g">Sync for this game<small>Follows the global setting</small></div><button class="gb">On</button></div>
+      </div>
+      <div class="tp panel" id="in" hidden>
+        <div class="li"><div class="g">Folder<small>D:\Games\Epic\LastDayOfJune · 4.1 GB</small></div><button class="gb">Open folder</button><button class="gb">Move</button></div>
+        <div class="li"><div class="g">Verify files<small>Checks and repairs missing or broken files</small></div><button class="gb">Verify</button></div>
+        <div class="li"><div class="g">Uninstall<small>Removes the chosen copy</small></div><button class="gb" style="color:#fca5a5">Uninstall</button></div>
+      </div>
+      <div class="tp panel" id="op" hidden>
+        <div class="li"><div class="g">Extra arguments<small>-windowed -novid</small></div><button class="gb">Edit</button></div>
+        <div class="li"><div class="g">Start offline<small>Epic only</small></div><button class="gb">Off</button></div>
+        <div class="li"><div class="g">Steam launch options<small>Steam keeps its own</small></div><button class="gb">Open in Steam</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+
+  <div class="modal" id="set"><div class="mp">
+    <div class="mnav"><b style="display:block;font-size:16px;margin:4px 8px 12px">Settings</b><button class="on">Accounts</button><button>Library</button><button>Extra metadata</button><button>Cloud saves</button><button>Storage</button><button>About</button></div>
+    <div class="mbody">
+      <h2 class="label">Accounts</h2>
+      <div class="srcc"><svg width="22" height="22"><use href="#steam"/></svg><div style="flex:1"><b>Steam</b><small style="display:block;color:var(--text-3);font-size:12px">● Logged in as thebiemgamer · 679 games · Found at C:\Program Files (x86)\Steam</small></div><button class="gb">Log out</button></div>
+      <div class="srcc"><svg width="22" height="22"><use href="#epic"/></svg><div style="flex:1"><b>Epic Games</b><small style="display:block;color:var(--text-3);font-size:12px">● Logged in · 547 games · Install folder D:\Games\Epic</small></div><button class="gb">Log out</button></div>
+    </div>
+    <button class="mx" id="mx" aria-label="Close settings">✕</button>
+  </div></div>
+<div class="pal" id="pal"><div class="box">
+  <input placeholder="Type a game or a command…" value="last d" aria-label="Command palette">
+  <div class="grp">Games</div>
+  <div class="it sel"><svg width="14" height="14"><use href="#steam"/></svg>Last Day of June<span class="k">Enter to play · → open page</span></div>
+  <div class="grp">Commands</div>
+  <div class="it">Check for updates<span class="k">Epic</span></div>
+  <div class="it">Verify files…<span class="k">pick a game</span></div>
+  <div class="it">Show downloads</div>
+</div></div>
+
+<div class="note"><b>Mockup v5.</b> In the Afterglow direction: quiet glass, chips, one white pill. Library filters sit in the toolbar: quick chips, active filters as chips with ✕, and a Filters popover of chip toggles plus Save as collection. Settings stays a modal (from the sidebar). Home keeps the banner.</div>
+
+<script>
+  const hues=[280,200,20,140,330,45,250,170,0,100,220,300];
+  const names=['Last Day of June','Portal 2','Alan Wake','Cassette Beasts','Hades','Celeste','Control','Outer Wilds','Inscryption','Hollow Knight','Subnautica','Tunic','Disco Elysium','Backpack Hero','Firewatch','Gris'];
+  const S='<span class="logo"><svg width="14" height="14"><use href="#steam"/></svg></span>', E='<span class="logo"><svg width="14" height="14"><use href="#epic"/></svg></span>';
+  let g='';for(let i=0;i<24;i++){const both=i%4==0,dim=i%5==2,up=i==3;g+=`<div class="card${dim?' dim':''}" data-open style="background:linear-gradient(160deg,hsl(${hues[i%12]} 45% 36%),hsl(${hues[i%12]} 40% 13%))"><b>${names[i%16]}</b><span class="logos">${both?S+E:(i%3?S:E)}</span>${dim?'<span class="ins">Install</span>':''}${up?'<span class="upd">Update</span>':''}</div>`}
+  grid.innerHTML=g;
+  let t='';for(let i=0;i<16;i++)t+=`<tr data-open><td>${names[i]}</td><td>${i%4==0?'Steam + Epic':i%3?'Steam':'Epic'}</td><td>${(i*1.7+0.8).toFixed(1)} GB</td><td>${i*3}h</td><td>${i+1} days ago</td><td>${i%5==2?'Not installed':'Installed'}</td></tr>`;tb.innerHTML=t;
+  document.querySelectorAll('[data-row]').forEach((r,k)=>{let h='';for(let i=0;i<+r.dataset.row;i++){const j=i+k*4;h+=`<div class="card" data-open style="background:linear-gradient(160deg,hsl(${hues[j%12]} 45% 36%),hsl(${hues[j%12]} 40% 13%))"><b>${names[j%16]}</b><span class="logos">${j%3?S:E}</span>${r.dataset.up?'<span class="upd">Update</span>':''}</div>`}r.innerHTML=h});
+  let from='home';
+  const show=id=>{if(id==='set'){document.getElementById('set').classList.add('on');return}if(id!=='game')from=id;document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id===id));document.querySelectorAll('.side .nb').forEach(b=>b.classList.toggle('on',b.dataset.go===(id==='game'?from:id)));document.querySelector('.bar').style.display=(id==='lib')?'':'none'};
+  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
+  document.addEventListener('click',e=>{if(e.target.closest('[data-open]'))show('game')});
+  back.onclick=()=>show(from);
+  show('home');
+  ftog.onclick=e=>{e.stopPropagation();fpop.classList.toggle('on')};
+  fpop.onclick=e=>e.stopPropagation();
+  document.addEventListener('click',()=>fpop.classList.remove('on'));
+  document.querySelectorAll('.fc button:not(.ghost)').forEach(b=>b.onclick=()=>b.classList.toggle('on'));
+  document.querySelectorAll('.on-x').forEach(a=>a.onclick=()=>a.remove());
+  let listMode=false; vt.onclick=()=>{listMode=!listMode;grid.style.display=listMode?'none':'';list.style.display=listMode?'':'none';vt.setAttribute('aria-pressed',String(listMode))};
+  const setM=document.getElementById('set'); mx.onclick=()=>setM.classList.remove('on'); setM.onclick=e=>{if(e.target===setM)setM.classList.remove('on')};
+  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.tp').forEach(p=>p.hidden=p.id!==b.dataset.t)});
+  openpal.onclick=()=>pal.classList.add('on'); pal.onclick=e=>{if(e.target===pal)pal.classList.remove('on')};
+  addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='k'){e.preventDefault();pal.classList.add('on')}if(e.key==='Escape')pal.classList.remove('on')});
+  addEventListener('mouseup',e=>{if(e.button===3)show(from)});
+</script>
+</body>
+</html>
