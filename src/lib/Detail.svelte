@@ -162,7 +162,7 @@
   const running = $derived(runningKey !== null && copyKeys.includes(runningKey))
   const progress = $derived(copyKeys.map((k) => progressByKey[k]).find(Boolean))
 
-  const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', update: 'Updating…', uninstall: 'Uninstalling…' }
+  const labels: Record<Action, string> = { play: 'Launching…', playOutdated: 'Launching…', install: 'Installing…', update: 'Updating…', uninstall: 'Uninstalling…' }
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false
@@ -375,7 +375,7 @@
                         </button>
                       {/if}
                       {#if copy!.updateAvailable}
-                        <button role="menuitem" tabindex="-1" onclick={() => pick(() => act('play'))}>Play without updating</button>
+                        <button role="menuitem" tabindex="-1" onclick={() => pick(() => act('playOutdated'))}>Play without updating</button>
                       {/if}
                       {#if copy!.installed}
                         <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>

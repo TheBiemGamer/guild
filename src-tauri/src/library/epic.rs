@@ -40,12 +40,12 @@ pub struct Epic;
 
 impl Provider for Epic {
     fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Ok(games(&json(&["list", "--json"])?, &json(&["list-installed", "--check-updates", "--json"])?))
+        Ok(games(&json(&["list", "--json"])?, &installed_list()?))
     }
 
     /// Waits for Legendary, so a failure (e.g. an update is required) reaches the UI.
     fn launch(&self, game: &Game) -> Result<(), Error> {
-        run(legendary(&["launch", &game.external_id]))
+        launch(&game.external_id, false)
     }
 
     fn install(&self, game: &Game) -> Result<(), Error> {
@@ -65,6 +65,28 @@ impl Provider for Epic {
     fn download_progress(&self, _game: &Game) -> Option<Progress> {
         None
     }
+}
+
+/// Starts a game and waits for Legendary. `skip_version_check` starts an out-of-date game anyway.
+pub fn launch(app_name: &str, skip_version_check: bool) -> Result<(), Error> {
+    let mut command = legendary(&["launch", app_name]);
+    if skip_version_check {
+        command.arg("--skip-version-check");
+    }
+    run(command)
+}
+
+/// Installed games with their update flags. The update check is online, so when it fails
+/// (e.g. offline) the plain list still answers, with no updates marked.
+fn installed_list() -> Result<Value, Error> {
+    with_fallback(json(&["list-installed", "--check-updates", "--json"]), || json(&["list-installed", "--json"]))
+}
+
+fn with_fallback(checked: Result<Value, Error>, plain: impl FnOnce() -> Result<Value, Error>) -> Result<Value, Error> {
+    checked.or_else(|e| {
+        eprintln!("legendary list-installed --check-updates: {e}");
+        plain()
+    })
 }
 
 /// Runs a hidden `legendary install` of a game or a DLC (Legendary's app name), reporting its pid and
@@ -430,6 +452,14 @@ mod tests {
         assert!(!games(&Value::Null, &same)[0].update_available);
         // Not installed: nothing to update.
         assert!(!all[1].update_available);
+    }
+
+    #[test]
+    fn failed_update_check_falls_back_to_the_plain_list() {
+        let plain = || Ok(serde_json::json!([{ "app_name": "A" }]));
+        assert_eq!(with_fallback(Err("offline".into()), plain).unwrap(), serde_json::json!([{ "app_name": "A" }]));
+        assert_eq!(with_fallback(Ok(Value::Null), || Err("unused".into())).unwrap(), Value::Null);
+        assert!(with_fallback(Err("a".into()), || Err("b".into())).is_err());
     }
 
     #[test]

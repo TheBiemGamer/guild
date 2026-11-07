@@ -162,6 +162,8 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
 #[serde(rename_all = "camelCase")]
 pub enum Action {
     Play,
+    /// Epic only: start an out-of-date game without updating it first.
+    PlayOutdated,
     Install,
     /// Epic only; Steam updates games itself.
     Update,
@@ -176,7 +178,7 @@ pub enum Action {
 pub async fn act(app: AppHandle, action: Action, key: String, with_dlc: Option<bool>, dlc: Option<String>) -> Res<()> {
     let game = app.state::<AppState>().game(&key).ok_or("This game is no longer in the library.")?;
     if let Some(id) = &dlc
-        && (action == Action::Play || !game.dlc.iter().any(|d| &d.id == id))
+        && (matches!(action, Action::Play | Action::PlayOutdated) || !game.dlc.iter().any(|d| &d.id == id))
     {
         return Err("This DLC is no longer in the library.".into());
     }
@@ -194,7 +196,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
             state.lock().tracked.insert(key.clone());
         }
         let result = match action {
-            Action::Play => store.launch(game).inspect(|()| record_play(&state, &key)),
+            Action::Play | Action::PlayOutdated => store.launch(game).inspect(|()| record_play(&state, &key)),
             Action::Install => store.install(game),
             Action::Update => Err("Steam updates its games itself.".into()),
             Action::Uninstall => store.uninstall(game),
@@ -202,7 +204,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
         return result.map_err(|e| format!("Steam: {e}"));
     }
     let result = match action {
-        Action::Play => store.launch(game).map(|()| {
+        Action::Play | Action::PlayOutdated => epic::launch(&game.external_id, action == Action::PlayOutdated).map(|()| {
             record_play(&state, &key);
             // The game started either way; without its exe name it just isn't shown as running.
             let exe = epic::executable(game).unwrap_or_else(|e| {
@@ -233,7 +235,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<b
         }
         Action::Uninstall => epic::uninstall(dlc.unwrap_or(&game.external_id)),
     };
-    if action != Action::Play {
+    if !matches!(action, Action::Play | Action::PlayOutdated) {
         rescan(app, true);
     }
     result.map_err(|e| format!("Epic Games: {e}"))

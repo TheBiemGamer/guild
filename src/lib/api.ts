@@ -4,7 +4,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 export type Store = 'steam' | 'epic'
 export type Sort = 'title' | 'lastPlayed' | 'playtime'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
-export type Action = 'play' | 'install' | 'update' | 'uninstall'
+export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall'
 
 /**
  * `stores`: every store this game is in, the one `key` belongs to first. `chosen`: the copy key Play and
