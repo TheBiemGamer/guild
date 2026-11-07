@@ -160,6 +160,8 @@ pub enum SyncOutcome {
     LocalNewer,
     /// The cloud save is newer and downloading was off, so nothing changed.
     CloudNewer,
+    /// GOG: both sides changed since the last sync, so nothing changed. Asked like `CloudNewer`.
+    Conflict,
     /// Legendary's last message.
     Failed(String),
 }
@@ -184,38 +186,45 @@ fn sync_args(app_name: &str, sync: SaveSync) -> Vec<&str> {
 const SYNC_ANSWERS: &[u8] = b"\n\n\n\n";
 
 /// Longest a `sync-saves` run may take; a stalled network call must not hold the launch.
-const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Runs `legendary sync-saves` for one installed game. Never fails: a failure is an outcome.
 pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
     match run_with_timeout(legendary(&sync_args(app_name, sync)), SYNC_ANSWERS, SYNC_TIMEOUT) {
-        Ok(Some((success, log))) => parse_sync(success, &log),
+        Ok(Some((success, _, log))) => parse_sync(success, &log),
         Ok(None) => SyncOutcome::Failed("Cloud saves timed out.".into()),
         Err(e) => SyncOutcome::Failed(e.to_string()),
     }
 }
 
 /// Runs `command` with `input` on stdin (then closed, so a prompt beyond it ends the process instead of
-/// hanging) and returns whether it succeeded and its stderr. `None` when it outlives `timeout`: its process
-/// tree is killed (legendary.exe unpacks itself into a child process).
-fn run_with_timeout(mut command: Command, input: &[u8], timeout: Duration) -> std::io::Result<Option<(bool, String)>> {
-    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn()?;
+/// hanging) and returns whether it succeeded, its stdout and its stderr. `None` when it outlives `timeout`: its
+/// process tree is killed (legendary.exe and gogdl.exe unpack themselves into a child process).
+pub(super) fn run_with_timeout(
+    mut command: Command,
+    input: &[u8],
+    timeout: Duration,
+) -> std::io::Result<Option<(bool, String, String)>> {
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     child.stdin.take().expect("stdin is piped").write_all(input)?;
-    let mut stderr = child.stderr.take().expect("stderr is piped");
     // Read aside, so a full pipe never stalls the process while this waits.
-    let reader = std::thread::spawn(move || {
-        let mut log = Vec::new();
-        _ = stderr.read_to_end(&mut log);
-        String::from_utf8_lossy(&log).into_owned()
-    });
+    let read = |mut pipe: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            _ = pipe.read_to_end(&mut bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+    };
+    let out = read(Box::new(child.stdout.take().expect("stdout is piped")));
+    let err = read(Box::new(child.stderr.take().expect("stderr is piped")));
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
-            return Ok(Some((status.success(), reader.join().unwrap_or_default())));
+            return Ok(Some((status.success(), out.join().unwrap_or_default(), err.join().unwrap_or_default())));
         }
         if Instant::now() >= deadline {
             if let Err(e) = crate::platform::kill_tree(child.id()) {
-                log!("stop timed-out legendary: {e}");
+                log!("stop timed-out sync: {e}");
                 _ = child.kill();
             }
             _ = child.wait();
@@ -991,9 +1000,9 @@ mod tests {
         let stalled = run_with_timeout(cmd("ping -n 30 127.0.0.1 >nul"), b"\n", Duration::from_millis(300)).unwrap();
         assert_eq!(stalled, None);
         assert!(started.elapsed() < Duration::from_secs(10));
-        let done = run_with_timeout(cmd("echo hi 1>&2"), b"\n", Duration::from_secs(10)).unwrap().unwrap();
+        let done = run_with_timeout(cmd("echo out& echo hi 1>&2"), b"\n", Duration::from_secs(10)).unwrap().unwrap();
         assert!(done.0);
-        assert_eq!(done.1.trim(), "hi");
+        assert_eq!((done.1.trim(), done.2.trim()), ("out", "hi"));
     }
 
     #[test]

@@ -99,6 +99,8 @@ struct Shared {
     twins_running: bool,
     /// An Epic playtime fetch is in flight.
     playtime_running: bool,
+    /// A GOG playtime fetch is in flight.
+    gog_playtime_running: bool,
     /// Cached how-long-to-beat "normally" seconds by key (`igdb::all_normally`), for sort, group,
     /// filters and the card badge. Loaded once by `load_cache`; `time_to_beat` keeps it current.
     ttb: HashMap<String, u64>,
@@ -109,7 +111,7 @@ struct Shared {
     lists: crate::view::Lists,
 }
 
-/// An Epic or added game launched from here, watched through its process to time the session.
+/// An Epic, GOG or added game launched from here, watched through its process to time the session.
 struct Watch {
     key: String,
     exe: String,

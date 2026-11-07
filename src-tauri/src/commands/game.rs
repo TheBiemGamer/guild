@@ -67,15 +67,23 @@ pub struct CopyView {
     size_bytes: Option<u64>,
     /// Only for an installed copy (Steam knows a folder for games it hasn't installed yet).
     install_dir: Option<String>,
-    /// An installed Epic copy that keeps its saves in Epic's cloud.
+    /// An installed Epic or GOG copy that keeps its saves in its store's cloud.
     cloud_saves: bool,
 }
 
+/// The game page. Opening it asks GOG for a GOG copy's playtime in the background, when that is due.
 #[tauri::command]
-pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
+pub fn game(app: AppHandle, key: String) -> Option<Detail> {
+    let state = app.state::<AppState>();
     let s = state.lock();
     let entry = entries::find(&s.entries, &s.games, &key)?;
-    Some(detail(entry, &s.games, &s.twins, &s.lists))
+    let gog = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Gog).map(Game::key);
+    let detail = detail(entry, &s.games, &s.twins, &s.lists);
+    drop(s);
+    if let Some(gog) = gog {
+        super::library::refresh_gog_playtime(app.clone(), Some(gog));
+    }
+    Some(detail)
 }
 
 fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, lists: &view::Lists) -> Detail {
@@ -176,7 +184,7 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
 #[serde(rename_all = "camelCase")]
 pub enum Action {
     Play,
-    /// Epic only: start an out-of-date game without updating it first.
+    /// Epic and GOG: start an out-of-date game without updating it first (a GOG Play never updates).
     PlayOutdated,
     Install,
     /// Epic and GOG; Steam updates games itself.
@@ -196,7 +204,7 @@ pub enum Keep {
     Local,
 }
 
-/// Why an Epic Play didn't launch yet: the question to ask first.
+/// Why an Epic or GOG Play didn't launch yet: the question to ask first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Conflict {
@@ -208,7 +216,7 @@ pub enum Conflict {
 /// Legendary or gogdl is done; installs report progress through `poll` meanwhile, under the game's key.
 /// `with_dlc` (Epic or GOG install, default on) installs the owned DLC too. `dlc` installs or uninstalls
 /// one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
-/// An Epic Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
+/// An Epic or GOG Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 #[tauri::command]
 pub async fn act(
     app: AppHandle,
@@ -276,11 +284,21 @@ fn act_blocking(
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
         return Err("This game is in the download queue. Cancel its download first.".into());
     }
+    if game.provider == ProviderKind::Gog && matches!(action, Action::Play | Action::PlayOutdated) {
+        let upload = match saves_before_play(&state, game, keep) {
+            Ok(upload) => upload,
+            Err(conflict) => return Ok(Some(conflict)),
+        };
+        let options = checked_launch_options(open_db(&state).as_ref(), game)?;
+        let dir = installed_dir(game).ok_or("GOG: This game isn't installed.")?;
+        let exe = gog::launch(&game.external_id, dir, &options).map_err(|e| format!("GOG: {e}"))?;
+        record_play(&state, &key);
+        state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload });
+        return Ok(None);
+    }
     if game.provider == ProviderKind::Gog {
         let result = act_gog(&state, action, game, dlc, dest);
-        if !matches!(action, Action::Play | Action::PlayOutdated) {
-            rescan(app, true);
-        }
+        rescan(app, true);
         return result.map(|()| None).map_err(|e| format!("GOG: {e}"));
     }
     let result = match action {
@@ -337,14 +355,13 @@ fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     dir.map(|p| p.to_string_lossy().into_owned())
 }
 
-/// A GOG copy's actions outside the queue. A DLC uninstall is an update without it, so it reports progress like Move.
+/// A GOG copy's actions outside the queue, but Play. A DLC uninstall is an update without it, so it reports progress like Move.
 fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, dest: Option<&str>) -> Result<(), crate::library::Error> {
     let key = game.key();
     let dir = installed_dir(game).ok_or("This game isn't installed.")?;
     let conn = cache::db::open(&state.dirs.db)?;
     match (action, dlc) {
-        // shortcut: GOG games don't launch here yet; the UI offers no Play for them.
-        (Action::Play | Action::PlayOutdated, _) => Err("GOG games can't be played here yet.".into()),
+        (Action::Play | Action::PlayOutdated, _) => unreachable!("played in act_blocking"),
         (Action::Move, _) => gog::move_to(&conn, &game.external_id, dir, std::path::Path::new(dest.ok_or("Pick a folder to move the game to.")?)),
         (Action::Uninstall, None) => gog::uninstall(&conn, &game.external_id, dir),
         (Action::Uninstall, Some(dlc)) => {
@@ -567,7 +584,8 @@ fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(In
     }
 }
 
-/// `game_prefs` name for an Epic copy's launch options, as `LaunchOptions` JSON; none is all defaults.
+/// `game_prefs` name for an Epic or GOG copy's launch options, as `LaunchOptions` JSON; none is all defaults. GOG
+/// uses only the arguments and the alternative executable.
 const LAUNCH_OPTIONS: &str = "launch_options";
 
 fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
@@ -580,7 +598,7 @@ fn store_launch_options(conn: &Connection, key: &str, options: &LaunchOptions) -
     cache::db::set_pref(conn, key, LAUNCH_OPTIONS, json.as_deref()).map_err(|e| e.to_string())
 }
 
-/// An installed Epic copy's launch options, with the alternative executable checked again: the folder
+/// An installed Epic or GOG copy's launch options, with the alternative executable checked again: the folder
 /// may have changed since it was saved.
 fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchOptions> {
     let mut options = conn.map(|c| launch_options_of(c, &game.key())).unwrap_or_default();
@@ -591,22 +609,27 @@ fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchO
     Ok(options)
 }
 
-/// The Launch options tab of an installed Epic copy; `None` for others (Steam keeps its own).
+/// Whether the copy has launch options here: an installed Epic or GOG copy (Steam keeps its own).
+fn has_launch_options(g: &Game) -> bool {
+    g.installed && matches!(g.provider, ProviderKind::Epic | ProviderKind::Gog)
+}
+
+/// The Launch options tab of an installed Epic or GOG copy; `None` for others.
 #[tauri::command]
 pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions> {
-    app.state::<AppState>().game(&key).filter(|g| g.installed && g.provider == ProviderKind::Epic)?;
+    app.state::<AppState>().game(&key).filter(has_launch_options)?;
     blocking(move || Some(launch_options_of(&open_db(&app.state::<AppState>())?, &key))).await
 }
 
-/// Saves an installed Epic copy's launch options. `exe` may be absolute (from the file picker); it is
+/// Saves an installed Epic or GOG copy's launch options. `exe` may be absolute (from the file picker); it is
 /// stored relative to the install folder, and only when it is a file inside it. Returns what was stored.
 #[tauri::command]
 pub async fn set_launch_options(app: AppHandle, key: String, mut options: LaunchOptions) -> Res<LaunchOptions> {
     let game = app
         .state::<AppState>()
         .game(&key)
-        .filter(|g| g.installed && g.provider == ProviderKind::Epic)
-        .ok_or("This game isn't installed from Epic.")?;
+        .filter(has_launch_options)
+        .ok_or("This game isn't installed from Epic or GOG.")?;
     blocking(move || {
         if let Some(exe) = &options.exe {
             let dir = installed_dir(&game).ok_or("This game has no install folder.")?;
@@ -626,9 +649,9 @@ pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()>
     crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id)).map_err(|e| e.to_string())
 }
 
-/// `game_prefs` name for an Epic copy's own cloud save choice, `on` or `off`; none follows the setting.
+/// `game_prefs` name for an Epic or GOG copy's own cloud save choice, `on` or `off`; none follows its store's setting.
 const SAVES_CHOICE: &str = "cloud_saves";
-/// Info cache kind for an Epic copy's last cloud save sync, as a `SyncRecord`.
+/// Info cache kind for an Epic or GOG copy's last cloud save sync, as a `SyncRecord`.
 const SAVES_SYNC: &str = "cloud-saves-sync";
 /// Info rows are read with a maximum age; these never go stale.
 const FOREVER: i64 = i64::MAX / 2;
@@ -662,7 +685,8 @@ fn last_sync(conn: &Connection, key: &str) -> Option<SyncRecord> {
 fn sync_record(outcome: &SyncOutcome, at: i64) -> Option<SyncRecord> {
     Some(match outcome {
         SyncOutcome::Synced => SyncRecord { at, error: None, cloud_newer: false },
-        SyncOutcome::CloudNewer => SyncRecord { at, error: None, cloud_newer: true },
+        // A GOG conflict changed nothing either: the next Play asks.
+        SyncOutcome::CloudNewer | SyncOutcome::Conflict => SyncRecord { at, error: None, cloud_newer: true },
         SyncOutcome::Failed(e) => SyncRecord { at, error: Some(e.clone()), cloud_newer: false },
         SyncOutcome::LocalNewer => return None,
     })
@@ -670,7 +694,7 @@ fn sync_record(outcome: &SyncOutcome, at: i64) -> Option<SyncRecord> {
 
 fn record_sync(conn: Option<&Connection>, key: &str, outcome: &SyncOutcome) {
     if let SyncOutcome::Failed(e) = outcome {
-        log!("legendary sync-saves {key}: {e}");
+        log!("sync saves {key}: {e}");
     }
     let at = unix_now();
     let (Some(conn), Some(mut record)) = (conn, sync_record(outcome, at)) else { return };
@@ -693,13 +717,26 @@ fn pre_launch_sync(keep: Option<Keep>, cloud_newer: bool) -> Result<Option<SaveS
     }
 }
 
-/// Syncs an Epic game's cloud saves before it launches, when it has them and syncing is on for it.
+/// Syncs a copy's cloud saves with its store's tool: Legendary for Epic, gogdl for GOG.
+fn sync_copy(conn: Option<&Connection>, game: &Game, sync: SaveSync) -> SyncOutcome {
+    match (game.provider, installed_dir(game)) {
+        (ProviderKind::Gog, Some(dir)) => gog::sync_saves(conn, &game.external_id, dir, sync),
+        (ProviderKind::Gog, None) => SyncOutcome::Failed("This game isn't installed.".into()),
+        _ => epic::sync_saves(&game.external_id, sync),
+    }
+}
+
+/// Syncs an Epic or GOG game's cloud saves before it launches, when it has them and syncing is on for it.
 /// Returns how to upload after the game exits (`None`: no syncing), or the conflict to ask about instead
 /// of launching. A failed sync is remembered and never stops the launch.
 fn saves_before_play(state: &AppState, game: &Game, keep: Option<Keep>) -> Result<Option<SaveSync>, Conflict> {
     let key = game.key();
     let conn = open_db(state);
-    let enabled = conn.as_ref().is_none_or(|c| saves_choice(c, &key).unwrap_or_else(|| settings::load(c).cloud_saves));
+    let store_default = |c: &Connection| {
+        let saved = settings::load(c);
+        if game.provider == ProviderKind::Gog { saved.gog_cloud_saves } else { saved.cloud_saves }
+    };
+    let enabled = conn.as_ref().is_none_or(|c| saves_choice(c, &key).unwrap_or_else(|| store_default(c)));
     if !game.cloud_saves || !enabled {
         return Ok(None);
     }
@@ -708,21 +745,26 @@ fn saves_before_play(state: &AppState, game: &Game, keep: Option<Keep>) -> Resul
         // Keep local: the upload afterwards sends this PC's save whatever the cloud holds.
         return Ok(Some(SaveSync::KeepLocal));
     };
-    let outcome = epic::sync_saves(&game.external_id, download);
-    if outcome == SyncOutcome::LocalNewer {
-        return Err(Conflict::LocalNewer);
+    match sync_copy(conn.as_ref(), game, download) {
+        SyncOutcome::LocalNewer => Err(Conflict::LocalNewer),
+        // GOG: both sides changed since the last sync; Keep cloud or Keep local settles it.
+        SyncOutcome::Conflict => Err(Conflict::CloudNewer),
+        outcome => {
+            record_sync(conn.as_ref(), &key, &outcome);
+            Ok(Some(SaveSync::Upload))
+        }
     }
-    record_sync(conn.as_ref(), &key, &outcome);
-    Ok(Some(SaveSync::Upload))
 }
 
-/// Uploads a watched Epic game's saves once it has exited, off the poll.
+/// Uploads a watched Epic or GOG game's saves once it has exited, off the poll.
 pub(super) fn upload_saves(app: &AppHandle, key: String, sync: SaveSync) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(app_name) = key.strip_prefix("epic-") else { return };
-        let outcome = epic::sync_saves(app_name, sync);
-        record_sync(open_db(&app.state::<AppState>()).as_ref(), &key, &outcome);
+        let state = app.state::<AppState>();
+        let Some(game) = state.game(&key) else { return };
+        let conn = open_db(&state);
+        let outcome = sync_copy(conn.as_ref(), &game, sync);
+        record_sync(conn.as_ref(), &key, &outcome);
     });
 }
 
@@ -749,7 +791,7 @@ fn saves_view(choice: Option<bool>, last: Option<SyncRecord>) -> SavesView {
     SavesView { choice, synced_at, error }
 }
 
-/// The Saves tab of an Epic copy (`key`); `None` for a copy without cloud saves.
+/// The Saves tab of an Epic or GOG copy (`key`); `None` for a copy without cloud saves.
 #[tauri::command]
 pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
     app.state::<AppState>().game(&key).filter(|g| g.installed && g.cloud_saves)?;
@@ -760,7 +802,7 @@ pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
     .await
 }
 
-/// Sets an Epic copy's own cloud save choice; `None` follows the setting again.
+/// Sets an Epic or GOG copy's own cloud save choice; `None` follows its store's setting again.
 #[tauri::command]
 pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res<()> {
     app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or("This game has no cloud saves.")?;
@@ -772,7 +814,7 @@ pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res
     .await
 }
 
-/// Sync now: the newer side wins. The outcome shows in the Saves tab, so this fails only before Legendary runs.
+/// Sync now: the newer side wins. The outcome shows in the Saves tab, so this fails only before Legendary or gogdl runs.
 #[tauri::command]
 pub async fn sync_saves_now(app: AppHandle, key: String) -> Res<()> {
     let game = app
@@ -781,8 +823,9 @@ pub async fn sync_saves_now(app: AppHandle, key: String) -> Res<()> {
         .filter(|g| g.installed && g.cloud_saves)
         .ok_or("This game has no cloud saves.")?;
     blocking(move || {
-        let outcome = epic::sync_saves(&game.external_id, SaveSync::Both);
-        record_sync(open_db(&app.state::<AppState>()).as_ref(), &key, &outcome);
+        let conn = open_db(&app.state::<AppState>());
+        let outcome = sync_copy(conn.as_ref(), &game, SaveSync::Both);
+        record_sync(conn.as_ref(), &key, &outcome);
         Ok(())
     })
     .await
@@ -1522,6 +1565,8 @@ mod tests {
         assert_eq!(shown(SyncOutcome::Failed("Login failed!".into())).error.as_deref(), Some("Cloud saves didn't sync: Login failed!"));
         assert!(shown(SyncOutcome::CloudNewer).error.is_some());
         assert_eq!(sync_record(&SyncOutcome::LocalNewer, 1_000), None);
+        // A GOG conflict changed nothing: the next Play asks, as after a newer cloud save.
+        assert!(sync_record(&SyncOutcome::Conflict, 1_000).unwrap().cloud_newer);
         assert_eq!(saves_view(Some(false), None), SavesView { choice: Some(false), synced_at: None, error: None });
         // Stored as JSON in the info table and read back.
         let json = serde_json::to_string(&sync_record(&SyncOutcome::CloudNewer, 7).unwrap()).unwrap();

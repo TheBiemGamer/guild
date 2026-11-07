@@ -3,7 +3,9 @@
 //! tokens are read into memory only: never logged, stored elsewhere, put in an error or sent to the UI.
 //! The library comes from GOG's endpoints: owned ids from `embed.gog.com`, titles and art from
 //! `api.gog.com/products`, cached in `info` as `gog-product`. Installs, updates, repairs and DLC changes are gogdl
-//! jobs run by the download queue (`commands::game`); each install folder is recorded in `gog_installs`.
+//! jobs run by the download queue (`commands::game`); each install folder is recorded in `gog_installs`. A game
+//! starts from its `goggame-<id>.info` play task, its cloud saves sync through gogdl's `save-sync`, and GOG's own
+//! playtime figure is read from `gameplay.gog.com` (sessions timed here are never sent back).
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -18,7 +20,7 @@ use rusqlite::Connection;
 use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
-use super::epic::InstallEvent;
+use super::epic::{InstallEvent, LaunchOptions, SaveSync, SyncOutcome, split_args};
 use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::tools;
@@ -232,17 +234,17 @@ fn id_text(v: &Value) -> Option<String> {
 
 pub struct Gog;
 
-/// Listed by `list`, which knows the app's folders and HTTP client; installed through the download queue.
-// shortcut: GOG games don't launch here yet.
-const NOT_HERE: &str = "GOG games can't be played here yet.";
+/// Listed by `list`, which knows the app's folders and HTTP client; installed and uninstalled through `commands::game`.
+const NOT_HERE: &str = "GOG games go through the download queue.";
 
 impl Provider for Gog {
     fn list_games(&self) -> Result<Vec<Game>, Error> {
         Err(NOT_HERE.into())
     }
 
-    fn launch(&self, _game: &Game) -> Result<(), Error> {
-        Err(NOT_HERE.into())
+    fn launch(&self, game: &Game) -> Result<(), Error> {
+        let dir = game.install_dir.as_deref().filter(|_| game.installed).ok_or("This game isn't installed.")?;
+        launch(&game.external_id, dir, &LaunchOptions::default()).map(drop)
     }
 
     fn install(&self, _game: &Game) -> Result<(), Error> {
@@ -263,7 +265,7 @@ impl Provider for Gog {
 }
 
 /// The owned GOG games. Products come from the cache; only uncached ids are asked, 50 per request. Also
-/// refreshes the cached account name. Blocks: call from a blocking thread.
+/// refreshes the cached account name, and marks the installed games with cloud saves. Blocks: call from a blocking thread.
 pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Game>, Error> {
     let conn = db::open(&dirs.db)?;
     let now = now_secs() as i64;
@@ -272,7 +274,7 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
         .iter()
         .filter_map(|(key, dir)| key.strip_prefix("gog-")?.parse().ok().filter(|&id| has_info(dir, id)))
         .collect();
-    let (owned, products, latest) = tauri::async_runtime::block_on(async {
+    let (owned, products, latest, saves) = tauri::async_runtime::block_on(async {
         let owned = owned_ids(&get_json(http.get(OWNED_URL).header(reqwest::header::AUTHORIZATION, creds.bearer())).await?);
         if let Err(e) = remember_account(http, &conn, creds, now).await {
             log!("gog account: {e}");
@@ -302,10 +304,15 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
             }
         }
         let latest = latest_builds(http, &conn, &installed, now).await;
-        Ok::<_, Error>((owned, products, latest))
+        let saves = with_cloud_saves(http, &conn, &installs, &installed, now).await;
+        Ok::<_, Error>((owned, products, latest, saves))
     })?;
     let covers = crate::gamesdb::covers(&conn, now);
-    Ok(games(&owned, &products, &installs, &latest, &covers))
+    let mut games = games(&owned, &products, &installs, &latest, &covers);
+    for g in &mut games {
+        g.cloud_saves = g.installed && g.external_id.parse().is_ok_and(|id| saves.contains(&id));
+    }
+    Ok(games)
 }
 
 /// The newest public build of each installed game (GOG's builds list needs no login), cached 6 h and asked one game
@@ -419,7 +426,8 @@ fn games(
                 title: title(p)?,
                 installed: dir.is_some(),
                 install_dir: dir.cloned(),
-                // shortcut: playtime and cloud saves come with the GOG launch; the size on disk isn't measured.
+                // Playtime comes from `epic_playtime::merge`, cloud saves from `list`.
+                // shortcut: the size on disk isn't measured.
                 playtime_minutes: None,
                 last_played: None,
                 size_bytes: None,
@@ -465,7 +473,7 @@ pub fn account_name(conn: &rusqlite::Connection) -> Option<String> {
 /// `info` kind of `gogdl info`'s answer for a game (sizes, languages, DLC, folder name), kept a week.
 const INSTALL_INFO: &str = "gog-install-info";
 const INSTALL_INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
-/// `info` kind of a game's cloud save timestamps; forgotten with the install.
+/// `info` kind of a game's cloud save timestamps, one row per game: `{location name: timestamp}`. Forgotten with the install.
 const SAVE_TS: &str = "gog-save-ts";
 /// gogdl retries forever without a connection, so a job that sends no progress this long is stopped.
 const STALL: Duration = Duration::from_secs(5 * 60);
@@ -878,6 +886,296 @@ pub fn move_to(conn: &Connection, id: &str, from: &Path, dest: &Path) -> Result<
     Ok(())
 }
 
+// Playing. Play runs the primary play task of `goggame-<id>.info` directly: `gogdl launch` hands it to a shell
+// (so cmd parses its arguments) and waits until the game exits.
+
+/// A play task: a program inside the install folder (GOG writes `/` or `\`), the folder it runs in and its arguments.
+#[derive(Debug, PartialEq)]
+struct Task {
+    path: String,
+    working_dir: String,
+    arguments: String,
+}
+
+/// The primary task, when it runs a program (a `URLTask` opens a web page).
+// shortcut: a primary `launcher` task (Prison Architect's `Launcher/dowser.exe`) is what gets watched although it hands
+// over to the game, so the session is timed only while it runs, like an Epic bootstrapper's.
+fn play_task(info: &Value) -> Option<Task> {
+    let task = info["playTasks"].as_array()?.iter().find(|t| t["isPrimary"] == true && t["type"] == "FileTask")?;
+    let text = |field: &str| task[field].as_str().unwrap_or_default().to_owned();
+    Some(Task { path: text("path"), working_dir: text("workingDir"), arguments: text("arguments") }).filter(|t| !t.path.is_empty())
+}
+
+/// `relative` inside `dir`, whichever slashes it uses.
+fn inside(dir: &Path, relative: &str) -> PathBuf {
+    relative.split(['/', '\\']).filter(|p| !p.is_empty()).fold(dir.to_path_buf(), |path, part| path.join(part))
+}
+
+/// What Play runs: the task's program in its working folder with its arguments, then the owner's extra arguments.
+/// An alternative executable (relative to `dir`, checked by the caller) runs in its own folder with only the extra ones.
+fn launch_command(dir: &Path, task: &Task, options: &LaunchOptions) -> Command {
+    let (exe, cwd, mut args) = match &options.exe {
+        Some(exe) => {
+            let exe = inside(dir, exe);
+            let cwd = exe.parent().unwrap_or(dir).to_path_buf();
+            (exe, cwd, Vec::new())
+        }
+        None => (inside(dir, &task.path), inside(dir, &task.working_dir), split_args(&task.arguments)),
+    };
+    args.extend(split_args(&options.args));
+    let mut command = Command::new(exe);
+    command.args(args).current_dir(cwd);
+    command
+}
+
+/// Starts an installed game without waiting for it. Returns its program's file name, to watch its process.
+pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, Error> {
+    let info = read_json(&dir.join(format!("goggame-{id}.info"))).ok_or("The game's files are missing. Verify or reinstall it.")?;
+    let task = play_task(&info).ok_or("GOG doesn't say how to start this game.")?;
+    let mut command = launch_command(dir, &task, options);
+    let exe = PathBuf::from(command.get_program());
+    if !exe.is_file() {
+        return Err(format!("The game's program is missing: {}", exe.display()).into());
+    }
+    command.spawn()?;
+    Ok(exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+// Playtime: GOG's own figure per game. Sessions timed here are added on top (`epic_playtime`) and never posted to GOG,
+// which would count them twice.
+
+/// `<GAMEPLAY_URL>/<id>/users/<user_id>/sessions`: `time_sum`, the minutes GOG counted for the game.
+const GAMEPLAY_URL: &str = "https://gameplay.gog.com/games";
+/// `info` kind of GOG's minutes for a game, or `null` when GOG answered without them.
+pub const PLAYTIME: &str = "gog-playtime";
+const PLAYTIME_MAX_AGE_SECS: i64 = 24 * 60 * 60;
+/// Between two playtime requests.
+pub const PLAYTIME_GAP: Duration = Duration::from_secs(1);
+
+/// The game has no recent playtime answer.
+pub fn playtime_due(conn: &Connection, key: &str, now: i64) -> bool {
+    db::cached_info(conn, key, PLAYTIME, PLAYTIME_MAX_AGE_SECS, now).ok().flatten().is_none()
+}
+
+// shortcut: UNVERIFIED field, from Heroic's GOG playtime code, not a captured response.
+fn parse_playtime(body: &Value) -> Option<u64> {
+    body["time_sum"].as_u64()
+}
+
+/// GOG's minutes for a game, `None` when GOG answered without them (an error status or another shape). `Err` only
+/// when GOG can't be reached.
+pub async fn fetch_playtime(http: &reqwest::Client, creds: &Creds, id: &str) -> Result<Option<u64>, Error> {
+    let url = format!("{GAMEPLAY_URL}/{id}/users/{}/sessions", creds.user_id);
+    let response = http.get(url).header(reqwest::header::AUTHORIZATION, creds.bearer()).send().await?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    Ok(serde_json::from_str(&response.text().await?).ok().as_ref().and_then(parse_playtime))
+}
+
+// Cloud saves, through gogdl's `save-sync`, one run per save location.
+
+/// `<SAVES_URL>/<clientId>?component_version=2.0.45`: a game's Galaxy settings, cloud saves among them. Public.
+const SAVES_URL: &str = "https://remote-config.gog.com/components/galaxy_client/clients";
+/// `info` kind of an installed game's cloud save locations (`[{name, location}]`), or `null` when it has none.
+const SAVES: &str = "gog-saves";
+const SAVES_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// The game's Galaxy client id, from its `goggame-<id>.info`.
+fn client_id(dir: &Path, id: impl std::fmt::Display) -> Option<String> {
+    read_json(&dir.join(format!("goggame-{id}.info"))).and_then(|v| id_text(&v["clientId"]))
+}
+
+/// The installed games (`ids`, in `installs`) whose remote config turns on cloud saves. Cached a week and asked one game
+/// at a time; a failure is logged and leaves that game without cloud saves until a later scan.
+async fn with_cloud_saves(
+    http: &reqwest::Client,
+    conn: &Connection,
+    installs: &HashMap<String, PathBuf>,
+    ids: &[u64],
+    now: i64,
+) -> HashSet<u64> {
+    let mut found = HashSet::new();
+    let mut asked = false;
+    for &id in ids {
+        let json = match db::cached_info(conn, &key(id), SAVES, SAVES_MAX_AGE_SECS, now).ok().flatten() {
+            Some(json) => json,
+            None => {
+                let Some(client) = installs.get(&key(id)).and_then(|dir| client_id(dir, id)) else { continue };
+                if std::mem::replace(&mut asked, true) {
+                    tokio::time::sleep(BATCH_GAP).await;
+                }
+                match get_json(http.get(format!("{SAVES_URL}/{client}?component_version=2.0.45"))).await {
+                    Ok(config) => {
+                        let json = save_locations(&config).to_string();
+                        if let Err(e) = db::put_info(conn, &key(id), SAVES, &json, now) {
+                            log!("gog saves cache: {e}");
+                        }
+                        json
+                    }
+                    Err(e) => {
+                        log!("gog remote config {id}: {e}");
+                        continue;
+                    }
+                }
+            }
+        };
+        if json.starts_with('[') {
+            found.insert(id);
+        }
+    }
+    found
+}
+
+/// A remote config's Windows save locations, `null` when cloud saves are off.
+fn save_locations(config: &Value) -> Value {
+    let storage = &config["content"]["Windows"]["cloudStorage"];
+    if storage["enabled"] != true {
+        return Value::Null;
+    }
+    Value::Array(storage["locations"].as_array().cloned().unwrap_or_default())
+}
+
+/// A save location with its `<?NAME?>` variables resolved (`platform::gog_folder`); `None` when one is unknown.
+fn resolve(location: &str, install: &Path) -> Option<PathBuf> {
+    let mut path = String::new();
+    let mut rest = location;
+    while let Some(start) = rest.find("<?") {
+        let end = start + rest[start..].find("?>")?;
+        path.push_str(&rest[..start]);
+        path.push_str(&crate::platform::gog_folder(&rest[start + 2..end], install)?.to_string_lossy());
+        rest = &rest[end + 2..];
+    }
+    path.push_str(rest);
+    // The remote config doubles its backslashes.
+    Some(PathBuf::from(path.split(['/', '\\']).filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\\")))
+}
+
+/// Each save location's name and folder. No locations means Galaxy's default folder for the game's client id. A
+/// location with a variable this app doesn't know is left out, quietly.
+fn save_folders(locations: &Value, client: &str, install: &Path) -> Vec<(String, PathBuf)> {
+    let default = [json!({
+        "name": "__default",
+        "location": format!("<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/{client}/Storage/Shared/Files"),
+    })];
+    let list = locations.as_array().filter(|l| !l.is_empty()).map_or(&default[..], Vec::as_slice);
+    list.iter()
+        .filter_map(|l| {
+            let (name, location) = (l["name"].as_str()?, l["location"].as_str()?);
+            let folder = resolve(location, install);
+            if folder.is_none() {
+                log!("gog saves: unknown folder in {location}");
+            }
+            Some((name.to_owned(), folder?))
+        })
+        .collect()
+}
+
+/// gogdl's `save-sync` arguments for one location. `ts` is when that location last synced, `0` for never.
+fn sync_args(folder: &Path, id: &str, name: &str, ts: &str, sync: SaveSync) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["save-sync".into(), folder.into(), id.into(), "--os".into(), "windows".into()];
+    args.extend(["--ts".into(), ts.into(), "--name".into(), name.into()]);
+    let flag = match sync {
+        SaveSync::Download => Some("--skip-upload"),
+        SaveSync::Upload => Some("--skip-download"),
+        SaveSync::Both => None,
+        SaveSync::KeepCloud => Some("--force-download"),
+        SaveSync::KeepLocal => Some("--force-upload"),
+    };
+    args.extend(flag.map(OsString::from));
+    args
+}
+
+/// Reads a `save-sync` log (stderr, `[SAVES] …` lines).
+fn sync_outcome(success: bool, log: &str) -> SyncOutcome {
+    if !success {
+        SyncOutcome::Failed(last_error(log))
+    } else if log.contains("Files in conflict") {
+        SyncOutcome::Conflict
+    } else if log.contains("Refused to download files, newer files locally") {
+        SyncOutcome::LocalNewer
+    } else if log.contains("Refused to upload files, newer files in the cloud") {
+        SyncOutcome::CloudNewer
+    } else {
+        SyncOutcome::Synced
+    }
+}
+
+/// The outcome to report of several locations': a question first, then a failure.
+fn first_to_report(outcomes: Vec<SyncOutcome>) -> SyncOutcome {
+    let rank = |o: &SyncOutcome| match o {
+        SyncOutcome::Conflict => 0,
+        SyncOutcome::LocalNewer => 1,
+        SyncOutcome::CloudNewer => 2,
+        SyncOutcome::Failed(_) => 3,
+        SyncOutcome::Synced => 4,
+    };
+    outcomes.into_iter().min_by_key(rank).unwrap_or(SyncOutcome::Synced)
+}
+
+/// When each save location of the game `key` last synced, as gogdl printed it.
+fn save_stamps(conn: &Connection, key: &str) -> HashMap<String, String> {
+    let json = db::cached_info(conn, key, SAVE_TS, i64::MAX / 2, 0).ok().flatten();
+    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+}
+
+fn store_save_stamps(conn: &Connection, key: &str, stamps: &HashMap<String, String>) {
+    let json = serde_json::to_string(stamps).unwrap_or_default();
+    if let Err(e) = db::put_info(conn, key, SAVE_TS, &json, now_secs() as i64) {
+        log!("gog save timestamps: {e}");
+    }
+}
+
+/// Keeps the timestamp gogdl printed (stdout, a float) as the location's last sync, only when it synced: after a
+/// refusal or a conflict the old one keeps the difference to ask about.
+fn keep_stamp(stamps: &mut HashMap<String, String>, name: &str, outcome: &SyncOutcome, stdout: &str) {
+    let stamp = stdout.trim();
+    if *outcome == SyncOutcome::Synced && stamp.parse::<f64>().is_ok() {
+        stamps.insert(name.to_owned(), stamp.to_owned());
+    }
+}
+
+/// Syncs an installed game's cloud saves, each location from the timestamp of its last sync (`keep_stamp`).
+/// Never fails: a failure is an outcome.
+pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSync) -> SyncOutcome {
+    let key = ProviderKind::Gog.key(id);
+    let Some(client) = client_id(dir, id) else { return SyncOutcome::Failed("The game's files are missing.".into()) };
+    let cached = conn.and_then(|c| db::cached_info(c, &key, SAVES, i64::MAX / 2, 0).ok().flatten());
+    let locations = cached.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or(Value::Null);
+    let folders = save_folders(&locations, &client, dir);
+    if folders.is_empty() {
+        return SyncOutcome::Failed("Can't tell where this game keeps its saves.".into());
+    }
+    if let Err(e) = ensure_login() {
+        return SyncOutcome::Failed(e.to_string());
+    }
+    // gogdl writes the game's own token into `auth.json`, so no other gogdl auth may run meanwhile. Held over the
+    // timestamps too, so two syncs of one game (Sync now while the upload after play runs) don't undo each other's.
+    let _auth = lock_auth();
+    let mut stamps = conn.map(|c| save_stamps(c, &key)).unwrap_or_default();
+    let outcomes = folders
+        .iter()
+        .map(|(name, folder)| {
+            _ = std::fs::create_dir_all(folder);
+            let ts = stamps.get(name).map_or("0", String::as_str);
+            let command = gogdl(sync_args(folder, id, name, ts, sync));
+            match super::epic::run_with_timeout(command, b"", super::epic::SYNC_TIMEOUT) {
+                Ok(Some((success, stdout, log))) => {
+                    let outcome = sync_outcome(success, &log);
+                    keep_stamp(&mut stamps, name, &outcome, &stdout);
+                    outcome
+                }
+                Ok(None) => SyncOutcome::Failed("Cloud saves timed out.".into()),
+                Err(e) => SyncOutcome::Failed(e.to_string()),
+            }
+        })
+        .collect();
+    if let Some(conn) = conn {
+        store_save_stamps(conn, &key, &stamps);
+    }
+    first_to_report(outcomes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1190,10 +1488,17 @@ mod tests {
         assert_eq!(default_build(&json!({"items": []})), None);
     }
 
-    /// An install folder like the Prison Architect sample in Heroic's `GOGImportData`: the game and one DLC.
+    /// An install folder like the Prison Architect sample in Heroic's `GOGImportData`: the game and one DLC. Its primary
+    /// play task is a launcher that hands over to a hidden game task.
     fn prison_architect(dir: &Path) {
         let game = r#"{"buildId": "55136646198962890", "clientId": "1", "gameId": "1441974651", "language": "English",
-            "languages": ["en-US"], "name": "Prison Architect", "playTasks": [], "rootGameId": "1441974651", "version": 1}"#;
+            "languages": ["en-US"], "name": "Prison Architect", "rootGameId": "1441974651", "version": 1, "playTasks": [
+                {"category": "launcher", "isPrimary": true, "languages": ["en-US"], "name": "Prison Architect",
+                 "osBitness": ["64"], "path": "Launcher/dowser.exe", "type": "FileTask"},
+                {"category": "game", "isHidden": true, "languages": ["en-US"], "name": "Prison Architect - launcher process Prison Architect64.exe",
+                 "osBitness": ["64"], "path": "Prison Architect64.exe", "type": "FileTask"},
+                {"category": "document", "isPrimary": false, "link": "https://www.gog.com/forum", "name": "Forum", "type": "URLTask"}
+            ]}"#;
         // Written with a byte order mark, as some GOG files are.
         std::fs::write(dir.join("goggame-1441974651.info"), [b"\xEF\xBB\xBF".as_slice(), game.as_bytes()].concat()).unwrap();
         let dlc = r#"{"gameId": "1716751705", "rootGameId": "1441974651", "name": "Aficionado"}"#;
@@ -1250,7 +1555,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("goggame-0.info"), r#"{"gameId": "0", "rootGameId": "0"}"#).unwrap();
         record_install(&conn, "0", &dir).unwrap();
-        db::put_info(&conn, "gog-0", SAVE_TS, "1.5", 0).unwrap();
+        store_save_stamps(&conn, "gog-0", &HashMap::from([("saves".to_string(), "1.5".to_string()), ("__default".to_string(), "2".to_string())]));
+        assert_eq!(save_stamps(&conn, "gog-0").len(), 2);
         // Another game's folder (a wrong record) is refused and kept.
         assert!(uninstall(&conn, "1", &dir).unwrap_err().to_string().contains("nothing was deleted"));
         assert!(dir.is_dir());
@@ -1258,6 +1564,7 @@ mod tests {
         assert!(!dir.exists());
         assert!(db::gog_installs(&conn).unwrap().is_empty());
         assert_eq!(db::cached_info(&conn, "gog-0", SAVE_TS, i64::MAX / 2, 0).unwrap(), None);
+        assert!(save_stamps(&conn, "gog-0").is_empty());
         drop(conn);
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -1282,6 +1589,122 @@ mod tests {
         assert!(to.is_dir());
         drop(conn);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn play_starts_the_primary_task() {
+        let dir = temp("play");
+        prison_architect(&dir);
+        let info = read_json(&dir.join("goggame-1441974651.info")).unwrap();
+        // The launcher task is primary, so it runs (and is watched), not the hidden game task.
+        let task = play_task(&info).unwrap();
+        assert_eq!(task, Task { path: "Launcher/dowser.exe".into(), working_dir: String::new(), arguments: String::new() });
+        let command = launch_command(Path::new(r"C:\Games\PA"), &task, &LaunchOptions::default());
+        assert_eq!(command.get_program(), r"C:\Games\PA\Launcher\dowser.exe");
+        assert_eq!(command.get_current_dir(), Some(Path::new(r"C:\Games\PA")));
+        assert_eq!(command.get_args().count(), 0);
+        // A plain game: its working folder and arguments, then the owner's extra arguments.
+        let plain = json!({"playTasks": [
+            {"isPrimary": true, "type": "FileTask", "path": "bin\\game.exe", "workingDir": "bin", "arguments": "-lang en \"-name x\""},
+        ]});
+        let task = play_task(&plain).unwrap();
+        let options = LaunchOptions { args: "-windowed".into(), ..LaunchOptions::default() };
+        let command = launch_command(Path::new(r"D:\G"), &task, &options);
+        assert_eq!(command.get_program(), r"D:\G\bin\game.exe");
+        assert_eq!(command.get_current_dir(), Some(Path::new(r"D:\G\bin")));
+        let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["-lang", "en", "-name x", "-windowed"]);
+        // An alternative executable runs in its own folder, with only the extra arguments.
+        let alt = LaunchOptions { exe: Some(r"tools\editor.exe".into()), ..options };
+        let command = launch_command(Path::new(r"D:\G"), &task, &alt);
+        assert_eq!(command.get_program(), r"D:\G\tools\editor.exe");
+        assert_eq!(command.get_current_dir(), Some(Path::new(r"D:\G\tools")));
+        assert_eq!(command.get_args().count(), 1);
+        // No primary task, or a primary web page: nothing to start.
+        assert_eq!(play_task(&json!({"playTasks": [{"type": "FileTask", "path": "a.exe"}]})), None);
+        assert_eq!(play_task(&json!({"playTasks": [{"isPrimary": true, "type": "URLTask", "link": "https://gog.com"}]})), None);
+        assert_eq!(play_task(&json!({})), None);
+        // The program missing from the folder: refused before anything starts.
+        assert!(launch("1441974651", &dir, &LaunchOptions::default()).unwrap_err().to_string().contains("missing"));
+        assert!(launch("1", &dir, &LaunchOptions::default()).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_locations_resolve_their_folder_variables() {
+        let install = Path::new(r"C:\Games\June");
+        let low = std::env::var("USERPROFILE").unwrap() + r"\AppData\LocalLow";
+        let locations = save_locations(&fixture("remote-config-1425609977.json"));
+        let folders = save_folders(&locations, "1", install);
+        // The remote config doubles its backslashes; the folder has single ones.
+        assert_eq!(folders, [("saves".to_string(), PathBuf::from(format!(r"{low}\Ovosonico\Last Day of June")))]);
+        assert_eq!(resolve("<?INSTALL?>/saves", install), Some(PathBuf::from(r"C:\Games\June\saves")));
+        let local = std::env::var("LOCALAPPDATA").unwrap();
+        assert_eq!(resolve("<?APPLICATION_DATA_LOCAL?>", install), Some(PathBuf::from(&local)));
+        // An unknown variable, or one left open, leaves that location out.
+        assert_eq!(resolve("<?STEAM_CLOUD?>/x", install), None);
+        assert_eq!(resolve("<?INSTALL", install), None);
+        let mixed = json!([{"name": "a", "location": "<?NOPE?>\\x"}, {"name": "b", "location": "<?INSTALL?>\\b"}]);
+        assert_eq!(save_folders(&mixed, "1", install), [("b".to_string(), PathBuf::from(r"C:\Games\June\b"))]);
+        // No locations: Galaxy's default folder for the client id.
+        assert_eq!(
+            save_folders(&json!([]), "5", install),
+            [("__default".to_string(), PathBuf::from(format!(r"{local}\GOG.com\Galaxy\Applications\5\Storage\Shared\Files")))]
+        );
+        // Cloud saves off: no locations at all.
+        let off = json!({"content": {"Windows": {"cloudStorage": {"enabled": false, "locations": []}}}});
+        assert_eq!(save_locations(&off), Value::Null);
+        assert_eq!(save_locations(&json!({})), Value::Null);
+    }
+
+    #[test]
+    fn save_sync_arguments_follow_the_direction() {
+        let args = |sync| strings(&sync_args(Path::new(r"C:\S"), "7", "saves", "1730000000.5", sync));
+        assert_eq!(
+            args(SaveSync::Both),
+            ["save-sync", r"C:\S", "7", "--os", "windows", "--ts", "1730000000.5", "--name", "saves"]
+        );
+        assert_eq!(args(SaveSync::Download)[9..], ["--skip-upload"]);
+        assert_eq!(args(SaveSync::Upload)[9..], ["--skip-download"]);
+        assert_eq!(args(SaveSync::KeepCloud)[9..], ["--force-download"]);
+        assert_eq!(args(SaveSync::KeepLocal)[9..], ["--force-upload"]);
+    }
+
+    #[test]
+    fn save_sync_log_decides_the_outcome() {
+        use SyncOutcome::*;
+        assert_eq!(sync_outcome(true, "[SAVES] INFO: Uploading 2 files\n"), Synced);
+        assert_eq!(sync_outcome(true, "[SAVES] WARNING: Refused to download files, newer files locally\n"), LocalNewer);
+        assert_eq!(sync_outcome(true, "[SAVES] WARNING: Refused to upload files, newer files in the cloud\n"), CloudNewer);
+        assert_eq!(sync_outcome(true, "[SAVES] WARNING: Files in conflict force downloading or uploading of files\n"), Conflict);
+        assert_eq!(sync_outcome(false, "[SAVES] ERROR: Failed to get credentials\nTraceback\n"), Failed("Failed to get credentials".into()));
+        // A question wins over a failure, a failure over a sync.
+        assert_eq!(first_to_report(vec![Synced, Failed("x".into()), CloudNewer]), CloudNewer);
+        assert_eq!(first_to_report(vec![LocalNewer, Conflict]), Conflict);
+        assert_eq!(first_to_report(vec![Synced, Failed("x".into())]), Failed("x".into()));
+        assert_eq!(first_to_report(vec![]), Synced);
+    }
+
+    #[test]
+    fn only_a_synced_location_keeps_the_new_timestamp() {
+        let mut stamps = HashMap::from([("saves".to_string(), "100.5".to_string())]);
+        keep_stamp(&mut stamps, "saves", &SyncOutcome::Conflict, "200.0");
+        keep_stamp(&mut stamps, "saves", &SyncOutcome::LocalNewer, "200.0\n");
+        keep_stamp(&mut stamps, "saves", &SyncOutcome::Failed("x".into()), "200.0");
+        assert_eq!(stamps["saves"], "100.5");
+        // gogdl may print no newline; junk isn't a timestamp.
+        keep_stamp(&mut stamps, "saves", &SyncOutcome::Synced, "Traceback");
+        keep_stamp(&mut stamps, "other", &SyncOutcome::Synced, "300.25");
+        keep_stamp(&mut stamps, "saves", &SyncOutcome::Synced, "200.0\r\n");
+        assert_eq!(stamps, HashMap::from([("saves".to_string(), "200.0".to_string()), ("other".to_string(), "300.25".to_string())]));
+    }
+
+    #[test]
+    fn playtime_is_the_time_sum_in_minutes() {
+        let sessions = json!({"time_sum": 754, "sessions": [{"date": "2026-11-01T20:00:00+0000", "time": 120}]});
+        assert_eq!(parse_playtime(&sessions), Some(754));
+        assert_eq!(parse_playtime(&json!({"error": "not_found"})), None);
+        assert_eq!(parse_playtime(&json!({"time_sum": "754"})), None);
     }
 
     /// Runs the real gogdl with no login: `gogdl info` needs only public endpoints for a game without DLC. Network;

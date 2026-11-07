@@ -199,6 +199,7 @@ pub async fn refresh(app: AppHandle, epic: bool, owned: bool) -> bool {
     if epic {
         fill_twins(again.clone());
         refresh_epic_playtime(again.clone());
+        refresh_gog_playtime(again.clone(), None);
     }
     refresh_owned(again, owned);
     changed
@@ -304,7 +305,61 @@ fn refresh_epic_playtime(app: AppHandle) {
     });
 }
 
-/// Applies the stored Epic playtime to the library; the next poll tells the UI when it changed.
+/// Asks GOG for its playtime of the GOG games due (no answer in the last day), one request per `gog::PLAYTIME_GAP`, in
+/// the background while logged in: after a GOG refresh the games launched here, on opening a game page that copy
+/// (`only`). Only one run at a time. Quiet: an unreachable GOG ends the run and keeps the last answers.
+pub(super) fn refresh_gog_playtime(app: AppHandle, only: Option<String>) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let opened = only.is_some();
+        let keys: Vec<String> = {
+            let mut s = state.lock();
+            if s.gog_playtime_running || s.gog_login != Some(gog::Login::LoggedIn) {
+                return;
+            }
+            s.gog_playtime_running = true;
+            only.map_or_else(|| s.games.iter().filter(|g| g.provider == ProviderKind::Gog).map(Game::key).collect(), |k| vec![k])
+        };
+        let _running = Running(app.clone(), |s: &mut Shared| &mut s.gog_playtime_running);
+        let job = app.clone();
+        let due = blocking(move || {
+            let state = job.state::<AppState>();
+            let conn = open_db(&state)?;
+            let launched = cache::db::launches(&conn).ok()?;
+            let now = super::unix_now();
+            let due: Vec<String> =
+                keys.into_iter().filter(|k| (opened || launched.contains_key(k)) && gog::playtime_due(&conn, k, now)).collect();
+            // The login last: it may run gogdl to refresh the token.
+            if due.is_empty() { None } else { Some((due, gog::login().1?)) }
+        })
+        .await;
+        let Some((due, creds)) = due else { return };
+        for (i, key) in due.iter().enumerate() {
+            if i > 0 {
+                tokio::time::sleep(gog::PLAYTIME_GAP).await;
+            }
+            let Some(id) = key.strip_prefix("gog-") else { continue };
+            match gog::fetch_playtime(&state.http, &creds, id).await {
+                Ok(minutes) => {
+                    let json = minutes.map_or_else(|| "null".to_string(), |m| m.to_string());
+                    if let Some(Err(e)) = open_db(&state).map(|c| cache::db::put_info(&c, key, gog::PLAYTIME, &json, super::unix_now())) {
+                        log!("gog playtime save: {e}");
+                    }
+                }
+                // Reduced to its kind: reqwest's errors carry the URL, which holds the account id.
+                Err(_) => {
+                    log!("gog playtime: GOG unreachable");
+                    break;
+                }
+            }
+        }
+        if let Some(conn) = open_db(&state) {
+            show_playtime(&state, &conn);
+        }
+    });
+}
+
+/// Applies the stored Epic and GOG playtime to the library; the next poll tells the UI when it changed.
 fn show_playtime(state: &AppState, conn: &rusqlite::Connection) {
     let mut s = state.lock();
     if epic_playtime::merge(conn, &mut s.games) {

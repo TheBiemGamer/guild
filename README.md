@@ -9,7 +9,7 @@ A Windows launcher that shows your Steam, Epic Games and GOG libraries as one li
 - **One library.** Steam, Epic and GOG games share one grid. A game you own in several stores becomes one card, and you pick which store launches it.
 - **Your whole Steam library**, including games you haven't installed.
 - **Epic games without the Epic Games Launcher:** install with a download queue (pause, resume, reorder), updates, cloud saves, verify, repair and move installs, and import of games you already installed.
-- **GOG games without GOG Galaxy:** install, update, verify, repair, move and uninstall them and their DLC through the same download queue, and import games you already installed. Playing GOG games from the launcher comes in a later version.
+- **GOG games without GOG Galaxy:** play, install, update, verify, repair, move and uninstall them and their DLC through the same download queue, and import games you already installed. Cloud saves sync around play, and GOG's own playtime shows with the time you play here.
 - **Game pages** with the description, screenshots, playtime, last played, how long to beat, and links to the store, PCGamingWiki, SteamDB and ProtonDB.
 - **Sort and filter** by store, install status, playtime and how long to beat.
 - **Works offline** from its local cache.
@@ -20,7 +20,7 @@ A Windows launcher that shows your Steam, Epic Games and GOG libraries as one li
 - Windows 10 or 11
 - [Steam](https://store.steampowered.com/about/), for Steam games
 - [Legendary](https://github.com/derrod/legendary), for Epic games. **Settings → Accounts** installs it when you ask (a pinned release, checked against its SHA-256). Or put your own `legendary.exe` on your `PATH` or in `%LOCALAPPDATA%\Programs\legendary`.
-- [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl), for GOG games. **Settings → Accounts** installs it the same way. Playing GOG games from the launcher comes in a later version.
+- [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl), for GOG games. **Settings → Accounts** installs it the same way.
 - Optional, for how long to beat: a free Twitch developer application (see below)
 
 ## Install
@@ -37,7 +37,7 @@ Open **Settings** with the gear button at the top right.
 
 - **Steam:** click **Log in** next to Steam and sign in with your password, or scan the QR code with the Steam mobile app.
 - **Epic Games:** click **Log in** next to Epic Games and sign in on the Epic page that opens. Its **Options** hold the install folder, cloud save sync, importing existing installs and syncing with the Epic Games Launcher.
-- **GOG:** click **Log in** next to GOG and sign in on the GOG page that opens. Its **Options** hold the install folder and importing existing installs.
+- **GOG:** click **Log in** next to GOG and sign in on the GOG page that opens. Its **Options** hold the install folder, cloud saves and importing existing installs.
 - **How long to beat:** create an application in the [Twitch developer console](https://dev.twitch.tv/console/apps), then paste its client ID and secret under **Extra metadata**.
 
 ## Why is a game shown twice?
@@ -53,7 +53,7 @@ An Epic or GOG copy joins a Steam game only when [GOG GamesDB](https://gamesdb.g
 
 - **Steam:** login and the Steam network, for owned games and download sizes
 - **Epic Games:** through Legendary
-- **GOG:** login, and GOG's API for your owned games, their titles and art, your account name and new game builds; downloads through gogdl
+- **GOG:** login, and GOG's API for your owned games, their titles and art, your account name, new game builds, cloud save settings and the playtime GOG counted; downloads and cloud saves through gogdl. Play sessions timed here are never sent to GOG.
 - **GOG GamesDB:** links Epic and GOG games to their Steam versions, and has the GOG games' covers
 - **IGDB (via Twitch):** how long to beat, only if you add credentials
 - **SteamGridDB:** covers for games you add yourself, only if you add an API key

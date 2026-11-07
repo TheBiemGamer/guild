@@ -628,6 +628,16 @@
                 </div>
               </div>
               <div class="row">
+                <div id="gog-saves-label">Sync cloud saves</div>
+                <button
+                  class="toggle"
+                  role="switch"
+                  aria-checked={view.gogCloudSaves}
+                  aria-labelledby="gog-saves-label"
+                  onclick={() => toggle('gog_cloud_saves', !view.gogCloudSaves)}
+                ></button>
+              </div>
+              <div class="row">
                 <div>Import an existing install</div>
                 <button class="btn" disabled={gogImporting} onclick={gogImport}>{gogImporting ? 'Importing…' : 'Import…'}</button>
               </div>

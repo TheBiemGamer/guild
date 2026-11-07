@@ -13,8 +13,6 @@ export type Store = 'steam' | 'epic' | 'gog' | 'custom'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
 export type GogLogin = 'noGogdl' | 'loggedOut' | 'loggedIn' | 'unreachable'
-/** GOG copies don't launch here yet, so Play leaves them out. */
-export const launches = (key: string) => !key.startsWith('gog-')
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
@@ -73,7 +71,7 @@ export interface CopyView {
   sizeBytes: number | null
   /** Only set for an installed copy. */
   installDir: string | null
-  /** An installed Epic copy that keeps its saves in Epic's cloud: the Saves tab. */
+  /** An installed Epic or GOG copy that keeps its saves in its store's cloud: the Saves tab. */
   cloudSaves: boolean
 }
 export type LinkKind = 'steamStore' | 'epicStore' | 'pcGamingWiki' | 'steamDb' | 'protonDb'
@@ -126,6 +124,8 @@ export interface SettingsView {
   ambient: boolean
   /** Epic games sync cloud saves around play unless the game's Saves tab says otherwise. */
   cloudSaves: boolean
+  /** The same for GOG games. */
+  gogCloudSaves: boolean
   /** Read from the Windows startup entry itself. */
   startWithWindows: boolean
   closeToTray: boolean
@@ -188,13 +188,13 @@ export const game = (key: string) => invoke<Detail | null>('game', { key })
  * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic or GOG Move goes to.
  */
 export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: 'cloud' | 'local'; dest?: string }
-/** Which save is newer when an Epic Play stopped to ask before launching. */
+/** Which save is newer when an Epic or GOG Play stopped to ask before launching. */
 export type Conflict = 'localNewer' | 'cloudNewer'
-/** Resolves to a conflict when an Epic Play asks first instead of launching; null otherwise. */
+/** Resolves to a conflict when an Epic or GOG Play asks first instead of launching; null otherwise. */
 export const act = (action: Action, key: string, options: ActOptions = {}) =>
   invoke<Conflict | null>('act', { action, key, ...options })
 /**
- * An Epic copy's Saves tab. `choice`: its own On/Off, null follows Settings. `syncedAt`: unix seconds of the last
+ * An Epic or GOG copy's Saves tab. `choice`: its own On/Off, null follows Settings. `syncedAt`: unix seconds of the last
  * sync that worked, null when never or when `error` says what went wrong with the last one.
  */
 export interface SavesView { choice: boolean | null; syncedAt: number | null; error: string | null }
@@ -202,7 +202,10 @@ export const saves = (key: string) => invoke<SavesView | null>('saves', { key })
 export const setSaves = (key: string, choice: boolean | null) => invoke<void>('set_saves', { key, choice })
 /** The newer save wins; the outcome shows in `saves`. */
 export const syncSavesNow = (key: string) => invoke<void>('sync_saves_now', { key })
-/** An installed Epic copy's Launch options tab. `exe`: relative to the install folder; null runs the default. */
+/**
+ * An installed Epic or GOG copy's Launch options tab. `exe`: relative to the install folder; null runs the default.
+ * GOG uses only `args` and `exe`.
+ */
 export interface LaunchOptions { args: string; offline: boolean; skipVersionCheck: boolean; exe: string | null }
 export const launchOptions = (key: string) => invoke<LaunchOptions | null>('launch_options', { key })
 /** `exe` may be absolute; resolves to what was stored (`exe` made relative). Fails for an exe outside the install folder. */

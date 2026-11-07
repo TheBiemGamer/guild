@@ -1,6 +1,7 @@
 //! Epic playtime: Epic's own figure from its playtime service (cached in the `info` table) plus the
-//! sessions this app timed (the `playtime` table), which Legendary's launches never report to Epic. Games the
-//! owner added get their timed sessions the same way.
+//! sessions this app timed (the `playtime` table), which Legendary's launches never report to Epic. GOG copies
+//! get GOG's own figure (`gog::PLAYTIME` rows, fetched by `commands::library`) plus their timed sessions, which are
+//! never posted to GOG either. Games the owner added get their timed sessions the same way.
 //! Legendary's access token is read from its session file only for the request; it never reaches a
 //! log line, error string, Debug output or the frontend, and is never stored here.
 
@@ -13,7 +14,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::cache::db;
-use crate::library::{epic, Game, ProviderKind};
+use crate::library::{epic, gog, Game, ProviderKind};
 
 /// The `info` row of Epic's last answer: minutes per artifact id.
 const KEY: &str = "epic";
@@ -115,25 +116,42 @@ pub fn remember(conn: &Connection, minutes: &HashMap<String, u64>, now_secs: i64
     }
 }
 
-/// Applies the stored playtime (Epic's last answer and the sessions timed here) to `games`.
+/// GOG's last answers in minutes, by product id. A game GOG answered without minutes (`null`) is left out.
+fn gog_cached(conn: &Connection) -> HashMap<String, u64> {
+    let Ok(mut rows) = conn.prepare("SELECT key, json FROM info WHERE kind = ?1") else { return HashMap::new() };
+    let read = rows.query_map([gog::PLAYTIME], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)));
+    read.map(|rows| rows.flatten().filter_map(|(key, json)| Some((key.strip_prefix("gog-")?.to_owned(), json.parse().ok()?))).collect())
+        .unwrap_or_default()
+}
+
+/// Applies the stored playtime (Epic's and GOG's last answers and the sessions timed here) to `games`.
 /// Returns whether anything changed.
 pub fn merge(conn: &Connection, games: &mut [Game]) -> bool {
     let own = db::own_totals(conn).unwrap_or_else(|e| {
         log!("own playtime: {e}");
         HashMap::new()
     });
-    apply(games, &cached(conn), &own)
+    apply(games, &cached(conn), &gog_cached(conn), &own)
 }
 
-/// An Epic copy gets Epic's minutes plus the minutes timed here, either alone when the other is missing,
-/// unknown when both are. A game the owner added has only the minutes timed here. Steam copies are left
-/// alone. Returns whether anything changed.
-pub fn apply(games: &mut [Game], service: &HashMap<String, u64>, own: &HashMap<String, i64>) -> bool {
+/// An Epic copy gets Epic's minutes (`service`, by app name) plus the minutes timed here, either alone when the other
+/// is missing, unknown when both are; a GOG copy the same with GOG's minutes (`gog`, by product id). A game the owner
+/// added has only the minutes timed here. Steam copies are left alone. Returns whether anything changed.
+pub fn apply(
+    games: &mut [Game],
+    service: &HashMap<String, u64>,
+    gog: &HashMap<String, u64>,
+    own: &HashMap<String, i64>,
+) -> bool {
     let mut changed = false;
     for g in games.iter_mut().filter(|g| g.provider != ProviderKind::Steam) {
         let timed = own.get(&g.key()).map(|&s| s.max(0) as u64 / 60);
-        let epic = service.get(&g.external_id).copied().filter(|_| g.provider == ProviderKind::Epic);
-        let minutes = [epic, timed].into_iter().flatten().reduce(|a, b| a + b);
+        let store = match g.provider {
+            ProviderKind::Epic => service.get(&g.external_id).copied(),
+            ProviderKind::Gog => gog.get(&g.external_id).copied(),
+            _ => None,
+        };
+        let minutes = [store, timed].into_iter().flatten().reduce(|a, b| a + b);
         changed |= g.playtime_minutes != minutes;
         g.playtime_minutes = minutes;
     }
@@ -176,13 +194,13 @@ mod tests {
             // Under a minute: known, but no whole minute yet.
             ("epic-ShortOwn".to_string(), 59),
         ]);
-        assert!(apply(&mut games, &service, &own));
+        assert!(apply(&mut games, &service, &HashMap::new(), &own));
         let minutes: Vec<_> = games.iter().map(|g| g.playtime_minutes).collect();
         assert_eq!(minutes, [Some(180), Some(10), Some(0), None]);
         // Nothing new: nothing changed.
-        assert!(!apply(&mut games, &service, &own));
+        assert!(!apply(&mut games, &service, &HashMap::new(), &own));
         // Epic's answer gone (none cached yet): the own total shows.
-        assert!(apply(&mut games, &HashMap::new(), &own));
+        assert!(apply(&mut games, &HashMap::new(), &HashMap::new(), &own));
         assert_eq!(games[0].playtime_minutes, Some(60));
     }
 
@@ -195,7 +213,7 @@ mod tests {
         let mut games = vec![epic("Pumpkin"), epic("Fortnite"), steam.clone()];
         let service = HashMap::from([("Pumpkin".to_string(), 50), (steam.external_id.clone(), 999)]);
         let own = HashMap::from([("Fortnite".to_string(), 6_000), (steam.key(), 6_000)]);
-        apply(&mut games, &service, &own);
+        apply(&mut games, &service, &service, &own);
         assert_eq!(games[0].playtime_minutes, Some(50));
         // Own totals are keyed `epic-<app_name>`, not by the bare app name.
         assert_eq!(games[1].playtime_minutes, None);
@@ -209,7 +227,33 @@ mod tests {
         // Epic's answer for a matching name never counts for an added game.
         let service = HashMap::from([("Fortnite".to_string(), 500)]);
         let own = HashMap::from([("custom-18f2a".to_string(), 7_200)]);
-        assert!(apply(&mut games, &service, &own));
+        assert!(apply(&mut games, &service, &service, &own));
         assert_eq!(games.iter().map(|g| g.playtime_minutes).collect::<Vec<_>>(), [Some(120), None]);
+    }
+
+    #[test]
+    fn gog_playtime_adds_gog_and_own() {
+        let gog = |id: &str| Game { provider: ProviderKind::Gog, external_id: id.into(), ..game(id, true, None, None) };
+        let mut games = vec![gog("1"), gog("2"), gog("3"), epic("1")];
+        // GOG's answer is by product id; Epic's map never counts for a GOG copy, nor GOG's for an Epic one.
+        let gog_minutes = HashMap::from([("1".to_string(), 90), ("2".to_string(), 5)]);
+        let epic_minutes = HashMap::from([("3".to_string(), 500)]);
+        let own = HashMap::from([("gog-1".to_string(), 1_200), ("gog-3".to_string(), 120)]);
+        assert!(apply(&mut games, &epic_minutes, &gog_minutes, &own));
+        assert_eq!(games.iter().map(|g| g.playtime_minutes).collect::<Vec<_>>(), [Some(110), Some(5), Some(2), None]);
+    }
+
+    #[test]
+    fn gog_answers_are_read_from_the_cache() {
+        let path = std::env::temp_dir().join(format!("launcher-gog-playtime-{}.sqlite", std::process::id()));
+        _ = std::fs::remove_file(&path);
+        let conn = db::open(&path).unwrap();
+        db::put_info(&conn, "gog-1", gog::PLAYTIME, "42", 0).unwrap();
+        // GOG answered without minutes.
+        db::put_info(&conn, "gog-2", gog::PLAYTIME, "null", 0).unwrap();
+        db::put_info(&conn, "gog-3", "gog-product", "7", 0).unwrap();
+        assert_eq!(gog_cached(&conn), HashMap::from([("1".to_string(), 42)]));
+        drop(conn);
+        _ = std::fs::remove_file(&path);
     }
 }

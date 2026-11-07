@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { logoFile, storeNames } from './StoreIcon.svelte'
-  import { cover, launches, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
+  import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
 
   let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu }: {
     game: Card
@@ -153,7 +153,7 @@
             <button class="glass small" onclick={() => oncancel(waiting.key)}>Cancel</button>
           {/if}
         </span>
-      {:else if game.installed && launches(game.chosen)}
+      {:else if game.installed}
         <button class="pill small" onclick={() => onplay(game.chosen)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
           Play

@@ -234,7 +234,7 @@
   }
 
   // A string, so a library reload that keeps the copy doesn't reload the options under the cursor.
-  const launchKey = $derived(copy?.installed && copy.provider === 'epic' ? copy.key : null)
+  const launchKey = $derived(copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog') ? copy.key : null)
   $effect(() => {
     const key = launchKey
     launch = null
@@ -383,11 +383,6 @@
     f()
   }
 
-  /** The copies Play and Install can act on: an installed GOG copy only to update it, as GOG games don't launch here yet. */
-  const playable = $derived(game?.copies.filter((c) => api.launches(c.key) || !c.installed || c.updateAvailable) ?? [])
-  /** The copy the pill acts on: the chosen one, unless the pill leaves it out. */
-  const pillKey = $derived((playable.find((c) => c.key === chosenKey) ?? playable[0])?.key)
-
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
 
@@ -441,7 +436,7 @@
     const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
     if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
     if (copy?.cloudSaves) list.push({ id: 'saves', label: 'Saves' })
-    if (copy?.installed && !custom && api.launches(copy.key)) list.push({ id: 'launch', label: 'Launch options' })
+    if (copy?.installed && !custom) list.push({ id: 'launch', label: 'Launch options' })
     if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
     return list
   })
@@ -562,23 +557,21 @@
                   />
                 {/if}
               </div>
-              {#if playable.length}
               <PlayButton
-                copies={playable}
+                copies={game.copies}
                 chosen={chosenKey}
                 {running}
                 busy={shown}
                 onchoose={(key) => (chosenKey = key)}
-                onplay={() => act('play', pillKey)}
-                onupdate={() => act('update', pillKey)}
+                onplay={() => act('play')}
+                onupdate={() => act('update')}
                 oninstall={() => {
-                  const key = pillKey! // the copy shown when the popup opens, not when it is confirmed
+                  const key = copy!.key // the copy shown when the popup opens, not when it is confirmed
                   onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), (withDlc) =>
                     act('install', key, { withDlc }),
                   )
                 }}
               />
-              {/if}
               {#if job?.state === 'paused'}
                 <button class="glass round" onclick={onresume}>Resume</button>
               {/if}
@@ -648,7 +641,7 @@
           </ul>
         </section>
       {:else if current === 'saves'}
-        <!-- The chosen Epic copy's cloud saves; the global default is in Settings → Library. -->
+        <!-- The chosen Epic or GOG copy's cloud saves; the store's default is in its Settings card's Options. -->
         <section class="panel rows" aria-label="Saves">
           <div class="row">
             <div class="what">Sync cloud saves<small>Default follows Settings.</small></div>
@@ -669,7 +662,7 @@
           </div>
         </section>
       {:else if current === 'launch'}
-        <!-- The chosen copy's own options; Epic applies them on Play. -->
+        <!-- The chosen copy's own options; Epic and GOG apply them on Play. GOG takes only the arguments and executable. -->
         <section class="panel rows" aria-label="Launch options">
           {#if copy!.provider === 'steam'}
             <div class="row">
@@ -691,23 +684,25 @@
                 onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
               />
             </div>
-            <div class="row">
-              <div class="what" id="launch-offline">Offline mode<small>Starts without signing in to Epic.</small></div>
-              <button class="chip" aria-pressed={launch.offline} aria-labelledby="launch-offline" onclick={() => setLaunch({ offline: !launch!.offline })}>
-                {launch.offline ? 'On' : 'Off'}
-              </button>
-            </div>
-            <div class="row">
-              <div class="what" id="launch-skip">Skip version check</div>
-              <button
-                class="chip"
-                aria-pressed={launch.skipVersionCheck}
-                aria-labelledby="launch-skip"
-                onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
-              >
-                {launch.skipVersionCheck ? 'On' : 'Off'}
-              </button>
-            </div>
+            {#if copy!.provider === 'epic'}
+              <div class="row">
+                <div class="what" id="launch-offline">Offline mode<small>Starts without signing in to Epic.</small></div>
+                <button class="chip" aria-pressed={launch.offline} aria-labelledby="launch-offline" onclick={() => setLaunch({ offline: !launch!.offline })}>
+                  {launch.offline ? 'On' : 'Off'}
+                </button>
+              </div>
+              <div class="row">
+                <div class="what" id="launch-skip">Skip version check</div>
+                <button
+                  class="chip"
+                  aria-pressed={launch.skipVersionCheck}
+                  aria-labelledby="launch-skip"
+                  onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
+                >
+                  {launch.skipVersionCheck ? 'On' : 'Off'}
+                </button>
+              </div>
+            {/if}
             <div class="row">
               <div class="what">Alternative executable<small class="path">{launch.exe ?? 'Default'}</small></div>
               <button class="chip" onclick={chooseExe}>Choose…</button>
@@ -728,9 +723,7 @@
             <div class="row">
               <div class="what">Update available</div>
               <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>Update</button>
-              {#if api.launches(copy!.key)}
-                <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
-              {/if}
+              <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
             </div>
           {/if}
           {#if copy!.installed && !custom}

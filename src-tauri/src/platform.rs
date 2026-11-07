@@ -35,6 +35,22 @@ pub fn process_bytes_written(pid: u32) -> Option<u64> {
     }
 }
 
+/// The folder a GOG save location's `<?NAME?>` variable stands for; `None` for one it doesn't know. `install` is
+/// the game's install folder.
+#[cfg(windows)]
+pub fn gog_folder(name: &str, install: &std::path::Path) -> Option<std::path::PathBuf> {
+    let base = directories::BaseDirs::new()?;
+    Some(match name {
+        "INSTALL" => install.to_path_buf(),
+        "SAVED_GAMES" => base.home_dir().join("Saved Games"),
+        "APPLICATION_DATA_LOCAL" => base.data_local_dir().to_path_buf(),
+        "APPLICATION_DATA_LOCAL_LOW" => base.home_dir().join("AppData").join("LocalLow"),
+        "APPLICATION_DATA_ROAMING" => base.data_dir().to_path_buf(),
+        "DOCUMENTS" => directories::UserDirs::new()?.document_dir()?.to_path_buf(),
+        _ => return None,
+    })
+}
+
 /// "Windows 11 (build 26200)", from the registry; builds from 22000 on are Windows 11.
 #[cfg(windows)]
 pub fn windows_version() -> String {

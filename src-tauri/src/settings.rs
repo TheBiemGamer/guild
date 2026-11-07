@@ -11,6 +11,7 @@ use crate::view::Sort;
 pub const SHOW_BANNER: &str = "show_banner";
 pub const AMBIENT: &str = "ambient";
 pub const CLOUD_SAVES: &str = "cloud_saves";
+pub const GOG_CLOUD_SAVES: &str = "gog_cloud_saves";
 pub const CLOSE_TO_TRAY: &str = "close_to_tray";
 pub const NOTIFY_DOWNLOADS: &str = "notify_downloads";
 /// Not stored: the autostart entry in the registry is the truth (`commands::settings`).
@@ -32,6 +33,8 @@ pub struct Settings {
     pub ambient: bool,
     /// Epic games sync their cloud saves around play unless the game says otherwise.
     pub cloud_saves: bool,
+    /// The same for GOG games.
+    pub gog_cloud_saves: bool,
     /// Closing the window hides it to the tray instead of quitting.
     pub close_to_tray: bool,
     /// A toast when a download finishes.
@@ -49,6 +52,7 @@ pub fn load(conn: &Connection) -> Settings {
         show_banner: get(SHOW_BANNER).is_none_or(|v| v != "false"),
         ambient: get(AMBIENT).is_none_or(|v| v != "false"),
         cloud_saves: get(CLOUD_SAVES).is_none_or(|v| v != "false"),
+        gog_cloud_saves: get(GOG_CLOUD_SAVES).is_none_or(|v| v != "false"),
         close_to_tray: get(CLOSE_TO_TRAY).is_none_or(|v| v != "false"),
         notify_downloads: get(NOTIFY_DOWNLOADS).is_none_or(|v| v != "false"),
         epic_install_dir: get(EPIC_INSTALL_DIR).map(PathBuf::from),
@@ -61,7 +65,7 @@ pub fn load(conn: &Connection) -> Settings {
 /// Whether `name` may be set to `value` (`None` resets it). The secret has its own command.
 pub fn validate(name: &str, value: Option<&str>) -> Result<(), String> {
     match name {
-        SHOW_BANNER | AMBIENT | CLOUD_SAVES | CLOSE_TO_TRAY | NOTIFY_DOWNLOADS | START_WITH_WINDOWS => match value {
+        SHOW_BANNER | AMBIENT | CLOUD_SAVES | GOG_CLOUD_SAVES | CLOSE_TO_TRAY | NOTIFY_DOWNLOADS | START_WITH_WINDOWS => match value {
             None | Some("true" | "false") => Ok(()),
             Some(_) => Err(format!("{name} must be true or false.")),
         },
@@ -184,7 +188,7 @@ mod tests {
     #[test]
     fn defaults_have_every_switch_on() {
         let s = load(&memory());
-        assert!(s.show_banner && s.ambient && s.cloud_saves && s.close_to_tray && s.notify_downloads);
+        assert!(s.show_banner && s.ambient && s.cloud_saves && s.gog_cloud_saves && s.close_to_tray && s.notify_downloads);
         assert_eq!((s.epic_install_dir, s.gog_install_dir, s.igdb_client_id), (None, None, None));
         assert_eq!(s.sort, Sort::Title);
     }
@@ -212,13 +216,14 @@ mod tests {
         let dir = std::env::temp_dir();
         update(&conn, SHOW_BANNER, Some("false")).unwrap();
         update(&conn, CLOUD_SAVES, Some("false")).unwrap();
+        update(&conn, GOG_CLOUD_SAVES, Some("false")).unwrap();
         update(&conn, CLOSE_TO_TRAY, Some("false")).unwrap();
         update(&conn, NOTIFY_DOWNLOADS, Some("false")).unwrap();
         update(&conn, EPIC_INSTALL_DIR, Some(&format!("  {}  ", dir.display()))).unwrap();
         update(&conn, GOG_INSTALL_DIR, Some(&dir.display().to_string())).unwrap();
         update(&conn, IGDB_CLIENT_ID, Some(" abc ")).unwrap();
         let s = load(&conn);
-        assert!(!s.show_banner && s.ambient && !s.cloud_saves && !s.close_to_tray && !s.notify_downloads);
+        assert!(!s.show_banner && s.ambient && !s.cloud_saves && !s.gog_cloud_saves && !s.close_to_tray && !s.notify_downloads);
         assert_eq!(s.epic_install_dir, Some(dir.clone()));
         assert_eq!(s.gog_install_dir, Some(dir));
         assert_eq!(s.igdb_client_id.as_deref(), Some("abc"));
@@ -238,6 +243,8 @@ mod tests {
         // Written only by connect and disconnect.
         assert!(validate(STEAM_ACCOUNT, Some("x")).is_err());
         assert!(validate(AMBIENT, Some("maybe")).is_err());
+        assert!(validate(GOG_CLOUD_SAVES, Some("on")).is_err());
+        assert!(validate(GOG_CLOUD_SAVES, Some("false")).is_ok());
         assert!(validate(START_WITH_WINDOWS, Some("yes")).is_err());
         assert!(validate(START_WITH_WINDOWS, Some("true")).is_ok());
         assert!(validate(EPIC_INSTALL_DIR, Some(r"Z:\no\such\folder")).is_err());

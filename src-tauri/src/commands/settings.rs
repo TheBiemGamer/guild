@@ -194,6 +194,7 @@ pub struct SettingsView {
     show_banner: bool,
     ambient: bool,
     cloud_saves: bool,
+    gog_cloud_saves: bool,
     /// Read from the autostart entry itself, so it can't drift from what Windows runs.
     start_with_windows: bool,
     close_to_tray: bool,
@@ -235,6 +236,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             show_banner: saved.show_banner,
             ambient: saved.ambient,
             cloud_saves: saved.cloud_saves,
+            gog_cloud_saves: saved.gog_cloud_saves,
             start_with_windows: app.autolaunch().is_enabled().unwrap_or(false),
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
