@@ -84,6 +84,8 @@
 
   {#if running}
     <span class="badge">Playing</span>
+  {:else if waiting}
+    <span class="chip">{waiting.state === 'paused' ? 'Paused' : 'Queued'}</span>
   {:else if progress}
     <span class="strip"><span style="width: {progress.fraction * 100}%"></span></span>
   {:else if game.installed && game.update}
