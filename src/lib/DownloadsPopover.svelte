@@ -50,48 +50,47 @@
   }
 </script>
 
-{#snippet bar(key: string, p: Progress | undefined)}
-  <div class="bar" role="progressbar" aria-label="{title(key)} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((p?.fraction ?? 0) * 100)}>
-    <span style="width: {(p?.fraction ?? 0) * 100}%"></span>
-  </div>
+{#snippet fill(key: string, p: Progress | undefined, paused = false)}
+  {@const pct = Math.round((p?.fraction ?? 0) * 100)}
+  <span class="fill" class:paused style="width: {pct}%" role="progressbar" aria-label="{title(key)} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}></span>
 {/snippet}
 
 {#snippet job(key: string, p: Progress, inSteam: boolean)}
   <div class="job">
+    {@render fill(key, p)}
     <StoreIcon provider={inSteam ? 'steam' : 'epic'} size={16} />
     <div class="what">
       <b>{title(key)}</b>
       <small>{p.text}</small>
-      {@render bar(key, p)}
     </div>
   </div>
 {/snippet}
 
 <div class="pop" role="dialog" aria-label="Downloads" tabindex="-1" use:popover={{ anchor, close: onclose }}>
-  {#if active || other.length}
-    <h3>Downloading</h3>
-    {#if active}
-      <div class="job">
-        <StoreIcon provider="epic" size={16} />
-        <div class="what">
-          <b>{title(active.key)}</b>
-          <small>{activeText(progress[active.key])}</small>
-          {@render bar(active.key, progress[active.key])}
-        </div>
-        {#if queue.paused}
-          <button class="glass icon" aria-label="Resume" title="Resume" onclick={onresume}>
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
-          </button>
-        {:else}
-          <button class="glass icon" aria-label="Pause" title="Pause" onclick={onpause}>
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
-          </button>
-        {/if}
-        <button class="glass" onclick={() => oncancel(active.key)}>Cancel</button>
+  {#if active}
+    <div class="job">
+      {@render fill(active.key, progress[active.key], queue.paused)}
+      <StoreIcon provider="epic" size={16} />
+      <div class="what">
+        <b>{title(active.key)}</b>
+        <small>{activeText(progress[active.key])}</small>
       </div>
-    {/if}
-    {#each other as [key, p] (key)}{@render job(key, p, false)}{/each}
+      {#if queue.paused}
+        <button class="glass icon" aria-label="Resume" title="Resume" onclick={onresume}>
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
+        </button>
+      {:else}
+        <button class="glass icon" aria-label="Pause" title="Pause" onclick={onpause}>
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+        </button>
+      {/if}
+      <button class="glass icon" aria-label="Cancel {title(active.key)}" title="Cancel" onclick={() => oncancel(active.key)}>
+        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
   {/if}
+  {#each other as [key, p] (key)}{@render job(key, p, false)}{/each}
+  {#each steam as [key, p] (key)}{@render job(key, p, true)}{/each}
   {#if next.length}
     <h3>Up next</h3>
     {#each next as j, i (`${j.key}|${j.action}`)}
@@ -99,23 +98,19 @@
         <StoreIcon provider="epic" size={16} />
         <div class="what">
           <b>{title(j.key)}</b>
-          <small>{actionName[j.action]}</small>
+          <small class="quiet">{actionName[j.action]}</small>
         </div>
         <button class="glass icon" aria-label="Move {title(j.key)} up" disabled={i === 0} onclick={() => onmove(j.key, true)}>
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
         </button>
         <button class="glass icon" aria-label="Move {title(j.key)} down" disabled={i === next.length - 1} onclick={() => onmove(j.key, false)}>
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
         </button>
         <button class="glass icon" aria-label="Remove {title(j.key)} from queue" onclick={() => oncancel(j.key)}>
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
       </div>
     {/each}
-  {/if}
-  {#if steam.length}
-    <h3>In Steam</h3>
-    {#each steam as [key, p] (key)}{@render job(key, p, true)}{/each}
   {/if}
 </div>
 
@@ -147,14 +142,36 @@
   }
 
   .job {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    overflow: hidden;
   }
 
   .job + .job {
-    border-top: 1px solid var(--glass-line);
+    margin-top: 2px;
+  }
+
+  /* The row is the progress bar: a faint fill with a 2px line along its bottom edge. */
+  .fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: rgb(124 92 255 / 0.18);
+    border-bottom: 2px solid var(--accent);
+    transition: width 400ms linear;
+    pointer-events: none;
+  }
+
+  .fill.paused {
+    background: rgb(255 255 255 / 0.08);
+    border-bottom-color: var(--text-3);
+  }
+
+  .job > :not(.fill) {
+    position: relative;
   }
 
   .what {
@@ -173,34 +190,23 @@
   small {
     display: block;
     font-size: 12px;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  small.quiet {
     color: var(--text-3);
   }
 
-  .bar {
-    height: 6px;
-    margin-top: 6px;
-    border-radius: 3px;
-    background: var(--glass-on);
-    overflow: hidden;
-  }
-
-  .bar span {
-    display: block;
-    height: 100%;
-    background: var(--accent);
-    transition: width 400ms linear;
-  }
-
-  .glass {
-    flex: none;
-    height: 32px;
-    padding: 0 14px;
-    border-radius: 999px;
-  }
-
   .glass.icon {
-    width: 32px;
+    flex: none;
+    width: 28px;
+    height: 28px;
     padding: 0;
+    border-radius: 999px;
     display: grid;
     place-items: center;
   }

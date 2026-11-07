@@ -13,6 +13,7 @@ mod igdb;
 mod info;
 mod library;
 mod links;
+mod platform;
 mod settings;
 mod steam_login;
 mod steam_owned;

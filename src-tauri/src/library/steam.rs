@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use keyvalues_parser::{Value, Vdf};
 use steamlocate::app::StateFlag;
@@ -64,15 +65,42 @@ impl Provider for Steam {
         let id = running_id(steam.get_value("RunningAppID"))?;
         // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
         // trust it while the Steam process it was written by is still alive.
-        let pid: u32 = steam.open_subkey("ActiveProcess").and_then(|k| k.get_value("pid")).ok()?;
-        steam_alive(pid).then_some(id)
+        steam_alive(steam_pid()?).then_some(id)
     }
 
     fn download_progress(&self, game: &Game) -> Option<Progress> {
         let (app, _) = SteamDir::locate().ok()?.find_app(game.external_id.parse().ok()?).ok()??;
-        progress(&app)
+        let pid = steam_pid();
+        let writes = pid.and_then(crate::platform::process_bytes_written);
+        let mut anchors = ANCHORS.lock().unwrap_or_else(|e| e.into_inner());
+        progress(&app, &mut anchors, pid.zip(writes), Instant::now())
     }
 }
+
+/// The Steam client's pid, as Steam last wrote it.
+fn steam_pid() -> Option<u32> {
+    let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam").ok()?;
+    steam.open_subkey("ActiveProcess").and_then(|k| k.get_value("pid")).ok()
+}
+
+/// Steam rewrites an appmanifest only when a download pauses or ends, so its byte counters stand still
+/// while it runs. Between rewrites the bytes steam.exe writes to disk follow the staged bytes closely
+/// (measured on this PC), so progress is the manifest's `BytesStaged` plus steam.exe's writes since then.
+// shortcut: other writes Steam makes meanwhile (cloud saves, workshop) count too, and with several
+// half-done downloads queued in Steam each one moves with the writes; the manifest's flags are as stale as its counters.
+struct Anchor {
+    /// Steam's pid and the manifest's `BytesStaged` when this anchor was set; either changing resets it.
+    pid: u32,
+    staged0: u64,
+    writes0: u64,
+    /// The previous sample, for the speed.
+    at: Instant,
+    staged: u64,
+    /// Bytes staged per second, smoothed.
+    rate: f64,
+}
+
+static ANCHORS: Mutex<Option<HashMap<u32, Anchor>>> = Mutex::new(None);
 
 /// Every owned game as a not-installed `Game` with its art. Built once per owned list: the art lookup
 /// reads the disk for every game.
@@ -116,15 +144,37 @@ pub fn with_owned(mut installed: Vec<Game>, owned: &[Game]) -> Vec<Game> {
     installed
 }
 
-/// Active download progress from an appmanifest; `None` once complete or never started.
-fn progress(app: &App) -> Option<Progress> {
+/// Active download progress from an appmanifest, moved on by steam.exe's writes (`steam` is its pid and
+/// bytes written so far); `None` once complete or never started.
+fn progress(app: &App, anchors: &mut Option<HashMap<u32, Anchor>>, steam: Option<(u32, u64)>, now: Instant) -> Option<Progress> {
     let (done, total) = (app.bytes_downloaded?, app.bytes_to_download?);
-    (total > 0 && done < total).then(|| Progress { fraction: done as f32 / total as f32, text: download_label(done, total) })
-}
-
-fn download_label(done: u64, total: u64) -> String {
-    let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
-    format!("Downloading {:.1} of {:.1} GB ({}%)", gb(done), gb(total), done * 100 / total.max(1))
+    if total == 0 || done >= total {
+        if let Some(a) = anchors.as_mut() {
+            a.remove(&app.app_id);
+        }
+        return None;
+    }
+    let (staged0, to_stage) = (app.bytes_staged.unwrap_or(0), app.bytes_to_stage.unwrap_or(0));
+    let Some((pid, writes)) = steam.filter(|_| to_stage > staged0) else {
+        let fraction = done as f32 / total as f32;
+        return Some(Progress { fraction, text: super::download_text(fraction, done, None) });
+    };
+    let fresh = || Anchor { pid, staged0, writes0: writes, at: now, staged: staged0, rate: 0.0 };
+    let a = anchors.get_or_insert_with(HashMap::new).entry(app.app_id).or_insert_with(fresh);
+    if a.pid != pid || a.staged0 != staged0 || writes < a.writes0 {
+        *a = fresh();
+    }
+    // Capped at 99%: only the manifest says when it is done.
+    let staged = (staged0 + (writes - a.writes0)).min(to_stage / 100 * 99).max(staged0);
+    let dt = now.duration_since(a.at).as_secs_f64();
+    if dt >= 1.0 {
+        let r = (staged - a.staged) as f64 / dt;
+        a.rate = if a.rate == 0.0 { r } else { 0.3 * r + 0.7 * a.rate };
+        (a.at, a.staged) = (now, staged);
+    }
+    let secs_left = (a.rate > 0.0).then(|| ((to_stage - staged) as f64 / a.rate) as u64);
+    let fraction = staged as f32 / to_stage as f32;
+    Some(Progress { fraction, text: super::download_text(fraction, (fraction as f64 * total as f64) as u64, secs_left) })
 }
 
 /// The newest `userdata/<account>/config/localconfig.vdf`.
@@ -422,19 +472,49 @@ mod tests {
     fn progress_only_while_downloading() {
         let library = Library::from_dir(&fixtures()).unwrap();
         let app = |id| library.app(id).unwrap().unwrap();
-        let p = progress(&app(20)).unwrap();
+        let now = Instant::now();
+        let p = progress(&app(20), &mut None, None, now).unwrap();
         assert_eq!(p.fraction, 0.25);
-        assert_eq!(p.text, "Downloading 0.0 of 0.0 GB (25%)");
+        assert_eq!(p.text, "25% · 0.0 GB");
         // SNUG-style finished manifest: downloaded == to_download.
-        assert_eq!(progress(&app(10)), None);
+        assert_eq!(progress(&app(10), &mut None, None, now), None);
         // No byte counters at all.
-        assert_eq!(progress(&app(30)), None);
+        assert_eq!(progress(&app(30), &mut None, None, now), None);
     }
 
     #[test]
-    fn download_label_handles_zero_total() {
-        assert_eq!(download_label(1 << 30, 4 << 30), "Downloading 1.0 of 4.0 GB (25%)");
-        assert_eq!(download_label(0, 0), "Downloading 0.0 of 0.0 GB (0%)");
+    fn steam_writes_move_progress_between_manifest_rewrites() {
+        let library = Library::from_dir(&fixtures()).unwrap();
+        let mut app = library.app(20).unwrap().unwrap();
+        (app.bytes_to_download, app.bytes_downloaded) = (Some(2 << 30), Some(0));
+        (app.bytes_to_stage, app.bytes_staged) = (Some(4 << 30), Some(0));
+        let mut anchors = None;
+        let t0 = Instant::now();
+        let at = |s| t0 + Duration::from_secs(s);
+
+        // First sample anchors on steam.exe's counter; no speed yet.
+        let p = progress(&app, &mut anchors, Some((7, 5_000)), at(0)).unwrap();
+        assert_eq!(p.text, "0% · 0.0 GB");
+        // 1 GiB written in 2 s: a quarter staged, 3 GiB at 0.5 GiB/s left.
+        let p = progress(&app, &mut anchors, Some((7, 5_000 + (1 << 30))), at(2)).unwrap();
+        assert_eq!(p.fraction, 0.25);
+        assert_eq!(p.text, "25% · 0.5 GB · 6 s left");
+        // Never 100% while the manifest says it isn't done.
+        let p = progress(&app, &mut anchors, Some((7, 5_000 + (9 << 30))), at(4)).unwrap();
+        assert!(p.fraction < 1.0);
+
+        // Steam restarted (new pid): start over from the manifest.
+        let p = progress(&app, &mut anchors, Some((8, 100)), at(6)).unwrap();
+        assert_eq!(p.fraction, 0.0);
+        // The manifest was rewritten (paused): anchor on its new BytesStaged.
+        app.bytes_staged = Some(2 << 30);
+        let p = progress(&app, &mut anchors, Some((8, 1 << 40)), at(8)).unwrap();
+        assert_eq!(p.fraction, 0.5);
+
+        // Done: no progress and the anchor is dropped.
+        app.bytes_downloaded = app.bytes_to_download;
+        assert_eq!(progress(&app, &mut anchors, Some((8, 1 << 40)), at(10)), None);
+        assert!(anchors.unwrap().is_empty());
     }
 
     #[test]

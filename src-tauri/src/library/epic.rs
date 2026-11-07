@@ -282,12 +282,12 @@ pub fn install(
     if let Some(dir) = base_path {
         command.arg("--base-path").arg(dir);
     }
-    stream(command, "Installing", on_event)
+    stream(command, "", on_event)
 }
 
 /// Updates an installed game (Legendary's app name) like `install`: same events, same cancel.
 pub fn update(app_name: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
-    stream(legendary(&["-y", "update", app_name, "--skip-sdl"]), "Installing", on_event)
+    stream(legendary(&["-y", "update", app_name, "--skip-sdl"]), "", on_event)
 }
 
 // Verbs and flags below are from Legendary 0.21.1's `--help` for each command and its `cli.py`.
@@ -331,7 +331,7 @@ pub fn verify(app_name: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<
     let (success, log) = run_logged(legendary(&verify_args(app_name)), &mut on_event)?;
     match parse_verify(success, &log)? {
         Verify::Ok => Ok(()),
-        Verify::Repair => stream(legendary(&repair_args(app_name)), "Repairing", on_event),
+        Verify::Repair => stream(legendary(&repair_args(app_name)), "Repairing ", on_event),
     }
 }
 
@@ -445,7 +445,7 @@ fn log_error(log: &str) -> String {
     line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m).to_owned()
 }
 
-fn stream(mut command: Command, verb: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+fn stream(mut command: Command, prefix: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
     let mut child = command
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -454,7 +454,7 @@ fn stream(mut command: Command, verb: &str, mut on_event: impl FnMut(InstallEven
     let mut downloaded_mib = 0.0;
     let mut last_line = String::new();
     for line in BufReader::new(child.stderr.take().expect("stderr is piped")).lines().map_while(Result::ok) {
-        if let Some(progress) = parse_progress(&line, verb, &mut downloaded_mib) {
+        if let Some(progress) = parse_progress(&line, prefix, &mut downloaded_mib) {
             on_event(InstallEvent::Progress(progress));
         }
         if !line.trim().is_empty() {
@@ -484,7 +484,7 @@ pub fn cancel(pid: u32) -> Result<(), Error> {
 /// `= Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:00`
 /// ` - Downloaded: 123.45 MiB, Written: 234.56 MiB`
 /// The Downloaded line follows the Progress line, so the text shows the previous second's total.
-fn parse_progress(line: &str, verb: &str, downloaded_mib: &mut f64) -> Option<Progress> {
+fn parse_progress(line: &str, prefix: &str, downloaded_mib: &mut f64) -> Option<Progress> {
     if let Some((_, rest)) = line.split_once(" - Downloaded: ") {
         if let Some(mib) = rest.split_whitespace().next().and_then(|n| n.parse().ok()) {
             *downloaded_mib = mib;
@@ -493,9 +493,12 @@ fn parse_progress(line: &str, verb: &str, downloaded_mib: &mut f64) -> Option<Pr
     }
     let (_, rest) = line.split_once("= Progress: ")?;
     let percent: f32 = rest.split('%').next()?.trim().parse().ok()?;
-    let eta = rest.split_once("ETA: ").map_or("--:--:--", |(_, eta)| eta.trim());
-    let text = format!("{verb} {percent:.0}% · {:.1} GB downloaded · {eta} left", *downloaded_mib / 1024.0);
-    Some(Progress { fraction: (percent / 100.0).clamp(0.0, 1.0), text })
+    let secs_left = rest.split_once("ETA: ").and_then(|(_, eta)| {
+        eta.trim().split(':').try_fold(0u64, |secs, part| Some(secs * 60 + part.parse::<u64>().ok()?))
+    });
+    let fraction = (percent / 100.0).clamp(0.0, 1.0);
+    let text = prefix.to_owned() + &super::download_text(fraction, (*downloaded_mib * 1048576.0) as u64, secs_left);
+    Some(Progress { fraction, text })
 }
 
 /// `legendary info <app> --json`: the game and its manifest. Slow (an online call), so cache the result.
@@ -1081,14 +1084,14 @@ mod tests {
     fn parses_legendary_progress_lines() {
         let mut mib = 0.0;
         let progress = "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05";
-        let first = parse_progress(progress, "Installing", &mut mib).unwrap();
+        let first = parse_progress(progress, "", &mut mib).unwrap();
         assert!((first.fraction - 0.1234).abs() < 1e-6);
-        assert_eq!(first.text, "Installing 12% · 0.0 GB downloaded · 00:01:05 left");
+        assert_eq!(first.text, "12% · 0.0 GB · 2 min left");
 
         assert_eq!(parse_progress("[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB", "Installing", &mut mib), None);
         assert_eq!(mib, 2048.0);
-        assert_eq!(parse_progress(progress, "Installing", &mut mib).unwrap().text, "Installing 12% · 2.0 GB downloaded · 00:01:05 left");
-        assert_eq!(parse_progress(progress, "Repairing", &mut mib).unwrap().text, "Repairing 12% · 2.0 GB downloaded · 00:01:05 left");
+        assert_eq!(parse_progress(progress, "", &mut mib).unwrap().text, "12% · 2.0 GB · 2 min left");
+        assert_eq!(parse_progress(progress, "Repairing ", &mut mib).unwrap().text, "Repairing 12% · 2.0 GB · 2 min left");
 
         // Other log lines and broken numbers are ignored.
         assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", "Installing", &mut mib), None);
