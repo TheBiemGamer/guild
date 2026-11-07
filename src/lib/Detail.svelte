@@ -507,7 +507,15 @@
               <div class="what">
                 Uninstall<small>Removes the {storeNames[copy!.provider]} copy{copy!.provider === 'steam' ? ' in Steam’s own dialog' : ' and deletes its files'}.</small>
               </div>
-              <button class="chip danger" disabled={!!busy || running} onclick={uninstall}>Uninstall</button>
+              <!-- The Epic confirm is in the hero; this chip stays, so focus is moved there by hand. -->
+              <button
+                class="chip danger"
+                disabled={!!busy || running}
+                onclick={() => {
+                  uninstall()
+                  tick().then(() => confirmCancel?.focus())
+                }}>Uninstall</button
+              >
             </div>
           {/if}
         </section>
