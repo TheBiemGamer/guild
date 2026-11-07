@@ -66,9 +66,6 @@
       'M12 3a9 9 0 0 0 0 18c1.5 0 2-1 2-2s-1-2 0-3 2-1 4-1a3 3 0 0 0 3-3c0-5-4-9-9-9zM7 10a1 1 0 1 0 2 0a1 1 0 1 0-2 0M11 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0M15 10a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
     banner: 'M5 5h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM6 19h12',
     globe: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
-    hash: 'M5 9h14M5 15h14M10 4 8 20M16 4l-2 16',
-    key: 'M4 15a4 4 0 1 0 8 0a4 4 0 1 0-8 0M10.8 12.2 20 3M16 7l3 3M14 9l2 2',
-    check: 'M20 6 9 17l-5-5',
     disk: 'M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM7 15h.01M11 15h6',
     file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
   }
@@ -87,6 +84,9 @@
   let replacing = $state(false)
   let gridKey = $state('')
   let gridReplacing = $state(false)
+  /** The services' fields, folded like the Options panels; SteamGridDB's open when Add a game's link opened Settings here. */
+  let igdbOpen = $state(false)
+  let gridOpen = $state(untrack(() => section === 'services'))
   let busy = $state(false)
   let connecting = $state(false)
   /** The Epic, GOG and Amazon cards' Options panels; folded each time Settings opens. */
@@ -131,6 +131,7 @@
   let now = $state(Date.now())
 
   const id = (name: string) => `settings-${name}`
+  const igdbSet = $derived(!!view.igdbClientId && view.igdbSecretSet)
   const showSecretField = $derived(!view.igdbSecretSet || replacing)
   const showGridField = $derived(!view.steamgriddbKeySet || gridReplacing)
 
@@ -539,6 +540,17 @@
   <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
 {/snippet}
 
+{#snippet fold(set: boolean, open: boolean, controls: string, onclick: () => void)}
+  <button class="btn opt" class:setup={!set} class:open aria-expanded={open} aria-controls={controls} {onclick}>
+    {set ? t('settings.edit') : t('settings.setUp')}
+    {@render chevron()}
+  </button>
+{/snippet}
+
+{#snippet saved(id: string)}
+  <span class="secret" {id}><span class="dots">••••••••</span><span class="ok">{t('settings.saved')}</span></span>
+{/snippet}
+
 {#snippet who(store: string, card: { name: string | null; problem: string | null })}
   <div class="what">
     {store}
@@ -903,88 +915,104 @@
 
       <section id={id('services')}>
         <h3>{t('settings.section.services')}</h3>
-        <h4>IGDB</h4>
-        <p class="hint">{igdbHint[0]}<button class="link" onclick={() => api.openTwitchConsole()}>{t('settings.igdbLink')}</button>{igdbHint[1]}</p>
         <div class="group">
           <div class="r">
-            {@render tile('hash')}
+            <span class="tile mark">IG</span>
             <div class="what">
-              <label for="igdb-id">{t('settings.clientId')}</label>
-              <div class="field">
-                <input
-                  id="igdb-id"
-                  type="text"
-                  spellcheck="false"
-                  autocomplete="off"
-                  bind:value={clientId}
-                  onblur={saveClientId}
-                  onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                />
-              </div>
+              IGDB
+              <small>
+                {t('settings.igdbWhat')} ·
+                {#if igdbSet}<span class="ok">{t('settings.connected')}</span>
+                {:else}{igdbHint[0]}<button class="link" onclick={() => api.openTwitchConsole()}>{t('settings.igdbLink')}</button>{igdbHint[1]}{/if}
+              </small>
             </div>
+            {@render fold(igdbSet, igdbOpen, 'igdb-fields', () => (igdbOpen = !igdbOpen))}
           </div>
-          <div class="r">
-            {@render tile('key')}
-            <div class="what">
-              <label for="igdb-secret">{t('settings.clientSecret')}</label>
-              <div class="field">
-                {#if showSecretField}
+          {#if igdbOpen}
+            <div class="opts creds" id="igdb-fields">
+              <div class="row">
+                <label for="igdb-id">{t('settings.clientId')}</label>
+                <div class="field">
                   <input
-                    id="igdb-secret"
-                    type="password"
+                    id="igdb-id"
+                    type="text"
+                    spellcheck="false"
                     autocomplete="off"
-                    placeholder={t('settings.pasteSecret')}
-                    bind:value={secret}
-                    onkeydown={(e) => e.key === 'Enter' && saveSecret()}
+                    bind:value={clientId}
+                    onblur={saveClientId}
+                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
                   />
-                  <button class="btn" disabled={busy || !secret.trim()} onclick={saveSecret}>{t('common.save')}</button>
-                  {#if replacing}<button class="btn" onclick={() => ((replacing = false), (secret = ''))}>{t('common.cancel')}</button>{/if}
-                {:else}
-                  <span class="saved" id="igdb-secret">{t('settings.savedCheck')}</span>
-                  <button class="btn" onclick={() => (replacing = true)}>{t('settings.replace')}</button>
-                  <button class="btn danger" disabled={busy} onclick={removeSecret}>{t('menu.remove')}</button>
-                {/if}
+                </div>
+              </div>
+              <div class="row">
+                <label for="igdb-secret">{t('settings.clientSecret')}</label>
+                <div class="field">
+                  {#if showSecretField}
+                    <input
+                      id="igdb-secret"
+                      type="password"
+                      autocomplete="off"
+                      placeholder={t('settings.pasteSecret')}
+                      bind:value={secret}
+                      onkeydown={(e) => e.key === 'Enter' && saveSecret()}
+                    />
+                    <button class="btn" disabled={busy || !secret.trim()} onclick={saveSecret}>{t('common.save')}</button>
+                    {#if replacing}<button class="btn" onclick={() => ((replacing = false), (secret = ''))}>{t('common.cancel')}</button>{/if}
+                  {:else}
+                    {@render saved('igdb-secret')}
+                    <button class="btn" onclick={() => (replacing = true)}>{t('settings.replace')}</button>
+                    <button class="btn danger" disabled={busy} onclick={removeSecret}>{t('menu.remove')}</button>
+                  {/if}
+                </div>
+              </div>
+              <div class="row">
+                <span class="lab"></span>
+                <div class="field">
+                  <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
+                    {testing ? t('settings.testing') : t('settings.testButton')}
+                  </button>
+                  {#if testPassed}<small class="ok">{t('settings.testPassed')}</small>{/if}
+                </div>
               </div>
             </div>
-          </div>
+          {/if}
           <div class="r">
-            {@render tile('check')}
+            <span class="tile mark">SG</span>
             <div class="what">
-              {t('settings.test')}
-              {#if testPassed}<small class="ok">{t('settings.testPassed')}</small>{/if}
+              SteamGridDB
+              <small>
+                {t('settings.gridWhat')} ·
+                {#if view.steamgriddbKeySet}<span class="ok">{t('settings.connected')}</span>
+                {:else}{gridHint[0]}<button class="link" onclick={() => run(api.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}{/if}
+              </small>
             </div>
-            <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
-              {testing ? t('settings.testing') : t('settings.testButton')}
-            </button>
+            {@render fold(view.steamgriddbKeySet, gridOpen, 'grid-fields', () => (gridOpen = !gridOpen))}
           </div>
-        </div>
-        <h4>SteamGridDB</h4>
-        <p class="hint">{gridHint[0]}<button class="link" onclick={() => run(api.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}</p>
-        <div class="group">
-          <div class="r">
-            {@render tile('key')}
-            <div class="what">
-              <label for="grid-key">{t('settings.gridKey')}</label>
-              <div class="field">
-                {#if showGridField}
-                  <input
-                    id="grid-key"
-                    type="password"
-                    autocomplete="off"
-                    placeholder={t('settings.pasteKey')}
-                    bind:value={gridKey}
-                    onkeydown={(e) => e.key === 'Enter' && saveGridKey()}
-                  />
-                  <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>{t('common.save')}</button>
-                  {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>{t('common.cancel')}</button>{/if}
-                {:else}
-                  <span class="saved" id="grid-key">{t('settings.savedCheck')}</span>
-                  <button class="btn" onclick={() => (gridReplacing = true)}>{t('settings.replace')}</button>
-                  <button class="btn danger" disabled={busy} onclick={removeGridKey}>{t('menu.remove')}</button>
-                {/if}
+          {#if gridOpen}
+            <div class="opts creds" id="grid-fields">
+              <div class="row">
+                <label for="grid-key">{t('settings.apiKey')}</label>
+                <div class="field">
+                  {#if showGridField}
+                    <input
+                      id="grid-key"
+                      type="password"
+                      autocomplete="off"
+                      placeholder={t('settings.pasteKey')}
+                      bind:value={gridKey}
+                      onkeydown={(e) => e.key === 'Enter' && saveGridKey()}
+                    />
+                    <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>{t('common.save')}</button>
+                    {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>{t('common.cancel')}</button>{/if}
+                  {:else}
+                    {@render saved('grid-key')}
+                    <button class="btn" onclick={() => (gridReplacing = true)}>{t('settings.replace')}</button>
+                    <button class="btn danger" disabled={busy} onclick={removeGridKey}>{t('menu.remove')}</button>
+                  {/if}
+                </div>
               </div>
             </div>
-          </div>
+          {/if}
         </div>
       </section>
 
@@ -1282,14 +1310,6 @@
     color: var(--warn);
   }
 
-  .what label {
-    display: block;
-  }
-
-  .what .field {
-    margin-top: 8px;
-  }
-
   .btn.opt {
     display: inline-flex;
     align-items: center;
@@ -1310,6 +1330,18 @@
 
   .btn.opt.open svg {
     transform: rotate(180deg);
+  }
+
+  /* "Set up" on a service that isn't: the standard button, not the quiet one. */
+  .btn.opt.setup {
+    background: rgb(255 255 255 / 0.1);
+    border-color: rgb(255 255 255 / 0.14);
+    color: var(--text);
+  }
+
+  .tile.mark {
+    font-size: 11px;
+    font-weight: 700;
   }
 
   /* The Language menu hangs under its button, right-aligned (ChoiceMenu). */
@@ -1333,6 +1365,50 @@
 
   .opts .row:not(.stack) > .field {
     flex: 0 1 260px;
+  }
+
+  /* A service's fields: the label at a fixed width on the left, its control filling the rest. */
+  .creds .row {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .creds .row > label,
+  .creds .lab {
+    flex: none;
+    width: 100px;
+  }
+
+  /* Wraps under the label only when narrower than this; the secret's dots give way first. */
+  .opts.creds .row > .field {
+    flex: 1 1 280px;
+    min-width: 0;
+  }
+
+  /* Beats `.row > div > span`, which stacks a row's subtitle. */
+  .creds .field > .secret {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid var(--glass-line);
+    background: var(--glass);
+    color: var(--text-3);
+  }
+
+  .secret .dots {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .secret .ok {
+    margin-left: auto;
+    font-size: 12px;
   }
 
   .logo {
@@ -1447,19 +1523,8 @@
     color: var(--text-3);
   }
 
-  .saved {
-    flex: 1;
+  .ok {
     color: #4ade80;
-  }
-
-  .what small.ok {
-    color: #4ade80;
-  }
-
-  .hint {
-    margin: 0 0 8px;
-    color: var(--text-3);
-    font-size: 12px;
   }
 
   .link {
