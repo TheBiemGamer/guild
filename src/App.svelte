@@ -8,6 +8,17 @@
   export function dueForRefresh(lastMs: number | null, nowMs: number, minGapMs: number): boolean {
     return lastMs === null || nowMs - lastMs >= minGapMs
   }
+
+  /** The mouse's Back (3) and Forward (4) buttons: the next open page and the page Forward would reopen, or null for no step. */
+  export function navStep(
+    button: number,
+    open: string | null,
+    last: string | null,
+  ): { open: string | null; last: string | null } | null {
+    if (button === 3 && open !== null) return { open: null, last: open }
+    if (button === 4 && open === null && last !== null) return { open: last, last }
+    return null
+  }
 </script>
 
 <script lang="ts">
@@ -206,7 +217,11 @@
     open = key
   }
 
+  /** The last page closed this session, for the Forward button. */
+  let lastClosed: string | null = null
+
   async function closeGame() {
+    if (open) lastClosed = open
     open = null
     tint = undefined
     const back = opener
@@ -214,6 +229,17 @@
     // The library is visible again only after the update; a recycled-away card is gone (isConnected).
     await tick()
     if (back?.isConnected) back.focus({ preventScroll: true })
+  }
+
+  function mouseNav(e: MouseEvent) {
+    if (e.button !== 3 && e.button !== 4) return
+    e.preventDefault()
+    // mouseup and auxclick both arrive for one press; only mouseup acts.
+    if (e.type !== 'mouseup') return
+    const step = navStep(e.button, open, lastClosed)
+    if (!step) return
+    if (step.open === null) closeGame()
+    else if (lib.games.some((g) => g.copyKeys.includes(step.open!) || g.chosen === step.open)) openGame(step.open)
   }
 
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
@@ -225,6 +251,8 @@
   /** The Epic filter with no Epic games at all: say why and offer the fix. */
   const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
 </script>
+
+<svelte:window onmouseup={mouseNav} onauxclick={mouseNav} />
 
 <Ambient hero={ambientHero} enabled={settings?.ambient ?? true} />
 
