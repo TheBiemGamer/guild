@@ -1,4 +1,5 @@
-//! Text for the owner, as a message code plus parameters; `src/lib/messages.ts` holds the words.
+//! Text for the owner, as a message code plus parameters; the UI's language files hold the words (`msg.<code>` in
+//! `src/lib/i18n/en.json`).
 //! Never put an English sentence in an error or status the UI shows: make a code with `msg!`.
 //! Raw errors from the OS, SQLite or a tool have no fixed text and go through as `system` with a `detail`.
 
@@ -97,8 +98,8 @@ impl fmt::Display for Param {
 
 impl std::error::Error for Msg {}
 
-/// English text shown outside the webview: window titles, the tray, toasts. Same codes and words as
-/// `src/lib/messages.ts` (a test checks).
+/// Text shown outside the webview: window titles, the tray, toasts. Same codes and words as `msg.<code>` in the
+/// UI's language files (a test checks); a code missing from a language falls back to English.
 const EN: &[(&str, &str)] = &[
     ("appName", "Game Launcher"),
     ("trayOpen", "Open"),
@@ -113,9 +114,46 @@ const EN: &[(&str, &str)] = &[
     ("filesVerified", "Files verified"),
 ];
 
-/// The native text for `code` in the app's language. Only English so far.
+/// Dutch, as in `src/lib/i18n/nl.json`.
+const NL: &[(&str, &str)] = &[];
+
+/// The languages with words, by code; the Language setting is one of these or "system".
+const LANGUAGES: &[(&str, &[(&str, &str)])] = &[("en", EN), ("nl", NL)];
+
+/// The language native text is in, set from the Language setting at start and on every change.
+static LANGUAGE: std::sync::RwLock<&str> = std::sync::RwLock::new("en");
+
+/// Whether the Language setting may be `value`.
+pub fn is_language(value: &str) -> bool {
+    value == "system" || LANGUAGES.iter().any(|(code, _)| *code == value)
+}
+
+/// The language for the Language setting: the one it names, or for "system" Windows' display language
+/// (`system`, like "nl") when there are words for it, else English.
+pub fn resolve(setting: &str, system: &str) -> &'static str {
+    let wanted = if setting == "system" { system } else { setting };
+    LANGUAGES.iter().find(|(code, _)| *code == wanted).map_or("en", |(code, _)| code)
+}
+
+/// Follows the Language setting; the tray needs relabelling after (`tray::relabel`).
+pub fn set_language(setting: &str) {
+    *LANGUAGE.write().unwrap_or_else(|e| e.into_inner()) = resolve(setting, crate::platform::ui_language());
+}
+
+/// The language the UI and native text are in ("en", "nl").
+pub fn language() -> &'static str {
+    *LANGUAGE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn text(language: &str, code: &str) -> &'static str {
+    let find = |table: &[(&str, &'static str)]| table.iter().find(|(c, _)| *c == code).map(|(_, text)| *text);
+    let table = LANGUAGES.iter().find(|(l, _)| *l == language).map_or(EN, |(_, table)| table);
+    find(table).or_else(|| find(EN)).unwrap_or("")
+}
+
+/// The native text for `code` in the app's language.
 pub fn native(code: &str) -> &'static str {
-    EN.iter().find(|(c, _)| *c == code).map_or("", |(_, text)| text)
+    text(language(), code)
 }
 
 #[cfg(test)]
@@ -151,5 +189,21 @@ mod tests {
     fn every_native_code_has_text() {
         assert_eq!(native("readyToPlay"), "Ready to play");
         assert!(EN.iter().all(|(_, text)| !text.is_empty()));
+    }
+
+    #[test]
+    fn language_follows_the_setting_then_windows() {
+        assert_eq!(resolve("system", "nl"), "nl");
+        assert_eq!(resolve("system", "en"), "en");
+        assert_eq!(resolve("nl", "en"), "nl");
+        assert_eq!(resolve("en", "nl"), "en");
+        assert!(is_language("system") && is_language("en") && is_language("nl") && !is_language("fr") && !is_language(""));
+    }
+
+    #[test]
+    fn missing_native_text_falls_back_to_english() {
+        assert_eq!(text("en", "trayQuit"), "Quit");
+        assert!(EN.iter().all(|(code, _)| !text("nl", code).is_empty()));
+        assert_eq!(text("en", "noSuchCode"), "");
     }
 }

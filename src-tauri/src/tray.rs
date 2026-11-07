@@ -23,8 +23,9 @@ pub fn reveal(app: &AppHandle) {
     }
 }
 
-pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let menu = Menu::with_items(
+/// The tray menu in the app's language.
+fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "open", native("trayOpen"), true, None::<&str>)?,
@@ -32,10 +33,21 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", native("trayQuit"), true, None::<&str>)?,
         ],
-    )?;
+    )
+}
+
+/// After a language change: the menu and tooltip in the new language.
+pub fn relabel(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("main") else { return };
+    if let Err(e) = menu(app).and_then(|m| tray.set_menu(Some(m))).and_then(|()| tray.set_tooltip(Some(native("appName")))) {
+        log!("tray labels: {e}");
+    }
+}
+
+pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip(native("appName"))
-        .menu(&menu)
+        .menu(&menu(app)?)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => reveal(app),

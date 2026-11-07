@@ -35,6 +35,15 @@ pub fn process_bytes_written(pid: u32) -> Option<u64> {
     }
 }
 
+/// Windows' display language as a language code, for the languages the app has words for ("nl"); "en" otherwise.
+#[cfg(windows)]
+pub fn ui_language() -> &'static str {
+    // SAFETY: takes nothing and returns a number.
+    let id = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
+    // The low 10 bits are the primary language; 0x13 is Dutch (Netherlands and Belgium alike).
+    if id & 0x3ff == 0x13 { "nl" } else { "en" }
+}
+
 /// The folder a GOG save location's `<?NAME?>` variable stands for; `None` for one it doesn't know. `install` is
 /// the game's install folder.
 #[cfg(windows)]

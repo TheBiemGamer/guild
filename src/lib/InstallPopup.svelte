@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { downloadSize } from './api'
   import { sizeLabel } from './format'
+  import { t } from './i18n'
 
   let { game, anchor, folder, onconfirm, oncancel }: {
     /** The Epic, GOG or Amazon copy's key and the game's title. */
@@ -67,18 +68,18 @@
   bind:this={el}
   bind:clientHeight={height}
   role="dialog"
-  aria-label="Install {game.title}"
+  aria-label={t('install.label', { title: game.title })}
   style="left: {x}px; top: {y}px; width: {WIDTH}px"
 >
-  <h4>Install {game.title}?</h4>
-  <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${sizeLabel(size)} download`}</p>
-  <p class="folder">{folder === undefined ? '' : `To ${folder ?? "the default folder"}`}</p>
+  <h4>{t('install.question', { title: game.title })}</h4>
+  <p>{size === undefined ? t('install.checking') : size === null ? t('install.sizeUnavailable') : t('install.download', { size: sizeLabel(size) })}</p>
+  <p class="folder">{folder === undefined ? '' : t('install.to', { folder: folder ?? t('install.defaultFolder') })}</p>
   {#if !game.key.startsWith('amazon-')}
-    <label class="dlc"><input type="checkbox" bind:checked={withDlc} />Include DLC</label>
+    <label class="dlc"><input type="checkbox" bind:checked={withDlc} />{t('install.dlc')}</label>
   {/if}
   <div class="buttons">
-    <button class="pill" bind:this={installButton} onclick={() => onconfirm(withDlc)}>Install</button>
-    <button class="glass" onclick={oncancel}>Cancel</button>
+    <button class="pill" bind:this={installButton} onclick={() => onconfirm(withDlc)}>{t('common.install')}</button>
+    <button class="glass" onclick={oncancel}>{t('common.cancel')}</button>
   </div>
 </div>
 

@@ -1,10 +1,13 @@
 <script lang="ts" module>
+  import { t } from './i18n'
+
   /** The year in a store date: Steam "28 Nov, 2016", Epic "2019-06-26". */
   export function releaseYear(date: string): string | null {
     return /\b(\d{4})\b/.exec(date)?.[1] ?? null
   }
 
-  // Fixed English names: toLocaleDateString's short months vary by ICU version ("Sept").
+  // The stores' English month names, for reading their dates. Shown through the language files: toLocaleDateString's
+  // short months vary by ICU version ("Sept").
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
   /** Month number 1–12 from a name like "Nov" or "November"; null when it isn't one. */
@@ -13,7 +16,7 @@
     return at < 0 ? null : at + 1
   }
 
-  const dayMonthYear = (day: number, month: number, year: string) => `${day} ${MONTHS[month - 1]} ${year}`
+  const dayMonthYear = (day: number, month: number, year: string) => t('date.dayMonthYear', { day, month: t(`date.month${month}`), year })
 
   /**
    * A store date as "28 Nov 2016": Epic "2019-06-26", Steam "28 Nov, 2016" or "Nov 28, 2016".
@@ -284,15 +287,7 @@
     if (path) setLaunch({ exe: path })
   }
 
-  const labels: Record<Action, string> = {
-    play: 'Launching…',
-    playOutdated: 'Launching…',
-    install: 'Installing…',
-    update: 'Updating…',
-    uninstall: 'Uninstalling…',
-    verify: 'Verifying…',
-    move: 'Moving…',
-  }
+  const label = (action: Action) => t(`busy.${action}`)
   /** This game's job in the download queue. */
   const job = $derived(api.queueState(queue, copyKeys))
   /** The job Cancel was pressed for, until it leaves the queue. */
@@ -304,19 +299,19 @@
   const shown = $derived(
     job
       ? cancelling === job.key
-        ? 'Cancelling…'
+        ? t('detail.cancelling')
         : job.state === 'queued'
-          ? 'Queued'
+          ? t('card.queued')
           : job.state === 'paused'
-            ? 'Paused'
-            : labels[job.action]
+            ? t('downloads.paused')
+            : label(job.action)
       : busy,
   )
 
   async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false
     menuOpen = false
-    busy = labels[action]
+    busy = label(action)
     keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
     try {
       const found = await api.act(action, key, options)
@@ -395,7 +390,7 @@
   const beatAll = $derived(ttb?.completely != null ? ttbLabel(ttb.completely) : null)
   const beatMore = $derived(
     ttb
-      ? [ttb.hastily !== null && `${ttbLabel(ttb.hastily)} hastily`, beatAll && `${beatAll} completely`].filter(
+      ? [ttb.hastily !== null && t('detail.hastily', { time: ttbLabel(ttb.hastily) }), beatAll && t('detail.completely', { time: beatAll })].filter(
           (s): s is string => !!s,
         )
       : [],
@@ -412,8 +407,8 @@
   const meta = $derived(
     game
       ? custom
-        ? ['Added by you', ...(game.installed ? [] : ['Not installed'])]
-        : [installedOn ? `Installed on ${storeNames[installedOn.provider]}` : 'Not installed', info?.developer, year].filter(
+        ? [t('store.custom'), ...(game.installed ? [] : [t('play.notInstalled')])]
+        : [installedOn ? t('detail.installedOn', { store: storeNames[installedOn.provider] }) : t('play.notInstalled'), info?.developer, year].filter(
             (s): s is string => !!s,
           )
       : [],
@@ -436,12 +431,12 @@
 
   // A tab with nothing for this game is hidden.
   const tabs = $derived.by(() => {
-    const list: { id: Tab; label: string; count?: number }[] = [{ id: 'overview', label: 'Overview' }]
-    if (dlcs.length) list.push({ id: 'dlc', label: 'DLC', count: dlcs.length })
-    if (copy?.cloudSaves) list.push({ id: 'saves', label: 'Saves' })
-    if (copy?.installed && !custom) list.push({ id: 'launch', label: 'Launch options' })
-    if (copy?.installed || copy?.installDir) list.push({ id: 'installation', label: 'Installation' })
-    return list
+    const ids: Tab[] = ['overview']
+    if (dlcs.length) ids.push('dlc')
+    if (copy?.cloudSaves) ids.push('saves')
+    if (copy?.installed && !custom) ids.push('launch')
+    if (copy?.installed || copy?.installDir) ids.push('installation')
+    return ids.map((id) => ({ id, label: t(`detail.tab.${id}`), count: id === 'dlc' ? dlcs.length : undefined }))
   })
   // A tab that went away (the DLC list emptied, the copy was uninstalled) falls back to Overview.
   const current = $derived(tabs.some((t) => t.id === tab) ? tab : 'overview')
@@ -466,10 +461,10 @@
 
 {#snippet copyItems()}
   {#if copy!.installDir}
-    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>Open install folder</button>
+    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>{t('detail.openInstallFolder')}</button>
   {/if}
   {#if copy!.installed && !custom}
-    <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
+    <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>{t('detail.uninstall')}</button>
   {/if}
 {/snippet}
 
@@ -486,7 +481,7 @@
   {/if}
 {/snippet}
 
-<section class="detail" aria-label={game?.title ?? 'Game'}>
+<section class="detail" aria-label={game?.title ?? t('detail.game')}>
   <div class="page">
     <header class="hero">
       <div class="frame">
@@ -494,7 +489,7 @@
           <img src={art.hero} alt="" class:loaded={heroLoaded} onload={() => (heroLoaded = true)} />
         {/if}
       </div>
-      <button class="back" bind:this={backButton} onclick={onback}>← Library</button>
+      <button class="back" bind:this={backButton} onclick={onback}>{t('detail.back')}</button>
 
       {#if game}
         <div class="bottom">
@@ -509,14 +504,14 @@
                 <div
                   class="bar"
                   role="progressbar"
-                  aria-label="Install progress"
+                  aria-label={t('detail.installProgress')}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(progress.fraction * 100)}
                 >
                   <span style="width: {progress.fraction * 100}%"></span>
                 </div>
-                <small>{job?.state === 'paused' ? `Paused · ${Math.round(progress.fraction * 100)}%` : progressLong(progress)}</small>
+                <small>{job?.state === 'paused' ? t('downloads.pausedAt', { percent: `${Math.round(progress.fraction * 100)}%` }) : progressLong(progress)}</small>
               </div>
             {/if}
           </div>
@@ -524,20 +519,20 @@
           <div class="actions" bind:this={actionsEl}>
             {#if asking}
               <!-- Asks before launching, like the Epic uninstall; never picks a save by itself. -->
-              <span class="ask">{asking.conflict === 'localNewer' ? 'Local save is newer than the cloud save.' : 'Cloud save is newer than the local save.'}</span>
-              <button class="glass round" onclick={() => keep('cloud')}>Keep cloud</button>
-              <button class="glass round" onclick={() => keep('local')}>Keep local</button>
-              <button class="glass round" bind:this={askCancel} onclick={cancelAsk}>Cancel</button>
+              <span class="ask">{asking.conflict === 'localNewer' ? t('detail.localNewer') : t('detail.cloudNewer')}</span>
+              <button class="glass round" onclick={() => keep('cloud')}>{t('detail.keepCloud')}</button>
+              <button class="glass round" onclick={() => keep('local')}>{t('detail.keepLocal')}</button>
+              <button class="glass round" bind:this={askCancel} onclick={cancelAsk}>{t('common.cancel')}</button>
             {:else if confirming}
-              <span class="ask">Uninstall {game.title}? Its files will be deleted.</span>
-              <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
-              <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
+              <span class="ask">{t('detail.askUninstall', { title: game.title })}</span>
+              <button class="glass round danger" onclick={() => act('uninstall')}>{t('detail.uninstall')}</button>
+              <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>{t('common.cancel')}</button>
             {:else}
               <div class="more-wrap">
                 <button
                   class="glass more"
                   bind:this={moreButton}
-                  aria-label="More actions"
+                  aria-label={t('detail.moreActions')}
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
                   onclick={() => (menuOpen ? closeMenu(true) : (menuOpen = true))}
@@ -550,7 +545,7 @@
                   <GameMenu
                     {game}
                     anchor={moreButton}
-                    label="More actions"
+                    label={t('detail.moreActions')}
                     onclose={closeMenu}
                     {onchanged}
                     {onerror}
@@ -576,10 +571,10 @@
                 }}
               />
               {#if job?.state === 'paused'}
-                <button class="glass round" onclick={onresume}>Resume</button>
+                <button class="glass round" onclick={onresume}>{t('common.resume')}</button>
               {/if}
               {#if job && !cancelling}
-                <button class="glass round" onclick={cancel}>Cancel</button>
+                <button class="glass round" onclick={cancel}>{t('common.cancel')}</button>
               {/if}
             {/if}
           </div>
@@ -588,10 +583,10 @@
     </header>
 
     {#if game === null}
-      <p class="gone">This game is no longer in the library.</p>
+      <p class="gone">{t('detail.gone')}</p>
     {:else if game}
       <!-- Always shown, Overview alone included, so a DLC tab that arrives late doesn't move the page. -->
-      <div class="tabs" role="tablist" aria-label="Game sections" tabindex="-1" bind:this={tabList} onkeydown={tabKeydown}>
+      <div class="tabs" role="tablist" aria-label={t('detail.sections')} tabindex="-1" bind:this={tabList} onkeydown={tabKeydown}>
         {#each tabs as t (t.id)}
           <button
             role="tab"
@@ -608,34 +603,34 @@
 
       <div id="tab-panel" role="tabpanel" aria-labelledby="tab-{current}">
       {#if current === 'dlc'}
-        <section class="panel" aria-label="DLC">
+        <section class="panel" aria-label={t('detail.tab.dlc')}>
           <ul class="dlc">
             {#each dlcs as d (`${d.copy}|${d.id}`)}
               <li>
                 <span class="dlc-title">{d.title}</span>
                 {#if confirmingDlc === `${d.copy}|${d.id}`}
                   <!-- Asks inline, like the game's own Epic uninstall. -->
-                  <span class="dlc-state">Its files will be deleted.</span>
+                  <span class="dlc-state">{t('detail.dlcAsk')}</span>
                   <button
                     class="chip danger"
-                    aria-label="Uninstall {d.title}"
+                    aria-label={t('detail.uninstallNamed', { title: d.title })}
                     onclick={() => {
                       confirmingDlc = null
                       act('uninstall', d.copy!, { dlc: d.id })
-                    }}>Uninstall</button
+                    }}>{t('detail.uninstall')}</button
                   >
-                  <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>Cancel</button>
+                  <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>{t('common.cancel')}</button>
                 {:else}
-                  <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
+                  <span class="dlc-state">{d.installed ? t('play.installed') : t('play.notInstalled')}</span>
                   <!-- Legendary and gogdl add a DLC to an installed game only. -->
                   {#if d.copy && !shown && game.copies.find((c) => c.key === d.copy)?.installed}
                     <button
                       class="chip"
                       class:danger={d.installed}
-                      aria-label="{d.installed ? 'Uninstall' : 'Install'} {d.title}"
+                      aria-label={t(d.installed ? 'detail.uninstallNamed' : 'detail.installNamed', { title: d.title })}
                       onclick={() => (d.installed ? askUninstallDlc(d) : act('install', d.copy!, { dlc: d.id }))}
                     >
-                      {d.installed ? 'Uninstall' : 'Install'}
+                      {d.installed ? t('detail.uninstall') : t('common.install')}
                     </button>
                   {/if}
                 {/if}
@@ -645,11 +640,11 @@
         </section>
       {:else if current === 'saves'}
         <!-- The chosen Epic or GOG copy's cloud saves; the store's default is in its Settings card's Options. -->
-        <section class="panel rows" aria-label="Saves">
+        <section class="panel rows" aria-label={t('detail.tab.saves')}>
           <div class="row">
-            <div class="what">Sync cloud saves<small>Default follows Settings.</small></div>
-            <div class="chips" role="group" aria-label="Sync cloud saves">
-              {#each [{ value: null, label: 'Default' }, { value: true, label: 'On' }, { value: false, label: 'Off' }] as option (option.label)}
+            <div class="what">{t('detail.syncSaves')}<small>{t('detail.syncSavesHint')}</small></div>
+            <div class="chips" role="group" aria-label={t('detail.syncSaves')}>
+              {#each [{ value: null, label: t('detail.default') }, { value: true, label: t('common.on') }, { value: false, label: t('common.off') }] as option (option.value)}
                 <button class="chip" aria-pressed={saves !== null && saves.choice === option.value} onclick={() => setSaves(option.value)}>
                   {option.label}
                 </button>
@@ -657,25 +652,25 @@
             </div>
           </div>
           <div class="row">
-            <div class="what">Last sync<small class="last" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</small></div>
+            <div class="what">{t('detail.lastSync')}<small class="last" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</small></div>
           </div>
           <div class="row">
-            <div class="what">Sync now<small>The newer save wins.</small></div>
-            <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}>{syncing ? 'Syncing…' : 'Sync now'}</button>
+            <div class="what">{t('detail.syncNow')}<small>{t('detail.syncNowHint')}</small></div>
+            <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}>{syncing ? t('detail.syncing') : t('detail.syncNow')}</button>
           </div>
         </section>
       {:else if current === 'launch'}
         <!-- The chosen copy's own options; Epic, GOG and Amazon apply them on Play. GOG and Amazon take only the arguments and executable. -->
-        <section class="panel rows" aria-label="Launch options">
+        <section class="panel rows" aria-label={t('detail.tab.launch')}>
           {#if copy!.provider === 'steam'}
             <div class="row">
-              <div class="what">Steam keeps its own launch options.</div>
-              <button class="chip" onclick={() => run(() => api.openSteamProperties(copy!.key))}>Open in Steam</button>
+              <div class="what">{t('detail.steamLaunch')}</div>
+              <button class="chip" onclick={() => run(() => api.openSteamProperties(copy!.key))}>{t('detail.openInSteam')}</button>
             </div>
           {:else if launch}
             <div class="row">
-              <label class="what" for="launch-args">Extra arguments<small>Quotes keep words together.</small></label>
-              {#if argsSaved}<span class="saved-note" role="status">Saved</span>{/if}
+              <label class="what" for="launch-args">{t('detail.args')}<small>{t('detail.argsHint')}</small></label>
+              {#if argsSaved}<span class="saved-note" role="status">{t('detail.saved')}</span>{/if}
               <input
                 id="launch-args"
                 class="args"
@@ -689,62 +684,62 @@
             </div>
             {#if copy!.provider === 'epic'}
               <div class="row">
-                <div class="what" id="launch-offline">Offline mode<small>Starts without signing in to Epic.</small></div>
+                <div class="what" id="launch-offline">{t('detail.offline')}<small>{t('detail.offlineHint')}</small></div>
                 <button class="chip" aria-pressed={launch.offline} aria-labelledby="launch-offline" onclick={() => setLaunch({ offline: !launch!.offline })}>
-                  {launch.offline ? 'On' : 'Off'}
+                  {launch.offline ? t('common.on') : t('common.off')}
                 </button>
               </div>
               <div class="row">
-                <div class="what" id="launch-skip">Skip version check</div>
+                <div class="what" id="launch-skip">{t('detail.skipCheck')}</div>
                 <button
                   class="chip"
                   aria-pressed={launch.skipVersionCheck}
                   aria-labelledby="launch-skip"
                   onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
                 >
-                  {launch.skipVersionCheck ? 'On' : 'Off'}
+                  {launch.skipVersionCheck ? t('common.on') : t('common.off')}
                 </button>
               </div>
             {/if}
             <div class="row">
-              <div class="what">Alternative executable<small class="path">{launch.exe ?? 'Default'}</small></div>
-              <button class="chip" onclick={chooseExe}>Choose…</button>
-              {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>Reset</button>{/if}
+              <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
+              <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
+              {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
             </div>
           {/if}
         </section>
       {:else if current === 'installation'}
         <!-- Acts on the chosen copy, like the ⋯ menu. -->
-        <section class="panel rows" aria-label="Installation">
+        <section class="panel rows" aria-label={t('detail.tab.installation')}>
           {#if copy!.installDir}
             <div class="row">
-              <div class="what">Folder<small class="path">{copy!.installDir}{#if copy!.sizeBytes !== null}{' · '}{sizeLabel(copy!.sizeBytes)}{/if}</small></div>
-              <button class="chip" onclick={() => run(() => api.openFolder(copy!.key))}>Open folder</button>
+              <div class="what">{t('detail.folder')}<small class="path">{copy!.installDir}{#if copy!.sizeBytes !== null}{' · '}{sizeLabel(copy!.sizeBytes)}{/if}</small></div>
+              <button class="chip" onclick={() => run(() => api.openFolder(copy!.key))}>{t('detail.openFolder')}</button>
             </div>
           {/if}
           {#if copy!.updateAvailable}
             <div class="row">
-              <div class="what">Update available</div>
-              <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>Update</button>
-              <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>Play without updating</button>
+              <div class="what">{t('detail.updateAvailable')}</div>
+              <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>{t('play.update')}</button>
+              <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>{t('detail.playOutdated')}</button>
             </div>
           {/if}
           {#if copy!.installed && !custom}
             <div class="row">
               <div class="what">
-                Verify files<small>{copy!.provider === 'steam' ? 'Opens in Steam.' : 'Repairs bad or missing files.'}</small>
+                {t('detail.verify')}<small>{copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}</small>
               </div>
-              <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>Verify files</button>
+              <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>{t('detail.verify')}</button>
             </div>
             <div class="row">
               <div class="what">
-                Move<small>{copy!.provider === 'steam' ? 'Opens in Steam.' : 'Same drive only.'}</small>
+                {t('detail.move')}<small>{copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}</small>
               </div>
-              <button class="chip" disabled={!!shown || running} onclick={move}>Move…</button>
+              <button class="chip" disabled={!!shown || running} onclick={move}>{t('detail.moveButton')}</button>
             </div>
             <div class="row">
               <div class="what">
-                Uninstall{#if copy!.provider === 'steam'}<small>Opens in Steam.</small>{/if}
+                {t('detail.uninstall')}{#if copy!.provider === 'steam'}<small>{t('detail.inSteam')}</small>{/if}
               </div>
               <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
               <button
@@ -753,7 +748,7 @@
                 onclick={() => {
                   uninstall()
                   tick().then(() => confirmCancel?.focus())
-                }}>Uninstall</button
+                }}>{t('detail.uninstall')}</button
               >
             </div>
           {/if}
@@ -767,21 +762,21 @@
         <div class="tiles">
           {#if playtime}
             <div class="tile"><div class="head">
-                <h2>Playtime</h2>
+                <h2>{t('detail.playtime')}</h2>
                 {#if game.playtimeBoth}<small>Steam + Epic</small>{/if}
               </div><p><b>{playtime}</b></p></div>
           {/if}
           {#if lastPlayed}
-            <div class="tile"><div class="head"><h2>Last played</h2></div><p><b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · on {storeNames[game.lastPlayedStore]}</span>{/if}</p></div>
+            <div class="tile"><div class="head"><h2>{t('detail.lastPlayed')}</h2></div><p><b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · {t('detail.onStore', { store: storeNames[game.lastPlayedStore] })}</span>{/if}</p></div>
           {/if}
           {#if ttb}
             <div class="tile">
               <div class="head">
-                <h2>How long to beat</h2>
-                <button class="credit" title="Data from IGDB" aria-label="Data from IGDB" onclick={() => run(api.openIgdb)}>IGDB</button>
+                <h2>{t('detail.ttb')}</h2>
+                <button class="credit" title={t('detail.igdbCredit')} aria-label={t('detail.igdbCredit')} onclick={() => run(api.openIgdb)}>IGDB</button>
               </div>
-              <p title={[beatMain && `${beatMain} normally`, ...beatMore].filter(Boolean).join(' · ')}>
-                <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {beatAll} all</span>{/if}
+              <p title={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')}>
+                <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}
               </p>
             </div>
           {/if}
@@ -793,18 +788,18 @@
         <!-- Skeleton lines hold the panels' places while the store details load. -->
         {#if info === undefined}
           <section class="panel about" aria-labelledby="about-heading" aria-busy="true">
-            <h2 id="about-heading">About</h2>
+            <h2 id="about-heading">{t('detail.about')}</h2>
             <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
           </section>
         {:else if showAbout && info}
           <section class="panel about" aria-labelledby="about-heading">
-            <h2 id="about-heading">About</h2>
+            <h2 id="about-heading">{t('detail.about')}</h2>
             {#if info.description}<p class="text">{info.description}</p>{/if}
             {#if info.screenshots.length && shots?.length !== 0}
               <div class="shots">
                 {#if shots}
                   {#each shots as shot, i (i)}
-                    <img src={shot} alt="Screenshot {i + 1} of {game.title}" loading="lazy" />
+                    <img src={shot} alt={t('detail.screenshot', { number: i + 1, title: game.title })} loading="lazy" />
                   {/each}
                 {:else}
                   {#each info.screenshots as _, i (i)}<div class="shot" aria-hidden="true"></div>{/each}
@@ -815,23 +810,23 @@
         {/if}
         {#if showDetails}
           <section class="panel details" class:solo={info !== undefined && !showAbout} aria-labelledby="details-heading">
-            <h2 id="details-heading">Details</h2>
+            <h2 id="details-heading">{t('detail.details')}</h2>
             <dl>
               {#if info === undefined}
-                {#each ['Genres', 'Developer', 'Publisher', 'Released'] as term (term)}
-                  <dt>{term}</dt><dd class="skeleton" aria-hidden="true"><span></span></dd>
+                {#each ['genres', 'developer', 'publisher', 'released'] as term (term)}
+                  <dt>{t(`detail.${term}`)}</dt><dd class="skeleton" aria-hidden="true"><span></span></dd>
                 {/each}
               {/if}
               {#if info?.genres.length}
-                <dt>Genres</dt>
+                <dt>{t('detail.genres')}</dt>
                 <dd class="tags">{#each info.genres as genre}<span>{genre}</span>{/each}</dd>
               {/if}
-              {#if info?.developer}<dt>Developer</dt><dd>{info.developer}</dd>{/if}
-              {#if info?.publisher}<dt>Publisher</dt><dd>{info.publisher}</dd>{/if}
-              {#if info?.released}<dt>Released</dt><dd>{releaseDate(info.released)}</dd>{/if}
-              {#if copy!.sizeBytes !== null}<dt>Size</dt><dd>{sizeLabel(copy!.sizeBytes)}</dd>{/if}
-              {@render chips('Store pages', storeLinks)}
-              {@render chips('Info', infoLinks)}
+              {#if info?.developer}<dt>{t('detail.developer')}</dt><dd>{info.developer}</dd>{/if}
+              {#if info?.publisher}<dt>{t('detail.publisher')}</dt><dd>{info.publisher}</dd>{/if}
+              {#if info?.released}<dt>{t('detail.released')}</dt><dd>{releaseDate(info.released)}</dd>{/if}
+              {#if copy!.sizeBytes !== null}<dt>{t('detail.size')}</dt><dd>{sizeLabel(copy!.sizeBytes)}</dd>{/if}
+              {@render chips(t('detail.storePages'), storeLinks)}
+              {@render chips(t('detail.info'), infoLinks)}
             </dl>
           </section>
         {/if}

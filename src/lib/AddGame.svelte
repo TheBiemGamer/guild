@@ -4,6 +4,7 @@
   import type { CustomGame, GridCover } from './api'
   import { nameFromExe } from './format'
   import { popover } from './popover'
+  import { around, t } from './i18n'
 
   let { edit = null, onclose, onsaved, onsettings }: {
     /** The game being edited, as saved; null adds a new one. */
@@ -94,32 +95,31 @@
 
 <div class="backdrop">
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="add-title" use:popover={{ anchor: undefined, close: onclose }}>
-    <h3 id="add-title">{start ? 'Edit game' : 'Add a game'}</h3>
+    <h3 id="add-title">{start ? t('addGame.editTitle') : t('toolbar.addGame')}</h3>
 
     <div class="f">
-      <label for="add-exe">Program</label>
+      <label for="add-exe">{t('addGame.program')}</label>
       <div class="in">
         <input id="add-exe" readonly value={exe} spellcheck="false" title={exe || undefined} onclick={browse} />
-        <button class="glass" onclick={browse}>Browse…</button>
+        <button class="glass" onclick={browse}>{t('common.browse')}</button>
       </div>
     </div>
     <div class="f">
-      <label for="add-name">Name</label>
+      <label for="add-name">{t('menu.name')}</label>
       <input id="add-name" type="text" spellcheck="false" autocomplete="off" bind:value={name} />
     </div>
     <div class="f">
-      <label for="add-args">Arguments</label>
-      <input id="add-args" type="text" spellcheck="false" autocomplete="off" placeholder="Optional" bind:value={args} />
+      <label for="add-args">{t('addGame.arguments')}</label>
+      <input id="add-args" type="text" spellcheck="false" autocomplete="off" placeholder={t('addGame.optional')} bind:value={args} />
     </div>
 
     <div class="f">
-      <span class="label" id="add-cover">Cover</span>
+      <span class="label" id="add-cover">{t('addGame.cover')}</span>
       {#if covers === null}
-        <p class="note">
-          Add a SteamGridDB API key in <button class="link" onclick={onsettings}>Settings → Extra metadata</button> to pick a cover here.
-        </p>
+        {@const [before, after] = around('addGame.noKey', 'link')}
+        <p class="note">{before}<button class="link" onclick={onsettings}>{t('addGame.noKeyLink')}</button>{after}</p>
         <div class="in file">
-          <button class="glass" onclick={pickFile}>Use a file…</button>
+          <button class="glass" onclick={pickFile}>{t('addGame.useFile')}</button>
           {#if file}<span title={file}>{fileName}</span>{/if}
         </div>
       {:else}
@@ -128,7 +128,7 @@
           {#each [0, 1, 2, 3] as i (i)}
             {@const c = covers?.[i]}
             {#if c}
-              <button class="c" aria-pressed={picked === i} aria-label="Cover {i + 1}" onclick={() => pickCover(i)}>
+              <button class="c" aria-pressed={picked === i} aria-label={t('addGame.coverNumber', { number: i + 1 })} onclick={() => pickCover(i)}>
                 <img src={c.thumb} alt="" />
               </button>
             {:else}
@@ -136,15 +136,15 @@
             {/if}
           {/each}
         </div>
-        <small><span title={file ?? undefined}>{file ? fileName : 'From SteamGridDB'}</span> · <button class="link" onclick={pickFile}>Use a file…</button></small>
+        <small><span title={file ?? undefined}>{file ? fileName : t('addGame.fromGrid')}</span> · <button class="link" onclick={pickFile}>{t('addGame.useFile')}</button></small>
       {/if}
     </div>
 
     {#if error}<p class="error" role="alert">{error}</p>{/if}
 
     <div class="foot">
-      <button class="glass" onclick={() => onclose(true)}>Cancel</button>
-      <button class="pill" disabled={!ready || saving} onclick={save}>{start ? 'Save' : 'Add game'}</button>
+      <button class="glass" onclick={() => onclose(true)}>{t('common.cancel')}</button>
+      <button class="pill" disabled={!ready || saving} onclick={save}>{start ? t('common.save') : t('addGame.add')}</button>
     </div>
   </div>
 </div>

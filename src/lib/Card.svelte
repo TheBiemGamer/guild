@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { logoFile, storeNames } from './StoreIcon.svelte'
   import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
+  import { t } from './i18n'
 
   let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu }: {
     game: Card
@@ -28,9 +29,9 @@
 
   /** "38 h played", "45 min played", "~25 h to beat"; null when never played, unknown or off. */
   const statText = $derived.by(() => {
-    if (stat === 'ttb') return game.ttbHours === null ? null : `~${game.ttbHours} h to beat`
+    if (stat === 'ttb') return game.ttbHours === null ? null : t('card.toBeat', { n: game.ttbHours })
     const m = stat === 'playtime' ? game.playtimeMinutes : null
-    return !m ? null : m < 60 ? `${m} min played` : `${Math.floor(m / 60)} h played`
+    return !m ? null : m < 60 ? t('card.minutesPlayed', { n: m }) : t('card.hoursPlayed', { n: Math.floor(m / 60) })
   })
 
   /** Waiting in the queue, or first but paused: the hover shows the busy pill with Cancel or Resume. */
@@ -106,7 +107,7 @@
   <button
     class="heart"
     aria-pressed={game.favorite}
-    aria-label="Favorite {game.title}"
+    aria-label={t('card.favorite', { title: game.title })}
     onclick={(e) => {
       e.stopPropagation()
       onfavorite(game.key, !game.favorite)
@@ -122,22 +123,22 @@
   </span>
 
   {#if running}
-    <span class="badge">Playing</span>
+    <span class="badge">{t('play.playing')}</span>
   {:else if waiting}
-    <span class="chip">{waiting.state === 'paused' ? 'Paused' : 'Queued'}</span>
+    <span class="chip">{waiting.state === 'paused' ? t('downloads.paused') : t('card.queued')}</span>
   {:else if progress}
     <span class="strip"><span style="width: {progress.fraction * 100}%"></span></span>
   {:else if game.installed && game.update}
     <span class="chip">
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-      Update
+      {t('play.update')}
     </span>
   {:else if statText}
     <span class="chip stat">{statText}</span>
   {:else if !game.installed}
     <span class="chip">
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-      Install
+      {t('common.install')}
     </span>
   {/if}
 
@@ -146,22 +147,22 @@
       <b>{game.title}</b>
       {#if waiting}
         <span class="btns">
-          <button class="pill small" aria-disabled="true">{waiting.state === 'paused' ? 'Paused' : 'Queued'}</button>
+          <button class="pill small" aria-disabled="true">{waiting.state === 'paused' ? t('downloads.paused') : t('card.queued')}</button>
           {#if waiting.state === 'paused'}
-            <button class="glass small" onclick={onresume}>Resume</button>
+            <button class="glass small" onclick={onresume}>{t('common.resume')}</button>
           {:else}
-            <button class="glass small" onclick={() => oncancel(waiting.key)}>Cancel</button>
+            <button class="glass small" onclick={() => oncancel(waiting.key)}>{t('common.cancel')}</button>
           {/if}
         </span>
       {:else if game.installed}
         <button class="pill small" onclick={() => onplay(game.chosen)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
-          Play
+          {t('play.play')}
         </button>
       {:else if !game.installed}
         <button class="pill small" onclick={() => oninstall(game.chosen, el.getBoundingClientRect())}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-          Install
+          {t('common.install')}
         </button>
       {/if}
     </div>

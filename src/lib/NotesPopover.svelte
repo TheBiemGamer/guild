@@ -9,6 +9,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import { popover } from './popover'
+  import { t } from './i18n'
 
   let { version, sub, notes, anchor, onclose, children }: {
     version: string
@@ -44,7 +45,7 @@
 <div
   class="pop"
   role="dialog"
-  aria-label="What's new in {version}"
+  aria-label={t('notes.label', { version })}
   tabindex="-1"
   style="left: {left}px; top: {place.top}px; max-height: {place.max}px"
   use:popover={{ anchor, close: onclose }}

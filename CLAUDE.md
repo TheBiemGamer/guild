@@ -32,6 +32,7 @@ Windows-only launcher for the Steam, Epic, GOG and Amazon Games libraries. Built
 - **Store tools** (Legendary, gogdl, Nile) are pinned in `src-tauri/src/tools.rs` and SHA-256-checked before use; bump one by changing its version, URL and hash together.
 - **New OS-specific code** goes behind `src-tauri/src/platform.rs` with `#[cfg(windows)]`. Linux may come later.
 - **UI** follows `DESIGN.md` (tokens, components, motion). Update it whenever the UI changes.
+- **UI text** only through `t()` with a key in `src/lib/i18n/en.json` (backend codes as `msg.<code>`), never hard-coded.
 - **Dependencies:** ask the owner before adding a crate or npm package.
 - **Always run both skills on every change.**
   - [ponytail](https://github.com/DietrichGebert/ponytail) for code: take the smallest change that fully solves the task, and use `ponytail-review` before calling it done.

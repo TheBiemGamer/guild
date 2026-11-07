@@ -1,5 +1,7 @@
-// The library's extra filters (the Filters popover) and their toolbar chips. No imports, so
-// `node --test scripts/` can load it as plain TypeScript.
+// The library's extra filters (the Filters popover) and their toolbar chips. `node --test scripts/` loads it
+// as plain TypeScript.
+
+import { t } from './i18n.ts'
 
 export type Filter =
   | 'notInstalled'
@@ -30,39 +32,24 @@ export interface Collection {
 }
 
 type Group = { label: string; filters: Filter[] }
-const status: Group = { label: 'Status', filters: ['notInstalled', 'update', 'downloading'] }
-const rest: Group[] = [
-  { label: 'Your playtime', filters: ['neverPlayed', 'under10h', 'played10to50h', 'played50hPlus'] },
-  { label: 'How long to beat', filters: ['ttbUnder5h', 'ttb5to15h', 'ttb15to40h', 'ttb40to100h', 'ttb100hPlus'] },
-  { label: 'Has', filters: ['bothStores'] },
+/** `id` names the group's words: `filters.group.<id>`. */
+type Ids = { id: string; filters: Filter[] }
+const status: Ids = { id: 'status', filters: ['notInstalled', 'update', 'downloading'] }
+const rest: Ids[] = [
+  { id: 'playtime', filters: ['neverPlayed', 'under10h', 'played10to50h', 'played50hPlus'] },
+  { id: 'ttb', filters: ['ttbUnder5h', 'ttb5to15h', 'ttb15to40h', 'ttb40to100h', 'ttb100hPlus'] },
+  { id: 'has', filters: ['bothStores'] },
 ]
 
 /** The popover's groups, in order, the Lists group made from `collections`. Filters in one group widen each other (or); groups narrow (and). */
 export function filterGroups(collections: readonly Collection[]): Group[] {
-  return [status, { label: 'Lists', filters: ['favorites', ...collections.map((c) => collectionFilter(c.id)), 'hidden'] }, ...rest]
-}
-
-const filterNames: Record<Exclude<Filter, `collection-${number}`>, string> = {
-  notInstalled: 'Not installed',
-  update: 'Update available',
-  downloading: 'Downloading',
-  neverPlayed: 'Never played',
-  under10h: 'Under 10 h',
-  played10to50h: '10–50 h',
-  played50hPlus: '50 h+',
-  ttbUnder5h: 'Under 5 h',
-  ttb5to15h: '5–15 h',
-  ttb15to40h: '15–40 h',
-  ttb40to100h: '40–100 h',
-  ttb100hPlus: '100 h+',
-  bothStores: 'On both stores',
-  favorites: 'Favorites',
-  hidden: 'Hidden',
+  const lists: Ids = { id: 'lists', filters: ['favorites', ...collections.map((c) => collectionFilter(c.id)), 'hidden'] }
+  return [status, lists, ...rest].map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
 }
 
 /** A collection is named after itself; one that no longer exists has no name. */
 export function filterName(filter: Filter, collections: readonly Collection[]): string {
-  if (!filter.startsWith('collection-')) return filterNames[filter as keyof typeof filterNames]
+  if (!filter.startsWith('collection-')) return t(`filters.${filter}`)
   return collections.find((c) => collectionFilter(c.id) === filter)?.name ?? ''
 }
 

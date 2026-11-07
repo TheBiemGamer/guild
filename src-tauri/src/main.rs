@@ -45,6 +45,7 @@ fn main() {
         .setup(|app| {
             log::init(&cache::Dirs::new().logs);
             log!("launcher {} started on {}", app.package_info().version, platform::windows_version());
+            commands::apply_language(app.handle());
             tray::build(app.handle())?;
             // Started by Windows: stay in the tray; neither `ready` nor the safety net shows the window.
             if std::env::args().any(|a| a == tray::MINIMIZED) {

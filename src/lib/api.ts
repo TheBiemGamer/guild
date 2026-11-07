@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import type { GroupId, Progress } from './format'
 import type { Collection, ListFilter } from './filters'
 import { render, type Msg } from './messages'
+import { t } from './i18n'
 
 export type { Msg }
 
@@ -110,6 +111,9 @@ export interface Detail {
   collections: number[]
 }
 export interface SettingsView {
+  language: Language
+  /** The language the UI shows: `language`, or for "system" Windows' display language when there are words for it. */
+  uiLanguage: string
   /** Whether Steam is installed on this PC. */
   steam: boolean
   steamLibrary: { account: string | null; attention: boolean }
@@ -191,8 +195,13 @@ export const renameCollection = (id: number, name: string) => invoke<void>('rena
 /** The games stay in the library. */
 export const deleteCollection = (id: number) => invoke<void>('delete_collection', { id })
 export const setInCollection = (key: string, id: number, on: boolean) => invoke<void>('set_in_collection', { key, id, on })
-/** Resolves to the saved sort, and `updatedTo`: the version this start updated to, once; null otherwise. */
-export const loadCache = () => invoke<{ sort: Sort; updatedTo: string | null }>('load_cache')
+/** The Language setting, and the language it resolves to (Windows' display language for "system"). */
+export type Language = 'system' | 'en' | 'nl'
+/**
+ * Resolves to the saved sort, `updatedTo`: the version this start updated to, once (null otherwise), and the UI's
+ * language.
+ */
+export const loadCache = () => invoke<{ sort: Sort; updatedTo: string | null; uiLanguage: string }>('load_cache')
 /** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */
 export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
@@ -331,7 +340,7 @@ export async function pickFolder(): Promise<string | null> {
 }
 /** An .exe picked from `folder` (it opens there); null when cancelled. */
 export async function pickExe(folder: string): Promise<string | null> {
-  const path = await open({ defaultPath: folder, filters: [{ name: 'Programs', extensions: ['exe'] }] })
+  const path = await open({ defaultPath: folder, filters: [{ name: t('dialog.programs'), extensions: ['exe'] }] })
   return typeof path === 'string' ? path : null
 }
 export const dismissEpicNotice = () => invoke<void>('dismiss_epic_notice')
@@ -371,12 +380,12 @@ export async function gridSearch(name: string): Promise<GridCover[] | null> {
 }
 /** A program (.exe) to add; null when cancelled. */
 export async function pickProgram(): Promise<string | null> {
-  const path = await open({ filters: [{ name: 'Programs', extensions: ['exe'] }] })
+  const path = await open({ filters: [{ name: t('dialog.programs'), extensions: ['exe'] }] })
   return typeof path === 'string' ? path : null
 }
 /** A PNG or JPEG cover; null when cancelled. */
 export async function pickImage(): Promise<string | null> {
-  const path = await open({ filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }] })
+  const path = await open({ filters: [{ name: t('dialog.images'), extensions: ['png', 'jpg', 'jpeg'] }] })
   return typeof path === 'string' ? path : null
 }
 export type ConnectStep =
@@ -487,5 +496,5 @@ export const detailArt = async (key: string) => {
   return { hero: url(art.hero) }
 }
 
-/** A command error or other `Msg` from Rust in words (`messages.ts`). */
+/** A command error or other `Msg` from Rust in words (`messages.ts`, `i18n/en.json`). */
 export const message = render

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { UpdateInfo } from './api'
   import NotesPopover from './NotesPopover.svelte'
+  import { t } from './i18n'
 
   let { update, current, running, installing, error, anchor, onclose, oninstall }: {
     update: UpdateInfo
@@ -17,13 +18,13 @@
   } = $props()
 </script>
 
-<NotesPopover version={update.version} sub="you have {current}" notes={update.notes} {anchor} {onclose}>
+<NotesPopover version={update.version} sub={t('update.youHave', { version: current })} notes={update.notes} {anchor} {onclose}>
   {#if error}<p class="error">{error}</p>{/if}
-  {#if running}<p>Close the game to update.</p>{/if}
+  {#if running}<p>{t('update.closeGame')}</p>{/if}
   <div class="foot">
-    <button class="glass" disabled={installing} onclick={() => onclose(true)}>Later</button>
+    <button class="glass" disabled={installing} onclick={() => onclose(true)}>{t('update.later')}</button>
     <button class="pill" disabled={running} aria-disabled={installing} onclick={() => installing || oninstall()}>
-      {installing ? 'Downloading…' : 'Update and restart'}
+      {installing ? t('update.downloading') : t('update.restart')}
     </button>
   </div>
 </NotesPopover>

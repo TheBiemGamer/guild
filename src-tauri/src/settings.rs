@@ -15,6 +15,8 @@ pub const CLOUD_SAVES: &str = "cloud_saves";
 pub const GOG_CLOUD_SAVES: &str = "gog_cloud_saves";
 pub const CLOSE_TO_TRAY: &str = "close_to_tray";
 pub const NOTIFY_DOWNLOADS: &str = "notify_downloads";
+/// "system" (Windows' display language), "en" or "nl" (`msg::is_language`).
+pub const LANGUAGE: &str = "language";
 /// Not stored: the autostart entry in the registry is the truth (`commands::settings`).
 pub const START_WITH_WINDOWS: &str = "start_with_windows";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
@@ -46,9 +48,11 @@ pub struct Settings {
     pub amazon_install_dir: Option<PathBuf>,
     pub igdb_client_id: Option<String>,
     pub sort: Sort,
+    /// The Language setting as saved; `msg::resolve` turns it into a language.
+    pub language: String,
 }
 
-/// Unset or unreadable values fall back to the defaults: every switch on.
+/// Unset or unreadable values fall back to the defaults: every switch on, the language Windows'.
 pub fn load(conn: &Connection) -> Settings {
     let get = |name| db::setting(conn, name).ok().flatten();
     Settings {
@@ -63,6 +67,7 @@ pub fn load(conn: &Connection) -> Settings {
         amazon_install_dir: get(AMAZON_INSTALL_DIR).map(PathBuf::from),
         igdb_client_id: get(IGDB_CLIENT_ID),
         sort: get(LIBRARY_SORT).and_then(|v| Sort::parse(&v)).unwrap_or(Sort::Title),
+        language: get(LANGUAGE).filter(|v| crate::msg::is_language(v)).unwrap_or_else(|| "system".into()),
     }
 }
 
@@ -80,6 +85,8 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
         IGDB_CLIENT_ID => Ok(()),
         LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => Err(msg!(unknownSort, value = format!("{value:?}"))),
         LIBRARY_SORT => Ok(()),
+        LANGUAGE if value.is_some_and(|v| !crate::msg::is_language(v)) => Err(msg!(unknownLanguage, value = format!("{value:?}"))),
+        LANGUAGE => Ok(()),
         "igdb_secret" => Err(msg!(igdbSecretOwnCommand)),
         _ => Err(msg!(unknownSetting, name = name)),
     }
@@ -205,6 +212,17 @@ mod tests {
         assert!(s.show_banner && s.ambient && s.cloud_saves && s.gog_cloud_saves && s.close_to_tray && s.notify_downloads);
         assert_eq!((s.epic_install_dir, s.gog_install_dir, s.amazon_install_dir, s.igdb_client_id), (None, None, None, None));
         assert_eq!(s.sort, Sort::Title);
+        assert_eq!(s.language, "system");
+    }
+
+    #[test]
+    fn language_loads_back_and_rejects_unknown_codes() {
+        let conn = memory();
+        update(&conn, LANGUAGE, Some("nl")).unwrap();
+        assert!(update(&conn, LANGUAGE, Some("fr")).is_err());
+        assert_eq!(load(&conn).language, "nl");
+        update(&conn, LANGUAGE, None).unwrap();
+        assert_eq!(load(&conn).language, "system");
     }
 
     #[test]

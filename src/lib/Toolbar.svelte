@@ -5,6 +5,7 @@
   import UpdatePopover from './UpdatePopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, type Collection, type Filter } from './filters'
+  import { t } from './i18n'
   import { onMount } from 'svelte'
   import { onOpenDownloads, type Card, type Progress, type QueueView, type Sort, type Store, type UpdateInfo } from './api'
 
@@ -89,13 +90,9 @@
     segments[i]?.focus()
   }
 
-  const sorts: { value: Sort; label: string }[] = [
-    { value: 'lastPlayed', label: 'Recently played' },
-    { value: 'mostPlayed', label: 'Most played' },
-    { value: 'longestToBeat', label: 'Longest to beat' },
-    { value: 'shortestToBeat', label: 'Shortest to beat' },
-    { value: 'title', label: 'Title' },
-  ]
+  const sorts = $derived(
+    (['lastPlayed', 'mostPlayed', 'longestToBeat', 'shortestToBeat', 'title'] as const).map((value) => ({ value, label: t(`sort.${value}`) })),
+  )
   const sortName = $derived(sorts.find((s) => s.value === sort)?.label)
 
   let open = $state<'filters' | 'downloads' | 'sort' | 'update' | null>(null)
@@ -153,16 +150,16 @@
     </svg>
     <input
       type="search"
-      placeholder="Search games"
+      placeholder={t('toolbar.search')}
       aria-keyshortcuts="Control+K"
       bind:this={search}
       bind:value={query}
     />
-    {#if !query}<kbd aria-hidden="true">Ctrl K</kbd>{/if}
+    {#if !query}<kbd aria-hidden="true">{t('toolbar.shortcut')}</kbd>{/if}
   </label>
 
-  <div class="chips" role="group" aria-label="Filter">
-    <div class="seg" role="radiogroup" aria-label="Store" style="--at: {storeIndex}">
+  <div class="chips" role="group" aria-label={t('toolbar.filter')}>
+    <div class="seg" role="radiogroup" aria-label={t('toolbar.store')} style="--at: {storeIndex}">
       <span class="thumb" aria-hidden="true"></span>
       {#each stores as s, i (s ?? 'all')}
         {@const name = s === null ? undefined : storeNames[s]}
@@ -176,15 +173,15 @@
           onclick={() => (store = s)}
           onkeydown={onSegmentKey}
         >
-          {#if s === null}All{:else}<StoreIcon provider={s} size={18} />{/if}
+          {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
         </button>
       {/each}
     </div>
     <button class="chip" aria-pressed={installedOnly} onclick={() => (installedOnly = !installedOnly)}>
-      Installed
+      {t('play.installed')}
     </button>
     {#each chips as chip (chip.filter)}
-      <button class="chip on" aria-label="Remove filter: {chip.label}" onclick={() => (filters = removeChip(filters, chip))}>
+      <button class="chip on" aria-label={t('toolbar.removeFilter', { name: chip.label })} onclick={() => (filters = removeChip(filters, chip))}>
         {chip.label}<i aria-hidden="true">✕</i>
       </button>
     {/each}
@@ -200,7 +197,7 @@
           <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
           <circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" />
         </svg>
-        Filters
+        {t('filters.title')}
       </button>
       {#if open === 'filters'}
         <FilterPopover bind:filters {collections} anchor={filtersChip} onclose={close} onchanged={oncollections} />
@@ -216,14 +213,14 @@
       bind:this={sortChip}
       aria-haspopup="menu"
       aria-expanded={open === 'sort'}
-      aria-label="Sort: {sortName}"
+      aria-label={t('toolbar.sort', { sort: sortName ?? '' })}
       onclick={() => (open = open === 'sort' ? null : 'sort')}
     >
       {sortName}
       <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
     </button>
     {#if open === 'sort'}
-      <ChoiceMenu bind:value={sort} options={sorts} label="Sort by" anchor={sortChip} onclose={close} />
+      <ChoiceMenu bind:value={sort} options={sorts} label={t('toolbar.sortBy')} anchor={sortChip} onclose={close} />
     {/if}
   </div>
 
@@ -237,7 +234,7 @@
         onclick={() => (open = open === 'update' ? null : 'update')}
       >
         <svg class="line up" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
-        Update
+        {t('play.update')}
       </button>
       {#if open === 'update'}
         <UpdatePopover
@@ -259,8 +256,8 @@
       <button
         class="chip icon"
         bind:this={downloadsChip}
-        aria-label="Downloads, {Math.round(fraction * 100)}%"
-        title="Downloads"
+        aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
+        title={t('downloads.title')}
         aria-haspopup="dialog"
         aria-expanded={open === 'downloads'}
         onclick={() => (open = open === 'downloads' ? null : 'downloads')}
@@ -274,11 +271,11 @@
     </div>
   {/if}
 
-  <button class="chip icon" onclick={onadd} aria-label="Add a game" title="Add a game">
+  <button class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')} title={t('toolbar.addGame')}>
     <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
   </button>
 
-  <button class="chip icon settings" onclick={onsettings} aria-label={attention ? 'Settings (needs attention)' : 'Settings'} title="Settings">
+  <button class="chip icon settings" onclick={onsettings} aria-label={attention ? t('toolbar.settingsAttention') : t('toolbar.settings')} title={t('toolbar.settings')}>
     <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
       <path

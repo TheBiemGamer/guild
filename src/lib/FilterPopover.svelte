@@ -3,6 +3,7 @@
   import * as api from './api'
   import { collectionFilter, filterGroups, filterName, toggleFilter, type Collection, type Filter } from './filters'
   import { popover } from './popover'
+  import { t } from './i18n'
 
   let { filters = $bindable(), collections, anchor, onclose, onchanged }: {
     filters: Filter[]
@@ -84,7 +85,7 @@
   }
 </script>
 
-<div class="pop" role="dialog" aria-label="Filters" tabindex="-1" use:popover={{ anchor, close: onclose }}>
+<div class="pop" role="dialog" aria-label={t('filters.title')} tabindex="-1" use:popover={{ anchor, close: onclose }}>
   {#each groups as group (group.label)}
     <h3 id="filter-{group.label}">{group.label}</h3>
     <div class="toggles" role="group" aria-labelledby="filter-{group.label}">
@@ -94,9 +95,9 @@
     </div>
   {/each}
   <div class="foot">
-    <button class="link" onclick={() => (filters = [])}>Clear</button>
+    <button class="link" onclick={() => (filters = [])}>{t('filters.clear')}</button>
     <button class="link" bind:this={manageButton} aria-expanded={managing} aria-controls="manage-collections" onclick={() => (managing = !managing)}>
-      Manage collections…
+      {t('filters.manage')}
     </button>
   </div>
   {#if managing}
@@ -104,23 +105,23 @@
       {#each collections as c (c.id)}
         <div class="row">
           {#if deleting === c.id}
-            <span class="ask">Delete {c.name}? Games stay in your library.</span>
-            <button class="small danger" onclick={() => remove(c)}>Delete</button>
-            <button class="small cancel" onclick={() => keep(c)}>Cancel</button>
+            <span class="ask">{t('filters.askDelete', { name: c.name })}</span>
+            <button class="small danger" onclick={() => remove(c)}>{t('common.delete')}</button>
+            <button class="small cancel" onclick={() => keep(c)}>{t('common.cancel')}</button>
           {:else if renaming === c.id}
             <input
-              aria-label="Rename {c.name}"
+              aria-label={t('filters.renameNamed', { name: c.name })}
               bind:value={draft}
               onkeydown={(e) => renameKeydown(e, c)}
               onblur={() => saveRename(c)}
             />
           {:else}
-            <button class="name" data-name={c.id} title="Rename" onclick={() => startRename(c)}>{c.name}</button>
-            <button class="x" data-delete={c.id} aria-label="Delete {c.name}" onclick={() => askDelete(c)}>✕</button>
+            <button class="name" data-name={c.id} title={t('filters.rename')} onclick={() => startRename(c)}>{c.name}</button>
+            <button class="x" data-delete={c.id} aria-label={t('filters.deleteNamed', { name: c.name })} onclick={() => askDelete(c)}>✕</button>
           {/if}
         </div>
       {:else}
-        <p class="note">No collections yet. Add games to one from a game's menu.</p>
+        <p class="note">{t('filters.noCollections')}</p>
       {/each}
       {#if problem}<p class="note problem" title={problem}>{problem}</p>{/if}
     </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Featured } from './api'
+  import { t } from './i18n'
 
   let { featured, running, onplay, onopen }: {
     featured: Featured
@@ -11,20 +12,20 @@
   let loaded = $state<string | null>(null)
 </script>
 
-<section class="continue" aria-label="Continue playing">
+<section class="continue" aria-label={t('continue.title')}>
   {#if featured.hero}
     <img src={featured.hero} alt="" class:loaded={loaded === featured.hero} onload={() => (loaded = featured.hero)} />
   {/if}
-  <button class="open" onclick={() => onopen(featured.key)} aria-label="Open {featured.title}"></button>
+  <button class="open" onclick={() => onopen(featured.key)} aria-label={t('common.openGame', { title: featured.title })}></button>
   <div class="text">
-    <small>Continue playing</small>
+    <small>{t('continue.title')}</small>
     <h2>{featured.title}</h2>
     <button class="pill" disabled={running} onclick={() => onplay(featured.chosen)}>
       {#if running}
-        Playing
+        {t('play.playing')}
       {:else}
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
-        Play
+        {t('play.play')}
       {/if}
     </button>
   </div>

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import * as api from './api'
   import type { LoginStep } from './api'
+  import { t } from './i18n'
 
   let { onclose, onconnected }: {
     onclose: () => void
@@ -57,7 +58,7 @@
         return follow(api.steamPasswordNext())
       case 'code':
         // Steam asks again after a code it didn't take.
-        error = phase === 'checking' ? "That code didn't work. Try again." : null
+        error = phase === 'checking' ? t('steam.codeFailed') : null
         phase = 'code'
         codeKind = step.kind
         code = ''
@@ -141,27 +142,27 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="steam-login-title">
-    <button class="close" onclick={onclose} aria-label="Close">✕</button>
-    <h4 id="steam-login-title">Log in to Steam</h4>
+    <button class="close" onclick={onclose} aria-label={t('common.close')}>✕</button>
+    <h4 id="steam-login-title">{t('steam.title')}</h4>
     <div class="cols">
       <div class="side">
         {#if phase === 'approve'}
-          <p>{approveByEmail ? 'Open the link Steam emailed you to approve this login.' : 'Approve the login in the Steam app on your phone.'}</p>
+          <p>{approveByEmail ? t('steam.approveEmail') : t('steam.approvePhone')}</p>
         {:else if phase === 'code' || phase === 'checking'}
           <form onsubmit={sendCode}>
             <label for="steam-code">
-              {codeKind === 'email' ? 'Code Steam emailed you' : 'Code from the Steam app'}
+              {codeKind === 'email' ? t('steam.codeEmail') : t('steam.codeApp')}
             </label>
             <!-- svelte-ignore a11y_autofocus -->
             <input id="steam-code" type="text" autocomplete="off" spellcheck="false" autofocus bind:value={code} />
             <button class="pill" disabled={phase === 'checking' || !code.trim()}>
-              {phase === 'checking' ? 'Checking…' : 'Submit'}
+              {phase === 'checking' ? t('steam.checking') : t('steam.submit')}
             </button>
           </form>
-          {#if phase === 'checking'}<p class="hint">This can take up to 30 seconds.</p>{/if}
+          {#if phase === 'checking'}<p class="hint">{t('steam.slow')}</p>{/if}
         {:else}
           <form onsubmit={signIn}>
-            <label for="steam-account">Account name</label>
+            <label for="steam-account">{t('steam.account')}</label>
             <input
               id="steam-account"
               type="text"
@@ -170,10 +171,10 @@
               bind:this={accountInput}
               bind:value={account}
             />
-            <label for="steam-password">Password</label>
+            <label for="steam-password">{t('steam.password')}</label>
             <input id="steam-password" type="password" autocomplete="off" bind:value={password} />
             <button class="pill" disabled={phase === 'busy' || !account.trim() || !password}>
-              {phase === 'busy' ? 'Logging in…' : 'Log in'}
+              {phase === 'busy' ? t('common.loggingIn') : t('common.logIn')}
             </button>
           </form>
         {/if}
@@ -187,7 +188,7 @@
           <div class="qr" aria-hidden="true">
             {#if svg}{@html svg}{/if}
           </div>
-          <p>{scanned ? 'Approve the login in the Steam app.' : 'Or scan with the Steam app → Steam Guard.'}</p>
+          <p>{scanned ? t('steam.approveScanned') : t('steam.scan')}</p>
         {/if}
       </div>
     </div>

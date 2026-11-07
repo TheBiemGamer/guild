@@ -36,6 +36,8 @@
   import AddGame from './lib/AddGame.svelte'
   import NotesPopover, { installedNotes } from './lib/NotesPopover.svelte'
   import { collectionFilter, isList, matches, type Filter } from './lib/filters'
+  import { around, t } from './lib/i18n'
+  import { setLanguage } from './lib/lang.svelte'
 
   let query = $state('')
   let store = $state<Store | null>(null)
@@ -189,7 +191,7 @@
       await api.epicLogIn()
       error = null
     } catch (e) {
-      error = `Epic login: ${api.message(e)}`
+      error = t('app.epicLoginError', { error: api.message(e) })
     }
     loggingIn = false
     await reload()
@@ -198,8 +200,9 @@
   async function loadSettings() {
     try {
       settings = await api.settingsView()
+      setLanguage(settings.uiLanguage)
     } catch (e) {
-      error = `Settings: ${api.message(e)}`
+      error = t('app.settingsError', { error: api.message(e) })
     }
   }
 
@@ -292,6 +295,7 @@
       benchSpeed = await api.benchSpeed()
       const saved = await api.loadCache().catch((e) => console.error('library cache', e))
       if (saved) {
+        setLanguage(saved.uiLanguage)
         sort = saved.sort
         updatedTo = saved.updatedTo
       }
@@ -463,10 +467,11 @@
 
   {#if updatedTo}
     {@const notes = installedNotes(updatedTo)}
+    {@const [before, after] = around('app.updatedTo', 'version')}
     <div class="notice">
-      <span>Updated to <b>{updatedTo}</b></span>
+      <span>{before}<b>{updatedTo}</b>{after}</span>
       {#if notes}
-        <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>What's new</button>
+        <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
         {#if updatedNotesOpen}
           <NotesPopover
             version={updatedTo}
@@ -479,20 +484,20 @@
           />
         {/if}
       {/if}
-      <button class="close" onclick={() => (updatedTo = null)} aria-label="Dismiss">✕</button>
+      <button class="close" onclick={() => (updatedTo = null)} aria-label={t('common.dismiss')}>✕</button>
     </div>
   {/if}
   {#if lib.epicNotice}
     <div class="notice">
-      <span>You were logged out of Epic Games. Log in again in Settings.</span>
-      <button class="glass" onclick={() => openSettings()}>Settings</button>
-      <button class="close" onclick={dismissNotice} aria-label="Dismiss">✕</button>
+      <span>{t('app.epicLoggedOut')}</span>
+      <button class="glass" onclick={() => openSettings()}>{t('toolbar.settings')}</button>
+      <button class="close" onclick={dismissNotice} aria-label={t('common.dismiss')}>✕</button>
     </div>
   {/if}
   {#if error}
     <div class="notice error">
       <span>{error}</span>
-      <button class="close" onclick={() => (error = null)} aria-label="Dismiss">✕</button>
+      <button class="close" onclick={() => (error = null)} aria-label={t('common.dismiss')}>✕</button>
     </div>
   {/if}
 
@@ -552,7 +557,7 @@
           {/if}
           {#if !view.sections}
             <h2 class="label">
-              {query || store || installedOnly || filters.length ? 'Results' : 'Library'}
+              {query || store || installedOnly || filters.length ? t('app.results') : t('app.library')}
               <span>{shown.length}</span>
             </h2>
           {/if}
@@ -560,22 +565,22 @@
       </Grid>
     {:else if epicEmpty && lib.epic === 'noLegendary'}
       <div class="empty">
-        <p>Legendary isn't installed.</p>
-        <small>Install it, then refresh.</small>
+        <p>{t('app.noLegendary')}</p>
+        <small>{t('app.noLegendaryHint')}</small>
       </div>
     {:else if epicEmpty && lib.epic === 'loggedOut'}
       <div class="empty">
-        <p>Your Epic games show after you log in.</p>
-        <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? 'Logging in…' : 'Log in to Epic'}</button>
+        <p>{t('app.epicLoggedOutEmpty')}</p>
+        <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
       </div>
     {:else if epicEmpty && lib.epic === 'unreachable'}
       <div class="empty">
-        <p>Can't reach Epic.</p>
-        <small>Your Epic games load once it's reachable.</small>
+        <p>{t('app.epicUnreachable')}</p>
+        <small>{t('app.epicUnreachableHint')}</small>
       </div>
     {:else if started}
       <div class="empty">
-        <p>{lib.total > 0 ? 'No games match.' : lib.status.map(api.message).join('\n')}</p>
+        <p>{lib.total > 0 ? t('app.noMatch') : lib.status.map(api.message).join('\n')}</p>
       </div>
     {/if}
     </div>
@@ -622,7 +627,7 @@
       onsaved={reload}
       onsettings={() => {
         closeAddGame(false)
-        openSettings('Extra metadata')
+        openSettings('metadata')
       }}
     />
   {/key}

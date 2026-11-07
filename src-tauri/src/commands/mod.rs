@@ -198,6 +198,13 @@ fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
+/// Puts native text (tray, toasts, login windows) in the Language setting's language.
+pub fn apply_language(app: &AppHandle) {
+    if let Some(conn) = open_db(&app.state::<AppState>()) {
+        crate::msg::set_language(&crate::settings::load(&conn).language);
+    }
+}
+
 /// Whether closing the main window hides it to the tray (the default) instead of quitting.
 pub fn close_to_tray(app: &AppHandle) -> bool {
     open_db(&app.state::<AppState>()).is_none_or(|conn| crate::settings::load(&conn).close_to_tray)

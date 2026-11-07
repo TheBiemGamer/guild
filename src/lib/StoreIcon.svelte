@@ -11,6 +11,7 @@
   import padSvg from './icons/gamepad.svg?raw'
   import padFile from './icons/gamepad.svg?no-inline'
   import type { Store } from './api'
+  import { t } from './i18n'
 
   // Simple Icons ship one path per logo; reading it once keeps {@html} out of every card.
   const path = (svg: string) => /\sd="([^"]+)"/.exec(svg)?.[1] ?? ''
@@ -26,7 +27,9 @@
     epic: 'Epic Games',
     gog: 'GOG',
     amazon: 'Amazon Games',
-    custom: 'Added by you',
+    get custom() {
+      return t('store.custom')
+    },
   }
   /** For places that repeat the logo many times (every cover): an <img> is rasterized once and cached. */
   export const logoFile: Record<Store, string> = { steam: steamFile, epic: epicFile, gog: gogFile, amazon: amazonFile, custom: padFile }

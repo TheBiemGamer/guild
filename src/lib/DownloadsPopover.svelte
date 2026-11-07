@@ -3,6 +3,7 @@
   import type { Card, Progress, QueuedAction, QueueView, Store } from './api'
   import { progressShort } from './format'
   import { popover } from './popover'
+  import { t } from './i18n'
   import StoreIcon from './StoreIcon.svelte'
 
   let { progress, queue, games, anchor, onclose, oncancel, onpause, onresume, onmove }: {
@@ -35,7 +36,7 @@
   })
 
   const queued = $derived(new Map(queue.jobs.map((j) => [j.key, j.title] as const)))
-  const title = (key: string) => known.get(key) || queued.get(key) || asked[key] || 'A game'
+  const title = (key: string) => known.get(key) || queued.get(key) || asked[key] || t('downloads.aGame')
   const active = $derived(queue.jobs[0])
   const next = $derived(queue.jobs.slice(1))
   const jobs = $derived(Object.entries(progress))
@@ -44,18 +45,18 @@
   // Epic and GOG jobs outside the queue (Move, a GOG DLC uninstall) show their progress only; Steam's run in Steam.
   const other = $derived(jobs.filter(([k]) => storeOf(k) !== 'steam' && k !== active?.key))
   const steam = $derived(jobs.filter(([k]) => storeOf(k) === 'steam'))
-  const running: Record<QueuedAction, string> = { install: 'Installing…', update: 'Updating…', verify: 'Verifying…' }
-  const actionName: Record<QueuedAction, string> = { install: 'Install', update: 'Update', verify: 'Verify' }
+  const running = (action: QueuedAction) => t(`queue.running.${action}`)
+  const actionName = (action: QueuedAction) => t(`queue.action.${action}`)
 
   function activeText(p: Progress | undefined): string {
-    if (queue.paused) return p ? `Paused · ${Math.round(p.fraction * 100)}%` : 'Paused'
-    return p ? progressShort(p) : running[active.action]
+    if (queue.paused) return p ? t('downloads.pausedAt', { percent: `${Math.round(p.fraction * 100)}%` }) : t('downloads.paused')
+    return p ? progressShort(p) : running(active.action)
   }
 </script>
 
 {#snippet fill(key: string, p: Progress | undefined, paused = false)}
   {@const pct = Math.round((p?.fraction ?? 0) * 100)}
-  <span class="fill" class:paused style="width: {pct}%" role="progressbar" aria-label="{title(key)} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}></span>
+  <span class="fill" class:paused style="width: {pct}%" role="progressbar" aria-label={t('downloads.progress', { title: title(key) })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}></span>
 {/snippet}
 
 {#snippet job(key: string, p: Progress)}
@@ -69,7 +70,7 @@
   </div>
 {/snippet}
 
-<div class="pop" role="dialog" aria-label="Downloads" tabindex="-1" use:popover={{ anchor, close: onclose }}>
+<div class="pop" role="dialog" aria-label={t('downloads.title')} tabindex="-1" use:popover={{ anchor, close: onclose }}>
   {#if active}
     <div class="job">
       {@render fill(active.key, progress[active.key], queue.paused)}
@@ -79,15 +80,15 @@
         <small>{activeText(progress[active.key])}</small>
       </div>
       {#if queue.paused}
-        <button class="glass icon" aria-label="Resume" title="Resume" onclick={onresume}>
+        <button class="glass icon" aria-label={t('common.resume')} title={t('common.resume')} onclick={onresume}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
         </button>
       {:else}
-        <button class="glass icon" aria-label="Pause" title="Pause" onclick={onpause}>
+        <button class="glass icon" aria-label={t('common.pause')} title={t('common.pause')} onclick={onpause}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
         </button>
       {/if}
-      <button class="glass icon" aria-label="Cancel {title(active.key)}" title="Cancel" onclick={() => oncancel(active.key)}>
+      <button class="glass icon" aria-label={t('downloads.cancelGame', { title: title(active.key) })} title={t('common.cancel')} onclick={() => oncancel(active.key)}>
         <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
@@ -95,21 +96,21 @@
   {#each other as [key, p] (key)}{@render job(key, p)}{/each}
   {#each steam as [key, p] (key)}{@render job(key, p)}{/each}
   {#if next.length}
-    <h3>Up next</h3>
+    <h3>{t('downloads.upNext')}</h3>
     {#each next as j, i (`${j.key}|${j.action}`)}
       <div class="job">
         <StoreIcon provider={storeOf(j.key)} size={16} />
         <div class="what">
           <b>{title(j.key)}</b>
-          <small class="quiet">{actionName[j.action]}</small>
+          <small class="quiet">{actionName(j.action)}</small>
         </div>
-        <button class="glass icon" aria-label="Move {title(j.key)} up" disabled={i === 0} onclick={() => onmove(j.key, true)}>
+        <button class="glass icon" aria-label={t('downloads.moveUp', { title: title(j.key) })} disabled={i === 0} onclick={() => onmove(j.key, true)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
         </button>
-        <button class="glass icon" aria-label="Move {title(j.key)} down" disabled={i === next.length - 1} onclick={() => onmove(j.key, false)}>
+        <button class="glass icon" aria-label={t('downloads.moveDown', { title: title(j.key) })} disabled={i === next.length - 1} onclick={() => onmove(j.key, false)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
         </button>
-        <button class="glass icon" aria-label="Remove {title(j.key)} from queue" onclick={() => oncancel(j.key)}>
+        <button class="glass icon" aria-label={t('downloads.remove', { title: title(j.key) })} onclick={() => oncancel(j.key)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
       </div>

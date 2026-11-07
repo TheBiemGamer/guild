@@ -6,6 +6,8 @@
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
   import NotesPopover, { installedNotes } from './NotesPopover.svelte'
+  import ChoiceMenu from './ChoiceMenu.svelte'
+  import { around, t } from './i18n'
 
   let {
     view,
@@ -46,7 +48,8 @@
     onlogin: () => void
   } = $props()
 
-  const sections = ['General', 'Accounts', 'Appearance', 'Extra metadata', 'Storage', 'About']
+  /** Section ids; `settings.section.<id>` names them. */
+  const sections = ['general', 'accounts', 'appearance', 'metadata', 'storage', 'about']
   let active = $state(sections[0])
   let main: HTMLElement
   let closeButton: HTMLButtonElement
@@ -75,7 +78,7 @@
   let notesOpen = $state(false)
   let notesButton = $state<HTMLButtonElement>()
   const versionNote = $derived(
-    checkError ?? installError ?? (update ? `${update.version} available` : updateChecked ? 'Up to date' : null),
+    checkError ?? installError ?? (update ? t('settings.available', { version: update.version }) : updateChecked ? t('settings.upToDate') : null),
   )
 
   async function checkNow() {
@@ -104,7 +107,7 @@
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
-  const id = (name: string) => `settings-${name.replace(' ', '-').toLowerCase()}`
+  const id = (name: string) => `settings-${name}`
   const showSecretField = $derived(!view.igdbSecretSet || replacing)
   const showGridField = $derived(!view.steamgriddbKeySet || gridReplacing)
 
@@ -125,6 +128,19 @@
   }
 
   const disconnectSteam = () => change(() => api.steamDisconnect())
+
+  /** The Language setting: "system" follows Windows' display language. Language names stay in their own language. */
+  const languages = $derived([
+    { value: 'system' as const, label: t('settings.languageSystem') },
+    { value: 'en' as const, label: 'English' },
+    { value: 'nl' as const, label: 'Nederlands' },
+  ])
+  const languageName = $derived(languages.find((l) => l.value === view.language)?.label ?? '')
+  let languageOpen = $state(false)
+  let languageButton = $state<HTMLButtonElement>()
+  /** The hints' words around their links. */
+  const igdbHint = $derived(around('settings.igdbHint', 'link'))
+  const gridHint = $derived(around('settings.gridHint', 'link'))
 
   async function steamConnected() {
     connecting = false
@@ -230,7 +246,7 @@
       if (!path) return
       const games = await api.epicImportable()
       if (games.length === 0) {
-        importNote = 'Every owned Epic game is already installed.'
+        importNote = t('settings.epicAllInstalled')
         return
       }
       importing = { path, games }
@@ -245,7 +261,7 @@
     managing = 'import'
     try {
       await api.epicImport(importKey, path)
-      importNote = `Imported ${games.find((g) => g.key === importKey)?.title ?? 'the game'}.`
+      importNote = t('settings.imported', { title: games.find((g) => g.key === importKey)?.title ?? t('settings.theGame') })
       importing = null
     } catch (e) {
       importNote = api.message(e)
@@ -259,7 +275,7 @@
     managing = 'egl'
     try {
       await api.epicEglSync()
-      eglNote = 'Synced with the Epic Games Launcher.'
+      eglNote = t('settings.eglSynced')
     } catch (e) {
       eglNote = api.message(e)
     }
@@ -289,7 +305,7 @@
       const path = await api.pickFolder()
       if (!path) return
       gogImporting = true
-      gogImportNote = `Imported ${await api.gogImport(path)}.`
+      gogImportNote = t('settings.imported', { title: await api.gogImport(path) })
     } catch (e) {
       gogImportNote = api.message(e)
     }
@@ -328,7 +344,7 @@
       if (!path) return
       const games = await api.amazonImportable()
       if (games.length === 0) {
-        amazonImportNote = 'Every owned Amazon game is already installed.'
+        amazonImportNote = t('settings.amazonAllInstalled')
         return
       }
       amazonImport = { path, games }
@@ -343,7 +359,7 @@
     amazonImporting = true
     try {
       await api.amazonImport(amazonImportKey, path)
-      amazonImportNote = `Imported ${games.find((g) => g.key === amazonImportKey)?.title ?? 'the game'}.`
+      amazonImportNote = t('settings.imported', { title: games.find((g) => g.key === amazonImportKey)?.title ?? t('settings.theGame') })
       amazonImport = null
     } catch (e) {
       amazonImportNote = api.message(e)
@@ -370,7 +386,8 @@
     amazonLoggingIn = false
   }
 
-  const jobLabel = (verb: string, job: { percent: number | null }) => (job.percent === null ? `${verb}…` : `${verb}… ${job.percent}%`)
+  const jobLabel = (kind: 'install' | 'update', job: { percent: number | null }) =>
+    job.percent === null ? t(`settings.job.${kind}`) : t(`settings.job.${kind}Percent`, { percent: job.percent })
 
   const removeSecret = () => change(() => api.setIgdbSecret(null))
   const removeGridKey = () => change(() => api.setSteamgriddbKey(null))
@@ -380,18 +397,18 @@
   const clearCache = () => change(() => api.clearCache())
 
   function ago(at: number | null, nowMs: number) {
-    if (at === null) return 'Not refreshed yet'
+    if (at === null) return t('settings.refreshed.never')
     const mins = Math.floor((nowMs - at) / 60_000)
-    if (mins < 1) return 'Refreshed just now'
-    if (mins < 60) return `Refreshed ${mins} min ago`
-    return `Refreshed ${Math.floor(mins / 60)} h ago`
+    if (mins < 1) return t('settings.refreshed.justNow')
+    if (mins < 60) return t('settings.refreshed.minutes', { n: mins })
+    return t('settings.refreshed.hours', { n: Math.floor(mins / 60) })
   }
 
   /** What the Steam card says: the account name, or a problem in its place. */
   const steam = $derived.by(() => {
     const account = view.steamLibrary.account
-    if (!view.steam) return { name: null, problem: "Steam isn't installed", fix: null, logout: !!account }
-    if (!account || view.steamLibrary.attention) return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+    if (!view.steam) return { name: null, problem: t('settings.steamMissing'), fix: null, logout: !!account }
+    if (!account || view.steamLibrary.attention) return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
     return { name: account, problem: null, fix: null, logout: true }
   })
 
@@ -399,17 +416,17 @@
   const epic = $derived.by(() => {
     switch (view.epic) {
       case 'loggedIn':
-        return { name: view.epicAccount ?? 'Logged in', problem: null, fix: null, logout: true }
+        return { name: view.epicAccount ?? t('settings.loggedIn'), problem: null, fix: null, logout: true }
       case 'loggedOut':
-        return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+        return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
       case 'unreachable':
-        return { name: null, problem: "Can't reach Epic", fix: 'Reconnect', logout: false }
+        return { name: null, problem: t('settings.epicUnreachable'), fix: t('settings.reconnect'), logout: false }
       case 'noLegendary':
         return legendaryError
           ? { name: null, problem: legendaryError, fix: null, logout: false }
-          : { name: 'Epic games need Legendary, a free open-source tool.', problem: null, fix: null, logout: false }
+          : { name: t('settings.needLegendary'), problem: null, fix: null, logout: false }
       default:
-        return { name: 'Checking…', problem: null, fix: null, logout: false }
+        return { name: t('steam.checking'), problem: null, fix: null, logout: false }
     }
   })
 
@@ -417,17 +434,17 @@
   const gog = $derived.by(() => {
     switch (view.gog) {
       case 'loggedIn':
-        return { name: view.gogAccount ?? 'Logged in', problem: null, fix: null, logout: true }
+        return { name: view.gogAccount ?? t('settings.loggedIn'), problem: null, fix: null, logout: true }
       case 'loggedOut':
-        return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+        return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
       case 'unreachable':
-        return { name: null, problem: "Can't reach GOG", fix: 'Reconnect', logout: false }
+        return { name: null, problem: t('settings.gogUnreachable'), fix: t('settings.reconnect'), logout: false }
       case 'noGogdl':
         return gogdlError
           ? { name: null, problem: gogdlError, fix: null, logout: false }
-          : { name: 'GOG games need gogdl, a free open-source tool.', problem: null, fix: null, logout: false }
+          : { name: t('settings.needGogdl'), problem: null, fix: null, logout: false }
       default:
-        return { name: 'Checking…', problem: null, fix: null, logout: false }
+        return { name: t('steam.checking'), problem: null, fix: null, logout: false }
     }
   })
 
@@ -435,17 +452,17 @@
   const amazon = $derived.by(() => {
     switch (view.amazon) {
       case 'loggedIn':
-        return { name: view.amazonAccount ?? 'Logged in', problem: null, fix: null, logout: true }
+        return { name: view.amazonAccount ?? t('settings.loggedIn'), problem: null, fix: null, logout: true }
       case 'loggedOut':
-        return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+        return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
       case 'unreachable':
-        return { name: null, problem: "Can't reach Amazon", fix: 'Reconnect', logout: false }
+        return { name: null, problem: t('settings.amazonUnreachable'), fix: t('settings.reconnect'), logout: false }
       case 'noNile':
         return nileError
           ? { name: null, problem: nileError, fix: null, logout: false }
-          : { name: 'Amazon games need Nile, a free open-source tool.', problem: null, fix: null, logout: false }
+          : { name: t('settings.needNile'), problem: null, fix: null, logout: false }
       default:
-        return { name: 'Checking…', problem: null, fix: null, logout: false }
+        return { name: t('steam.checking'), problem: null, fix: null, logout: false }
     }
   })
 
@@ -479,25 +496,25 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="panel" role="dialog" aria-modal="true" aria-label="Settings">
-    <nav aria-label="Settings sections">
-      <h2>Settings</h2>
+  <div class="panel" role="dialog" aria-modal="true" aria-label={t('toolbar.settings')}>
+    <nav aria-label={t('settings.sectionsLabel')}>
+      <h2>{t('toolbar.settings')}</h2>
       {#each sections as name (name)}
-        <button class="item" class:on={active === name} onclick={() => go(name)}>{name}</button>
+        <button class="item" class:on={active === name} onclick={() => go(name)}>{t(`settings.section.${name}`)}</button>
       {/each}
     </nav>
 
     <div class="main" bind:this={main} {onscroll}>
-      <button class="close" bind:this={closeButton} onclick={onclose} aria-label="Close settings">✕</button>
+      <button class="close" bind:this={closeButton} onclick={onclose} aria-label={t('settings.close')}>✕</button>
 
       {#if error}
         <p class="error" role="alert">{error}</p>
       {/if}
 
-      <section id={id('General')}>
-        <h4>General</h4>
+      <section id={id('general')}>
+        <h4>{t('settings.section.general')}</h4>
         <div class="row">
-          <div id="startup-label">Start with Windows</div>
+          <div id="startup-label">{t('settings.startup')}</div>
           <button
             class="toggle"
             role="switch"
@@ -507,7 +524,7 @@
           ></button>
         </div>
         <div class="row">
-          <div id="tray-label">Keep running in the tray when closed</div>
+          <div id="tray-label">{t('settings.tray')}</div>
           <button
             class="toggle"
             role="switch"
@@ -517,7 +534,7 @@
           ></button>
         </div>
         <div class="row">
-          <div id="notify-label">Notify when a download finishes</div>
+          <div id="notify-label">{t('settings.notify')}</div>
           <button
             class="toggle"
             role="switch"
@@ -526,20 +543,49 @@
             onclick={() => toggle('notify_downloads', !view.notifyDownloads)}
           ></button>
         </div>
+        <div class="row">
+          <div id="language-label">{t('settings.language')}</div>
+          <div class="choice">
+            <button
+              class="btn opt"
+              class:open={languageOpen}
+              bind:this={languageButton}
+              aria-haspopup="menu"
+              aria-expanded={languageOpen}
+              aria-label={t('settings.languageNow', { name: languageName })}
+              onclick={() => (languageOpen = !languageOpen)}
+            >
+              {languageName}
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+            {#if languageOpen}
+              <ChoiceMenu
+                bind:value={() => view.language, (v) => change(() => api.updateSetting('language', v))}
+                options={languages}
+                label={t('settings.language')}
+                anchor={languageButton}
+                onclose={(refocus) => {
+                  languageOpen = false
+                  if (refocus) languageButton?.focus()
+                }}
+              />
+            {/if}
+          </div>
+        </div>
       </section>
 
-      <section id={id('Accounts')}>
+      <section id={id('accounts')}>
         <div class="head">
-          <h4>Accounts</h4>
-          {#if refreshing}<span class="ago still">Refreshing…</span>{/if}
+          <h4>{t('settings.section.accounts')}</h4>
+          {#if refreshing}<span class="ago still">{t('settings.refreshing')}</span>{/if}
           <span class="ago" class:moving={refreshing}>{ago(refreshedAt, now)}</span>
           <button
             class="refresh"
             class:spinning={refreshing}
             disabled={refreshing}
             onclick={onrefresh}
-            aria-label="Refresh library"
-            title="Refresh library"
+            aria-label={t('settings.refreshLibrary')}
+            title={t('settings.refreshLibrary')}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
           </button>
@@ -553,7 +599,7 @@
               {:else if steam.name}<span>{steam.name}</span>{/if}
             </div>
             {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
-            {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>Log out</button>{/if}
+            {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>{t('settings.logOut')}</button>{/if}
           </div>
         </div>
 
@@ -573,31 +619,31 @@
                 aria-controls="epic-options"
                 onclick={() => (epicOptions = !epicOptions)}
               >
-                Options
+                {t('settings.options')}
                 <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
               </button>
             {/if}
             {#if view.epic === 'noLegendary'}
               <button class="btn" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
-                {legendaryJob ? jobLabel('Installing', legendaryJob) : 'Install Legendary'}
+                {legendaryJob ? jobLabel('install', legendaryJob) : t('settings.installTool', { tool: 'Legendary' })}
               </button>
             {/if}
             {#if epic.fix}
-              <button class="btn" disabled={loggingIn} onclick={onlogin}>{loggingIn ? 'Logging in…' : epic.fix}</button>
+              <button class="btn" disabled={loggingIn} onclick={onlogin}>{loggingIn ? t('common.loggingIn') : epic.fix}</button>
             {/if}
             {#if epic.logout}
-              <button class="btn danger" disabled={busy} onclick={logOut}>Log out</button>
+              <button class="btn danger" disabled={busy} onclick={logOut}>{t('settings.logOut')}</button>
             {/if}
           </div>
           {#if epicOptions && view.epic !== 'noLegendary'}
             <div class="opts" id="epic-options">
               <div class="row">
-                <label for="epic-folder">Install folder</label>
+                <label for="epic-folder">{t('settings.installFolder')}</label>
                 <div class="field">
                   <input
                     id="epic-folder"
                     type="text"
-                    placeholder="Default (~/Games)"
+                    placeholder={t('settings.defaultFolder')}
                     spellcheck="false"
                     bind:value={folder}
                     onblur={saveFolder}
@@ -611,13 +657,13 @@
                         saveFolder()
                       }}
                     >
-                      Reset
+                      {t('common.reset')}
                     </button>
                   {/if}
                 </div>
               </div>
               <div class="row">
-                <div id="saves-label">Sync cloud saves</div>
+                <div id="saves-label">{t('settings.syncSaves')}</div>
                 <button
                   class="toggle"
                   role="switch"
@@ -627,32 +673,32 @@
                 ></button>
               </div>
               <div class="row">
-                <div>Import an existing install</div>
-                <button class="btn" disabled={managing !== null || importing !== null} onclick={pickImport}>Import…</button>
+                <div>{t('settings.importInstall')}</div>
+                <button class="btn" disabled={managing !== null || importing !== null} onclick={pickImport}>{t('settings.importButton')}</button>
               </div>
               {#if importing}
                 <div class="row stack">
-                  <label for="import-game">Which game is in {importing.path}?</label>
+                  <label for="import-game">{t('settings.whichGame', { path: importing.path })}</label>
                   <div class="field">
                     <select id="import-game" bind:value={importKey}>
                       {#each importing.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
                     </select>
-                    <button class="btn" disabled={managing !== null} onclick={runImport}>{managing === 'import' ? 'Importing…' : 'Import'}</button>
-                    <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>Cancel</button>
+                    <button class="btn" disabled={managing !== null} onclick={runImport}>{managing === 'import' ? t('settings.importing') : t('settings.import')}</button>
+                    <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>{t('common.cancel')}</button>
                   </div>
                 </div>
               {/if}
               {#if importNote}<p class="note" title={importNote}>{importNote}</p>{/if}
               <div class="row">
-                <div>Sync with Epic Games Launcher<span>Adds the games it installed.</span></div>
-                <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? 'Syncing…' : 'Sync'}</button>
+                <div>{t('settings.eglSync')}<span>{t('settings.eglSyncHint')}</span></div>
+                <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? t('settings.syncing') : t('settings.sync')}</button>
               </div>
               {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
               {#if legendary?.update}
                 <div class="row">
-                  <div>Legendary {legendary.version ?? ''}<span>{legendary.pinned} is available.</span></div>
+                  <div>Legendary {legendary.version ?? ''}<span>{t('settings.toolAvailable', { version: legendary.pinned })}</span></div>
                   <button class="btn" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
-                    {legendaryJob ? jobLabel('Updating', legendaryJob) : 'Update'}
+                    {legendaryJob ? jobLabel('update', legendaryJob) : t('play.update')}
                   </button>
                 </div>
                 {#if legendaryError}<p class="note" title={legendaryError}>{legendaryError}</p>{/if}
@@ -677,31 +723,31 @@
                 aria-controls="gog-options"
                 onclick={() => (gogOptions = !gogOptions)}
               >
-                Options
+                {t('settings.options')}
                 <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
               </button>
             {/if}
             {#if view.gog === 'noGogdl'}
               <button class="btn" disabled={gogdlJob !== null} aria-live="polite" onclick={installGogdl}>
-                {gogdlJob ? jobLabel('Installing', gogdlJob) : 'Install gogdl'}
+                {gogdlJob ? jobLabel('install', gogdlJob) : t('settings.installTool', { tool: 'gogdl' })}
               </button>
             {/if}
             {#if gog.fix}
-              <button class="btn" disabled={gogLoggingIn} onclick={gogLogIn}>{gogLoggingIn ? 'Logging in…' : gog.fix}</button>
+              <button class="btn" disabled={gogLoggingIn} onclick={gogLogIn}>{gogLoggingIn ? t('common.loggingIn') : gog.fix}</button>
             {/if}
             {#if gog.logout}
-              <button class="btn danger" disabled={busy} onclick={gogLogOut}>Log out</button>
+              <button class="btn danger" disabled={busy} onclick={gogLogOut}>{t('settings.logOut')}</button>
             {/if}
           </div>
           {#if gogOptions && view.gog !== 'noGogdl'}
             <div class="opts" id="gog-options">
               <div class="row">
-                <label for="gog-folder">Install folder</label>
+                <label for="gog-folder">{t('settings.installFolder')}</label>
                 <div class="field">
                   <input
                     id="gog-folder"
                     type="text"
-                    placeholder="Default (~/Games)"
+                    placeholder={t('settings.defaultFolder')}
                     spellcheck="false"
                     bind:value={gogFolder}
                     onblur={saveGogFolder}
@@ -715,13 +761,13 @@
                         saveGogFolder()
                       }}
                     >
-                      Reset
+                      {t('common.reset')}
                     </button>
                   {/if}
                 </div>
               </div>
               <div class="row">
-                <div id="gog-saves-label">Sync cloud saves</div>
+                <div id="gog-saves-label">{t('settings.syncSaves')}</div>
                 <button
                   class="toggle"
                   role="switch"
@@ -731,15 +777,15 @@
                 ></button>
               </div>
               <div class="row">
-                <div>Import an existing install</div>
-                <button class="btn" disabled={gogImporting} onclick={gogImport}>{gogImporting ? 'Importing…' : 'Import…'}</button>
+                <div>{t('settings.importInstall')}</div>
+                <button class="btn" disabled={gogImporting} onclick={gogImport}>{gogImporting ? t('settings.importing') : t('settings.importButton')}</button>
               </div>
               {#if gogImportNote}<p class="note" title={gogImportNote}>{gogImportNote}</p>{/if}
               {#if gogdl?.update}
                 <div class="row">
-                  <div>gogdl {gogdl.version ?? ''}<span>{gogdl.pinned} is available.</span></div>
+                  <div>gogdl {gogdl.version ?? ''}<span>{t('settings.toolAvailable', { version: gogdl.pinned })}</span></div>
                   <button class="btn" disabled={gogdlJob !== null} aria-live="polite" onclick={installGogdl}>
-                    {gogdlJob ? jobLabel('Updating', gogdlJob) : 'Update'}
+                    {gogdlJob ? jobLabel('update', gogdlJob) : t('play.update')}
                   </button>
                 </div>
                 {#if gogdlError}<p class="note" title={gogdlError}>{gogdlError}</p>{/if}
@@ -764,31 +810,31 @@
                 aria-controls="amazon-options"
                 onclick={() => (amazonOptions = !amazonOptions)}
               >
-                Options
+                {t('settings.options')}
                 <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
               </button>
             {/if}
             {#if view.amazon === 'noNile'}
               <button class="btn" disabled={nileJob !== null} aria-live="polite" onclick={installNile}>
-                {nileJob ? jobLabel('Installing', nileJob) : 'Install Nile'}
+                {nileJob ? jobLabel('install', nileJob) : t('settings.installTool', { tool: 'Nile' })}
               </button>
             {/if}
             {#if amazon.fix}
-              <button class="btn" disabled={amazonLoggingIn} onclick={amazonLogIn}>{amazonLoggingIn ? 'Logging in…' : amazon.fix}</button>
+              <button class="btn" disabled={amazonLoggingIn} onclick={amazonLogIn}>{amazonLoggingIn ? t('common.loggingIn') : amazon.fix}</button>
             {/if}
             {#if amazon.logout}
-              <button class="btn danger" disabled={busy} onclick={amazonLogOut}>Log out</button>
+              <button class="btn danger" disabled={busy} onclick={amazonLogOut}>{t('settings.logOut')}</button>
             {/if}
           </div>
           {#if amazonOptions && view.amazon !== 'noNile'}
             <div class="opts" id="amazon-options">
               <div class="row">
-                <label for="amazon-folder">Install folder</label>
+                <label for="amazon-folder">{t('settings.installFolder')}</label>
                 <div class="field">
                   <input
                     id="amazon-folder"
                     type="text"
-                    placeholder="Default (~/Games)"
+                    placeholder={t('settings.defaultFolder')}
                     spellcheck="false"
                     bind:value={amazonFolder}
                     onblur={saveAmazonFolder}
@@ -802,33 +848,33 @@
                         saveAmazonFolder()
                       }}
                     >
-                      Reset
+                      {t('common.reset')}
                     </button>
                   {/if}
                 </div>
               </div>
               <div class="row">
-                <div>Import an existing install</div>
-                <button class="btn" disabled={amazonImporting || amazonImport !== null} onclick={pickAmazonImport}>Import…</button>
+                <div>{t('settings.importInstall')}</div>
+                <button class="btn" disabled={amazonImporting || amazonImport !== null} onclick={pickAmazonImport}>{t('settings.importButton')}</button>
               </div>
               {#if amazonImport}
                 <div class="row stack">
-                  <label for="amazon-import-game">Which game is in {amazonImport.path}?</label>
+                  <label for="amazon-import-game">{t('settings.whichGame', { path: amazonImport.path })}</label>
                   <div class="field">
                     <select id="amazon-import-game" bind:value={amazonImportKey}>
                       {#each amazonImport.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
                     </select>
-                    <button class="btn" disabled={amazonImporting} onclick={runAmazonImport}>{amazonImporting ? 'Importing…' : 'Import'}</button>
-                    <button class="btn" disabled={amazonImporting} onclick={() => (amazonImport = null)}>Cancel</button>
+                    <button class="btn" disabled={amazonImporting} onclick={runAmazonImport}>{amazonImporting ? t('settings.importing') : t('settings.import')}</button>
+                    <button class="btn" disabled={amazonImporting} onclick={() => (amazonImport = null)}>{t('common.cancel')}</button>
                   </div>
                 </div>
               {/if}
               {#if amazonImportNote}<p class="note" title={amazonImportNote}>{amazonImportNote}</p>{/if}
               {#if nile?.update}
                 <div class="row">
-                  <div>Nile {nile.version ?? ''}<span>{nile.pinned} is available.</span></div>
+                  <div>Nile {nile.version ?? ''}<span>{t('settings.toolAvailable', { version: nile.pinned })}</span></div>
                   <button class="btn" disabled={nileJob !== null} aria-live="polite" onclick={installNile}>
-                    {nileJob ? jobLabel('Updating', nileJob) : 'Update'}
+                    {nileJob ? jobLabel('update', nileJob) : t('play.update')}
                   </button>
                 </div>
                 {#if nileError}<p class="note" title={nileError}>{nileError}</p>{/if}
@@ -838,12 +884,10 @@
         </div>
       </section>
 
-      <section id={id('Appearance')}>
-        <h4>Appearance</h4>
+      <section id={id('appearance')}>
+        <h4>{t('settings.section.appearance')}</h4>
         <div class="row">
-          <div id="ambient-label">
-            Ambient color from your last-played game
-          </div>
+          <div id="ambient-label">{t('settings.ambient')}</div>
           <button
             class="toggle"
             role="switch"
@@ -853,7 +897,7 @@
           ></button>
         </div>
         <div class="row">
-          <div id="banner-label">Show the "Continue playing" banner</div>
+          <div id="banner-label">{t('settings.banner')}</div>
           <button
             class="toggle"
             role="switch"
@@ -864,14 +908,11 @@
         </div>
       </section>
 
-      <section id={id('Extra metadata')}>
-        <h4>Extra metadata</h4>
-        <p class="hint">
-          IGDB fills how long to beat and extra details. It needs a free Twitch application:
-          <button class="link" onclick={() => api.openTwitchConsole()}>open the Twitch developer console</button>.
-        </p>
+      <section id={id('metadata')}>
+        <h4>{t('settings.section.metadata')}</h4>
+        <p class="hint">{igdbHint[0]}<button class="link" onclick={() => api.openTwitchConsole()}>{t('settings.igdbLink')}</button>{igdbHint[1]}</p>
         <div class="row stack">
-          <label for="igdb-id">Client ID</label>
+          <label for="igdb-id">{t('settings.clientId')}</label>
           <div class="field">
             <input
               id="igdb-id"
@@ -885,98 +926,95 @@
           </div>
         </div>
         <div class="row stack">
-          <label for="igdb-secret">Client Secret</label>
+          <label for="igdb-secret">{t('settings.clientSecret')}</label>
           <div class="field">
             {#if showSecretField}
               <input
                 id="igdb-secret"
                 type="password"
                 autocomplete="off"
-                placeholder="Paste the secret"
+                placeholder={t('settings.pasteSecret')}
                 bind:value={secret}
                 onkeydown={(e) => e.key === 'Enter' && saveSecret()}
               />
-              <button class="btn" disabled={busy || !secret.trim()} onclick={saveSecret}>Save</button>
-              {#if replacing}<button class="btn" onclick={() => ((replacing = false), (secret = ''))}>Cancel</button>{/if}
+              <button class="btn" disabled={busy || !secret.trim()} onclick={saveSecret}>{t('common.save')}</button>
+              {#if replacing}<button class="btn" onclick={() => ((replacing = false), (secret = ''))}>{t('common.cancel')}</button>{/if}
             {:else}
-              <span class="saved" id="igdb-secret">Saved ✓</span>
-              <button class="btn" onclick={() => (replacing = true)}>Replace</button>
-              <button class="btn danger" disabled={busy} onclick={removeSecret}>Remove</button>
+              <span class="saved" id="igdb-secret">{t('settings.savedCheck')}</span>
+              <button class="btn" onclick={() => (replacing = true)}>{t('settings.replace')}</button>
+              <button class="btn danger" disabled={busy} onclick={removeSecret}>{t('menu.remove')}</button>
             {/if}
           </div>
         </div>
         <div class="row">
           <div>
-            Test the credentials
-            {#if testPassed}<span class="ok">Twitch and IGDB accepted them.</span>{/if}
+            {t('settings.test')}
+            {#if testPassed}<span class="ok">{t('settings.testPassed')}</span>{/if}
           </div>
           <button class="btn" disabled={busy || testing || !view.igdbClientId || !view.igdbSecretSet} onclick={testIgdb}>
-            {testing ? 'Testing…' : 'Test'}
+            {testing ? t('settings.testing') : t('settings.testButton')}
           </button>
         </div>
-        <p class="hint gap">
-          SteamGridDB has covers for games you add yourself. It needs a free API key:
-          <button class="link" onclick={() => run(api.openSteamgriddb)}>get one on SteamGridDB</button>.
-        </p>
+        <p class="hint gap">{gridHint[0]}<button class="link" onclick={() => run(api.openSteamgriddb)}>{t('settings.gridLink')}</button>{gridHint[1]}</p>
         <div class="row stack">
-          <label for="grid-key">SteamGridDB API key</label>
+          <label for="grid-key">{t('settings.gridKey')}</label>
           <div class="field">
             {#if showGridField}
               <input
                 id="grid-key"
                 type="password"
                 autocomplete="off"
-                placeholder="Paste the key"
+                placeholder={t('settings.pasteKey')}
                 bind:value={gridKey}
                 onkeydown={(e) => e.key === 'Enter' && saveGridKey()}
               />
-              <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>Save</button>
-              {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>Cancel</button>{/if}
+              <button class="btn" disabled={busy || !gridKey.trim()} onclick={saveGridKey}>{t('common.save')}</button>
+              {#if gridReplacing}<button class="btn" onclick={() => ((gridReplacing = false), (gridKey = ''))}>{t('common.cancel')}</button>{/if}
             {:else}
-              <span class="saved" id="grid-key">Saved ✓</span>
-              <button class="btn" onclick={() => (gridReplacing = true)}>Replace</button>
-              <button class="btn danger" disabled={busy} onclick={removeGridKey}>Remove</button>
+              <span class="saved" id="grid-key">{t('settings.savedCheck')}</span>
+              <button class="btn" onclick={() => (gridReplacing = true)}>{t('settings.replace')}</button>
+              <button class="btn danger" disabled={busy} onclick={removeGridKey}>{t('menu.remove')}</button>
             {/if}
           </div>
         </div>
       </section>
 
-      <section id={id('Storage')}>
-        <h4>Storage</h4>
+      <section id={id('storage')}>
+        <h4>{t('settings.section.storage')}</h4>
         <div class="row">
-          <div>Cached covers and art<span>{sizeLabel(view.cacheBytes)}</span></div>
-          <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>Clear cache</button>
+          <div>{t('settings.cache')}<span>{sizeLabel(view.cacheBytes)}</span></div>
+          <button class="btn" disabled={busy || view.cacheBytes === 0} onclick={clearCache}>{t('settings.clearCache')}</button>
         </div>
       </section>
 
-      <section id={id('About')}>
-        <h4>About</h4>
+      <section id={id('about')}>
+        <h4>{t('settings.section.about')}</h4>
         <div class="row">
-          <div>Version {view.appVersion}{#if versionNote}<span class="quiet">{versionNote}</span>{/if}</div>
+          <div>{t('settings.version', { version: view.appVersion })}{#if versionNote}<span class="quiet">{versionNote}</span>{/if}</div>
           <div class="field">
             {#if notes}
               <button class="btn" bind:this={notesButton} aria-haspopup="dialog" aria-expanded={notesOpen} onclick={() => (notesOpen = !notesOpen)}>
-                What's new
+                {t('app.whatsNew')}
               </button>
             {/if}
             {#if update}
               <button class="btn" aria-disabled={installing} onclick={() => installing || oninstall()}>
-                {installing ? 'Downloading…' : 'Update and restart'}
+                {installing ? t('update.downloading') : t('update.restart')}
               </button>
             {:else}
-              <button class="btn" disabled={checking} onclick={checkNow}>{checking ? 'Checking…' : 'Check for updates'}</button>
+              <button class="btn" disabled={checking} onclick={checkNow}>{checking ? t('steam.checking') : t('settings.checkUpdates')}</button>
             {/if}
           </div>
         </div>
         <div class="row">
           <div>Legendary (Epic Games)</div>
-          <span class="value">{view.legendaryVersion ?? 'Not installed'}</span>
+          <span class="value">{view.legendaryVersion ?? t('play.notInstalled')}</span>
         </div>
         <div class="row">
-          <div>Troubleshooting</div>
+          <div>{t('settings.troubleshooting')}</div>
           <div class="field">
-            <button class="btn" onclick={() => run(api.openLogFolder)}>Open log folder</button>
-            <button class="btn" onclick={() => run(api.reportProblem)}>Report a problem</button>
+            <button class="btn" onclick={() => run(api.openLogFolder)}>{t('settings.openLog')}</button>
+            <button class="btn" onclick={() => run(api.reportProblem)}>{t('settings.report')}</button>
           </div>
         </div>
       </section>
@@ -1187,6 +1225,11 @@
 
   .btn.opt.open svg {
     transform: rotate(180deg);
+  }
+
+  /* The Language menu hangs under its button, right-aligned (ChoiceMenu). */
+  .choice {
+    position: relative;
   }
 
   /* Indented to line up with the store name (14px padding + 40px logo + 12px). */

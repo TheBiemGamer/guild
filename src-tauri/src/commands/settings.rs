@@ -244,6 +244,10 @@ pub struct SteamLibrary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
+    /// The Language setting as saved: "system", "en" or "nl".
+    language: String,
+    /// The language the UI shows (`msg::language`).
+    ui_language: &'static str,
     /// Whether Steam is installed on this PC.
     steam: bool,
     steam_library: SteamLibrary,
@@ -297,6 +301,8 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             attention: state.lock().steam_attention,
         };
         Ok(SettingsView {
+            language: saved.language,
+            ui_language: crate::msg::language(),
             steam,
             steam_library,
             epic,
@@ -356,6 +362,10 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
         settings::update(&conn, &name, value.as_deref())?;
         if name == settings::IGDB_CLIENT_ID {
             state.igdb.lock().expect("token cache lock poisoned").reset();
+        }
+        if name == settings::LANGUAGE {
+            crate::msg::set_language(&settings::load(&conn).language);
+            crate::tray::relabel(&app);
         }
         Ok(())
     })

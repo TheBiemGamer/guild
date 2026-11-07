@@ -3,6 +3,7 @@
   import * as api from './api'
   import type { CopyView } from './api'
   import { sizeLabel } from './format'
+  import { t } from './i18n'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
   let { copies, chosen, running, busy, onchoose, onplay, oninstall, onupdate }: {
@@ -36,12 +37,12 @@
     }
   })
 
-  const downloadText = (key: string) => (key in sizes ? (sizes[key] !== null ? `${sizeLabel(sizes[key])} download` : '') : 'Checking size…')
+  const downloadText = (key: string) => (key in sizes ? (sizes[key] !== null ? t('install.download', { size: sizeLabel(sizes[key]) }) : '') : t('install.checking'))
 
   function sub(c: CopyView): string {
-    if (c.installed) return c.sizeBytes !== null ? `Installed · ${sizeLabel(c.sizeBytes)}` : 'Installed'
+    if (c.installed) return c.sizeBytes !== null ? t('play.installedSize', { size: sizeLabel(c.sizeBytes) }) : t('play.installed')
     const size = sizes[c.key] ?? null
-    return size !== null ? `Not installed · ${sizeLabel(size)} download` : 'Not installed'
+    return size !== null ? t('play.notInstalledSize', { size: sizeLabel(size) }) : t('play.notInstalled')
   }
 
   const go = () => (copy.installed ? (copy.updateAvailable ? onupdate() : onplay()) : oninstall())
@@ -110,7 +111,7 @@
 {#if busy}
   <button class="pill big" aria-disabled="true">{busy}</button>
 {:else if running}
-  <button class="pill big" disabled>Playing</button>
+  <button class="pill big" disabled>{t('play.playing')}</button>
 {:else if !split}
   <button class="pill big" onclick={go}>
     {@render goLabel()}
@@ -123,7 +124,7 @@
         bind:this={switcher}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Choose launcher, now {storeNames[copy.provider]}"
+        aria-label={t('play.chooseLauncher', { store: storeNames[copy.provider] })}
         onclick={() => (open ? close(true) : openMenu())}
       >
         <StoreIcon provider={copy.provider} size={18} />
@@ -135,8 +136,8 @@
       </button>
     </div>
     {#if open}
-      <div class="menu" role="menu" aria-label="Play with" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
-        <span class="label" role="presentation">Play with</span>
+      <div class="menu" role="menu" aria-label={t('play.playWith')} tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
+        <span class="label" role="presentation">{t('play.playWith')}</span>
         {#each copies as c (c.key)}
           <button role="menuitemradio" aria-checked={c.key === copy.key} tabindex="-1" onclick={() => choose(c.key)}>
             <StoreIcon provider={c.provider} size={18} />
@@ -152,13 +153,13 @@
 {#snippet goLabel()}
   {#if copy.installed && copy.updateAvailable}
     <svg class="stroke" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-    Update
+    {t('play.update')}
   {:else if copy.installed}
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
-    Play
+    {t('play.play')}
   {:else}
     <svg class="stroke" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-    Install
+    {t('common.install')}
   {/if}
 {/snippet}
 
