@@ -115,7 +115,19 @@ const EN: &[(&str, &str)] = &[
 ];
 
 /// Dutch, as in `src/lib/i18n/nl.json`.
-const NL: &[(&str, &str)] = &[];
+const NL: &[(&str, &str)] = &[
+    ("appName", "Game Launcher"),
+    ("trayOpen", "Openen"),
+    ("trayDownloads", "Downloads"),
+    ("trayQuit", "Afsluiten"),
+    ("logInEpicTitle", "Inloggen bij Epic Games"),
+    ("logInGogTitle", "Inloggen bij GOG"),
+    ("logInAmazonTitle", "Inloggen bij Amazon"),
+    ("readyToPlay", "Klaar om te spelen"),
+    ("updated", "Bijgewerkt"),
+    ("repaired", "Hersteld"),
+    ("filesVerified", "Bestanden gecontroleerd"),
+];
 
 /// The languages with words, by code; the Language setting is one of these or "system".
 const LANGUAGES: &[(&str, &[(&str, &str)])] = &[("en", EN), ("nl", NL)];
