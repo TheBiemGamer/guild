@@ -166,32 +166,27 @@
     return `Last refreshed ${Math.floor(mins / 60)} hour${mins < 120 ? '' : 's'} ago.`
   }
 
-  const games = (n: number) => `${n} game${n === 1 ? '' : 's'}`
-
-  /** What the Steam row says; built like the Epic row. */
+  /** What the Steam card says: the account name, or a problem in its place. */
   const steam = $derived.by(() => {
     const account = view.steamLibrary.account
-    const n = games(view.steamGames)
-    if (!view.steam) return { tone: 'warn', text: "Steam isn't installed", detail: '', fix: null, logout: !!account }
-    if (!account || view.steamLibrary.attention)
-      return { tone: 'warn', text: 'Not logged in', detail: `${n} saved`, fix: 'Log in', logout: false }
-    return { tone: 'ok', text: `Logged in as ${account}`, detail: n, fix: null, logout: true }
+    if (!view.steam) return { name: null, problem: "Steam isn't installed", fix: null, logout: !!account }
+    if (!account || view.steamLibrary.attention) return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+    return { name: account, problem: null, fix: null, logout: true }
   })
 
-  /** What the Epic row says, and which fix it offers. */
+  /** What the Epic card says, and which fix it offers. */
   const epic = $derived.by(() => {
-    const n = games(view.epicGames)
     switch (view.epic) {
       case 'loggedIn':
-        return { tone: 'ok', text: view.epicAccount ? `Logged in as ${view.epicAccount}` : 'Logged in', detail: n, fix: null, logout: true }
+        return { name: view.epicAccount, problem: null, fix: null, logout: true }
       case 'loggedOut':
-        return { tone: 'warn', text: 'Not logged in', detail: `${n} saved`, fix: 'Log in', logout: false }
+        return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
       case 'unreachable':
-        return { tone: 'warn', text: "Can't reach Epic", detail: `${n} saved`, fix: 'Reconnect', logout: false }
+        return { name: null, problem: "Can't reach Epic", fix: 'Reconnect', logout: false }
       case 'noLegendary':
-        return { tone: 'warn', text: "Legendary isn't installed", detail: '', fix: null, logout: false }
+        return { name: null, problem: "Legendary isn't installed", fix: null, logout: false }
       default:
-        return { tone: 'idle', text: 'Checking…', detail: '', fix: null, logout: false }
+        return { name: 'Checking…', problem: null, fix: null, logout: false }
     }
   })
 
@@ -245,11 +240,9 @@
           <div class="logo steam"><StoreIcon provider="steam" size={24} /></div>
           <div class="who">
             <b>Steam</b>
-            <span>
-              <span class={steam.tone}>● {steam.text}</span>{#if steam.detail}{' · '}{steam.detail}{/if}
-            </span>
+            {#if steam.problem}<span class="problem"><i class="dot"></i>{steam.problem}</span>
+            {:else if steam.name}<span>{steam.name}</span>{/if}
           </div>
-          {#if view.steam}<button class="btn" onclick={() => api.openSteam()}>Open Steam</button>{/if}
           {#if steam.fix}<button class="btn" onclick={() => (connecting = true)}>{steam.fix}</button>{/if}
           {#if steam.logout}<button class="btn danger" disabled={busy} onclick={disconnectSteam}>Log out</button>{/if}
         </div>
@@ -258,9 +251,8 @@
           <div class="logo epic"><StoreIcon provider="epic" size={24} /></div>
           <div class="who">
             <b>Epic Games</b>
-            <span>
-              <span class={epic.tone}>● {epic.text}</span>{#if epic.detail}{' · '}{epic.detail}{/if}
-            </span>
+            {#if epic.problem}<span class="problem"><i class="dot"></i>{epic.problem}</span>
+            {:else if epic.name}<span>{epic.name}</span>{/if}
           </div>
           {#if epic.fix}
             <button class="btn" disabled={loggingIn} onclick={onlogin}>{loggingIn ? 'Logging in…' : epic.fix}</button>
@@ -541,7 +533,7 @@
     align-items: center;
     gap: 14px;
     margin-bottom: 10px;
-    padding: 14px 16px;
+    padding: 12px 14px;
     border-radius: 12px;
     background: var(--glass);
     border: 1px solid var(--glass-line);
@@ -573,19 +565,29 @@
   .who b {
     display: block;
     font-size: 14px;
+    font-weight: 600;
   }
 
   .who span {
-    color: var(--text-2);
+    display: block;
+    color: var(--text-3);
+    font-size: 12px;
     overflow-wrap: anywhere;
   }
 
-  .ok {
-    color: #4ade80;
+  .who .problem {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-2);
   }
 
-  .warn {
-    color: var(--warn);
+  .dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--warn);
   }
 
   .btn {

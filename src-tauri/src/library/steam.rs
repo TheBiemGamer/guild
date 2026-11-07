@@ -151,17 +151,6 @@ fn play_stats(steam_root: &Path) -> PlayStats {
     read_localconfig(steam_root).map(|text| parse_play_stats(&text)).unwrap_or_default()
 }
 
-/// The Steam account name shown in Settings, from the same file as `play_stats`.
-pub fn persona_name(steam_root: &Path) -> Option<String> {
-    parse_persona_name(&read_localconfig(steam_root)?)
-}
-
-fn parse_persona_name(text: &str) -> Option<String> {
-    let vdf = Vdf::from(keyvalues_parser::parse(text).ok()?);
-    let name = child(child(&vdf.value, "friends")?, "PersonaName")?.get_str()?;
-    (!name.is_empty()).then(|| name.to_owned())
-}
-
 fn parse_play_stats(text: &str) -> PlayStats {
     let vdf = match keyvalues_parser::parse(text).map(Vdf::from) {
         Ok(vdf) => vdf,
@@ -421,13 +410,6 @@ mod tests {
         let stats = play_stats(steam.path());
         eprintln!("{} apps with play stats", stats.len());
         assert!(!stats.is_empty());
-    }
-
-    #[test]
-    fn reads_persona_name_from_newest_localconfig() {
-        assert_eq!(persona_name(&fixtures()).as_deref(), Some("fixture"));
-        assert_eq!(persona_name(&fixtures().join("nowhere")), None);
-        assert_eq!(parse_persona_name("\"UserLocalConfigStore\" { \"friends\" { } }"), None);
     }
 
     #[test]

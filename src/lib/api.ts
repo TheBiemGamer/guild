@@ -81,14 +81,12 @@ export interface Detail {
   dlc: Dlc[]
 }
 export interface SettingsView {
-  steam: { name: string | null; path: string } | null
+  /** Whether Steam is installed on this PC. */
+  steam: boolean
   steamLibrary: { account: string | null; attention: boolean }
-  /** Steam copies in the library. */
-  steamGames: number
   epic: Login | null
   /** The logged-in Epic account's display name, if Legendary's session has one. */
   epicAccount: string | null
-  epicGames: number
   /** Null means Legendary's own default folder. */
   epicInstallDir: string | null
   igdbClientId: string | null
@@ -272,7 +270,6 @@ export const steamPasswordCode = (code: string) => invoke<LoginStep>('steam_pass
 export const steamPasswordNext = () => invoke<LoginStep>('steam_password_next')
 export const steamLoginCancel = () => invoke<void>('steam_login_cancel')
 export const steamDisconnect = () => invoke<void>('steam_disconnect')
-export const openSteam = () => invoke<void>('open_steam')
 export const openTwitchConsole = () => invoke<void>('open_twitch_console')
 export const openFolder = (key: string) => invoke<void>('open_folder', { key })
 export const openLink = (key: string, kind: LinkKind) => invoke<void>('open_link', { key, kind })

@@ -18,7 +18,6 @@ use super::{blocking, AppState, Res};
 use crate::cache;
 use crate::epic_login;
 use crate::library::epic::{self, Login};
-use crate::library::steam;
 use crate::library::ProviderKind;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
@@ -103,13 +102,6 @@ pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     .await
 }
 
-/// The Steam install found on this PC.
-#[derive(Serialize)]
-pub struct SteamLocal {
-    name: Option<String>,
-    path: String,
-}
-
 /// The owned-games login, separate from the local install.
 #[derive(Serialize)]
 pub struct SteamLibrary {
@@ -122,14 +114,12 @@ pub struct SteamLibrary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
-    steam: Option<SteamLocal>,
+    /// Whether Steam is installed on this PC.
+    steam: bool,
     steam_library: SteamLibrary,
-    /// Steam copies in the library.
-    steam_games: usize,
     epic: Option<Login>,
     /// The logged-in Epic account's display name, when Legendary's session file has one.
     epic_account: Option<String>,
-    epic_games: usize,
     epic_install_dir: Option<String>,
     igdb_client_id: Option<String>,
     /// Whether a secret is saved; its value never leaves Credential Manager.
@@ -150,17 +140,10 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
         let saved = settings::load(&conn);
-        let (epic, steam_games, epic_games) = {
-            let s = state.lock();
-            let count = |kind| s.games.iter().filter(|g| g.provider == kind).count();
-            (s.epic_login, count(ProviderKind::Steam), count(ProviderKind::Epic))
-        };
+        let epic = state.lock().epic_login;
         let epic_account = if epic == Some(Login::LoggedIn) { crate::epic_playtime::account_name() } else { None };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
-        let steam = steamlocate::SteamDir::locate().ok().map(|dir| SteamLocal {
-            name: steam::persona_name(dir.path()),
-            path: dir.path().to_string_lossy().into_owned(),
-        });
+        let steam = steamlocate::SteamDir::locate().is_ok();
         let steam_library = SteamLibrary {
             account: cache::db::setting(&conn, settings::STEAM_ACCOUNT).ok().flatten(),
             attention: state.lock().steam_attention,
@@ -168,10 +151,8 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         Ok(SettingsView {
             steam,
             steam_library,
-            steam_games,
             epic,
             epic_account,
-            epic_games,
             epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
             igdb_secret_set: settings::secret().is_some(),
@@ -244,11 +225,6 @@ pub async fn clear_cache(app: AppHandle) -> Res<()> {
         Ok(())
     })
     .await
-}
-
-#[tauri::command]
-pub fn open_steam() -> Res<()> {
-    crate::library::open_uri("steam://open/main").map_err(|e| e.to_string())
 }
 
 /// The page where the owner creates the Twitch application IGDB needs.

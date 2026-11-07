@@ -154,7 +154,7 @@ components:
   account-card:
     backgroundColor: "{colors.glass}"
     rounded: "{rounded.notice}"
-    padding: "14px 16px"
+    padding: "12px 14px"
   settings-panel:
     backgroundColor: "rgb(22 22 32 / 0.82)"
     rounded: "{rounded.panel}"
@@ -280,7 +280,7 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Hover:** lifts, white ring, reveals title and a small Play (installed) or Install (not) pill. The overlay is absent (not transparent) when idle, to keep scrolling cheap.
 - **Continue banner:** 14px radius, 180px, hero art cover-fit, left-to-right dark scrim, title and white Play pill bottom-left.
 - **Notice:** `glass-strong`, 12px radius, 44px min height, dismiss button; error variant has a red border. Used for Epic logged-out (only on state change) and errors.
-- **Account card (Settings, Accounts first):** one per source (Steam, Epic Games), per mockup v5: `glass` fill, `glass-line` border, 12px radius, 14px 16px padding, 14px gap; a 40px store-logo tile, then the name, a status line (a green or amber `●`: "Logged in as … · 120 games" (Epic: "Logged in · 120 games" without an account name), "Not logged in · 120 games saved", Epic's "Can't reach Epic · 120 games saved", or "Steam isn't installed" / "Legendary isn't installed"), and Log in / Log out buttons (Steam also has Open Steam; unreachable Epic offers Reconnect).
+- **Account card (Settings, Accounts first):** one per source (Steam, Epic Games), the same layout for both: `glass` fill, `glass-line` border, 12px radius, 12px 14px padding, 14px gap; a 40px store-logo tile, then the store name (600) over the account name in `text-3` 12px (no dot, no game count; nothing when Epic has no name), and one button: Log out (`danger-text`) when logged in, Log in when not. A problem replaces the account name with a 7px `warn` dot and short `text-2` text: "Not logged in", "Can't reach Epic" (the button is Reconnect), "Steam isn't installed" or "Legendary isn't installed".
 - **Settings → Library, Epic import rows:** "Import an existing install" (an "Import…" Settings button opens the system folder picker; then a stacked row asks "Which game is in <folder>?" with a select of owned, not-installed Epic games, styled like the text fields, and Import / Cancel buttons) and "Sync with Epic Games Launcher" (a "Sync" button, "Syncing…" while it runs; import only, nothing is sent to EGL). Each row's last result is one quiet line under it (13px `text-2`, ellipsis, full text in the tooltip): success ("Imported <game>.", "Synced with the Epic Games Launcher.") or Legendary's error. No banners.
 
 ### Inputs / Fields

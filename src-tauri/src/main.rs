@@ -68,7 +68,6 @@ fn main() {
             commands::settings::update_setting,
             commands::settings::set_igdb_secret,
             commands::settings::clear_cache,
-            commands::settings::open_steam,
             commands::settings::steam_connect_start,
             commands::settings::steam_connect_poll,
             commands::settings::steam_connect_cancel,
