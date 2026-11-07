@@ -181,6 +181,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 
 ### Status
 - **Play Green** (`play` #22c55e): running state only (the "Playing" badge, the running-card ring, the live dot).
+  - **Playing notice:** while a game runs, a notice shows an 8px `play` dot that pulses (opacity 1 → 0.35 → 1, 2 s, ease-in-out; still under reduced motion), then "Playing <title>" in `text-2`. No glow.
 - **Amber** (`warn` #f5b942): Epic needs attention (settings dot, "Not logged in").
 - **Red** (`danger` #ef4444): destructive actions and error notices. **Soft Red** (`danger-text` #fca5a5): destructive text on dark glass (Settings "Remove", the game page's Uninstall); plain `danger` is too dark for small text there.
 - **Scrim** (`scrim`, rgb(10 10 16 / 0.9)): the bottom stop of a gradient over art, so titles on photos stay readable (game page hero).

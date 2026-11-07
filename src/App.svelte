@@ -339,7 +339,7 @@
     </div>
   {/if}
   {#if running}
-    <div class="notice playing"><span class="live"></span>Playing {runningTitle ?? 'a game'}</div>
+    <div class="notice playing"><span class="live" aria-hidden="true"></span><span>Playing {runningTitle ?? 'a game'}</span></div>
   {/if}
   {#if error}
     <div class="notice error">
@@ -488,11 +488,21 @@
     color: var(--text-2);
   }
 
-  .live {
+  /* Beats `.notice > span:first-child`: the dot stays a dot, the text after it takes the room. */
+  .notice.playing .live {
+    flex: none;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: var(--play);
+    animation: live 2s ease-in-out infinite;
+  }
+
+  /* app.css turns animations off under prefers-reduced-motion. */
+  @keyframes live {
+    50% {
+      opacity: 0.35;
+    }
   }
 
   .notice.error {
