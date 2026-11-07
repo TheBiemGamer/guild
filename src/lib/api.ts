@@ -9,9 +9,12 @@ import type { Collection, ListFilter } from './filters'
 export type { Collection, GroupId, Progress }
 
 /** `custom`: a game the owner added (key `custom-<id>`); it never shares a card with a store copy. */
-export type Store = 'steam' | 'epic' | 'custom'
+export type Store = 'steam' | 'epic' | 'gog' | 'custom'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
 export type Login = 'noLegendary' | 'loggedOut' | 'loggedIn' | 'unreachable'
+export type GogLogin = 'noGogdl' | 'loggedOut' | 'loggedIn' | 'unreachable'
+/** GOG copies are listed only: nothing installs or plays them here yet, so Install and Play leave them out. */
+export const actionable = (key: string) => !key.startsWith('gog-')
 export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall' | 'verify' | 'move'
 
 /**
@@ -53,6 +56,9 @@ export interface Library {
   steamAttention: boolean
   /** Logged out since the last run: one dismissible banner. */
   epicNotice: boolean
+  gog: GogLogin | null
+  /** GOG's state is known and it isn't logged in: the settings button carries a dot. */
+  gogAttention: boolean
 }
 /** The game played last; `hero` is ready for an `<img>` or CSS `url()`. `chosen` and `copyKeys` as on `Card`. */
 export interface Featured { key: string; chosen: string; copyKeys: string[]; title: string; hero: string | null }
@@ -106,6 +112,11 @@ export interface SettingsView {
   epicAccount: string | null
   /** Null means Legendary's own default folder. */
   epicInstallDir: string | null
+  gog: GogLogin | null
+  /** The logged-in GOG account's name, once a GOG refresh has fetched it. */
+  gogAccount: string | null
+  /** Null means the default folder. */
+  gogInstallDir: string | null
   igdbClientId: string | null
   /** The secret itself never reaches the UI. */
   igdbSecretSet: boolean
@@ -281,6 +292,8 @@ export const epicLogOut = () => invoke<void>('epic_log_out')
 export const epicImportable = () => invoke<{ key: string; title: string }[]>('epic_importable')
 export const epicImport = (key: string, path: string) => invoke<void>('epic_import', { key, path })
 export const epicEglSync = () => invoke<void>('epic_egl_sync')
+export const gogLogIn = () => invoke<void>('gog_log_in')
+export const gogLogOut = () => invoke<void>('gog_log_out')
 /** Downloads and checks a store tool; `onPercent` hears each new whole percent once the size is known. */
 export function installTool(name: ToolView['name'], onPercent: (percent: number) => void) {
   const channel = new Channel<number>()

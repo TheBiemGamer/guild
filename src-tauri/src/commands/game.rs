@@ -257,6 +257,10 @@ fn act_blocking(
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
     }
+    // shortcut: GOG copies are listed only; the UI offers no action for them until the GOG install and launch land.
+    if game.provider == ProviderKind::Gog {
+        return Err("GOG games can't be installed or played here yet.".into());
+    }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
         Action::Update => Some(QueuedAction::Update),
@@ -741,7 +745,8 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
     let steam_id = match game.provider {
         ProviderKind::Epic => None,
         ProviderKind::Steam => Some(game.external_id.parse::<u32>().ok()?),
-        ProviderKind::Custom => return None,
+        // shortcut: GOG sizes come with the GOG install (`gogdl info`).
+        ProviderKind::Gog | ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());
@@ -975,7 +980,8 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// Store details for the game page (description, genres, developer, screenshots).
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 /// An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
-/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss).
+/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG game starts
+/// from GamesDB and has its gaps filled from its Steam twin's page.
 /// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
@@ -996,6 +1002,23 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
             if game.provider == ProviderKind::Steam {
                 return parse_details(steam_details(conn.as_ref(), &http, &game.external_id, now));
             }
+            let gamesdb = || {
+                let json = info::gamesdb_cached_or_fetch(conn.as_ref(), &key, now, || {
+                    let body = tauri::async_runtime::block_on(gamesdb::fetch(&http, &key))
+                        .inspect_err(|e| log!("gamesdb details {key}: {e}"))
+                        .ok()?;
+                    serde_json::to_string(&body.and_then(|b| info::parse_gamesdb_info(&b))).ok()
+                });
+                parse_details(json)
+            };
+            let steam_twin = || twin.and_then(|id| parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now)));
+            if game.provider == ProviderKind::Gog {
+                let all = match (gamesdb(), steam_twin()) {
+                    (Some(base), Some(extra)) => info::fill_missing(base, extra),
+                    (base, extra) => base.or(extra).unwrap_or_default(),
+                };
+                return (all != GameInfo::default()).then_some(all);
+            }
             // One list answers for every Epic game, so all of them are cached from it.
             let catalog = info::cached_or_fetch(conn.as_ref(), &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
                 let list = epic::catalog().inspect_err(|e| log!("legendary list {key}: {e}")).ok()?;
@@ -1008,20 +1031,8 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
                 Some(all.into_iter().find(|(k, _)| *k == key).map_or_else(|| "null".into(), |(_, json)| json))
             });
             let base = parse_details(catalog).unwrap_or_default();
-            let gamesdb = || {
-                let json = info::gamesdb_cached_or_fetch(conn.as_ref(), &key, now, || {
-                    let body = tauri::async_runtime::block_on(gamesdb::fetch(&http, &game.external_id))
-                        .inspect_err(|e| log!("gamesdb details {key}: {e}"))
-                        .ok()?;
-                    serde_json::to_string(&body.and_then(|b| info::parse_gamesdb_info(&b))).ok()
-                });
-                parse_details(json)
-            };
-            let extra = match twin {
-                // A twin whose store page is gone still has GamesDB.
-                Some(id) => parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now)).or_else(gamesdb),
-                None => gamesdb(),
-            };
+            // A twin whose store page is gone still has GamesDB.
+            let extra = steam_twin().or_else(gamesdb);
             let all = extra.map_or(base.clone(), |extra| info::fill_missing(base, extra));
             (all != GameInfo::default()).then_some(all)
         })

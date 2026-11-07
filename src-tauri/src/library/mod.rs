@@ -2,6 +2,7 @@
 
 pub mod custom;
 pub mod epic;
+pub mod gog;
 pub mod steam;
 
 use std::path::PathBuf;
@@ -9,22 +10,24 @@ use std::time::SystemTime;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
     Steam,
     Epic,
+    Gog,
     /// A program the owner added (`custom_games`); never merged with a store copy.
     Custom,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 3] = [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Custom];
+    pub const ALL: [ProviderKind; 4] = [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Custom];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Steam => "steam",
             Self::Epic => "epic",
+            Self::Gog => "gog",
             Self::Custom => "custom",
         }
     }
@@ -37,6 +40,7 @@ impl ProviderKind {
         match self {
             Self::Steam => "Steam",
             Self::Epic => "Epic Games",
+            Self::Gog => "GOG",
             Self::Custom => "added games",
         }
     }
@@ -45,6 +49,7 @@ impl ProviderKind {
         match self {
             Self::Steam => &steam::Steam,
             Self::Epic => &epic::Epic,
+            Self::Gog => &gog::Gog,
             Self::Custom => &custom::Custom,
         }
     }

@@ -1,5 +1,5 @@
-//! GOG GamesDB (public, keyless): which Steam release is the same game as an Epic one.
-//! Matched by store ID, never by title. A twin is only taken when the answer is unambiguous.
+//! GOG GamesDB (public, keyless): which Steam release is the same game as an Epic or GOG one, and a GOG
+//! game's portrait cover. Matched by store ID, never by title. A twin is only taken when the answer is unambiguous.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::cache::db;
 use crate::library::percent_encode;
 
-const URL: &str = "https://gamesdb.gog.com/platforms/epic/external_releases";
+const URL: &str = "https://gamesdb.gog.com/platforms";
 
 /// `info` table kind of a cached answer.
 pub const TWIN: &str = "twin3";
@@ -29,6 +29,12 @@ struct Response {
 struct Game {
     #[serde(default)]
     releases: Vec<Release>,
+    vertical_cover: Option<ImageRef>,
+}
+
+#[derive(Deserialize)]
+struct ImageRef {
+    url_format: String,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +58,12 @@ pub fn parse_steam_apps(json: &str) -> Result<Vec<u32>, String> {
     Ok(ids.into_iter().collect())
 }
 
+/// The game's portrait cover at its original size; `None` when GamesDB has none.
+pub fn parse_cover(json: &str) -> Option<String> {
+    let r: Response = serde_json::from_str(json).ok()?;
+    Some(r.game.vertical_cover?.url_format.replace("{formatter}", "").replace("{ext}", "jpg"))
+}
+
 /// The twin among the listed Steam apps: the only one in `owned` (the owner's Steam games), else the
 /// only one listed. That last one merges only if owned, but still gives links and How long to beat.
 pub fn resolve(apps: &[u32], owned: &HashSet<u32>) -> Option<u32> {
@@ -71,22 +83,28 @@ pub fn steam_ids(games: &[crate::library::Game]) -> HashSet<u32> {
         .collect()
 }
 
-/// `resolve` for every Epic game key with a list.
+/// `resolve` for every Epic or GOG game key with a list.
 pub fn resolve_all(lists: &HashMap<String, Vec<u32>>, owned: &HashSet<u32>) -> HashMap<String, u32> {
     lists.iter().filter_map(|(key, apps)| Some((key.clone(), resolve(apps, owned)?))).collect()
 }
 
-/// Asks GamesDB for the Steam apps of an Epic app name. A 404 means GamesDB doesn't know the game.
-pub async fn look_up(http: &reqwest::Client, app_name: &str) -> Result<Vec<u32>, String> {
-    match fetch(http, app_name).await? {
-        Some(body) => parse_steam_apps(&body),
-        None => Ok(Vec::new()),
+/// Asks GamesDB for the Steam apps and the cover of an Epic or GOG copy key. A 404 means GamesDB doesn't know the game.
+pub async fn look_up(http: &reqwest::Client, key: &str) -> Result<(Vec<u32>, Option<String>), String> {
+    match fetch(http, key).await? {
+        Some(body) => Ok((parse_steam_apps(&body)?, parse_cover(&body))),
+        None => Ok((Vec::new(), None)),
     }
 }
 
-/// GamesDB's answer body for an Epic app name; `None` when it doesn't know the game (404).
-pub async fn fetch(http: &reqwest::Client, app_name: &str) -> Result<Option<String>, String> {
-    let url = format!("{URL}/{}", percent_encode(app_name));
+/// The GamesDB release URL of an Epic or GOG copy key: its store is GamesDB's platform, its id the release's.
+fn release_url(key: &str) -> Option<String> {
+    let (platform, id) = key.split_once('-').filter(|(p, id)| matches!(*p, "epic" | "gog") && !id.is_empty())?;
+    Some(format!("{URL}/{platform}/external_releases/{}", percent_encode(id)))
+}
+
+/// GamesDB's answer body for an Epic or GOG copy key; `None` when it doesn't know the game (404).
+pub async fn fetch(http: &reqwest::Client, key: &str) -> Result<Option<String>, String> {
+    let url = release_url(key).ok_or_else(|| format!("gamesdb: no platform for {key}"))?;
     let resp = http.get(url).send().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
@@ -102,31 +120,46 @@ pub async fn fetch(http: &reqwest::Client, app_name: &str) -> Result<Option<Stri
 #[derive(Serialize, Deserialize)]
 struct Stored {
     steam: Vec<u32>,
+    /// GamesDB's portrait cover; GOG copies use it.
+    #[serde(default)]
+    cover: Option<String>,
 }
 
 /// The cached answer: `Some(vec![])` is a remembered "no Steam app", `None` means ask GamesDB.
-pub fn cached(conn: &Connection, epic_key: &str, now_secs: i64) -> Option<Vec<u32>> {
-    let json = db::cached_info(conn, epic_key, TWIN, TWIN_MAX_AGE_SECS, now_secs).ok().flatten()?;
+pub fn cached(conn: &Connection, key: &str, now_secs: i64) -> Option<Vec<u32>> {
+    let json = db::cached_info(conn, key, TWIN, TWIN_MAX_AGE_SECS, now_secs).ok().flatten()?;
     serde_json::from_str::<Stored>(&json).ok().map(|s| s.steam)
 }
 
-pub fn remember(conn: &Connection, epic_key: &str, apps: &[u32], now_secs: i64) {
-    if let Ok(json) = serde_json::to_string(&Stored { steam: apps.to_vec() }) {
-        _ = db::put_info(conn, epic_key, TWIN, &json, now_secs);
+pub fn remember(conn: &Connection, key: &str, apps: &[u32], cover: Option<&str>, now_secs: i64) {
+    if let Ok(json) = serde_json::to_string(&Stored { steam: apps.to_vec(), cover: cover.map(str::to_owned) }) {
+        _ = db::put_info(conn, key, TWIN, &json, now_secs);
     }
 }
 
-/// Every fresh cached Steam app list by Epic game key.
-pub fn all_cached(conn: &Connection, now_secs: i64) -> HashMap<String, Vec<u32>> {
+/// Every fresh cached answer with its game key.
+fn all_stored(conn: &Connection, now_secs: i64) -> Vec<(String, Stored)> {
     let Ok(mut stmt) = conn.prepare("SELECT key, json FROM info WHERE kind = ?1 AND fetched >= ?2") else {
-        return HashMap::new();
+        return Vec::new();
     };
     let rows = stmt.query_map(rusqlite::params![TWIN, now_secs - TWIN_MAX_AGE_SECS], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
     });
-    let Ok(rows) = rows else { return HashMap::new() };
-    rows.flatten()
-        .filter_map(|(key, json)| Some((key, serde_json::from_str::<Stored>(&json).ok()?.steam)))
+    let Ok(rows) = rows else { return Vec::new() };
+    rows.flatten().filter_map(|(key, json)| Some((key, serde_json::from_str::<Stored>(&json).ok()?))).collect()
+}
+
+/// Every fresh cached Steam app list by Epic or GOG game key.
+pub fn all_cached(conn: &Connection, now_secs: i64) -> HashMap<String, Vec<u32>> {
+    all_stored(conn, now_secs).into_iter().map(|(key, s)| (key, s.steam)).collect()
+}
+
+/// Every fresh cached cover of a GOG game, by its key.
+pub fn covers(conn: &Connection, now_secs: i64) -> HashMap<String, String> {
+    all_stored(conn, now_secs)
+        .into_iter()
+        .filter(|(key, _)| key.starts_with("gog-"))
+        .filter_map(|(key, s)| Some((key, s.cover?)))
         .collect()
 }
 
@@ -215,8 +248,8 @@ mod tests {
         let conn = temp_db("cache");
         let day = 24 * 60 * 60;
         assert_eq!(cached(&conn, "epic-a", 1000), None);
-        remember(&conn, "epic-a", &[], 1000);
-        remember(&conn, "epic-b", &[381210, 471230], 1000);
+        remember(&conn, "epic-a", &[], None, 1000);
+        remember(&conn, "epic-b", &[381210, 471230], None, 1000);
         assert_eq!(cached(&conn, "epic-a", 1000 + day), Some(vec![]));
         assert_eq!(cached(&conn, "epic-b", 1000 + day), Some(vec![381210, 471230]));
         let all = all_cached(&conn, 1000 + day);
@@ -266,8 +299,8 @@ mod tests {
                 std::thread::sleep(TWIN_GAP);
             }
             asked += 1;
-            match tauri::async_runtime::block_on(look_up(&http, &games[e].external_id)) {
-                Ok(apps) => _ = lists.insert(key, apps),
+            match tauri::async_runtime::block_on(look_up(&http, &key)) {
+                Ok((apps, _)) => _ = lists.insert(key, apps),
                 Err(err) => println!("{key}: {err}"),
             }
         }
@@ -287,6 +320,43 @@ mod tests {
             };
             println!("{} | {} | {} | {why}", eg.title, eg.key(), sg.key());
         }
+    }
+
+    #[test]
+    fn gog_release_lists_its_steam_twin_and_cover() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gog/gdb-1425609977.json");
+        let body = std::fs::read_to_string(path).unwrap();
+        assert_eq!(parse_steam_apps(&body).unwrap(), [635320]);
+        assert_eq!(
+            parse_cover(&body).as_deref(),
+            Some("https://images.gog.com/279e02c9da2d01c299b54fcdab89ccad3a88d46c05e3dcdf904f13611895ed67.jpg?namespace=gamesdb")
+        );
+        assert_eq!(parse_cover(&fixture("pumpkin.json")), None);
+        assert_eq!(parse_cover("nope"), None);
+    }
+
+    #[test]
+    fn release_url_takes_the_platform_from_the_key() {
+        let url = |key| release_url(key);
+        assert_eq!(url("epic-Pumpkin").as_deref(), Some("https://gamesdb.gog.com/platforms/epic/external_releases/Pumpkin"));
+        assert_eq!(url("gog-1425609977").as_deref(), Some("https://gamesdb.gog.com/platforms/gog/external_releases/1425609977"));
+        assert_eq!(url("epic-a b").as_deref(), Some("https://gamesdb.gog.com/platforms/epic/external_releases/a%20b"));
+        assert_eq!(url("steam-70"), None);
+        assert_eq!(url("custom-x"), None);
+        assert_eq!(url("gog-"), None);
+    }
+
+    #[test]
+    fn gog_covers_come_from_the_twin_cache() {
+        let conn = temp_db("covers");
+        remember(&conn, "gog-1", &[635320], Some("https://images.gog.com/c.jpg"), 1000);
+        remember(&conn, "gog-2", &[], None, 1000);
+        remember(&conn, "epic-a", &[], Some("https://images.gog.com/e.jpg"), 1000);
+        assert_eq!(covers(&conn, 1000), HashMap::from([("gog-1".to_string(), "https://images.gog.com/c.jpg".to_string())]));
+        assert_eq!(all_cached(&conn, 1000)["gog-1"], [635320]);
+        // An answer stored before covers were kept still reads.
+        db::put_info(&conn, "gog-3", TWIN, r#"{"steam":[70]}"#, 1000).unwrap();
+        assert_eq!(cached(&conn, "gog-3", 1000), Some(vec![70]));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 # Game Launcher
 
-A Windows launcher that shows your Steam and Epic Games libraries as one library.
+A Windows launcher that shows your Steam, Epic Games and GOG libraries as one library.
 
 ![The library grid](docs/screenshot.png)
 
 ## What it does
 
-- **One library.** Steam and Epic games share one grid. A game you own in both stores becomes one card, and you pick which store launches it.
+- **One library.** Steam, Epic and GOG games share one grid. A game you own in several stores becomes one card, and you pick which store launches it.
 - **Your whole Steam library**, including games you haven't installed.
 - **Epic games without the Epic Games Launcher:** install with a download queue (pause, resume, reorder), updates, cloud saves, verify, repair and move installs, and import of games you already installed.
 - **Game pages** with the description, screenshots, playtime, last played, how long to beat, and links to the store, PCGamingWiki, SteamDB and ProtonDB.
@@ -19,6 +19,7 @@ A Windows launcher that shows your Steam and Epic Games libraries as one library
 - Windows 10 or 11
 - [Steam](https://store.steampowered.com/about/), for Steam games
 - [Legendary](https://github.com/derrod/legendary), for Epic games. **Settings → Accounts** installs it when you ask (a pinned release, checked against its SHA-256). Or put your own `legendary.exe` on your `PATH` or in `%LOCALAPPDATA%\Programs\legendary`.
+- [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl), for GOG games. **Settings → Accounts** installs it the same way. GOG games are listed for now; installing and playing them comes in a later version.
 - Optional, for how long to beat: a free Twitch developer application (see below)
 
 ## Install
@@ -35,22 +36,24 @@ Open **Settings** with the gear button at the top right.
 
 - **Steam:** click **Log in** next to Steam and sign in with your password, or scan the QR code with the Steam mobile app.
 - **Epic Games:** click **Log in** next to Epic Games and sign in on the Epic page that opens. Its **Options** hold the install folder, cloud save sync, importing existing installs and syncing with the Epic Games Launcher.
+- **GOG:** click **Log in** next to GOG and sign in on the GOG page that opens.
 - **How long to beat:** create an application in the [Twitch developer console](https://dev.twitch.tv/console/apps), then paste its client ID and secret under **Extra metadata**.
 
 ## Why is a game shown twice?
 
-A Steam and an Epic copy merge only when [GOG GamesDB](https://gamesdb.gog.com) links the Epic game to that exact Steam app. Games with the same title but no such link stay separate cards.
+An Epic or GOG copy joins a Steam game only when [GOG GamesDB](https://gamesdb.gog.com) links it to that exact Steam app, which you own. Games with the same title but no such link stay separate cards, and so do Epic and GOG copies of a game you don't own on Steam.
 
 ## Your data
 
 - Your library, settings, play history and cached art live in `%LOCALAPPDATA%\launcher\`. **Settings → Storage** clears the cache.
-- Your Steam login token and IGDB secret are kept only in Windows Credential Manager. Your Steam password and Steam Guard codes are never stored. Legendary keeps the Epic login in its own folder.
+- Your Steam login token and IGDB secret are kept only in Windows Credential Manager. Your Steam password and Steam Guard codes are never stored. Legendary keeps the Epic login in its own folder, and gogdl keeps the GOG login in `%LOCALAPPDATA%\launcher\data\gog`.
 
 ## Services it connects to
 
 - **Steam:** login and the Steam network, for owned games and download sizes
 - **Epic Games:** through Legendary
-- **GOG GamesDB:** links Epic games to their Steam versions
+- **GOG:** login, and GOG's API for your owned games, their titles and art and your account name
+- **GOG GamesDB:** links Epic and GOG games to their Steam versions, and has the GOG games' covers
 - **IGDB (via Twitch):** how long to beat, only if you add credentials
 - **SteamGridDB:** covers for games you add yourself, only if you add an API key
 - **Store image servers** (Steam, Epic, GOG): cover art and screenshots

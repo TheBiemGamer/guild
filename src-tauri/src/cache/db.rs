@@ -87,6 +87,11 @@ const STEPS: &[&str] = &[
         args TEXT NOT NULL DEFAULT '',
         added INTEGER NOT NULL
     );",
+    // 5: where each GOG game is installed (owner data; gogdl records nothing). Keys `gog-<product_id>`.
+    "CREATE TABLE gog_installs (
+        key TEXT PRIMARY KEY,
+        path TEXT NOT NULL
+    );",
 ];
 
 /// Opens the database and brings its schema up to date. Every connection goes through here.
@@ -411,6 +416,13 @@ pub fn delete_custom_game(conn: &Connection, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Every GOG install folder by copy key (`gog-<product_id>`). Written by the GOG install.
+pub fn gog_installs(conn: &Connection) -> Result<HashMap<String, PathBuf>, Error> {
+    let mut stmt = conn.prepare("SELECT key, path FROM gog_installs")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, PathBuf::from(r.get::<_, String>(1)?))))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Cached JSON for `(key, kind)` if it was fetched within `max_age_secs` of `now_secs`.
 pub fn cached_info(
     conn: &Connection,
@@ -631,6 +643,7 @@ mod tests {
         assert_eq!(columns(&conn, "collections"), ["id", "name"]);
         assert_eq!(columns(&conn, "collection_games"), ["collection_id", "key"]);
         assert_eq!(columns(&conn, "custom_games"), ["id", "name", "exe", "args", "added"]);
+        assert_eq!(columns(&conn, "gog_installs"), ["key", "path"]);
         set_pref(&conn, "epic-A", "cloud_saves", Some("on")).unwrap();
         set_pref(&conn, "epic-A", "cloud_saves", Some("off")).unwrap();
         assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap().as_deref(), Some("off"));
@@ -764,6 +777,28 @@ mod tests {
         // `args` may be left out.
         conn.execute("INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)", []).unwrap();
         assert_eq!(custom_game(&conn, "a").unwrap().unwrap().args, "");
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn step_four_file_gets_gog_installs_and_keeps_custom_games() {
+        let dir = temp_dir("step5");
+        let path = dir.join("library.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            for step in &STEPS[..4] {
+                conn.execute_batch(step).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 4).unwrap();
+            conn.execute("INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)", []).unwrap();
+        }
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), STEPS.len());
+        assert_eq!(custom_games(&conn).unwrap().len(), 1);
+        assert!(gog_installs(&conn).unwrap().is_empty());
+        conn.execute(r"INSERT INTO gog_installs (key, path) VALUES ('gog-1', 'C:\Games\A')", []).unwrap();
+        assert_eq!(gog_installs(&conn).unwrap(), HashMap::from([("gog-1".to_string(), PathBuf::from(r"C:\Games\A"))]));
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }

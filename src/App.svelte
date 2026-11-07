@@ -46,7 +46,7 @@
   let popoverOpen = $state(false)
   let collections = $state<Collection[]>([])
 
-  let lib = $state<Library>({ games: [], groups: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false })
+  let lib = $state<Library>({ games: [], groups: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false, gog: null, gogAttention: false })
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
@@ -442,7 +442,7 @@
     oncollections={reload}
     bind:sort
     bind:popoverOpen
-    attention={lib.epicAttention || lib.steamAttention}
+    attention={lib.epicAttention || lib.steamAttention || lib.gogAttention}
     {progress}
     {queue}
     games={lib.games}

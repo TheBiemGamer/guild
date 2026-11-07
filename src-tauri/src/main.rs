@@ -12,6 +12,7 @@ mod entries;
 mod epic_login;
 mod epic_playtime;
 mod gamesdb;
+mod gog_login;
 mod igdb;
 mod info;
 mod library;
@@ -93,6 +94,8 @@ fn main() {
             commands::settings::epic_importable,
             commands::settings::epic_import,
             commands::settings::epic_egl_sync,
+            commands::settings::gog_log_in,
+            commands::settings::gog_log_out,
             commands::settings::install_tool,
             commands::settings::settings_view,
             commands::settings::update_setting,

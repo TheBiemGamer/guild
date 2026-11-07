@@ -1,5 +1,5 @@
 <script lang="ts">
-  import StoreIcon from './StoreIcon.svelte'
+  import StoreIcon, { storeNames } from './StoreIcon.svelte'
   import FilterPopover from './FilterPopover.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
   import UpdatePopover from './UpdatePopover.svelte'
@@ -74,7 +74,7 @@
   } = $props()
 
   /** The store segments, in order; null is All. */
-  const stores: (Store | null)[] = [null, 'steam', 'epic']
+  const stores: (Store | null)[] = [null, 'steam', 'epic', 'gog']
   const storeIndex = $derived(stores.indexOf(store))
   let segments = $state<HTMLButtonElement[]>([])
   const chips = $derived(filterChips(filters, collections))
@@ -165,7 +165,7 @@
     <div class="seg" role="radiogroup" aria-label="Store" style="--at: {storeIndex}">
       <span class="thumb" aria-hidden="true"></span>
       {#each stores as s, i (s ?? 'all')}
-        {@const name = s === null ? undefined : s === 'steam' ? 'Steam' : 'Epic Games'}
+        {@const name = s === null ? undefined : storeNames[s]}
         <button
           role="radio"
           aria-checked={store === s}

@@ -218,6 +218,14 @@ async fn download(
     Ok(hex(&hasher.finalize()))
 }
 
+/// `install` into another tools folder, for tests that must not touch the owner's.
+#[cfg(test)]
+pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Result<(), String> {
+    let (part, dest) = (tool.managed(root).with_extension("exe.part"), tool.managed(root));
+    let digest = download(http, tool, &part, |_| {}).await.map_err(|e| e.to_string())?;
+    place(&part, &dest, &digest, tool.sha256)
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

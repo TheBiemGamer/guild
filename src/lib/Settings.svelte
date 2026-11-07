@@ -54,6 +54,7 @@
   let error = $state<string | null>(null)
   // Drafts start from the saved values; after that they are the user's text.
   let folder = $state(untrack(() => view.epicInstallDir ?? ''))
+  let gogFolder = $state(untrack(() => view.gogInstallDir ?? ''))
   let clientId = $state(untrack(() => view.igdbClientId ?? ''))
   let secret = $state('')
   let replacing = $state(false)
@@ -61,8 +62,10 @@
   let gridReplacing = $state(false)
   let busy = $state(false)
   let connecting = $state(false)
-  /** The Epic card's Options panel; folded each time Settings opens. */
+  /** The Epic and GOG cards' Options panels; folded each time Settings opens. */
   let epicOptions = $state(false)
+  let gogOptions = $state(false)
+  let gogLoggingIn = $state(false)
   let checking = $state(false)
   let checkError = $state<string | null>(null)
   const notes = $derived(installedNotes(view.appVersion))
@@ -87,6 +90,9 @@
   let legendaryJob = $state<{ percent: number | null } | null>(null)
   let legendaryError = $state('')
   const legendary = $derived(view.tools.find((t) => t.name === 'legendary'))
+  /** gogdl's install while it runs, like Legendary's. */
+  let gogdlJob = $state<{ percent: number | null } | null>(null)
+  let gogdlError = $state('')
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -126,6 +132,18 @@
         await api.updateSetting('epic_install_dir', folder.trim() || null)
       } catch (e) {
         folder = view.epicInstallDir ?? ''
+        throw e
+      }
+    })
+  }
+
+  function saveGogFolder() {
+    if (gogFolder.trim() === (view.gogInstallDir ?? '')) return
+    change(async () => {
+      try {
+        await api.updateSetting('gog_install_dir', gogFolder.trim() || null)
+      } catch (e) {
+        gogFolder = view.gogInstallDir ?? ''
         throw e
       }
     })
@@ -241,11 +259,30 @@
     await onchange()
   }
 
+  async function installGogdl() {
+    gogdlError = ''
+    gogdlJob = { percent: null }
+    try {
+      await api.installTool('gogdl', (percent) => (gogdlJob = { percent }))
+    } catch (e) {
+      gogdlError = api.message(e)
+    }
+    gogdlJob = null
+    await onchange()
+  }
+
+  async function gogLogIn() {
+    gogLoggingIn = true
+    await change(() => api.gogLogIn())
+    gogLoggingIn = false
+  }
+
   const jobLabel = (verb: string, job: { percent: number | null }) => (job.percent === null ? `${verb}…` : `${verb}… ${job.percent}%`)
 
   const removeSecret = () => change(() => api.setIgdbSecret(null))
   const removeGridKey = () => change(() => api.setSteamgriddbKey(null))
   const logOut = () => change(() => api.epicLogOut())
+  const gogLogOut = () => change(() => api.gogLogOut())
   const clearCache = () => change(() => api.clearCache())
 
   function ago(at: number | null, nowMs: number) {
@@ -277,6 +314,24 @@
         return legendaryError
           ? { name: null, problem: legendaryError, fix: null, logout: false }
           : { name: 'Epic games need Legendary, a free open-source tool.', problem: null, fix: null, logout: false }
+      default:
+        return { name: 'Checking…', problem: null, fix: null, logout: false }
+    }
+  })
+
+  /** What the GOG card says, and which fix it offers. */
+  const gog = $derived.by(() => {
+    switch (view.gog) {
+      case 'loggedIn':
+        return { name: view.gogAccount ?? 'Logged in', problem: null, fix: null, logout: true }
+      case 'loggedOut':
+        return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
+      case 'unreachable':
+        return { name: null, problem: "Can't reach GOG", fix: 'Reconnect', logout: false }
+      case 'noGogdl':
+        return gogdlError
+          ? { name: null, problem: gogdlError, fix: null, logout: false }
+          : { name: 'GOG games need gogdl, a free open-source tool.', problem: null, fix: null, logout: false }
       default:
         return { name: 'Checking…', problem: null, fix: null, logout: false }
     }
@@ -490,6 +545,69 @@
                 </div>
                 {#if legendaryError}<p class="note" title={legendaryError}>{legendaryError}</p>{/if}
               {/if}
+            </div>
+          {/if}
+        </div>
+
+        <div class="acct">
+          <div class="top">
+            <div class="logo gog"><StoreIcon provider="gog" size={24} /></div>
+            <div class="who">
+              <b>GOG</b>
+              {#if gog.problem}<span class="problem"><i class="dot"></i>{gog.problem}</span>
+              {:else if gog.name}<span>{gog.name}</span>{/if}
+            </div>
+            {#if view.gog !== 'noGogdl'}
+              <button
+                class="btn opt"
+                class:open={gogOptions}
+                aria-expanded={gogOptions}
+                aria-controls="gog-options"
+                onclick={() => (gogOptions = !gogOptions)}
+              >
+                Options
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+            {/if}
+            {#if view.gog === 'noGogdl'}
+              <button class="btn" disabled={gogdlJob !== null} aria-live="polite" onclick={installGogdl}>
+                {gogdlJob ? jobLabel('Installing', gogdlJob) : 'Install gogdl'}
+              </button>
+            {/if}
+            {#if gog.fix}
+              <button class="btn" disabled={gogLoggingIn} onclick={gogLogIn}>{gogLoggingIn ? 'Logging in…' : gog.fix}</button>
+            {/if}
+            {#if gog.logout}
+              <button class="btn danger" disabled={busy} onclick={gogLogOut}>Log out</button>
+            {/if}
+          </div>
+          {#if gogOptions && view.gog !== 'noGogdl'}
+            <div class="opts" id="gog-options">
+              <div class="row">
+                <label for="gog-folder">Install folder</label>
+                <div class="field">
+                  <input
+                    id="gog-folder"
+                    type="text"
+                    placeholder="Default (~/Games)"
+                    spellcheck="false"
+                    bind:value={gogFolder}
+                    onblur={saveGogFolder}
+                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  />
+                  {#if view.gogInstallDir}
+                    <button
+                      class="btn"
+                      onclick={() => {
+                        gogFolder = ''
+                        saveGogFolder()
+                      }}
+                    >
+                      Reset
+                    </button>
+                  {/if}
+                </div>
+              </div>
             </div>
           {/if}
         </div>
@@ -881,6 +999,10 @@
 
   .logo.epic {
     background: #2a2a2a;
+  }
+
+  .logo.gog {
+    background: #86328a;
   }
 
   .who {

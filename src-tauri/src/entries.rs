@@ -1,7 +1,7 @@
-//! One library entry (card) per game: an Epic copy joins its Steam twin when that match is exact and
+//! One library entry (card) per game: an Epic or GOG copy joins its Steam twin when that match is exact and
 //! one-to-one. Never on title alone: a wrong merge is worse than a duplicate card. Pure functions, unit tested.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 use crate::library::{Game, ProviderKind};
@@ -10,32 +10,38 @@ use crate::library::{Game, ProviderKind};
 pub struct Entry {
     /// The Steam copy's key when merged, else the only copy's key.
     pub key: String,
-    /// Indices into `games`, the Steam copy first.
+    /// Indices into `games`: the Steam copy, then the Epic and the GOG copy.
     pub copies: Vec<usize>,
 }
 
-/// Entries in `games` order (title order). An Epic game joins `steam-<twin>` only when that Steam game
-/// is in `games` and no other Epic game in `games` has the same twin. When several do, the one whose
-/// title equals the Steam title (trimmed, case-insensitive) joins if it is the only such one.
+/// The stores whose copies can join a Steam game, in copy order.
+const JOINING: [ProviderKind; 2] = [ProviderKind::Epic, ProviderKind::Gog];
+
+/// Entries in `games` order (title order). Per store, an Epic or GOG game joins `steam-<twin>` only when that
+/// Steam game is in `games` and no other game of the same store has the same twin. When several do, the one
+/// whose title equals the Steam title (trimmed, case-insensitive) joins if it is the only such one. Epic and
+/// GOG copies only ever meet through a Steam game.
 pub fn group(games: &[Game], twins: &HashMap<String, u32>) -> Vec<Entry> {
-    let twin = |g: &Game| (g.provider == ProviderKind::Epic).then(|| twins.get(&g.key()).copied()).flatten();
-    let mut claims: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut claims: HashMap<(ProviderKind, u32), Vec<usize>> = HashMap::new();
     for (i, g) in games.iter().enumerate() {
-        if let Some(id) = twin(g) {
-            claims.entry(id).or_default().push(i);
+        if let Some(&id) = twins.get(&g.key()).filter(|_| JOINING.contains(&g.provider)) {
+            claims.entry((g.provider, id)).or_default().push(i);
         }
     }
-    // Steam app id -> its one Epic copy.
+    // Steam app id -> its one copy from each other store.
     let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
-    let mut pairs: HashMap<String, usize> = HashMap::new();
+    let mut joined: HashMap<&str, Vec<usize>> = HashMap::new();
     for g in games.iter().filter(|g| g.provider == ProviderKind::Steam) {
-        let Some(claimants) = g.external_id.parse().ok().and_then(|id: u32| claims.get(&id)) else { continue };
-        let exact: Vec<usize> = claimants.iter().copied().filter(|&i| same(&games[i].title, &g.title)).collect();
-        if let [epic] = if claimants.len() == 1 { claimants.as_slice() } else { exact.as_slice() } {
-            pairs.insert(g.external_id.clone(), *epic);
+        let Ok(id) = g.external_id.parse::<u32>() else { continue };
+        for store in JOINING {
+            let Some(claimants) = claims.get(&(store, id)) else { continue };
+            let exact: Vec<usize> = claimants.iter().copied().filter(|&i| same(&games[i].title, &g.title)).collect();
+            if let [copy] = if claimants.len() == 1 { claimants.as_slice() } else { exact.as_slice() } {
+                joined.entry(&g.external_id).or_default().push(*copy);
+            }
         }
     }
-    let merged: Vec<usize> = pairs.values().copied().collect();
+    let merged: HashSet<usize> = joined.values().flatten().copied().collect();
     games
         .iter()
         .enumerate()
@@ -43,7 +49,7 @@ pub fn group(games: &[Game], twins: &HashMap<String, u32>) -> Vec<Entry> {
         .map(|(i, g)| {
             let mut copies = vec![i];
             if g.provider == ProviderKind::Steam {
-                copies.extend(pairs.get(&g.external_id));
+                copies.extend(joined.get(g.external_id.as_str()).into_iter().flatten());
             }
             Entry { key: g.key(), copies }
         })
@@ -91,12 +97,12 @@ pub fn stores(entry: &Entry, games: &[Game]) -> Vec<ProviderKind> {
     entry.copies.iter().map(|&i| games[i].provider).collect()
 }
 
-/// The Steam copy's app id, else the Epic copy's twin.
+/// The Steam copy's app id, else the Epic or GOG copy's twin.
 pub fn steam_appid(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) -> Option<u32> {
     let first = &games[entry.copies[0]];
     match first.provider {
         ProviderKind::Steam => first.external_id.parse().ok(),
-        ProviderKind::Epic => twins.get(&first.key()).copied(),
+        ProviderKind::Epic | ProviderKind::Gog => twins.get(&first.key()).copied(),
         ProviderKind::Custom => None,
     }
 }
@@ -115,6 +121,10 @@ mod tests {
         Game { provider: ProviderKind::Epic, title: title.into(), ..game(id, false, None, None) }
     }
 
+    fn gog(id: &str, title: &str) -> Game {
+        Game { provider: ProviderKind::Gog, title: title.into(), ..game(id, false, None, None) }
+    }
+
     fn pumpkin() -> (Vec<Game>, HashMap<String, u32>) {
         let games = vec![epic("Pumpkin", "Pumpkin Jack"), steam("635320", "Pumpkin Jack")];
         (games, HashMap::from([("epic-Pumpkin".to_string(), 635320)]))
@@ -131,6 +141,53 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key, "steam-635320");
         assert_eq!(keys(&games, &entries[0]), ["steam-635320", "epic-Pumpkin"]);
+    }
+
+    #[test]
+    fn steam_epic_and_gog_copies_make_one_card() {
+        let games = vec![gog("1425609977", "Last Day of June"), epic("Pumpkin", "Last Day of June"), steam("635320", "Last Day of June")];
+        let twins = HashMap::from([("epic-Pumpkin".to_string(), 635320), ("gog-1425609977".to_string(), 635320)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, "steam-635320");
+        assert_eq!(keys(&games, &entries[0]), ["steam-635320", "epic-Pumpkin", "gog-1425609977"]);
+        assert_eq!(stores(&entries[0], &games), [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Gog]);
+        for key in ["gog-1425609977", "epic-Pumpkin"] {
+            assert_eq!(find(&entries, &games, key).map(|e| e.key.as_str()), Some("steam-635320"));
+        }
+        // One store's tie doesn't stop the other's merge.
+        let mut games = games;
+        games.push(epic("Pumpkin2", "Last Day of June: Deluxe"));
+        let mut twins = twins;
+        twins.insert("epic-Pumpkin2".into(), 635320);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(keys(&games, &entries[0]), ["steam-635320", "epic-Pumpkin", "gog-1425609977"]);
+        assert_eq!(entries[1].key, "epic-Pumpkin2");
+    }
+
+    #[test]
+    fn two_gog_claimants_merge_the_exact_title() {
+        let games = vec![gog("1", "Satisfactory"), gog("2", "Satisfactory Experimental"), steam("526870", "Satisfactory")];
+        let twins = HashMap::from([("gog-1".to_string(), 526870), ("gog-2".to_string(), 526870)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key, "gog-2");
+        assert_eq!(keys(&games, &entries[1]), ["steam-526870", "gog-1"]);
+        // Two exact titles: neither joins.
+        let games = vec![gog("1", "Satisfactory"), gog("2", "satisfactory"), steam("526870", "Satisfactory")];
+        assert!(group(&games, &twins).iter().all(|e| e.copies.len() == 1));
+    }
+
+    #[test]
+    fn gog_copy_without_the_steam_game_stays_separate() {
+        // Epic and GOG share a twin that isn't owned on Steam: no merge without the Steam copy.
+        let games = vec![gog("1425609977", "Last Day of June"), epic("Pumpkin", "Last Day of June")];
+        let twins = HashMap::from([("epic-Pumpkin".to_string(), 635320), ("gog-1425609977".to_string(), 635320)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.copies.len() == 1));
+        assert_eq!(steam_appid(&entries[0], &games, &twins), Some(635320));
     }
 
     #[test]

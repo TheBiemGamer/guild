@@ -1,4 +1,4 @@
-//! The settings page and the Epic login actions.
+//! The settings page and the Epic and GOG login actions.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -15,11 +15,13 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
-use super::library::{refresh_owned, rescan};
+use super::library::{fill_twins, refresh_owned, rescan};
 use super::{blocking, AppState, Res};
 use crate::cache;
 use crate::epic_login;
+use crate::gog_login;
 use crate::library::epic::{self, Login};
+use crate::library::gog;
 use crate::library::ProviderKind;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
@@ -51,6 +53,30 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
         rescan(&app, true);
         // The user did this; it isn't news.
         app.state::<AppState>().lock().epic_notice = false;
+        Ok(())
+    })
+    .await
+}
+
+/// Opens GOG's login window, hands the code to gogdl, then loads the GOG library.
+#[tauri::command]
+pub async fn gog_log_in(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        let code = gog_login::run(&app)?.ok_or("The login window was closed before logging in.")?;
+        gog::log_in(&code).map_err(|e| e.to_string())?;
+        rescan(&app, true);
+        fill_twins(app.clone());
+        Ok(())
+    })
+    .await
+}
+
+/// Forgets the GOG login, then rescans. Cached GOG games stay.
+#[tauri::command]
+pub async fn gog_log_out(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        gog::log_out().map_err(|e| e.to_string())?;
+        rescan(&app, true);
         Ok(())
     })
     .await
@@ -104,8 +130,8 @@ pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     .await
 }
 
-/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Legendary then rescans Epic,
-/// so the card moves on to Log in.
+/// Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Legendary and gogdl then
+/// rescan, so their card moves on to Log in.
 #[tauri::command]
 pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>) -> Res<()> {
     let tool = tools::find(&name).ok_or("Unknown tool.")?;
@@ -114,7 +140,7 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
         let _ = on_percent.send(percent);
     })
     .await?;
-    if tool.name == tools::LEGENDARY.name {
+    if [tools::LEGENDARY.name, tools::GOGDL.name].contains(&tool.name) {
         blocking(move || rescan(&app, true)).await;
     }
     Ok(())
@@ -139,6 +165,10 @@ pub struct SettingsView {
     /// The logged-in Epic account's display name, when Legendary's session file has one.
     epic_account: Option<String>,
     epic_install_dir: Option<String>,
+    gog: Option<gog::Login>,
+    /// The logged-in GOG account's name, once a GOG scan has fetched it.
+    gog_account: Option<String>,
+    gog_install_dir: Option<String>,
     igdb_client_id: Option<String>,
     /// Whether a secret is saved; its value never leaves Credential Manager.
     igdb_secret_set: bool,
@@ -165,6 +195,8 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         let saved = settings::load(&conn);
         let epic = state.lock().epic_login;
         let epic_account = if epic == Some(Login::LoggedIn) { crate::epic_playtime::account_name() } else { None };
+        let gog = state.lock().gog_login;
+        let gog_account = if gog == Some(gog::Login::LoggedIn) { gog::account_name(&conn) } else { None };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
         let steam = steamlocate::SteamDir::locate().is_ok();
         let steam_library = SteamLibrary {
@@ -177,6 +209,9 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             epic,
             epic_account,
             epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
+            gog,
+            gog_account,
+            gog_install_dir: saved.gog_install_dir.map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
             igdb_secret_set: settings::secret().is_some(),
             steamgriddb_key_set: settings::grid_key().is_some(),

@@ -21,6 +21,8 @@ pub struct Dirs {
     pub custom: PathBuf,
     /// Store tools installed on request (`tools.rs`).
     pub tools: PathBuf,
+    /// gogdl's login file and manifests (`library::gog`).
+    pub gog: PathBuf,
 }
 
 impl Dirs {
@@ -34,6 +36,7 @@ impl Dirs {
             logs: dirs.data_local_dir().join("logs"),
             custom: dirs.data_local_dir().join("custom"),
             tools: dirs.data_local_dir().join("tools"),
+            gog: dirs.data_local_dir().join("gog"),
         }
     }
 }

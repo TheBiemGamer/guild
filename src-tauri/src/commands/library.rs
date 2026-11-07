@@ -13,6 +13,7 @@ use crate::cache;
 use crate::entries::{self, Entry};
 use crate::epic_playtime;
 use crate::library::epic::{self, Login};
+use crate::library::gog;
 use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
 use crate::settings;
@@ -90,6 +91,9 @@ pub struct Library {
     /// Steam rejected the saved login: the settings button carries a dot too.
     steam_attention: bool,
     epic_notice: bool,
+    gog: Option<gog::Login>,
+    /// GOG state is known and isn't logged in.
+    gog_attention: bool,
 }
 
 /// `lists` are the Lists filters that are on ("favorites", "hidden", "collection-<id>"); the UI applies
@@ -122,6 +126,8 @@ pub fn library(
         epic_attention: s.epic_login.is_some_and(|l| l != Login::LoggedIn),
         steam_attention: s.steam_attention,
         epic_notice: s.epic_notice,
+        gog: s.gog_login,
+        gog_attention: s.gog_login.is_some_and(|l| l != gog::Login::LoggedIn),
     }
 }
 
@@ -184,7 +190,7 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     .await
 }
 
-/// Rescans Steam, and Epic too when `epic`: Legendary is slow and online, so the UI only asks on demand.
+/// Rescans Steam, and Epic and GOG too when `epic`: they are slow and online, so the UI only asks on demand.
 /// `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Returns whether the library changed.
 #[tauri::command]
 pub async fn refresh(app: AppHandle, epic: bool, owned: bool) -> bool {
@@ -210,10 +216,10 @@ impl Drop for Running {
     }
 }
 
-/// Looks up the Steam apps of every Epic game without a fresh cached answer, one request per
-/// `TWIN_GAP`, in the background. Answers are cached; errors are skipped and retried on a later run, and
-/// an unreachable GamesDB (offline) ends the run.
-/// Only one run at a time. Each answer with Steam apps regroups the library and tells the next poll.
+/// Looks up the Steam apps (and a GOG game's cover) of every Epic and GOG game without a fresh cached answer,
+/// one request per `TWIN_GAP`, in the background. Answers are cached; errors are skipped and retried on a later
+/// run, and an unreachable GamesDB (offline) ends the run.
+/// Only one run at a time. Each answer with Steam apps or a cover updates the library and tells the next poll.
 pub(crate) fn fill_twins(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
@@ -226,32 +232,36 @@ pub(crate) fn fill_twins(app: AppHandle) {
         }
         let _running = Running(app.clone(), |s: &mut Shared| &mut s.twins_running);
         let pending = {
-            let epic: Vec<String> = state
+            let keys: Vec<String> = state
                 .lock()
                 .games
                 .iter()
-                .filter(|g| g.provider == ProviderKind::Epic)
-                .map(|g| g.external_id.clone())
+                .filter(|g| matches!(g.provider, ProviderKind::Epic | ProviderKind::Gog))
+                .map(Game::key)
                 .collect();
             let Some(conn) = open_db(&state) else { return };
             let now = super::unix_now();
             // Cached answers are already in `twin_lists` (load_cache), so only the unanswered remain.
-            epic.into_iter()
-                .filter(|app_name| crate::gamesdb::cached(&conn, &format!("epic-{app_name}"), now).is_none())
-                .collect::<Vec<_>>()
+            keys.into_iter().filter(|key| crate::gamesdb::cached(&conn, key, now).is_none()).collect::<Vec<_>>()
         };
-        for (i, app_name) in pending.iter().enumerate() {
+        for (i, key) in pending.into_iter().enumerate() {
             if i > 0 {
                 tokio::time::sleep(crate::gamesdb::TWIN_GAP).await;
             }
-            match crate::gamesdb::look_up(&state.http, app_name).await {
-                Ok(apps) => {
-                    let key = format!("epic-{app_name}");
+            match crate::gamesdb::look_up(&state.http, &key).await {
+                Ok((apps, cover)) => {
                     if let Some(conn) = open_db(&state) {
-                        crate::gamesdb::remember(&conn, &key, &apps, super::unix_now());
+                        crate::gamesdb::remember(&conn, &key, &apps, cover.as_deref(), super::unix_now());
+                    }
+                    let mut s = state.lock();
+                    // A GOG game's grid art: until the next GOG scan reads it from the cache.
+                    // shortcut: a card whose header was already shown keeps it until the UI asks for its cover again.
+                    let gog = s.games.iter_mut().find(|g| g.provider == ProviderKind::Gog && g.key() == key);
+                    if let (Some(game), Some(url)) = (gog, cover) {
+                        game.art.cover.url = Some(url);
+                        s.library_changed = true;
                     }
                     if !apps.is_empty() {
-                        let mut s = state.lock();
                         s.twin_lists.insert(key, apps);
                         regroup(&mut s);
                         // The next poll tells the UI to re-ask the library.
@@ -447,14 +457,16 @@ fn owned(state: &AppState) -> Option<Vec<Game>> {
     Some(games)
 }
 
-/// Scans, merges and saves. Runs on a blocking thread. Returns whether the library changed.
-pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
+/// Scans, merges and saves; Epic and GOG only when `online`. Runs on a blocking thread. Returns whether the
+/// library changed.
+pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
-    let (results, login) = scan(with_epic, owned.as_deref(), &state.dirs);
+    let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
     let mut s = state.lock();
-    if let Some(login) = login {
+    if let Some((login, gog_login)) = logins {
         s.epic_login = Some(login);
+        s.gog_login = Some(gog_login);
         note_epic_login(&state, &mut s, login);
     }
     let mut merged = merge(&s.games, results);
@@ -492,21 +504,35 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
     true
 }
 
-fn scan(with_epic: bool, owned: Option<&[Game]>, dirs: &cache::Dirs) -> (ScanResults, Option<Login>) {
+fn scan(
+    online: bool,
+    owned: Option<&[Game]>,
+    dirs: &cache::Dirs,
+    http: &reqwest::Client,
+) -> (ScanResults, Option<(Login, gog::Login)>) {
     let steam = ProviderKind::Steam.provider().list_games().map_err(|e| e.to_string()).map(|installed| match owned {
         Some(owned) => with_owned(installed, owned),
         None => installed,
     });
     let custom = crate::library::custom::list(dirs).map_err(|e| e.to_string());
     let mut results = vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)];
-    if !with_epic {
+    if !online {
         return (results, None);
     }
     let login = epic::login_state();
     let games = epic_result(login, || ProviderKind::Epic.provider().list_games().map_err(|e| e.to_string()));
     results.push((ProviderKind::Epic, games));
-    (results, Some(login))
+    let (gog_login, creds) = gog::login();
+    let games = match creds {
+        Some(creds) => gog::list(http, dirs, &creds).map_err(|e| format!("{GOG_QUIET}: {e}")),
+        None => Err(format!("{GOG_QUIET}: {gog_login:?}")),
+    };
+    results.push((ProviderKind::Gog, games));
+    (results, Some((login, gog_login)))
 }
+
+/// Prefix of every failed GOG scan: it only keeps the cache, and `Library::gog_attention` reports the login.
+const GOG_QUIET: &str = "GOG unavailable";
 
 /// Only a logged-in Epic is listed. Any other state is an `Err`, so `merge` keeps the cached Epic games.
 fn epic_result(login: Login, list: impl FnOnce() -> Result<Vec<Game>, String>) -> Result<Vec<Game>, String> {
@@ -572,7 +598,12 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
             }
             Err(e) => {
                 log!("{}: {e}", provider.name());
-                if !(provider == ProviderKind::Epic && e.starts_with(EPIC_QUIET)) {
+                let quiet = match provider {
+                    ProviderKind::Epic => e.starts_with(EPIC_QUIET),
+                    ProviderKind::Gog => e.starts_with(GOG_QUIET),
+                    _ => false,
+                };
+                if !quiet {
                     errors.push(format!("Couldn't read the {} library: {e}", provider.name()));
                 }
                 games.extend(current.iter().filter(|g| g.provider == provider).cloned());
@@ -883,6 +914,21 @@ mod tests {
             assert_eq!(merged.games, vec![epic_game.clone()]);
             assert!(merged.scanned.is_empty());
         }
+    }
+
+    #[test]
+    fn failed_gog_scans_keep_the_cache_quietly() {
+        let mut gog_game = game("Last Day of June", false, None, None);
+        gog_game.provider = ProviderKind::Gog;
+        let results = vec![(ProviderKind::Gog, Err(format!("{GOG_QUIET}: offline")))];
+        let merged = merge(&[gog_game.clone()], results);
+        assert!(merged.errors.is_empty());
+        assert_eq!(merged.games, vec![gog_game.clone()]);
+        assert!(merged.scanned.is_empty());
+        // A list replaces the cached GOG games.
+        let merged = merge(&[gog_game], vec![(ProviderKind::Gog, Ok(vec![]))]);
+        assert!(merged.games.is_empty());
+        assert_eq!(merged.scanned, vec![ProviderKind::Gog]);
     }
 
     #[test]
