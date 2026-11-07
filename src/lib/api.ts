@@ -56,6 +56,8 @@ export interface Detail {
   lastPlayedStore: string | null
   /** Store pages first, then info sites (only with a Steam app id). */
   links: LinkKind[]
+  /** The Epic copies' DLC; a Steam copy's comes from `steamDlc`. */
+  dlc: Dlc[]
 }
 export interface SettingsView {
   steam: { name: string | null; path: string } | null
@@ -89,8 +91,12 @@ export interface ActOptions { withDlc?: boolean; dlc?: string }
 export const act = (action: Action, key: string, options: ActOptions = {}) => invoke<void>('act', { action, key, ...options })
 /** A DLC under its game. `copy` is the Epic copy's key for Install and Uninstall; null for Steam, which installs DLC itself. */
 export interface Dlc { id: string; title: string; installed: boolean; copy: string | null }
-/** The game's owned DLC: Epic's from the library, Steam's asked from Steam (connected account only, cached). */
-export const dlc = (key: string) => invoke<Dlc[]>('dlc', { key })
+/**
+ * The Steam copy's owned DLC (Steam logs on for it: connected account only, cached in Rust). Asked once per
+ * game and kept, like the other game page answers.
+ */
+export const steamDlc = (key: string) =>
+  remembered('steamDlc', key, () => invoke<{ id: string; title: string }[]>('steam_dlc', { key }))
 /** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
 export const downloadSize = (key: string) => remembered('size', key, () => invoke<string | null>('download_size', { key }))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */

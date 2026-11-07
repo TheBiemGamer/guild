@@ -63,31 +63,33 @@ pub async fn fetch_appinfo(token: &str, appid: u32) -> Result<String, String> {
 
 /// The DLC of `appid` this account owns, as (app id, name), in Steam's order. Steam's own clients
 /// list a game's DLC in its app info (`extended.listofdlc`) and the store says per app whether the
-/// account owns it (`Store.GetUserGameInterestState`, asked side by side). One logon, dropped when done.
+/// account owns it (`Store.GetUserGameInterestState`, `CHECKS_AT_ONCE` at a time). One logon, dropped when done.
 pub async fn fetch_owned_dlc(token: &str, appid: u32) -> Result<Vec<(u32, String)>, String> {
     tokio::time::timeout(TIMEOUT, async {
         let session = steam_owned::connect(token).await.map_err(|e| format!("{e:?}"))?;
         let base = appinfo(&session, vec![appid]).await?;
-        let checks: Vec<_> = base
-            .first()
-            .map(|(_, vdf)| steam::dlc_ids(vdf))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|id| {
-                let session = session.clone();
-                tauri::async_runtime::spawn(async move {
-                    let request = CStore_GetUserGameInterestState_Request { appid: Some(id), ..Default::default() };
-                    session.service_method(request).await.map(|r| (id, r.owned()))
+        let ids = base.first().map(|(_, vdf)| steam::dlc_ids(vdf)).unwrap_or_default();
+        let (mut owned, mut answered) = (Vec::new(), 0);
+        for batch in ids.chunks(CHECKS_AT_ONCE) {
+            let checks: Vec<_> = batch
+                .iter()
+                .map(|&id| {
+                    let session = session.clone();
+                    tauri::async_runtime::spawn(async move { (id, owns(&session, id).await) })
                 })
-            })
-            .collect();
-        let mut owned = Vec::new();
-        for check in checks {
-            // One unanswered check would silently drop a DLC; fail so nothing wrong is cached.
-            let (id, is_owned) = check.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
-            if is_owned {
-                owned.push(id);
+                .collect();
+            for check in checks {
+                if let Ok((id, Some(is_owned))) = check.await {
+                    answered += 1;
+                    if is_owned {
+                        owned.push(id);
+                    }
+                }
             }
+        }
+        // Not one answer means the session is broken, not that nothing is owned.
+        if answered == 0 && !ids.is_empty() {
+            return Err("Steam didn't answer the ownership checks".into());
         }
         if owned.is_empty() {
             return Ok(Vec::new());
@@ -101,6 +103,20 @@ pub async fn fetch_owned_dlc(token: &str, appid: u32) -> Result<Vec<(u32, String
     })
     .await
     .unwrap_or_else(|_| Err("timed out".into()))
+}
+
+/// Ownership checks in flight at once, so a game with hundreds of DLC doesn't flood Steam.
+const CHECKS_AT_ONCE: usize = 4;
+
+/// Whether the account owns `appid`, asked twice at most; `None` when Steam didn't answer.
+async fn owns(session: &Session, appid: u32) -> Option<bool> {
+    for _ in 0..2 {
+        let request = CStore_GetUserGameInterestState_Request { appid: Some(appid), ..Default::default() };
+        if let Ok(state) = session.service_method(request).await {
+            return Some(state.owned());
+        }
+    }
+    None
 }
 
 /// Public PICS app info for `appids` as (app id, text VDF), in one request.

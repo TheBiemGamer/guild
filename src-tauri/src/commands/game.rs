@@ -44,6 +44,8 @@ pub struct Detail {
     last_played_store: Option<String>,
     /// Store pages, then info sites when the Steam app id is known.
     links: Vec<LinkKind>,
+    /// The Epic copies' DLC; a Steam copy's comes from `steam_dlc`.
+    dlc: Vec<DlcView>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +103,7 @@ fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: Syst
         last_played_tile: view::last_played_tile(last.map(|(t, _)| t), now),
         last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| format!("on {}", p.name())),
         links: links::kinds(&stores, entries::steam_appid(entry, games, twins)),
+        dlc: epic_dlc(&entry.copies.iter().map(|&i| &games[i]).collect::<Vec<_>>()),
     }
 }
 
@@ -172,10 +175,12 @@ pub async fn act(app: AppHandle, action: Action, key: String, with_dlc: Option<b
     {
         return Err("This DLC is no longer in the library.".into());
     }
-    blocking(move || act_blocking(&app, action, &game, with_dlc.unwrap_or(true), dlc.as_deref())).await
+    // A DLC install is just that DLC.
+    let with_dlc = if dlc.is_some() { None } else { Some(with_dlc.unwrap_or(true)) };
+    blocking(move || act_blocking(&app, action, &game, with_dlc, dlc.as_deref())).await
 }
 
-fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: bool, dlc: Option<&str>) -> Res<()> {
+fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: Option<bool>, dlc: Option<&str>) -> Res<()> {
     let state = app.state::<AppState>();
     let key = game.key();
     let store = game.provider.provider();
@@ -311,34 +316,15 @@ pub struct DlcView {
     id: String,
     title: String,
     installed: bool,
-    /// The Epic copy's key, for Install and Uninstall; `None` for Steam, which installs DLC itself.
+    /// The Epic copy's key, for Install and Uninstall.
     copy: Option<String>,
 }
 
-/// Info cache kind for a Steam copy's owned DLC, as JSON `[[appid, name], ...]`.
+/// Info cache kind for a Steam copy's owned DLC, as JSON `[[appid, name], ...]`; kept a week.
 const DLC: &str = "dlc";
-
-/// DLC for the game page: an Epic copy's from the library scan, then a Steam copy's owned DLC
-/// (asked from Steam, which logs on, so only with a connected account; cached a week). A Steam DLC
-/// named like an Epic one is shown once. Failures leave the Steam part out.
-#[tauri::command]
-pub async fn dlc(app: AppHandle, key: String) -> Vec<DlcView> {
-    let (mut rows, steam) = {
-        let state = app.state::<AppState>();
-        let s = state.lock();
-        let Some(entry) = entries::find(&s.entries, &s.games, &key) else { return Vec::new() };
-        let copies: Vec<&Game> = entry.copies.iter().map(|&i| &s.games[i]).collect();
-        (epic_dlc(&copies), copies.iter().find(|g| g.provider == ProviderKind::Steam).map(|g| (g.key(), g.installed)))
-    };
-    let Some((steam_key, installed)) = steam else { return rows };
-    for (id, title) in steam_dlc(&app, steam_key).await.unwrap_or_default() {
-        if !rows.iter().any(|r| r.title.eq_ignore_ascii_case(&title)) {
-            // shortcut: Steam installs owned DLC with the game, so a Steam DLC counts as installed with it.
-            rows.push(DlcView { id: id.to_string(), title, installed, copy: None });
-        }
-    }
-    rows
-}
+/// Info cache kind marking a failed Steam DLC lookup, so a failing game isn't logged on for again soon.
+const DLC_FAILED: &str = "dlc-failed";
+const DLC_RETRY_SECS: i64 = 6 * 60 * 60;
 
 fn epic_dlc(copies: &[&Game]) -> Vec<DlcView> {
     copies
@@ -354,39 +340,108 @@ fn epic_dlc(copies: &[&Game]) -> Vec<DlcView> {
         .collect()
 }
 
-/// A Steam copy's owned DLC as (app id, name): cached, else fetched with one Steam logon at a time.
-async fn steam_dlc(app: &AppHandle, key: String) -> Option<Vec<(u32, String)>> {
-    let appid: u32 = key.strip_prefix("steam-")?.parse().ok()?;
-    let (cached, token) = blocking({
+#[derive(Serialize)]
+pub struct SteamDlc {
+    id: String,
+    title: String,
+}
+
+/// The entry's Steam copy's owned DLC for the game page. Asked from Steam, which logs on, so only
+/// with a connected account and when the store page lists DLC; cached a week, a failure for 6 h.
+/// Failures are quiet and give an empty list.
+#[tauri::command]
+pub async fn steam_dlc(app: AppHandle, key: String) -> Vec<SteamDlc> {
+    let steam_key = {
+        let state = app.state::<AppState>();
+        let s = state.lock();
+        entries::find(&s.entries, &s.games, &key)
+            .and_then(|e| e.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Steam).map(Game::key))
+    };
+    let Some(steam_key) = steam_key else { return Vec::new() };
+    steam_owned_dlc(&app, steam_key).await.into_iter().map(|(id, title)| SteamDlc { id: id.to_string(), title }).collect()
+}
+
+#[derive(Debug, PartialEq)]
+enum DlcStep {
+    Answer(Vec<(u32, String)>),
+    LogOn,
+}
+
+/// Whether the Steam DLC lookup can answer without a logon: from the cached list, after a recent
+/// failure (nothing), or when the store page lists no DLC (`has_dlc`, `None` when unknown).
+fn dlc_step(cached: Option<&str>, failed_recently: bool, has_dlc: Option<bool>) -> DlcStep {
+    if let Some(list) = cached.and_then(|json| serde_json::from_str(json).ok()) {
+        return DlcStep::Answer(list);
+    }
+    if failed_recently || has_dlc == Some(false) {
+        return DlcStep::Answer(Vec::new());
+    }
+    DlcStep::LogOn
+}
+
+/// The cached list and whether a lookup failed recently.
+fn cached_dlc(conn: &Connection, key: &str, now: i64) -> (Option<String>, bool) {
+    let cached = |kind, max_age| cache::db::cached_info(conn, key, kind, max_age, now).ok().flatten();
+    (cached(DLC, INFO_MAX_AGE_SECS), cached(DLC_FAILED, DLC_RETRY_SECS).is_some())
+}
+
+/// A Steam copy's owned DLC as (app id, name). Answers from the cache when it can; otherwise logs on,
+/// one logon at a time, and remembers the answer or the failure.
+async fn steam_owned_dlc(app: &AppHandle, key: String) -> Vec<(u32, String)> {
+    let Some(appid) = key.strip_prefix("steam-").and_then(|id| id.parse::<u32>().ok()) else { return Vec::new() };
+    // Everything that can answer is checked before the lock, so this never waits behind another logon for nothing.
+    let (step, token) = blocking({
         let (app, key) = (app.clone(), key.clone());
         move || {
-            let conn = open_db(&app.state::<AppState>())?;
-            Some(match cache::db::cached_info(&conn, &key, DLC, INFO_MAX_AGE_SECS, unix_now()).ok().flatten() {
-                Some(json) => (Some(json), None),
-                None => (None, steam_token(&conn)),
-            })
-        }
-    })
-    .await?;
-    if let Some(json) = cached {
-        return serde_json::from_str(&json).ok();
-    }
-    let list = {
-        let state = app.state::<AppState>();
-        let _one = state.steam_size.lock().await;
-        steam_size::fetch_owned_dlc(&token?, appid).await
-    }
-    .inspect_err(|e| eprintln!("steam dlc {key}: {e}"))
-    .ok()?;
-    let json = serde_json::to_string(&list).ok()?;
-    let app = app.clone();
-    blocking(move || {
-        if let Some(c) = open_db(&app.state::<AppState>()) {
-            _ = cache::db::put_info(&c, &key, DLC, &json, unix_now());
+            let state = app.state::<AppState>();
+            let Some(conn) = open_db(&state) else { return (DlcStep::Answer(Vec::new()), None) };
+            let now = unix_now();
+            let (cached, failed) = cached_dlc(&conn, &key, now);
+            let has_dlc = (cached.is_none() && !failed)
+                .then(|| parse_details(steam_details(Some(&conn), &state.http, &appid.to_string(), now)))
+                .flatten()
+                .and_then(|i| i.has_dlc);
+            let step = dlc_step(cached.as_deref(), failed, has_dlc);
+            let token = (step == DlcStep::LogOn).then(|| steam_token(&conn)).flatten();
+            (step, token)
         }
     })
     .await;
-    Some(list)
+    if let DlcStep::Answer(list) = step {
+        return list;
+    }
+    let Some(token) = token else { return Vec::new() };
+    let state = app.state::<AppState>();
+    let _one = state.steam_size.lock().await;
+    // A caller that queued on the lock may find its answer cached by the one before it.
+    let again = blocking({
+        let (app, key) = (app.clone(), key.clone());
+        move || {
+            let Some(conn) = open_db(&app.state::<AppState>()) else { return DlcStep::Answer(Vec::new()) };
+            let (cached, failed) = cached_dlc(&conn, &key, unix_now());
+            dlc_step(cached.as_deref(), failed, None)
+        }
+    })
+    .await;
+    if let DlcStep::Answer(list) = again {
+        return list;
+    }
+    let result = steam_size::fetch_owned_dlc(&token, appid).await;
+    let (kind, json) = match &result {
+        Ok(list) => (DLC, serde_json::to_string(list).unwrap_or_else(|_| "[]".into())),
+        Err(e) => {
+            eprintln!("steam dlc {key}: {e}");
+            (DLC_FAILED, "null".into())
+        }
+    };
+    let app = app.clone();
+    blocking(move || {
+        if let Some(c) = open_db(&app.state::<AppState>()) {
+            _ = cache::db::put_info(&c, &key, kind, &json, unix_now());
+        }
+    })
+    .await;
+    result.unwrap_or_default()
 }
 
 /// Steam `appdetails` JSON for an app, cached as `steam-<appid>` (the same entry a Steam copy uses).
@@ -683,6 +738,36 @@ mod tests {
             rows,
             [DlcView { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: true, copy: Some("epic-Pumpkin".into()) }]
         );
+    }
+
+    #[test]
+    fn steam_dlc_logs_on_only_when_nothing_answers() {
+        let list = r#"[[10,"Hat"]]"#;
+        assert_eq!(dlc_step(Some(list), true, Some(false)), DlcStep::Answer(vec![(10, "Hat".into())]));
+        // A recent failure or a store page without DLC answers "none" without a logon.
+        assert_eq!(dlc_step(None, true, Some(true)), DlcStep::Answer(Vec::new()));
+        assert_eq!(dlc_step(None, false, Some(false)), DlcStep::Answer(Vec::new()));
+        // Unknown or listed DLC, nothing cached: log on. A broken cache entry counts as nothing cached.
+        assert_eq!(dlc_step(None, false, None), DlcStep::LogOn);
+        assert_eq!(dlc_step(Some("junk"), false, Some(true)), DlcStep::LogOn);
+    }
+
+    #[test]
+    fn steam_dlc_queued_caller_reads_what_the_first_cached() {
+        let path = std::env::temp_dir().join(format!("launcher-dlc-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let conn = cache::db::open(&path).unwrap();
+        // Before the lock: nothing yet, so it would log on.
+        let (cached, failed) = cached_dlc(&conn, "steam-1", 1_000);
+        assert_eq!(dlc_step(cached.as_deref(), failed, None), DlcStep::LogOn);
+        // After the lock: the first caller's answer is there.
+        cache::db::put_info(&conn, "steam-1", DLC, r#"[[10,"Hat"]]"#, 1_000).unwrap();
+        let (cached, failed) = cached_dlc(&conn, "steam-1", 1_001);
+        assert_eq!(dlc_step(cached.as_deref(), failed, None), DlcStep::Answer(vec![(10, "Hat".into())]));
+        // A failure is remembered for 6 h only.
+        cache::db::put_info(&conn, "steam-2", DLC_FAILED, "null", 1_000).unwrap();
+        assert!(cached_dlc(&conn, "steam-2", 1_000 + DLC_RETRY_SECS).1);
+        assert!(!cached_dlc(&conn, "steam-2", 1_001 + DLC_RETRY_SECS).1);
     }
 
     #[test]

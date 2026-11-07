@@ -22,6 +22,9 @@ pub struct GameInfo {
     pub publisher: Option<String>,
     pub released: Option<String>,
     pub screenshots: Vec<String>,
+    /// Whether the Steam store page lists DLC; `None` when unknown (other sources, older caches).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_dlc: Option<bool>,
 }
 
 /// The `info` cache kind for a game's details.
@@ -62,6 +65,7 @@ pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
             .take(MAX_SCREENSHOTS)
             .map(str::to_owned)
             .collect(),
+        has_dlc: Some(data["dlc"].as_array().is_some_and(|d| !d.is_empty())),
     })
 }
 
@@ -90,6 +94,7 @@ pub fn parse_gamesdb_info(json: &str) -> Option<GameInfo> {
             .take(MAX_SCREENSHOTS)
             .map(|u| u.replace("{formatter}", "").replace("{ext}", "jpg"))
             .collect(),
+        has_dlc: None,
     };
     (parsed != GameInfo::default()).then_some(parsed)
 }
@@ -103,6 +108,7 @@ pub fn fill_missing(base: GameInfo, extra: GameInfo) -> GameInfo {
         publisher: base.publisher.or(extra.publisher),
         released: base.released.or(extra.released),
         screenshots: if base.screenshots.is_empty() { extra.screenshots } else { base.screenshots },
+        has_dlc: base.has_dlc,
     }
 }
 
@@ -156,6 +162,7 @@ pub fn parse_epic_info(info: &Value) -> Option<GameInfo> {
         publisher: None,
         released,
         screenshots: Vec::new(),
+        has_dlc: None,
     };
     let empty = parsed.description.is_empty() && parsed.developer.is_none() && parsed.released.is_none();
     (!empty).then_some(parsed)
@@ -271,6 +278,10 @@ mod tests {
         // The fixture has 5 screenshots; only 3 are kept.
         assert_eq!(info.screenshots.len(), 3);
         assert!(info.screenshots[0].starts_with("https://"));
+        // Its `dlc` array lists 30 app ids.
+        assert_eq!(info.has_dlc, Some(true));
+        let no_dlc = r#"{"1":{"success":true,"data":{"short_description":"x"}}}"#;
+        assert_eq!(parse_steam_appdetails(no_dlc, "1").unwrap().has_dlc, Some(false));
     }
 
     #[test]
@@ -375,6 +386,7 @@ mod tests {
             publisher: Some("Pub".into()),
             released: Some("2020-01-01".into()),
             screenshots: vec!["u".into()],
+            has_dlc: Some(true),
         };
         let got = fill_missing(base, extra);
         assert_eq!(got.description, "mine");

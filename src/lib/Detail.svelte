@@ -68,7 +68,10 @@
   /** Local screenshot URLs; undefined while downloading, when their slots stay reserved. */
   let shots = $state<string[] | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
-  let dlcs = $state<Dlc[]>([])
+  let steamDlc = $state<{ id: string; title: string }[]>([])
+  /** The Epic DLC whose uninstall is being confirmed, as `copy|id`. */
+  let confirmingDlc = $state<string | null>(null)
+  let dlcCancel = $state<HTMLButtonElement>()
   let busy = $state<string | null>(null)
   let confirming = $state(false)
   let menuOpen = $state(false)
@@ -88,7 +91,6 @@
     if (!active || active === document.body) target()?.focus()
   }
 
-  let dlcFor = ''
   // Each answer lands only if this is still the game asked about.
   $effect(() => {
     const key = gameKey
@@ -97,13 +99,6 @@
     api.game(key).then(
       (g) => alive && (game = g),
       (e) => alive && onerror(api.message(e)),
-    )
-    // Asked again after each reload, for the DLC's installed state; another game's list is cleared at once.
-    if (key !== dlcFor) dlcs = []
-    dlcFor = key
-    api.dlc(key).then(
-      (d) => alive && (dlcs = d),
-      () => {},
     )
     return () => {
       alive = false
@@ -118,6 +113,12 @@
     info = undefined
     shots = undefined
     ttb = undefined
+    steamDlc = []
+    confirmingDlc = null
+    api.steamDlc(key).then(
+      (d) => alive && (steamDlc = d ?? []),
+      () => {},
+    )
     api.detailArt(key).then((a) => {
       if (!alive) return
       art = a
@@ -273,6 +274,22 @@
         )
       : [],
   )
+  // Epic's DLC first; a Steam DLC named like one of them is shown once. Steam installs owned DLC with the game.
+  const dlcs = $derived.by((): Dlc[] => {
+    if (!game) return []
+    const epic = game.dlc
+    const steamInstalled = game.copies.some((c) => c.provider === 'steam' && c.installed)
+    const steam = steamDlc
+      .filter((s) => !epic.some((e) => e.title.toLowerCase() === s.title.toLowerCase()))
+      .map((s) => ({ ...s, installed: steamInstalled, copy: null }))
+    return [...epic, ...steam]
+  })
+
+  function askUninstallDlc(d: Dlc) {
+    confirmingDlc = `${d.copy}|${d.id}`
+    keepFocus(() => dlcCancel)
+  }
+
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
   // Every game has a store page, so Details always has something to show.
   const showDetails = $derived(!!game)
@@ -467,17 +484,31 @@
                 {#each dlcs as d (`${d.copy}|${d.id}`)}
                   <li>
                     <span class="dlc-title">{d.title}</span>
-                    <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
-                    <!-- Legendary adds a DLC to an installed game only. -->
-                    {#if d.copy && !busy && game.copies.find((c) => c.key === d.copy)?.installed}
+                    {#if confirmingDlc === `${d.copy}|${d.id}`}
+                      <!-- Asks inline, like the game's own Epic uninstall. -->
+                      <span class="dlc-state">Its files will be deleted.</span>
                       <button
-                        class="chip"
-                        class:danger={d.installed}
-                        aria-label="{d.installed ? 'Uninstall' : 'Install'} {d.title}"
-                        onclick={() => act(d.installed ? 'uninstall' : 'install', d.copy!, { dlc: d.id })}
+                        class="chip danger"
+                        aria-label="Uninstall {d.title}"
+                        onclick={() => {
+                          confirmingDlc = null
+                          act('uninstall', d.copy!, { dlc: d.id })
+                        }}>Uninstall</button
                       >
-                        {d.installed ? 'Uninstall' : 'Install'}
-                      </button>
+                      <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>Cancel</button>
+                    {:else}
+                      <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
+                      <!-- Legendary adds a DLC to an installed game only. -->
+                      {#if d.copy && !busy && game.copies.find((c) => c.key === d.copy)?.installed}
+                        <button
+                          class="chip"
+                          class:danger={d.installed}
+                          aria-label="{d.installed ? 'Uninstall' : 'Install'} {d.title}"
+                          onclick={() => (d.installed ? askUninstallDlc(d) : act('install', d.copy!, { dlc: d.id }))}
+                        >
+                          {d.installed ? 'Uninstall' : 'Install'}
+                        </button>
+                      {/if}
                     {/if}
                   </li>
                 {/each}
