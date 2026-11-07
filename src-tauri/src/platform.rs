@@ -1,5 +1,12 @@
 //! OS-specific calls. Windows only for now.
 
+/// Keeps a console program from flashing a window.
+#[cfg(windows)]
+pub fn no_window(command: &mut std::process::Command) -> &mut std::process::Command {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(crate::library::CREATE_NO_WINDOW)
+}
+
 /// Bytes a process has written since it started (`WriteTransferCount`), or `None` when it's gone or not ours to read.
 #[cfg(windows)]
 pub fn process_bytes_written(pid: u32) -> Option<u64> {

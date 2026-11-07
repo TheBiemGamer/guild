@@ -1,5 +1,5 @@
 // Typed wrappers for the Rust commands in src-tauri/src/commands.rs.
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { GroupId, Progress } from './format'
@@ -121,7 +121,20 @@ export interface SettingsView {
   notifyDownloads: boolean
   appVersion: string
   legendaryVersion: string | null
+  tools: ToolView[]
   cacheBytes: number
+}
+/**
+ * A store tool the app can install. `version`: what `--version` reports, null when it isn't found.
+ * `managed`: ours, in the app's tools folder. `update`: ours and not the `pinned` version.
+ */
+export interface ToolView {
+  name: 'legendary' | 'gogdl' | 'nile'
+  installed: boolean
+  version: string | null
+  managed: boolean
+  pinned: string
+  update: boolean
 }
 export type QueuedAction = 'install' | 'update' | 'verify'
 /** The Epic download queue in order. `active` is the first job's key, also while `paused`. */
@@ -268,6 +281,12 @@ export const epicLogOut = () => invoke<void>('epic_log_out')
 export const epicImportable = () => invoke<{ key: string; title: string }[]>('epic_importable')
 export const epicImport = (key: string, path: string) => invoke<void>('epic_import', { key, path })
 export const epicEglSync = () => invoke<void>('epic_egl_sync')
+/** Downloads and checks a store tool; `onPercent` hears each new whole percent once the size is known. */
+export function installTool(name: ToolView['name'], onPercent: (percent: number) => void) {
+  const channel = new Channel<number>()
+  channel.onmessage = onPercent
+  return invoke<void>('install_tool', { name, onPercent: channel })
+}
 /** The system folder picker; null when it was closed without picking. */
 export async function pickFolder(): Promise<string | null> {
   const path = await open({ directory: true })

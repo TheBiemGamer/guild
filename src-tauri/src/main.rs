@@ -22,6 +22,7 @@ mod steam_login;
 mod steam_owned;
 mod steam_size;
 mod steamgriddb;
+mod tools;
 mod tray;
 mod view;
 
@@ -92,6 +93,7 @@ fn main() {
             commands::settings::epic_importable,
             commands::settings::epic_import,
             commands::settings::epic_egl_sync,
+            commands::settings::install_tool,
             commands::settings::settings_view,
             commands::settings::update_setting,
             commands::settings::set_igdb_secret,
