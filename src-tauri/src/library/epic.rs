@@ -235,8 +235,19 @@ fn failure(output: &std::process::Output) -> String {
     format!("Legendary failed ({}): {last}", output.status)
 }
 
-/// Owned games, marked installed where Legendary has them, plus installed games missing
-/// from the owned list (e.g. imported ones), so nothing installed disappears.
+/// Whether an Epic catalog item (a `list --json` entry) has `path` among its `metadata.categories`.
+fn has_category(item: &Value, path: &str) -> bool {
+    item["metadata"]["categories"].as_array().into_iter().flatten().any(|c| c["path"] == path)
+}
+
+/// Games, as opposed to Unreal Engine assets, engines, DLC, apps, servers and hidden content.
+fn is_game(item: &Value) -> bool {
+    has_category(item, "games")
+}
+
+/// Owned games, marked installed where Legendary has them, plus installed items missing
+/// from the owned list (e.g. imported ones). Owned items that aren't games are left out unless
+/// installed, so nothing installed disappears.
 fn games(owned: &Value, installed: &Value) -> Vec<Game> {
     let mut installed: HashMap<&str, &Value> =
         installed.as_array().into_iter().flatten().filter_map(|g| Some((g["app_name"].as_str()?, g))).collect();
@@ -247,6 +258,9 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
         .filter_map(|g| {
             let name = g["app_name"].as_str()?;
             let local = installed.remove(name);
+            if local.is_none() && !is_game(g) {
+                return None;
+            }
             let title = g["app_title"].as_str().or(local.and_then(|l| l["title"].as_str())).unwrap_or(name);
             Some(game(name, title, local, art(&g["metadata"])))
         })
@@ -332,6 +346,31 @@ mod tests {
         let imported = &all[2];
         assert_eq!(imported.title, "Imported Game");
         assert!(imported.installed);
+    }
+
+    /// Trimmed from real Legendary metadata: a game, its DLC, an Unreal Engine plugin, an engine,
+    /// an app, and a DLC of a game that isn't owned.
+    fn categories() -> Value {
+        fixture("list-categories.json")
+    }
+
+    const NEW_VEGAS: &str = "5daeb974a22a435988892319b3a4f476";
+    const SPOTIFY: &str = "2b04bd96d2c34822b37c91ece7fa5f1c";
+
+    #[test]
+    fn list_keeps_only_games() {
+        let ids: Vec<_> = games(&categories(), &Value::Null).into_iter().map(|g| g.external_id).collect();
+        assert_eq!(ids, [NEW_VEGAS]);
+    }
+
+    #[test]
+    fn installed_non_game_is_kept() {
+        let installed = serde_json::json!([{ "app_name": SPOTIFY, "title": "Spotify", "install_path": r"C:\Spotify" }]);
+        let all = games(&categories(), &installed);
+        let spotify = all.iter().find(|g| g.external_id == SPOTIFY).expect("installed app stays");
+        assert!(spotify.installed);
+        assert_eq!(spotify.title, "Spotify Music and Podcasts");
+        assert_eq!(all.len(), 2);
     }
 
     #[test]

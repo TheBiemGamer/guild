@@ -1,0 +1,127 @@
+[
+ {
+  "app_name": "5daeb974a22a435988892319b3a4f476",
+  "app_title": "Fallout: New Vegas",
+  "metadata": {
+   "id": "dabb52e328834da7bbe99691e374cb84",
+   "namespace": "3428aaab2c674c98b3acb789dcfaa548",
+   "title": "Fallout: New Vegas",
+   "categories": [
+    {
+     "path": "games"
+    },
+    {
+     "path": "applications"
+    }
+   ]
+  }
+ },
+ {
+  "app_name": "4fa3d8d9b2cb4714a19a38d1a598be8f",
+  "app_title": "Fallout New Vegas®: Lonesome Road™",
+  "metadata": {
+   "id": "9d6e337d893346fa897ba823042718fd",
+   "namespace": "3428aaab2c674c98b3acb789dcfaa548",
+   "title": "Fallout New Vegas®: Lonesome Road™",
+   "categories": [
+    {
+     "path": "addons"
+    },
+    {
+     "path": "applications"
+    }
+   ],
+   "mainGameItem": {
+    "id": "dabb52e328834da7bbe99691e374cb84",
+    "namespace": "3428aaab2c674c98b3acb789dcfaa548"
+   }
+  }
+ },
+ {
+  "app_name": "AsyncLoa0a74ccc95d81V14",
+  "app_title": "Async Loading Screen",
+  "metadata": {
+   "id": "69f113fef5504cf49d8c61bf768d7b28",
+   "namespace": "89efe5924d3d467c839449ab6ab52e7f",
+   "title": "Async Loading Screen",
+   "categories": [
+    {
+     "path": "plugins/engine"
+    },
+    {
+     "path": "plugins"
+    },
+    {
+     "path": "asset-format/game-engine"
+    },
+    {
+     "path": "type/format-item"
+    },
+    {
+     "path": "asset-format/game-engine/unreal-engine"
+    },
+    {
+     "path": "type"
+    },
+    {
+     "path": "asset-format"
+    }
+   ]
+  }
+ },
+ {
+  "app_name": "ARKDevKit",
+  "app_title": "ARK ModKit (UE4)",
+  "metadata": {
+   "id": "8077d89481064a9097dd4b8fe7bca090",
+   "namespace": "ark",
+   "title": "ARK ModKit (UE4)",
+   "categories": [
+    {
+     "path": "engines"
+    },
+    {
+     "path": "applications"
+    }
+   ]
+  }
+ },
+ {
+  "app_name": "2b04bd96d2c34822b37c91ece7fa5f1c",
+  "app_title": "Spotify Music and Podcasts",
+  "metadata": {
+   "id": "b55fccb269ad47928804c681b16b8e93",
+   "namespace": "61dbcd85808d4125ba873ba90385949b",
+   "title": "Spotify Music and Podcasts",
+   "categories": [
+    {
+     "path": "public"
+    },
+    {
+     "path": "software"
+    },
+    {
+     "path": "applications"
+    }
+   ]
+  }
+ },
+ {
+  "app_name": "0e07b42c0ffe4cfdb2095568f461f38f",
+  "app_title": "Train Sim World® 5: Sand Patch Grade",
+  "metadata": {
+   "id": "63488d912008428aba6244932ac74777",
+   "namespace": "65ebb4f95d5845bba92b300f21235d1a",
+   "title": "Train Sim World® 5: Sand Patch Grade",
+   "categories": [
+    {
+     "path": "addons"
+    }
+   ],
+   "mainGameItem": {
+    "id": "05c628e914534613ba27b9b9679d0803",
+    "namespace": "65ebb4f95d5845bba92b300f21235d1a"
+   }
+  }
+ }
+]
