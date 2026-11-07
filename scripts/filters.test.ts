@@ -1,7 +1,7 @@
 // node --test scripts/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterChips, matches, removeChip, toggleFilter, type Filter } from '../src/lib/filters.ts'
+import { collectionFilter, filterChips, filterGroups, isList, matches, removeChip, toggleFilter, type Filter } from '../src/lib/filters.ts'
 
 test('chips follow the popover order, one per filter that is on', () => {
   assert.deepEqual(filterChips([]), [])
@@ -25,7 +25,17 @@ test('toggle turns a filter on and off', () => {
   assert.deepEqual(toggleFilter(['update', 'downloading'], 'update'), ['downloading'])
 })
 
-const game = { installed: true, update: false, stores: ['steam'], copyKeys: ['steam-1'], playtimeMinutes: 60, ttbHours: 10 }
+const game = {
+  installed: true,
+  update: false,
+  stores: ['steam'],
+  copyKeys: ['steam-1'],
+  playtimeMinutes: 60,
+  ttbHours: 10,
+  favorite: false,
+  hidden: false,
+  collections: [] as number[],
+}
 
 test('filters in a group widen, groups narrow', () => {
   assert.ok(matches(game, [], {}))
@@ -73,4 +83,38 @@ test('the new groups widen inside and narrow across', () => {
   assert.ok(!matches(played(30, 3), ['under10h', 'ttb5to15h'], {}))
   assert.ok(matches(played(30, 3), ['under10h', 'ttb5to15h', 'ttbUnder5h'], {}))
   assert.deepEqual(filterChips(['ttb100hPlus', 'neverPlayed', 'bothStores']).map((c) => c.label), ['Never played', '100 h+', 'On both stores'])
+})
+
+const collections = [
+  { id: 3, name: 'Backlog', count: 2 },
+  { id: 7, name: 'Co-op', count: 1 },
+]
+
+test('Lists come after Status: Favorites, each collection, then Hidden', () => {
+  const lists = filterGroups(collections)[1]
+  assert.deepEqual(lists, { label: 'Lists', filters: ['favorites', 'collection-3', 'collection-7', 'hidden'] })
+  assert.deepEqual(filterGroups([])[1].filters, ['favorites', 'hidden'])
+  assert.deepEqual(filterGroups([]).map((g) => g.label), ['Status', 'Lists', 'Your playtime', 'How long to beat', 'Has'])
+})
+
+test('list chips are named after the list and come after Status', () => {
+  const on: Filter[] = ['bothStores', 'hidden', collectionFilter(7), 'notInstalled', 'favorites']
+  assert.deepEqual(filterChips(on, collections).map((c) => c.label), ['Not installed', 'Favorites', 'Co-op', 'Hidden', 'On both stores'])
+  const left = removeChip(on, filterChips(on, collections)[2])
+  assert.deepEqual(left, ['bothStores', 'hidden', 'notInstalled', 'favorites'])
+  assert.ok(isList('collection-7') && isList('hidden') && !isList('update'))
+})
+
+test('lists widen each other and narrow the other groups', () => {
+  const fav = { ...game, favorite: true }
+  const inCoop = { ...game, collections: [7] }
+  const hidden = { ...game, hidden: true, installed: false }
+  assert.ok(matches(fav, ['favorites'], {}))
+  assert.ok(!matches(inCoop, ['favorites'], {}))
+  assert.ok(matches(inCoop, ['favorites', collectionFilter(7)], {}))
+  assert.ok(!matches(inCoop, [collectionFilter(3)], {}))
+  assert.ok(matches(hidden, ['hidden'], {}))
+  assert.ok(!matches(game, ['hidden'], {}))
+  assert.ok(matches(hidden, ['hidden', 'notInstalled'], {}))
+  assert.ok(!matches(fav, ['favorites', 'notInstalled'], {}))
 })

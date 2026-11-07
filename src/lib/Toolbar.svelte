@@ -3,7 +3,7 @@
   import FilterPopover from './FilterPopover.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
-  import { filterChips, removeChip, type Filter } from './filters'
+  import { filterChips, removeChip, type Collection, type Filter } from './filters'
   import type { Card, Progress, QueueView, Sort, Store } from './api'
 
   let {
@@ -11,6 +11,7 @@
     store = $bindable(),
     installedOnly = $bindable(),
     filters = $bindable(),
+    collections,
     sort = $bindable(),
     popoverOpen = $bindable(),
     attention,
@@ -23,12 +24,15 @@
     onresume,
     onmove,
     onsettings,
+    oncollections,
   }: {
     query: string
     store: Store | null
     installedOnly: boolean
     /** The Filters popover's extra filters. */
     filters: Filter[]
+    /** For the Lists filters' names. */
+    collections: Collection[]
     sort: Sort
     /** A popover is open; App ignores mouse Back/Forward meanwhile, as for Settings. */
     popoverOpen: boolean
@@ -46,13 +50,15 @@
     onresume: () => void
     onmove: (key: string, up: boolean) => void
     onsettings: () => void
+    /** A collection was renamed or deleted in the Filters popover. */
+    oncollections: () => void
   } = $props()
 
   /** The store segments, in order; null is All. */
   const stores: (Store | null)[] = [null, 'steam', 'epic']
   const storeIndex = $derived(stores.indexOf(store))
   let segments = $state<HTMLButtonElement[]>([])
-  const chips = $derived(filterChips(filters))
+  const chips = $derived(filterChips(filters, collections))
 
   /** Arrow keys move to the next or previous store and pick it, wrapping around (radio group). */
   function onSegmentKey(e: KeyboardEvent) {
@@ -170,7 +176,7 @@
         Filters
       </button>
       {#if open === 'filters'}
-        <FilterPopover bind:filters anchor={filtersChip} onclose={close} />
+        <FilterPopover bind:filters {collections} anchor={filtersChip} onclose={close} onchanged={oncollections} />
       {/if}
     </div>
   </div>

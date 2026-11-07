@@ -41,6 +41,7 @@
   import * as api from './api'
   import type { ActOptions, Action, Conflict, Detail, Dlc, GameInfo, LaunchOptions, LinkKind, Progress, QueueView, SavesView, TimeToBeat } from './api'
   import PlayButton from './PlayButton.svelte'
+  import GameMenu from './GameMenu.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
   import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
@@ -84,7 +85,6 @@
   let confirming = $state(false)
   let menuOpen = $state(false)
   let moreButton = $state<HTMLButtonElement>()
-  let menu = $state<HTMLDivElement>()
   let backButton = $state<HTMLButtonElement>()
   let confirmCancel = $state<HTMLButtonElement>()
   let actionsEl = $state<HTMLDivElement>()
@@ -369,12 +369,6 @@
 
   const run = (f: () => Promise<void>) => f().catch((e) => onerror(api.message(e)))
 
-  async function openMenu() {
-    menuOpen = true
-    await tick()
-    menu?.querySelector('button')?.focus()
-  }
-
   function closeMenu(refocus: boolean) {
     menuOpen = false
     if (refocus) moreButton?.focus()
@@ -385,31 +379,8 @@
     f()
   }
 
-  function menuKeydown(e: KeyboardEvent) {
-    if (!menu) return
-    const items = Array.from(menu.querySelectorAll('button'))
-    const at = items.indexOf(document.activeElement as HTMLButtonElement)
-    const go = (i: number) => {
-      e.preventDefault()
-      items[(i + items.length) % items.length]?.focus()
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      closeMenu(true)
-    } else if (e.key === 'ArrowDown') go(at + 1)
-    else if (e.key === 'ArrowUp') go(at - 1)
-    else if (e.key === 'Home') go(0)
-    else if (e.key === 'End') go(-1)
-    else if (e.key === 'Tab') closeMenu(false)
-  }
-
-  function onpointerdown(e: PointerEvent) {
-    if (!menuOpen) return
-    const target = e.target as Node
-    if (menu?.contains(target) || moreButton?.contains(target)) return
-    closeMenu(false)
-  }
+  // The chosen copy's own actions; not while it is busy.
+  const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
 
   // Null hides the tile (Epic's unknown playtime, never played).
   const playtime = $derived(game?.playtimeMinutes != null ? playtimeLabel(game.playtimeMinutes) : null)
@@ -484,6 +455,15 @@
   const infoLinks = $derived(game?.links.filter((k) => k !== 'steamStore' && k !== 'epicStore') ?? [])
 </script>
 
+{#snippet copyItems()}
+  {#if copy!.installDir}
+    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>Open install folder</button>
+  {/if}
+  {#if copy!.installed}
+    <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
+  {/if}
+{/snippet}
+
 {#snippet chips(label: string, kinds: LinkKind[])}
   {#if kinds.length}
     <dt>{label}</dt>
@@ -496,8 +476,6 @@
     </dd>
   {/if}
 {/snippet}
-
-<svelte:window {onpointerdown} />
 
 <section class="detail" aria-label={game?.title ?? 'Game'}>
   <div class="page">
@@ -546,34 +524,31 @@
               <button class="glass round danger" onclick={() => act('uninstall')}>Uninstall</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>Cancel</button>
             {:else}
-              {#if !shown && (copy!.installed || copy!.installDir)}
-                <div class="more-wrap">
-                  <button
-                    class="glass more"
-                    bind:this={moreButton}
-                    aria-label="More actions"
-                    aria-haspopup="menu"
-                    aria-expanded={menuOpen}
-                    onclick={() => (menuOpen ? closeMenu(true) : openMenu())}
-                  >
-                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                      <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-                    </svg>
-                  </button>
-                  {#if menuOpen}
-                    <div class="menu" role="menu" aria-label="More actions" tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
-                      {#if copy!.installDir}
-                        <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => api.openFolder(copy!.key)))}>
-                          Open install folder
-                        </button>
-                      {/if}
-                      {#if copy!.installed}
-                        <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>Uninstall</button>
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-              {/if}
+              <div class="more-wrap">
+                <button
+                  class="glass more"
+                  bind:this={moreButton}
+                  aria-label="More actions"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onclick={() => (menuOpen ? closeMenu(true) : (menuOpen = true))}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                  </svg>
+                </button>
+                {#if menuOpen}
+                  <GameMenu
+                    {game}
+                    anchor={moreButton}
+                    label="More actions"
+                    onclose={closeMenu}
+                    {onchanged}
+                    {onerror}
+                    extra={copyActions ? copyItems : undefined}
+                  />
+                {/if}
+              </div>
               <PlayButton
                 copies={game.copies}
                 chosen={chosenKey}
@@ -1026,39 +1001,6 @@
 
   .more svg {
     fill: currentColor;
-  }
-
-  .menu {
-    position: absolute;
-    z-index: 5;
-    top: calc(100% + 8px);
-    right: 0;
-    min-width: 220px;
-    padding: 4px;
-    display: grid;
-    border-radius: 12px;
-    background: var(--surface-2);
-    border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
-  }
-
-  .menu button {
-    padding: 8px 12px;
-    text-align: left;
-    background: transparent;
-  }
-
-  .menu button:hover:not(:disabled),
-  .menu button:focus-visible {
-    background: var(--glass-hover);
-  }
-
-  .menu button:focus-visible {
-    outline-offset: -2px;
-  }
-
-  .menu button:active:not(:disabled) {
-    transform: none;
   }
 
   svg {

@@ -2,7 +2,7 @@
 //! the labels (`src/lib/format.ts`).
 
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,72 @@ impl Sort {
     pub fn parse(value: &str) -> Option<Self> {
         serde_json::from_value(serde_json::Value::String(value.into())).ok()
     }
+}
+
+/// The owner's favorites, hidden games and collections, by copy key (`cache::db::lists`). An entry is in
+/// one when any of its copies is, so the choice survives entries merging or splitting.
+#[derive(Debug, Default)]
+pub struct Lists {
+    pub favorite: HashSet<String>,
+    pub hidden: HashSet<String>,
+    /// Collection ids by copy key.
+    pub collections: HashMap<String, Vec<i64>>,
+}
+
+impl Lists {
+    fn any(set: &HashSet<String>, e: &Entry, games: &[Game]) -> bool {
+        !set.is_empty() && e.copies.iter().any(|&i| set.contains(&games[i].key()))
+    }
+
+    pub fn favorite(&self, e: &Entry, games: &[Game]) -> bool {
+        Self::any(&self.favorite, e, games)
+    }
+
+    pub fn hidden(&self, e: &Entry, games: &[Game]) -> bool {
+        Self::any(&self.hidden, e, games)
+    }
+
+    /// The ids of the collections any copy is in, ascending.
+    pub fn collections(&self, e: &Entry, games: &[Game]) -> Vec<i64> {
+        if self.collections.is_empty() {
+            return Vec::new();
+        }
+        let mut ids: Vec<i64> =
+            e.copies.iter().filter_map(|&i| self.collections.get(&games[i].key())).flatten().copied().collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+}
+
+/// Drops hidden entries from `shown`, unless `with_hidden` (the Hidden filter is on: the UI keeps only them).
+pub fn hide(shown: &mut Vec<usize>, entries: &[Entry], games: &[Game], lists: &Lists, with_hidden: bool) {
+    if !with_hidden {
+        shown.retain(|&i| !lists.hidden(&entries[i], games));
+    }
+}
+
+/// Favorites on top: when `shown` has a favorite that isn't hidden (hidden wins), a `favorites` group
+/// comes first in `shown` order, then `groups` without the favorites, or the rest as `allGames` when the
+/// sort has no groups. Groups left empty are dropped.
+pub fn favorites_first(
+    shown: &[usize],
+    groups: Vec<(&'static str, Vec<usize>)>,
+    entries: &[Entry],
+    games: &[Game],
+    lists: &Lists,
+) -> Vec<(&'static str, Vec<usize>)> {
+    let favorite: HashSet<usize> =
+        shown.iter().copied().filter(|&i| lists.favorite(&entries[i], games) && !lists.hidden(&entries[i], games)).collect();
+    if favorite.is_empty() {
+        return groups;
+    }
+    let rest = if groups.is_empty() { vec![("allGames", shown.to_vec())] } else { groups };
+    let favorites = ("favorites", shown.iter().copied().filter(|i| favorite.contains(i)).collect());
+    std::iter::once(favorites)
+        .chain(rest.into_iter().map(|(id, ids)| (id, ids.into_iter().filter(|i| !favorite.contains(i)).collect())))
+        .filter(|(_, ids): &(_, Vec<usize>)| !ids.is_empty())
+        .collect()
 }
 
 /// How long to beat ("normally", seconds) from the cached IGDB answers, by entry key; a copy's key
@@ -190,11 +256,11 @@ pub fn merge_last_played(games: &mut [Game], launches: &HashMap<String, i64>) {
     }
 }
 
-/// The installed entry played most recently.
-pub fn featured<'a>(games: &[Game], entries: &'a [Entry]) -> Option<&'a Entry> {
+/// The installed entry played most recently, never a hidden one.
+pub fn featured<'a>(games: &[Game], entries: &'a [Entry], lists: &Lists) -> Option<&'a Entry> {
     entries
         .iter()
-        .filter(|e| entries::installed(e, games))
+        .filter(|e| entries::installed(e, games) && !lists.hidden(e, games))
         .filter_map(|e| Some((e, entries::last_played(e, games)?.0)))
         .max_by_key(|&(_, t)| t)
         .map(|(e, _)| e)
@@ -447,8 +513,87 @@ pub(crate) mod tests {
         let games =
             vec![game("old", true, None, Some(10)), game("gone", false, None, Some(99)), game("never", true, None, None)];
         let entries = entries::group(&games, &HashMap::new());
-        assert_eq!(featured(&games, &entries).map(|e| games[e.copies[0]].title.as_str()), Some("old"));
+        let none = Lists::default();
+        assert_eq!(featured(&games, &entries, &none).map(|e| games[e.copies[0]].title.as_str()), Some("old"));
         let never = [game("never", true, None, None)];
-        assert!(featured(&never, &entries::group(&never, &HashMap::new())).is_none());
+        assert!(featured(&never, &entries::group(&never, &HashMap::new()), &none).is_none());
+        // A hidden game isn't featured.
+        assert!(featured(&games, &entries, &lists_of(&[], &["steam-old"])).is_none());
+    }
+
+    fn lists_of(favorite: &[&str], hidden: &[&str]) -> Lists {
+        let set = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect();
+        Lists { favorite: set(favorite), hidden: set(hidden), ..Lists::default() }
+    }
+
+    #[test]
+    fn an_entry_is_in_a_list_when_any_copy_is() {
+        let mut epic = game("Pumpkin", false, None, None);
+        epic.provider = ProviderKind::Epic;
+        let games = vec![epic, game("635320", false, None, None)];
+        let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let mut lists = lists_of(&["epic-Pumpkin"], &[]);
+        lists.collections = HashMap::from([("epic-Pumpkin".into(), vec![2]), ("steam-635320".into(), vec![1, 2])]);
+        assert!(lists.favorite(&entries[0], &games));
+        assert!(!lists.hidden(&entries[0], &games));
+        assert_eq!(lists.collections(&entries[0], &games), [1, 2]);
+        assert!(Lists::default().collections(&entries[0], &games).is_empty());
+    }
+
+    #[test]
+    fn hidden_games_leave_the_library_and_search_unless_the_hidden_filter_is_on() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        let lists = lists_of(&[], &["steam-beta"]);
+        let shown = |query: &str, with_hidden: bool| {
+            let mut shown = arrange(&g, &e, query, None, false, Sort::Title, &no_ttb());
+            hide(&mut shown, &e, &g, &lists, with_hidden);
+            titles(&g, shown)
+        };
+        assert_eq!(shown("", false), ["Alpha", "delta", "Gamma Beta"]);
+        assert_eq!(shown("beta", false), ["Gamma Beta"]);
+        // The Hidden filter: everything comes back and the UI keeps the hidden ones.
+        assert_eq!(shown("", true), ["Alpha", "beta", "delta", "Gamma Beta"]);
+    }
+
+    #[test]
+    fn favorites_come_first_under_title_with_the_rest_as_all_games() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        let shown = arrange(&g, &e, "", None, false, Sort::Title, &no_ttb());
+        let lists = lists_of(&["steam-Gamma Beta", "epic-delta"], &[]);
+        assert_eq!(
+            named(&g, &e, favorites_first(&shown, Vec::new(), &e, &g, &lists)),
+            [("favorites", vec!["delta", "Gamma Beta"]), ("allGames", vec!["Alpha", "beta"])]
+        );
+        // No favorite: Title stays one list.
+        assert!(favorites_first(&shown, Vec::new(), &e, &g, &Lists::default()).is_empty());
+    }
+
+    #[test]
+    fn favorites_come_first_under_a_grouped_sort_and_leave_their_groups() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        let shown = arrange(&g, &e, "", None, false, Sort::MostPlayed, &no_ttb());
+        let groups = group(&shown, &e, &g, &no_ttb(), Sort::MostPlayed, UNIX_EPOCH, 0);
+        // Alpha was alone in Never played, so that group goes.
+        let lists = lists_of(&["steam-beta", "steam-Alpha"], &[]);
+        assert_eq!(
+            named(&g, &e, favorites_first(&shown, groups, &e, &g, &lists)),
+            [("favorites", vec!["beta", "Alpha"]), ("played0h", vec!["Gamma Beta", "delta"])]
+        );
+    }
+
+    #[test]
+    fn a_hidden_favorite_is_hidden() {
+        let g = library();
+        let e = entries::group(&g, &HashMap::new());
+        let lists = lists_of(&["steam-beta"], &["steam-beta"]);
+        for with_hidden in [false, true] {
+            let mut shown = arrange(&g, &e, "", None, false, Sort::Title, &no_ttb());
+            hide(&mut shown, &e, &g, &lists, with_hidden);
+            assert_eq!(shown.contains(&1), with_hidden);
+            assert!(favorites_first(&shown, Vec::new(), &e, &g, &lists).is_empty(), "{with_hidden}");
+        }
     }
 }

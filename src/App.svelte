@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import type { Action, Featured, Library, Progress, QueueView, Section, SettingsView, Sort, Store } from './lib/api'
+  import type { Action, Card, Collection, Featured, Library, Progress, QueueView, Section, SettingsView, Sort, Store } from './lib/api'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -32,7 +32,8 @@
   import Detail from './lib/Detail.svelte'
   import Settings from './lib/Settings.svelte'
   import InstallPopup from './lib/InstallPopup.svelte'
-  import { matches, type Filter } from './lib/filters'
+  import GameMenu from './lib/GameMenu.svelte'
+  import { collectionFilter, isList, matches, type Filter } from './lib/filters'
 
   let query = $state('')
   let store = $state<Store | null>(null)
@@ -41,6 +42,7 @@
   /** The Filters popover's extra filters, applied here to the loaded list. */
   let filters = $state<Filter[]>([])
   let popoverOpen = $state(false)
+  let collections = $state<Collection[]>([])
 
   let lib = $state<Library>({ games: [], groups: [], total: 0, status: '', epic: null, epicAttention: false, steamAttention: false, epicNotice: false })
   let featured = $state<Featured | null>(null)
@@ -65,18 +67,39 @@
   let ready = $state(false)
 
   async function load() {
-    lib = await api.library(query, store, installedOnly, sort)
+    // Rust needs the Lists filters: Hidden brings hidden games back, and they decide whether favorites go on top.
+    lib = await api.library(query, store, installedOnly, sort, filters.filter(isList))
     version++
   }
 
-  /** Library and the last-played game together, so the banner and the tint arrive with the grid. */
+  /** Library, the last-played game and the collections together, so the banner and the tint arrive with the grid. */
   async function reload() {
-    const [, f] = await Promise.all([load(), api.featured()])
+    const [, f, c] = await Promise.all([load(), api.featured(), api.collections().catch(() => collections)])
     featured = f
+    collections = c
+    // A collection that went away takes its filter along.
+    const gone = (f: Filter) => f.startsWith('collection-') && !c.some((x) => collectionFilter(x.id) === f)
+    if (filters.some(gone)) filters = filters.filter((f) => !gone(f))
+  }
+
+  async function setFavorite(key: string, on: boolean) {
+    await api.setFavorite(key, on).catch((e) => (error = api.message(e)))
+    await reload()
+  }
+
+  /** The game menu a card's right-click opened, at the pointer; focus goes back to what had it. */
+  let cardMenu = $state<{ game: Card; x: number; y: number; back: HTMLElement | null } | null>(null)
+  function openCardMenu(game: Card, x: number, y: number) {
+    cardMenu = { game, x, y, back: document.activeElement instanceof HTMLElement ? document.activeElement : null }
+  }
+  function closeCardMenu(refocus: boolean) {
+    const back = cardMenu?.back
+    cardMenu = null
+    if (refocus && back?.isConnected) back.focus({ preventScroll: true })
   }
 
   $effect(() => {
-    void [query, store, sort, installedOnly]
+    void [query, store, sort, installedOnly, filters]
     load()
   })
 
@@ -304,7 +327,8 @@
       at += s.count
       if (games.length > before) kept.push({ group: s.group, count: games.length - before })
     }
-    return { games, sections: kept }
+    // No favorite left: under Title the rest is one list again.
+    return { games, sections: kept.length === 1 && kept[0].group === 'allGames' ? null : kept }
   })
   const shown = $derived(view.games)
   /** The hours every card's badge shows while sorting by them: how long to beat or playtime. */
@@ -343,6 +367,8 @@
     bind:store
     bind:installedOnly
     bind:filters
+    {collections}
+    oncollections={reload}
     bind:sort
     bind:popoverOpen
     attention={lib.epicAttention || lib.steamAttention}
@@ -405,6 +431,8 @@
         oninstall={install}
         oncancel={cancelDownload}
         onresume={resumeDownloads}
+        onfavorite={setFavorite}
+        onmenu={openCardMenu}
         benchSpeed={ready ? benchSpeed : null}
         {headerHeight}
       >
@@ -467,6 +495,19 @@
     {/if}
   </div>
 </main>
+
+{#if cardMenu}
+  {#key cardMenu}
+    <GameMenu
+      game={cardMenu.game}
+      at={cardMenu}
+      label={cardMenu.game.title}
+      onclose={closeCardMenu}
+      onchanged={reload}
+      onerror={(m) => (error = m)}
+    />
+  {/key}
+{/if}
 
 {#if settingsOpen && settings}
   <Settings

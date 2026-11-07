@@ -4,7 +4,7 @@
   import { benchDone, queueState, type Card, type Progress, type QueueView, type Section } from './api'
   import { groupLabel } from './format'
 
-  let { games, sections = null, stat = null, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, benchSpeed, header, headerHeight = 0 }: {
+  let { games, sections = null, stat = null, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu, benchSpeed, header, headerHeight = 0 }: {
     games: Card[]
     /** Labelled runs of `games`, each starting on its own row under a label row; null for one plain run. */
     sections?: Section[] | null
@@ -22,6 +22,9 @@
     /** Takes a waiting game out of the download queue, by copy key. */
     oncancel: (key: string) => void
     onresume: () => void
+    onfavorite: (key: string, on: boolean) => void
+    /** A card's right-click, at the pointer. */
+    onmenu: (game: Card, x: number, y: number) => void
     /** px/s; when set, scroll to the bottom once and report frame times (LAUNCHER_BENCH). */
     benchSpeed: number | null
     /** Scrolls with the covers, above them, as wide as the columns. */
@@ -155,6 +158,8 @@
           {oninstall}
           {oncancel}
           {onresume}
+          {onfavorite}
+          {onmenu}
         />
       </div>
     {/each}

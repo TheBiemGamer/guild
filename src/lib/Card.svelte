@@ -3,7 +3,7 @@
   import { logoFile, storeNames } from './StoreIcon.svelte'
   import { cover, prefetch, type Card, type Cover, type Progress, type QueueState } from './api'
 
-  let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume }: {
+  let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu }: {
     game: Card
     /** Place in the grid; covers are asked in this order. */
     index: number
@@ -21,6 +21,9 @@
     /** Takes the waiting copy (its key) out of the queue. */
     oncancel: (key: string) => void
     onresume: () => void
+    onfavorite: (key: string, on: boolean) => void
+    /** A right-click: the game menu opens at the pointer. */
+    onmenu: (game: Card, x: number, y: number) => void
   } = $props()
 
   /** "38 h played", "45 min played", "~25 h to beat"; null when never played, unknown or off. */
@@ -59,7 +62,18 @@
   $effect(() => () => clearTimeout(resting))
 </script>
 
-<div class="card" class:running class:out={!game.installed} bind:this={el}>
+<!-- The right-click (or the menu key on the focused card) opens the game page's ⋯ menu here. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="card"
+  class:running
+  class:out={!game.installed}
+  bind:this={el}
+  oncontextmenu={(e) => {
+    e.preventDefault()
+    onmenu(game, e.clientX, e.clientY)
+  }}
+>
   <button
     class="open"
     style:background={art?.color}
@@ -87,6 +101,18 @@
         onerror={() => (art = null)}
       />
     {/if}
+  </button>
+
+  <button
+    class="heart"
+    aria-pressed={game.favorite}
+    aria-label="Favorite {game.title}"
+    onclick={(e) => {
+      e.stopPropagation()
+      onfavorite(game.key, !game.favorite)
+    }}
+  >
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" /></svg>
   </button>
 
   <span class="logos">
@@ -219,6 +245,39 @@
   /* Option C: not installed fades a little, and the chip says what's next. */
   .out .open img {
     filter: saturate(0.5) brightness(0.75);
+  }
+
+  /* Shown on hover or focus; a favorite keeps its filled heart. Absent otherwise, like the hover overlay. */
+  .heart {
+    position: absolute;
+    z-index: 1;
+    top: 8px;
+    left: 8px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: rgb(0 0 0 / 0.5);
+    border: 1px solid var(--glass-line);
+    color: #fff;
+  }
+
+  .heart:hover:not(:disabled) {
+    background: rgb(0 0 0 / 0.5);
+  }
+
+  .card:not(:hover, :focus-within) .heart[aria-pressed='false'] {
+    display: none;
+  }
+
+  .heart svg {
+    stroke-width: 2;
+  }
+
+  .heart[aria-pressed='true'] svg {
+    fill: currentColor;
   }
 
   /* One glass circle per store, stacked down from the corner. */

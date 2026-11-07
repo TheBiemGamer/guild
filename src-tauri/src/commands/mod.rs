@@ -3,6 +3,7 @@
 
 pub mod game;
 pub mod library;
+pub mod lists;
 pub mod settings;
 
 use std::collections::{HashMap, HashSet};
@@ -99,6 +100,8 @@ struct Shared {
     /// Every owned Steam game as a `Game`, built once per owned list so a rescan does no art lookups.
     /// `None` until built from the cached list (or after Disconnect).
     owned: Option<Vec<Game>>,
+    /// The owner's favorites, hidden games and collections. Loaded by `load_cache`; the `lists` commands keep it current.
+    lists: crate::view::Lists,
 }
 
 /// An Epic game launched from here, watched through its process.

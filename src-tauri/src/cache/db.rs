@@ -1,6 +1,6 @@
 //! SQLite library cache so startup can render before the stores are scanned. The same file keeps
-//! user data that is not a cache: settings, launch history, per-game choices (`game_prefs`) and
-//! playtime. The `info` table is cache only.
+//! user data that is not a cache: settings, launch history, per-game choices (`game_prefs`, favorites and
+//! hidden games among them), playtime and collections. The `info` table is cache only.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 
 use crate::library::{Art, Error, Game, Image, ProviderKind};
+use crate::view::Lists;
 
 /// Migration steps; `PRAGMA user_version` is how many have run. Schema changes are new steps at the end,
 /// never edits to old ones, and the file name never changes.
@@ -65,6 +66,17 @@ const STEPS: &[&str] = &[
     INSERT INTO game_prefs (key, name, value)
         SELECT key, 'cloud_saves', json FROM info WHERE kind = 'cloud-saves' AND json IN ('on', 'off');
     DELETE FROM info WHERE kind IN ('cloud-saves', 'twin', 'twin2');",
+    // 3: the owner's collections, holding copy keys. Foreign keys are off, so `delete_collection` deletes
+    // the members itself.
+    "CREATE TABLE collections (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+    );
+    CREATE TABLE collection_games (
+        collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        PRIMARY KEY (collection_id, key)
+    );",
 ];
 
 /// Opens the database and brings its schema up to date. Every connection goes through here.
@@ -298,6 +310,67 @@ pub fn set_pref(conn: &Connection, key: &str, name: &str, value: Option<&str>) -
     Ok(())
 }
 
+/// `game_prefs` names that mark a copy as a favorite or hidden; the value is "1", no row is off.
+pub const FAVORITE: &str = "favorite";
+pub const HIDDEN: &str = "hidden";
+
+/// Favorites, hidden games and collection members, by copy key.
+pub fn lists(conn: &Connection) -> Result<Lists, Error> {
+    let mut lists = Lists::default();
+    let mut stmt = conn.prepare("SELECT key, name FROM game_prefs WHERE name IN (?1, ?2)")?;
+    for row in stmt.query_map([FAVORITE, HIDDEN], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (key, name) = row?;
+        if name == FAVORITE { &mut lists.favorite } else { &mut lists.hidden }.insert(key);
+    }
+    let mut stmt = conn.prepare("SELECT key, collection_id FROM collection_games ORDER BY collection_id")?;
+    for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (key, id) = row?;
+        lists.collections.entry(key).or_default().push(id);
+    }
+    Ok(lists)
+}
+
+/// Every collection as `(id, name)`, by name.
+pub fn collections(conn: &Connection) -> Result<Vec<(i64, String)>, Error> {
+    let mut stmt = conn.prepare("SELECT id, name FROM collections ORDER BY name COLLATE NOCASE, id")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Returns the new collection's id.
+pub fn create_collection(conn: &Connection, name: &str) -> Result<i64, Error> {
+    conn.execute("INSERT INTO collections (name) VALUES (?1)", [name])?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn rename_collection(conn: &Connection, id: i64, name: &str) -> Result<(), Error> {
+    conn.execute("UPDATE collections SET name = ?2 WHERE id = ?1", params![id, name])?;
+    Ok(())
+}
+
+/// Deletes the collection and its members; the games themselves stay.
+pub fn delete_collection(conn: &mut Connection, id: i64) -> Result<(), Error> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM collection_games WHERE collection_id = ?1", [id])?;
+    tx.execute("DELETE FROM collections WHERE id = ?1", [id])?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Adds the copy keys to the collection, or takes them out.
+pub fn set_in_collection(conn: &mut Connection, id: i64, keys: &[String], on: bool) -> Result<(), Error> {
+    let tx = conn.transaction()?;
+    for key in keys {
+        if on {
+            tx.execute("INSERT OR IGNORE INTO collection_games (collection_id, key) VALUES (?1, ?2)", params![id, key])?;
+        } else {
+            tx.execute("DELETE FROM collection_games WHERE collection_id = ?1 AND key = ?2", params![id, key])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Cached JSON for `(key, kind)` if it was fetched within `max_age_secs` of `now_secs`.
 pub fn cached_info(
     conn: &Connection,
@@ -477,7 +550,7 @@ mod tests {
         }
 
         let conn = open(&path).unwrap();
-        assert_eq!(user_version(&conn).unwrap(), 2);
+        assert_eq!(user_version(&conn).unwrap(), STEPS.len());
         let settings = [("igdb_client_id".into(), "abc".into()), ("steam_account".into(), "noah".into())];
         assert_eq!(all_settings(&conn), settings);
         assert_eq!(launches(&conn).unwrap(), HashMap::from([("steam-30".to_string(), 1_000)]));
@@ -515,6 +588,8 @@ mod tests {
         assert!(!games.iter().any(|c| c.starts_with("logo")));
         assert_eq!(columns(&conn, "game_prefs"), ["key", "name", "value"]);
         assert_eq!(columns(&conn, "playtime"), ["key", "started", "seconds"]);
+        assert_eq!(columns(&conn, "collections"), ["id", "name"]);
+        assert_eq!(columns(&conn, "collection_games"), ["collection_id", "key"]);
         set_pref(&conn, "epic-A", "cloud_saves", Some("on")).unwrap();
         set_pref(&conn, "epic-A", "cloud_saves", Some("off")).unwrap();
         assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap().as_deref(), Some("off"));
@@ -608,6 +683,52 @@ mod tests {
         assert!(!std::fs::read_dir(&dir).unwrap().any(tmp));
         drop(held);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn step_two_file_gets_collections_and_keeps_prefs() {
+        let dir = temp_dir("step3");
+        let path = dir.join("library.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(STEPS[0]).unwrap();
+            conn.execute_batch(STEPS[1]).unwrap();
+            conn.pragma_update(None, "user_version", 2).unwrap();
+            set_pref(&conn, "epic-A", FAVORITE, Some("1")).unwrap();
+        }
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), STEPS.len());
+        assert_eq!(pref(&conn, "epic-A", FAVORITE).unwrap().as_deref(), Some("1"));
+        assert!(collections(&conn).unwrap().is_empty());
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn lists_read_favorites_hidden_and_collections() {
+        let mut conn = memory();
+        set_pref(&conn, "steam-1", FAVORITE, Some("1")).unwrap();
+        set_pref(&conn, "epic-A", HIDDEN, Some("1")).unwrap();
+        set_pref(&conn, "epic-A", "cloud_saves", Some("on")).unwrap();
+        let backlog = create_collection(&conn, "Backlog").unwrap();
+        let coop = create_collection(&conn, "co-op").unwrap();
+        let keys = ["steam-1".to_string(), "epic-B".to_string()];
+        set_in_collection(&mut conn, backlog, &keys, true).unwrap();
+        set_in_collection(&mut conn, backlog, &keys, true).unwrap();
+        set_in_collection(&mut conn, coop, &keys[..1], true).unwrap();
+        let found = lists(&conn).unwrap();
+        assert_eq!(found.favorite, ["steam-1".to_string()].into());
+        assert_eq!(found.hidden, ["epic-A".to_string()].into());
+        assert_eq!(found.collections["steam-1"], [backlog, coop]);
+        assert_eq!(found.collections["epic-B"], [backlog]);
+        assert_eq!(collections(&conn).unwrap(), [(backlog, "Backlog".into()), (coop, "co-op".into())]);
+
+        rename_collection(&conn, coop, "Alone").unwrap();
+        assert_eq!(collections(&conn).unwrap(), [(coop, "Alone".into()), (backlog, "Backlog".into())]);
+        set_in_collection(&mut conn, backlog, &keys[1..], false).unwrap();
+        delete_collection(&mut conn, coop).unwrap();
+        assert_eq!(collections(&conn).unwrap(), [(backlog, "Backlog".into())]);
+        assert_eq!(lists(&conn).unwrap().collections, HashMap::from([("steam-1".to_string(), vec![backlog])]));
     }
 
     #[test]

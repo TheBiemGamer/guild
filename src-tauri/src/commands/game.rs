@@ -47,6 +47,10 @@ pub struct Detail {
     links: Vec<LinkKind>,
     /// The Epic copies' DLC; a Steam copy's comes from `steam_dlc`.
     dlc: Vec<DlcView>,
+    /// Any copy is a favorite, hidden, or in the collection (ids).
+    favorite: bool,
+    hidden: bool,
+    collections: Vec<i64>,
 }
 
 #[derive(Serialize)]
@@ -69,10 +73,10 @@ pub struct CopyView {
 pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
     let s = state.lock();
     let entry = entries::find(&s.entries, &s.games, &key)?;
-    Some(detail(entry, &s.games, &s.twins))
+    Some(detail(entry, &s.games, &s.twins, &s.lists))
 }
 
-fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) -> Detail {
+fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, lists: &view::Lists) -> Detail {
     let (minutes, both) = entries::playtime(entry, games);
     let chosen = &games[entries::default_copy(entry, games)];
     // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone shows only known playtime.
@@ -112,6 +116,9 @@ fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) -> Detail
         last_played: last.map(|(t, _)| t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())),
         last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| p),
         dlc: epic_dlc(&entry.copies.iter().map(|&i| &games[i]).collect::<Vec<_>>()),
+        favorite: lists.favorite(entry, games),
+        hidden: lists.hidden(entry, games),
+        collections: lists.collections(entry, games),
     }
 }
 
@@ -1286,7 +1293,7 @@ mod tests {
 
     fn pumpkin_detail(games: &[Game], twins: &HashMap<String, u32>) -> Detail {
         let entries = entries::group(games, twins);
-        detail(&entries[0], games, twins)
+        detail(&entries[0], games, twins, &view::Lists::default())
     }
 
     #[test]

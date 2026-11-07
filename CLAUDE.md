@@ -19,7 +19,7 @@ Windows-only launcher for the Steam and Epic libraries. Built with Tauri 2, Svel
   - Steam passwords and Steam Guard codes are never stored.
 - **The database** file is `library.sqlite`; never change the file name. Schema changes are new migration steps at the end of `STEPS` in `cache/db.rs` (`PRAGMA user_version` counts the ones run); never edit a step that shipped.
   - Open it only through `cache::db::open`, which sets WAL and the busy timeout and runs the migrations.
-  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices) and `playtime`.
+  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections` and `collection_games` (members by copy key).
   - `info` is cache only: use it with a new `kind` for new cached data, never for anything the owner chose or built up.
 - **Keys:**
   - A store copy is keyed `steam-<appid>` or `epic-<app_name>`.

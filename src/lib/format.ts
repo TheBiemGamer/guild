@@ -15,8 +15,10 @@ export interface Progress {
   totalFiles: number | null
 }
 
-/** Group ids from Rust's `view::group`, in its order per sort. */
+/** Group ids from Rust's `view::group`, in its order per sort, and `favorites` and `allGames` from `view::favorites_first`. */
 export type GroupId =
+  | 'favorites'
+  | 'allGames'
   | 'today'
   | 'thisWeek'
   | 'thisMonth'
@@ -36,6 +38,8 @@ export type GroupId =
   | 'unknown'
 
 const GROUPS: Record<GroupId, string> = {
+  favorites: 'Favorites',
+  allGames: 'All games',
   today: 'Today',
   thisWeek: 'This week',
   thisMonth: 'This month',

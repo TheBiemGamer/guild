@@ -2,9 +2,10 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { GroupId, Progress } from './format'
+import type { Collection, ListFilter } from './filters'
 
 // Rust sends numbers and ids; `format.ts` turns them into labels.
-export type { GroupId, Progress }
+export type { Collection, GroupId, Progress }
 
 export type Store = 'steam' | 'epic'
 export type Sort = 'title' | 'lastPlayed' | 'mostPlayed' | 'longestToBeat' | 'shortestToBeat'
@@ -15,6 +16,7 @@ export type Action = 'play' | 'playOutdated' | 'install' | 'update' | 'uninstall
  * `stores`: every store this game is in, the one `key` belongs to first. `chosen`: the copy key Play and
  * Install use. `copyKeys`: every copy's key, which running state and install progress are reported under.
  * `playtimeMinutes`: summed over the copies, null when unknown. `ttbHours`: how long to beat in shown hours, null when unknown.
+ * `favorite`, `hidden`, `collections` (ids): any copy is.
  */
 export interface Card {
   key: string
@@ -26,14 +28,20 @@ export interface Card {
   update: boolean
   playtimeMinutes: number | null
   ttbHours: number | null
+  favorite: boolean
+  hidden: boolean
+  collections: number[]
 }
+/** What the game menu needs of a game (a card or the game page). */
+export type Listed = Pick<Card, 'key' | 'title' | 'favorite' | 'hidden' | 'collections'>
 /** A run of `count` cards; `groupLabel` names its `group`. */
 export interface Section { group: GroupId; count: number }
 export interface Library {
   /** Grouped by the sort, group after group. */
   games: Card[]
-  /** The groups over `games`, in order; empty for the Title sort. */
+  /** The groups over `games`, in order; empty for the Title sort without favorites. */
   groups: Section[]
+  /** Games in the library, hidden ones left out. */
   total: number
   status: string
   epic: Login | null
@@ -83,6 +91,9 @@ export interface Detail {
   links: LinkKind[]
   /** The Epic copies' DLC; a Steam copy's comes from `steamDlc`. */
   dlc: Dlc[]
+  favorite: boolean
+  hidden: boolean
+  collections: number[]
 }
 export interface SettingsView {
   /** Whether Steam is installed on this PC. */
@@ -118,9 +129,23 @@ export function queueState(queue: QueueView, keys: string[]): QueueState | null 
   return { key, action, state: at > 0 ? 'queued' : queue.paused ? 'paused' : 'active' }
 }
 
-/** Recently played groups by local calendar day, so it sends the time zone's offset east of UTC. */
-export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort) =>
-  invoke<Library>('library', { query, store, installedOnly, sort, utcOffsetMin: -new Date().getTimezoneOffset() })
+/**
+ * Recently played groups by local calendar day, so it sends the time zone's offset east of UTC. `lists`: the Lists
+ * filters that are on; Hidden brings hidden games back, and favorites go on top unless Favorites is the only one.
+ */
+export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort, lists: ListFilter[]) =>
+  invoke<Library>('library', { query, store, installedOnly, sort, lists, utcOffsetMin: -new Date().getTimezoneOffset() })
+/** `key`: a game's key; every copy of it changes. */
+export const setFavorite = (key: string, on: boolean) => invoke<void>('set_favorite', { key, on })
+export const setHidden = (key: string, on: boolean) => invoke<void>('set_hidden', { key, on })
+/** By name. */
+export const collections = () => invoke<Collection[]>('collections')
+/** Fails when the name is empty or taken (ignoring case); resolves to the new id. */
+export const createCollection = (name: string) => invoke<number>('create_collection', { name })
+export const renameCollection = (id: number, name: string) => invoke<void>('rename_collection', { id, name })
+/** The games stay in the library. */
+export const deleteCollection = (id: number) => invoke<void>('delete_collection', { id })
+export const setInCollection = (key: string, id: number, on: boolean) => invoke<void>('set_in_collection', { key, id, on })
 /** Resolves to the saved sort. */
 export const loadCache = () => invoke<{ sort: Sort }>('load_cache')
 /** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */

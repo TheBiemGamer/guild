@@ -17,7 +17,7 @@ use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
-use crate::view::{self, Sort};
+use crate::view::{self, Lists, Sort};
 
 /// How long a launched Epic game may take to show up as a process before we stop looking.
 const EPIC_START_GRACE: Duration = Duration::from_secs(30);
@@ -39,6 +39,10 @@ pub struct Card {
     playtime_minutes: Option<u64>,
     /// How long to beat ("normally") in shown hours, from the cache; `None` when unknown.
     ttb_hours: Option<u64>,
+    /// Any copy is a favorite, hidden, or in the collection (ids).
+    favorite: bool,
+    hidden: bool,
+    collections: Vec<i64>,
 }
 
 /// The key of the copy Play and Install use.
@@ -46,8 +50,11 @@ fn chosen(e: &Entry, games: &[Game]) -> String {
     games[entries::default_copy(e, games)].key()
 }
 
-fn card(e: &Entry, games: &[Game], ttb: &HashMap<String, u64>) -> Card {
+fn card(e: &Entry, games: &[Game], ttb: &HashMap<String, u64>, lists: &Lists) -> Card {
     Card {
+        favorite: lists.favorite(e, games),
+        hidden: lists.hidden(e, games),
+        collections: lists.collections(e, games),
         key: e.key.clone(),
         chosen: chosen(e, games),
         copy_keys: e.copies.iter().map(|&i| games[i].key()).collect(),
@@ -72,8 +79,9 @@ pub struct Section {
 pub struct Library {
     /// In order; grouped by the sort, group after group.
     games: Vec<Card>,
-    /// The groups over `games`, in order; empty for Title.
+    /// The groups over `games`, in order; empty for Title without favorites.
     groups: Vec<Section>,
+    /// Games in the library, hidden ones left out.
     total: usize,
     status: String,
     epic: Option<Login>,
@@ -84,6 +92,9 @@ pub struct Library {
     epic_notice: bool,
 }
 
+/// `lists` are the Lists filters that are on ("favorites", "hidden", "collection-<id>"); the UI applies
+/// them, like its other filters. Here, Hidden brings hidden games back, and favorites go on top unless
+/// Favorites is the only one.
 #[tauri::command]
 pub fn library(
     state: State<'_, AppState>,
@@ -91,16 +102,21 @@ pub fn library(
     store: Option<ProviderKind>,
     installed_only: bool,
     sort: Sort,
+    lists: Vec<String>,
     utc_offset_min: i64,
 ) -> Library {
     let s = state.lock();
-    let shown = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort, &s.ttb);
-    let groups = view::group(&shown, &s.entries, &s.games, &s.ttb, sort, SystemTime::now(), utc_offset_min * 60);
-    let (games, groups) = sections(&s.games, &s.entries, &s.ttb, shown, groups);
+    let mut shown = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort, &s.ttb);
+    view::hide(&mut shown, &s.entries, &s.games, &s.lists, lists.iter().any(|f| f == "hidden"));
+    let mut groups = view::group(&shown, &s.entries, &s.games, &s.ttb, sort, SystemTime::now(), utc_offset_min * 60);
+    if lists != ["favorites"] {
+        groups = view::favorites_first(&shown, groups, &s.entries, &s.games, &s.lists);
+    }
+    let (games, groups) = sections(&s.games, &s.entries, &s.ttb, &s.lists, shown, groups);
     Library {
         games,
         groups,
-        total: s.entries.len(),
+        total: s.entries.iter().filter(|e| !s.lists.hidden(e, &s.games)).count(),
         status: s.status.clone(),
         epic: s.epic_login,
         epic_attention: s.epic_login.is_some_and(|l| l != Login::LoggedIn),
@@ -114,10 +130,11 @@ fn sections(
     games: &[Game],
     entries: &[Entry],
     ttb: &HashMap<String, u64>,
+    lists: &Lists,
     shown: Vec<usize>,
     groups: Vec<(&'static str, Vec<usize>)>,
 ) -> (Vec<Card>, Vec<Section>) {
-    let card = |&i: &usize| card(&entries[i], games, ttb);
+    let card = |&i: &usize| card(&entries[i], games, ttb, lists);
     if groups.is_empty() {
         return (shown.iter().map(card).collect(), Vec::new());
     }
@@ -144,8 +161,10 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
         view::sort_by_title(&mut games);
         let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
         let ttb = crate::igdb::all_normally(&conn);
+        let lists = cache::db::lists(&conn).map_err(|e| e.to_string())?;
         let mut s = state.lock();
         s.ttb = ttb;
+        s.lists = lists;
         // A scan that already finished wins over the cache.
         if s.games.is_empty() {
             s.games = games;
@@ -635,7 +654,7 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
     let state = app.state::<AppState>();
     let (card, game) = {
         let s = state.lock();
-        featured_pick(&s.games, &s.entries)?
+        featured_pick(&s.games, &s.entries, &s.lists)?
     };
     let dir = state.dirs.art.join(game.key());
     let mut hero = None;
@@ -649,9 +668,9 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
 }
 
 /// The featured entry as a card, and its first copy (for the art).
-fn featured_pick(games: &[Game], entries: &[Entry]) -> Option<(Card, Game)> {
-    let e = view::featured(games, entries)?;
-    Some((card(e, games, &HashMap::new()), games[e.copies[0]].clone()))
+fn featured_pick(games: &[Game], entries: &[Entry], lists: &Lists) -> Option<(Card, Game)> {
+    let e = view::featured(games, entries, lists)?;
+    Some((card(e, games, &HashMap::new(), lists), games[e.copies[0]].clone()))
 }
 
 #[derive(Serialize)]
@@ -778,11 +797,11 @@ mod tests {
         };
         let games = vec![epic, steam];
         let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
-        let c = card(&entries[0], &games, &HashMap::new());
+        let c = card(&entries[0], &games, &HashMap::new(), &Lists::default());
         assert_eq!(c.key, "steam-635320");
         assert_eq!(c.chosen, "epic-Pumpkin");
         assert_eq!(c.copy_keys, ["steam-635320", "epic-Pumpkin"]);
-        let (f, _) = featured_pick(&games, &entries).unwrap();
+        let (f, _) = featured_pick(&games, &entries, &Lists::default()).unwrap();
         assert_eq!(f.key, "steam-635320");
         assert_eq!(f.chosen, "epic-Pumpkin");
     }
