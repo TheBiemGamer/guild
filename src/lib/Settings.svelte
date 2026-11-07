@@ -178,7 +178,7 @@
   const epic = $derived.by(() => {
     switch (view.epic) {
       case 'loggedIn':
-        return { name: view.epicAccount, problem: null, fix: null, logout: true }
+        return { name: view.epicAccount ?? 'Logged in', problem: null, fix: null, logout: true }
       case 'loggedOut':
         return { name: null, problem: 'Not logged in', fix: 'Log in', logout: false }
       case 'unreachable':
