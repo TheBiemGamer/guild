@@ -11,6 +11,7 @@ use super::{allow, blocking, open_db, regroup, AppState, Res, Shared};
 use crate::bench;
 use crate::cache;
 use crate::entries::{self, Entry};
+use crate::epic_playtime;
 use crate::library::epic::{self, Login};
 use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
@@ -99,6 +100,7 @@ pub async fn load_cache(app: AppHandle) -> Res<()> {
         let conn = cache::db::open(&state.dirs.db).map_err(|e| e.to_string())?;
         let mut games = cache::db::load(&conn).map_err(|e| e.to_string())?;
         view::merge_last_played(&mut games, &cache::db::launches(&conn).map_err(|e| e.to_string())?);
+        epic_playtime::merge(&conn, &mut games);
         view::sort_by_title(&mut games);
         let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
         let mut s = state.lock();
@@ -125,6 +127,7 @@ pub async fn refresh(app: AppHandle, epic: bool, owned: bool) -> bool {
     let changed = blocking(move || rescan(&app, epic)).await;
     if epic {
         fill_twins(again.clone());
+        refresh_epic_playtime(again.clone());
     }
     refresh_owned(again, owned);
     changed
@@ -199,6 +202,50 @@ pub(crate) fn fill_twins(app: AppHandle) {
             }
         }
     });
+}
+
+/// Asks Epic's playtime service in the background after an Epic refresh, while logged in. Only one at a
+/// time. Quiet: a failure keeps Epic's last answer, and games without one show the sessions timed here.
+fn refresh_epic_playtime(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        {
+            let mut s = state.lock();
+            if s.playtime_running || s.epic_login != Some(Login::LoggedIn) {
+                return;
+            }
+            s.playtime_running = true;
+        }
+        let _running = Running(app.clone(), |s: &mut Shared| &mut s.playtime_running);
+        match epic_playtime::fetch(&state.http).await {
+            Ok(minutes) => {
+                if let Some(conn) = open_db(&state) {
+                    epic_playtime::remember(&conn, &minutes, super::unix_now());
+                    show_playtime(&state, &conn);
+                }
+            }
+            Err(e) => eprintln!("{e}"),
+        }
+    });
+}
+
+/// Applies the stored Epic playtime to the library; the next poll tells the UI when it changed.
+fn show_playtime(state: &AppState, conn: &rusqlite::Connection) {
+    let mut s = state.lock();
+    if epic_playtime::merge(conn, &mut s.games) {
+        s.library_changed = true;
+    }
+}
+
+/// Adds a play session timed here, ending now, to the copy's own playtime.
+// shortcut: a session still running when the launcher quits is lost.
+fn record_session(state: &AppState, key: &str, played: Duration) {
+    let seconds = played.as_secs() as i64;
+    let Some(conn) = open_db(state) else { return };
+    match cache::db::add_session(&conn, key, super::unix_now() - seconds, seconds) {
+        Ok(()) => show_playtime(state, &conn),
+        Err(e) => eprintln!("playtime: {e}"),
+    }
 }
 
 /// Fetches the owned Steam games in the background when there is a saved login and the cached list is
@@ -346,8 +393,14 @@ pub(super) fn rescan(app: &AppHandle, with_epic: bool) -> bool {
         note_epic_login(&state, &mut s, login);
     }
     let mut merged = merge(&s.games, results);
-    match cache::db::open(&state.dirs.db).and_then(|c| cache::db::launches(&c)) {
-        Ok(launches) => view::merge_last_played(&mut merged.games, &launches),
+    match cache::db::open(&state.dirs.db) {
+        Ok(conn) => {
+            match cache::db::launches(&conn) {
+                Ok(launches) => view::merge_last_played(&mut merged.games, &launches),
+                Err(e) => eprintln!("launch history: {e}"),
+            }
+            epic_playtime::merge(&conn, &mut merged.games);
+        }
         Err(e) => eprintln!("launch history: {e}"),
     }
     // Only a finished scan may claim the library is empty.
@@ -581,14 +634,23 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     let watch = state.lock().epic_watch.as_ref().map(|w| (w.key.clone(), w.exe.clone(), w.since));
     let epic_running = watch.and_then(|(key, exe, since)| {
         if epic::is_running(&exe) {
+            if let Some(w) = state.lock().epic_watch.as_mut().filter(|w| w.since == since) {
+                w.seen = true;
+            }
             return Some(key);
         }
-        // Gone, or never showed up: stop watching once it had time to start, and upload its saves.
+        // Gone, or never showed up: stop watching once it had time to start, time the session if it ran,
+        // and upload its saves.
         // shortcut: one that never showed up (a bootstrapper exe) has its saves uploaded while it may still run.
         if since.elapsed() > EPIC_START_GRACE {
             let ended = state.lock().epic_watch.take();
-            if let Some(super::EpicWatch { key, upload: Some(sync), .. }) = ended {
-                super::game::upload_saves(app, key, sync);
+            if let Some(w) = ended {
+                if w.seen {
+                    record_session(&state, &w.key, w.since.elapsed());
+                }
+                if let Some(sync) = w.upload {
+                    super::game::upload_saves(app, w.key, sync);
+                }
             }
         }
         None

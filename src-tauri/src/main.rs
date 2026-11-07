@@ -7,6 +7,7 @@ mod commands;
 mod downloads;
 mod entries;
 mod epic_login;
+mod epic_playtime;
 mod gamesdb;
 mod igdb;
 mod info;

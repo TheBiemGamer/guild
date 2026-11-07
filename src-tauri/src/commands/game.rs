@@ -35,7 +35,7 @@ pub struct Detail {
     copies: Vec<CopyView>,
     /// The copy key Play and Install use.
     chosen: String,
-    /// Tile text, like `15 h 3 min`; `None` hides the tile (Epic doesn't report playtime).
+    /// Tile text, like `15 h 3 min`; `None` hides the tile (an Epic copy with no known playtime).
     playtime_tile: Option<String>,
     /// `Steam + Epic` when both copies contributed to the playtime.
     playtime_note: Option<String>,
@@ -74,7 +74,7 @@ pub fn game(state: State<'_, AppState>, key: String) -> Option<Detail> {
 
 fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, now: SystemTime) -> Detail {
     let (minutes, both) = entries::playtime(entry, games);
-    // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone has no playtime to show.
+    // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone shows only known playtime.
     let tile_provider = entry
         .copies
         .iter()
@@ -282,7 +282,7 @@ fn act_blocking(
                         None
                     }),
                 };
-                state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), upload });
+                state.lock().epic_watch = exe.map(|exe| EpicWatch { key: key.clone(), exe, since: Instant::now(), seen: false, upload });
             })
         }
         // Not cancellable: stopped halfway, Legendary's record and the folder disagree.

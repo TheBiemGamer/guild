@@ -245,6 +245,22 @@ pub fn launches(conn: &Connection) -> Result<HashMap<String, i64>, Error> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Records a play session of the copy `key` timed here: started at `started_secs`, `seconds` long.
+pub fn add_session(conn: &Connection, key: &str, started_secs: i64, seconds: i64) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO playtime (key, started, seconds) VALUES (?1, ?2, ?3)",
+        params![key, started_secs, seconds.max(0)],
+    )?;
+    Ok(())
+}
+
+/// Seconds played per copy key, summed over the sessions timed here.
+pub fn own_totals(conn: &Connection) -> Result<HashMap<String, i64>, Error> {
+    let mut stmt = conn.prepare("SELECT key, sum(seconds) FROM playtime GROUP BY key")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 pub fn setting(conn: &Connection, name: &str) -> Result<Option<String>, Error> {
     Ok(conn.query_row("SELECT value FROM settings WHERE name = ?1", [name], |r| r.get(0)).optional()?)
 }
@@ -601,6 +617,19 @@ mod tests {
         record_launch(&conn, "epic-Fortnite", 2_000).unwrap();
         record_launch(&conn, "epic-Fortnite", 1_500).unwrap();
         assert_eq!(launches(&conn).unwrap().get("epic-Fortnite"), Some(&2_000));
+    }
+
+    #[test]
+    fn own_playtime_adds_session_length() {
+        let conn = memory();
+        assert_eq!(own_totals(&conn).unwrap(), HashMap::new());
+        add_session(&conn, "epic-Fortnite", 1_000, 1_800).unwrap();
+        add_session(&conn, "epic-Fortnite", 5_000, 45).unwrap();
+        add_session(&conn, "epic-Pumpkin", 9_000, 600).unwrap();
+        // A clock that went backwards never takes time away.
+        add_session(&conn, "epic-Pumpkin", 9_500, -30).unwrap();
+        let totals = own_totals(&conn).unwrap();
+        assert_eq!(totals, HashMap::from([("epic-Fortnite".to_string(), 1_845), ("epic-Pumpkin".to_string(), 600)]));
     }
 
     #[test]

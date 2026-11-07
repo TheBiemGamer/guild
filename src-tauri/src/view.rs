@@ -50,7 +50,7 @@ pub fn arrange(
 }
 
 /// The game page's Playtime tile: `15 h 3 min`, `45 min`, or Steam's `Never played`.
-/// `None` for Epic, whose playtime Legendary doesn't report: unknown, so the tile hides.
+/// `None` for an Epic copy without playtime: Epic's zero only means nothing is known, so the tile hides.
 pub fn playtime_tile(provider: ProviderKind, minutes: Option<u64>) -> Option<String> {
     Some(match minutes.unwrap_or(0) {
         0 if provider == ProviderKind::Epic => return None,
@@ -209,9 +209,10 @@ pub(crate) mod tests {
         assert_eq!(playtime_tile(steam, Some(0)).as_deref(), Some("Never played"));
         assert_eq!(playtime_tile(steam, Some(45)).as_deref(), Some("45 min"));
         assert_eq!(playtime_tile(steam, Some(903)).as_deref(), Some("15 h 3 min"));
-        // Legendary reports no playtime, so for Epic it is unknown and the tile hides.
+        // Epic without playtime is unknown, so the tile hides; known playtime shows.
         assert_eq!(playtime_tile(ProviderKind::Epic, None), None);
         assert_eq!(playtime_tile(ProviderKind::Epic, Some(0)), None);
+        assert_eq!(playtime_tile(ProviderKind::Epic, Some(90)).as_deref(), Some("1 h 30 min"));
     }
 
     #[test]

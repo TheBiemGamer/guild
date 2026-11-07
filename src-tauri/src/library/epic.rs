@@ -686,7 +686,7 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         title: title.to_owned(),
         installed: installed.is_some(),
         install_dir: installed.and_then(|l| l["install_path"].as_str()).map(PathBuf::from),
-        // shortcut: Legendary doesn't track playtime or last played.
+        // Legendary tracks neither: playtime comes from `epic_playtime`, last played from launches here.
         playtime_minutes: None,
         last_played: None,
         size_bytes: installed.and_then(|l| l["install_size"].as_u64()),

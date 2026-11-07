@@ -90,6 +90,8 @@ struct Shared {
     twins: HashMap<String, u32>,
     /// A twin lookup run is in flight.
     twins_running: bool,
+    /// An Epic playtime fetch is in flight.
+    playtime_running: bool,
     /// Every owned Steam game as a `Game`, built once per owned list so a rescan does no art lookups.
     /// `None` until built from the cached list (or after Disconnect).
     owned: Option<Vec<Game>>,
@@ -100,6 +102,8 @@ struct EpicWatch {
     key: String,
     exe: String,
     since: Instant,
+    /// Its process was seen running, so its end times a play session.
+    seen: bool,
     /// How its cloud saves are uploaded once it exits; `None` doesn't sync.
     upload: Option<crate::library::epic::SaveSync>,
 }
