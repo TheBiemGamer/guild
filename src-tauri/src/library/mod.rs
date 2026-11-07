@@ -87,18 +87,15 @@ pub struct Game {
     pub size_bytes: Option<u64>,
     pub art: Art,
     /// Owned DLC whose base game this is. Only Epic fills it; Steam's comes from the `dlc` command.
-    // shortcut: not saved in SQLite, so it is empty until the first Epic scan after startup.
     pub dlc: Vec<Dlc>,
     /// An installed Epic game has a newer version. Steam updates itself, so it is always false there.
-    // shortcut: not saved in SQLite either; it is false until the first Epic scan after startup.
     pub update_available: bool,
     /// An Epic game keeps its saves in Epic's cloud (its catalog item names a `CloudSaveFolder`).
-    // shortcut: not saved in SQLite either; it is false until the first Epic scan after startup.
     pub cloud_saves: bool,
 }
 
 /// A DLC under its base game. `id` is the store's id for it (Legendary's app name).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Dlc {
     pub id: String,
     pub title: String,

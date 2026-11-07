@@ -457,8 +457,8 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
     }
 }
 
-/// Info cache kind for an Epic copy's own cloud save choice, `on` or `off`; anything else follows the setting.
-const SAVES_CHOICE: &str = "cloud-saves";
+/// `game_prefs` name for an Epic copy's own cloud save choice, `on` or `off`; none follows the setting.
+const SAVES_CHOICE: &str = "cloud_saves";
 /// Info cache kind for an Epic copy's last cloud save sync, as a `SyncRecord`.
 const SAVES_SYNC: &str = "cloud-saves-sync";
 /// Info rows are read with a maximum age; these never go stale.
@@ -477,7 +477,7 @@ struct SyncRecord {
 }
 
 fn saves_choice(conn: &Connection, key: &str) -> Option<bool> {
-    match cache::db::cached_info(conn, key, SAVES_CHOICE, FOREVER, unix_now()).ok().flatten()?.as_str() {
+    match cache::db::pref(conn, key, SAVES_CHOICE).ok().flatten()?.as_str() {
         "on" => Some(true),
         "off" => Some(false),
         _ => None,
@@ -597,12 +597,8 @@ pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res
     app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or("This game has no cloud saves.")?;
     blocking(move || {
         let conn = open_db(&app.state::<AppState>()).ok_or("The settings database can't be opened.")?;
-        let value = match choice {
-            Some(true) => "on",
-            Some(false) => "off",
-            None => "default",
-        };
-        cache::db::put_info(&conn, &key, SAVES_CHOICE, value, unix_now()).map_err(|e| e.to_string())
+        let value = choice.map(|on| if on { "on" } else { "off" });
+        cache::db::set_pref(&conn, &key, SAVES_CHOICE, value).map_err(|e| e.to_string())
     })
     .await
 }

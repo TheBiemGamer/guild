@@ -1,62 +1,205 @@
 //! SQLite library cache so startup can render before the stores are scanned. The same file keeps
-//! user data that is not a cache: settings and launch history.
+//! user data that is not a cache: settings, launch history, per-game choices (`game_prefs`) and
+//! playtime. The `info` table is cache only.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 
 use crate::library::{Art, Error, Game, Image, ProviderKind};
 
-// shortcut: no migrations. The file also holds the user's settings and launch history, so bumping
-// its name in `Dirs` (library-v3.sqlite) wipes them; the next schema change must copy `settings`
-// and `launches` over from the old file (or add real migrations) instead of just bumping.
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS games (
-    provider TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    installed INTEGER NOT NULL,
-    install_dir TEXT,
-    playtime_minutes INTEGER,
-    last_played INTEGER,
-    cover TEXT, cover_url TEXT,
-    header TEXT, header_url TEXT,
-    hero TEXT, hero_url TEXT,
-    logo TEXT, logo_url TEXT,
-    size_bytes INTEGER,
-    PRIMARY KEY (provider, external_id)
-);
-CREATE TABLE IF NOT EXISTS launches (
-    key TEXT PRIMARY KEY,
-    at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS settings (
-    name TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS info (
-    key TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    json TEXT NOT NULL,
-    fetched INTEGER NOT NULL,
-    PRIMARY KEY (key, kind)
-);";
+/// Migration steps; `PRAGMA user_version` is how many have run. Schema changes are new steps at the end,
+/// never edits to old ones, and the file name never changes.
+const STEPS: &[&str] = &[
+    // 1: the schema of the `library-v3.sqlite` file, so an existing one needs no work.
+    "CREATE TABLE IF NOT EXISTS games (
+        provider TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        installed INTEGER NOT NULL,
+        install_dir TEXT,
+        playtime_minutes INTEGER,
+        last_played INTEGER,
+        cover TEXT, cover_url TEXT,
+        header TEXT, header_url TEXT,
+        hero TEXT, hero_url TEXT,
+        logo TEXT, logo_url TEXT,
+        size_bytes INTEGER,
+        PRIMARY KEY (provider, external_id)
+    );
+    CREATE TABLE IF NOT EXISTS launches (
+        key TEXT PRIMARY KEY,
+        at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+        name TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS info (
+        key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        json TEXT NOT NULL,
+        fetched INTEGER NOT NULL,
+        PRIMARY KEY (key, kind)
+    );",
+    // 2: the Epic scan's DLC, update and cloud save flags are kept. Per-game choices and playtime get
+    // their own tables, apart from the `info` cache.
+    "ALTER TABLE games ADD COLUMN dlc TEXT;
+    ALTER TABLE games ADD COLUMN update_available INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE games ADD COLUMN cloud_saves INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE games DROP COLUMN logo;
+    ALTER TABLE games DROP COLUMN logo_url;
+    CREATE TABLE game_prefs (
+        key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (key, name)
+    );
+    CREATE TABLE playtime (
+        key TEXT NOT NULL,
+        started INTEGER NOT NULL,
+        seconds INTEGER NOT NULL
+    );
+    INSERT INTO game_prefs (key, name, value)
+        SELECT key, 'cloud_saves', json FROM info WHERE kind = 'cloud-saves' AND json IN ('on', 'off');
+    DELETE FROM info WHERE kind IN ('cloud-saves', 'twin', 'twin2');",
+];
 
+/// Opens the database and brings its schema up to date. Every connection goes through here.
 pub fn open(path: &Path) -> Result<Connection, Error> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let conn = Connection::open(path)?;
-    conn.execute_batch(SCHEMA)?;
+    let mut conn = Connection::open(path)?;
+    // Background jobs write while commands do: wait for the lock instead of failing the write.
+    conn.busy_timeout(Duration::from_secs(5))?;
+    conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get::<_, String>(0))?;
+    migrate(&mut conn)?;
     Ok(conn)
+}
+
+fn user_version(conn: &Connection) -> rusqlite::Result<usize> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).map(|v| v as usize)
+}
+
+/// Runs each step above `user_version`, each in its own transaction. Two connections opening at once
+/// never both run a step: the version is read again under the write lock.
+fn migrate(conn: &mut Connection) -> Result<(), Error> {
+    if user_version(conn)? >= STEPS.len() {
+        return Ok(());
+    }
+    for (done, step) in STEPS.iter().enumerate() {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if user_version(&tx)? > done {
+            continue;
+        }
+        tx.execute_batch(step)?;
+        tx.pragma_update(None, "user_version", done as i64 + 1)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
+const SIDECARS: [&str; 3] = ["-journal", "-wal", "-shm"];
+
+/// `path` with `suffix` appended to its file name, as SQLite names its sidecar files.
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    name.into()
+}
+
+/// The database file in `dir`: `library.sqlite`. Runs once at startup, before anything opens it.
+/// The first time, an older `library-v3.sqlite` there is renamed to it, or copied when the rename fails
+/// (another instance has it open). The old file is used only when neither works, and is never deleted.
+pub fn file_in(dir: &Path) -> PathBuf {
+    let new = dir.join("library.sqlite");
+    let old = dir.join("library-v3.sqlite");
+    if !old.exists() || (new.exists() && !is_leftover(&new)) {
+        return new;
+    }
+    let keep_old = |why: &dyn std::fmt::Display| {
+        eprintln!("database: {why}; keeps using {}", old.display());
+        old.clone()
+    };
+    // SQLite would apply a stray journal of `library.sqlite` to the adopted file.
+    if let Some(stray) = SIDECARS.iter().map(|s| sidecar(&new, s)).find(|p| p.exists()) {
+        return keep_old(&format!("{} is in the way", stray.display()));
+    }
+    if new.exists() {
+        // A `library.sqlite` from before settings existed only ever held a game cache. It is set aside, not deleted.
+        let aside = dir.join("library-v1.sqlite");
+        if aside.exists() {
+            return keep_old(&format!("{} is an old cache and {} exists", new.display(), aside.display()));
+        }
+        if let Err(e) = std::fs::rename(&new, &aside) {
+            return keep_old(&e);
+        }
+    }
+    let adopted = rename_with_sidecars(&old, &new).or_else(|e| {
+        eprintln!("database: renaming {}: {e}; copying it instead", old.display());
+        copy(&old, &new)
+    });
+    match adopted {
+        Ok(()) => new,
+        // Another instance adopted it first.
+        Err(_) if new.exists() => new,
+        Err(e) => keep_old(&e),
+    }
+}
+
+/// A file without a `settings` table: the game cache of the first builds, never anyone's data.
+fn is_leftover(path: &Path) -> bool {
+    let settings_tables = |conn: Connection| -> rusqlite::Result<i64> {
+        conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'settings'", [], |r| r.get(0))
+    };
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).and_then(settings_tables) == Ok(0)
+}
+
+/// Renames `old` and its sidecars to `new`, the main file last so it never arrives without them.
+/// Puts back what moved when a rename fails.
+fn rename_with_sidecars(old: &Path, new: &Path) -> Result<(), Error> {
+    let mut moved = Vec::new();
+    let mut rename = || -> std::io::Result<()> {
+        for suffix in SIDECARS {
+            let (from, to) = (sidecar(old, suffix), sidecar(new, suffix));
+            if from.exists() {
+                std::fs::rename(&from, &to)?;
+                moved.push((from, to));
+            }
+        }
+        std::fs::rename(old, new)
+    };
+    let result = rename();
+    if result.is_err() {
+        for (from, to) in moved {
+            _ = std::fs::rename(to, from);
+        }
+    }
+    Ok(result?)
+}
+
+/// Copies `old` to `new` through SQLite, so a file another instance is writing is copied whole.
+fn copy(old: &Path, new: &Path) -> Result<(), Error> {
+    let tmp = new.with_extension(format!("sqlite.{}.tmp", std::process::id()));
+    _ = std::fs::remove_file(&tmp);
+    let conn = Connection::open_with_flags(old, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    conn.busy_timeout(Duration::from_secs(5))?;
+    conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy()])?;
+    drop(conn);
+    // A hard link fails when `new` exists, so the copy never replaces a file another instance just made.
+    let linked = std::fs::hard_link(&tmp, new);
+    _ = std::fs::remove_file(&tmp);
+    Ok(linked?)
 }
 
 pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
     let mut stmt = conn.prepare(
         "SELECT provider, external_id, title, installed, install_dir, playtime_minutes, last_played,
-                cover, cover_url, header, header_url, hero, hero_url, logo, logo_url, size_bytes FROM games",
+                cover, cover_url, header, header_url, hero, hero_url, size_bytes, dlc, update_available, cloud_saves
+         FROM games",
     )?;
     let rows = stmt.query_map([], |r| {
         let Some(provider) = ProviderKind::parse(&r.get::<_, String>(0)?) else {
@@ -73,11 +216,12 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
             install_dir: r.get::<_, Option<String>>(4)?.map(PathBuf::from),
             playtime_minutes: r.get::<_, Option<i64>>(5)?.map(|m| m as u64),
             last_played: r.get::<_, Option<i64>>(6)?.map(|s| UNIX_EPOCH + Duration::from_secs(s as u64)),
-            size_bytes: r.get::<_, Option<i64>>(15)?.map(|b| b as u64),
-            art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)?, logo: image(r, 13)? },
-            dlc: Vec::new(),
-            update_available: false,
-            cloud_saves: false,
+            size_bytes: r.get::<_, Option<i64>>(13)?.map(|b| b as u64),
+            art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)?, ..Art::default() },
+            // A list that doesn't parse is a cache miss: the next Epic scan fills it again.
+            dlc: r.get::<_, Option<String>>(14)?.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default(),
+            update_available: r.get(15)?,
+            cloud_saves: r.get(16)?,
         }))
     })?;
     // Rows from an unknown provider (e.g. written by a newer build) are skipped.
@@ -118,6 +262,26 @@ pub fn set_setting(conn: &Connection, name: &str, value: Option<&str>) -> Result
     Ok(())
 }
 
+/// The owner's choice `name` for the game copy `key`, such as `cloud_saves`.
+pub fn pref(conn: &Connection, key: &str, name: &str) -> Result<Option<String>, Error> {
+    Ok(conn
+        .query_row("SELECT value FROM game_prefs WHERE key = ?1 AND name = ?2", [key, name], |r| r.get(0))
+        .optional()?)
+}
+
+/// Stores a per-game choice, or removes it when `value` is `None`.
+pub fn set_pref(conn: &Connection, key: &str, name: &str, value: Option<&str>) -> Result<(), Error> {
+    match value {
+        Some(value) => conn.execute(
+            "INSERT INTO game_prefs (key, name, value) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key, name) DO UPDATE SET value = excluded.value",
+            params![key, name, value],
+        )?,
+        None => conn.execute("DELETE FROM game_prefs WHERE key = ?1 AND name = ?2", [key, name])?,
+    };
+    Ok(())
+}
+
 /// Cached JSON for `(key, kind)` if it was fetched within `max_age_secs` of `now_secs`.
 pub fn cached_info(
     conn: &Connection,
@@ -151,8 +315,8 @@ pub fn replace(conn: &mut Connection, provider: ProviderKind, games: &[Game]) ->
     {
         let mut insert = tx.prepare(
             "INSERT INTO games (provider, external_id, title, installed, install_dir, playtime_minutes, last_played,
-                cover, cover_url, header, header_url, hero, hero_url, logo, logo_url, size_bytes)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                cover, cover_url, header, header_url, hero, hero_url, size_bytes, dlc, update_available, cloud_saves)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         )?;
         let text = |p: &Option<PathBuf>| p.as_ref().map(|p| p.to_string_lossy().into_owned());
         for g in games.iter().filter(|g| g.provider == provider) {
@@ -171,9 +335,10 @@ pub fn replace(conn: &mut Connection, provider: ProviderKind, games: &[Game]) ->
                 a.header.url,
                 text(&a.hero.path),
                 a.hero.url,
-                text(&a.logo.path),
-                a.logo.url,
                 g.size_bytes.map(|b| b as i64),
+                (!g.dlc.is_empty()).then(|| serde_json::to_string(&g.dlc).unwrap_or_default()),
+                g.update_available,
+                g.cloud_saves,
             ])?;
         }
     }
@@ -184,6 +349,7 @@ pub fn replace(conn: &mut Connection, provider: ProviderKind, games: &[Game]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::Dlc;
 
     fn game(provider: ProviderKind, id: &str) -> Game {
         Game {
@@ -197,7 +363,7 @@ mod tests {
             size_bytes: Some(27_300_000_000),
             art: Art {
                 cover: Image { path: Some("c.jpg".into()), url: Some("https://x/c.jpg".into()) },
-                logo: Image { path: None, url: Some("https://x/l.png".into()) },
+                hero: Image { path: None, url: Some("https://x/h.png".into()) },
                 ..Art::default()
             },
             dlc: Vec::new(),
@@ -206,10 +372,41 @@ mod tests {
         }
     }
 
+    fn memory() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+        conn
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("launcher-db-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A file as the v3 build left it: step 1 only, `user_version` 0, rollback journal.
+    fn v3_file(path: &Path, settings: &[(&str, &str)]) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(STEPS[0]).unwrap();
+        for (name, value) in settings {
+            set_setting(&conn, name, Some(value)).unwrap();
+        }
+    }
+
+    fn all_settings(conn: &Connection) -> Vec<(String, String)> {
+        let mut stmt = conn.prepare("SELECT name, value FROM settings ORDER BY name").unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+    }
+
+    fn columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
+        stmt.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    }
+
     #[test]
     fn round_trips_and_replaces_per_provider() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA).unwrap();
+        let mut conn = memory();
         conn.execute("INSERT INTO games (provider, external_id, title, installed) VALUES ('future', 'x', 'X', 0)", [])
             .unwrap();
         let (steam, epic) = (ProviderKind::Steam, ProviderKind::Epic);
@@ -224,10 +421,177 @@ mod tests {
         assert_eq!(loaded, vec![game(steam, "2"), game(epic, "Fortnite")]);
     }
 
-    fn memory() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA).unwrap();
-        conn
+    #[test]
+    fn games_round_trip_dlc_update_and_cloud_saves() {
+        let mut conn = memory();
+        let epic = ProviderKind::Epic;
+        let mut g = game(epic, "Fallout");
+        g.dlc = vec![
+            Dlc { id: "LonesomeRoad".into(), title: "Lonesome Road".into(), installed: true },
+            Dlc { id: "OldWorldBlues".into(), title: "Old World Blues".into(), installed: false },
+        ];
+        g.update_available = true;
+        g.cloud_saves = true;
+        replace(&mut conn, epic, &[g.clone(), game(epic, "Plain")]).unwrap();
+        let mut loaded = load(&conn).unwrap();
+        loaded.sort_by(|a, b| a.external_id.cmp(&b.external_id));
+        assert_eq!(loaded, vec![g, game(epic, "Plain")]);
+    }
+
+    #[test]
+    fn migrates_v3_file_keeping_settings_and_launches() {
+        let dir = temp_dir("migrate");
+        let path = dir.join("library.sqlite");
+        v3_file(&path, &[("igdb_client_id", "abc"), ("steam_account", "noah")]);
+        {
+            let conn = Connection::open(&path).unwrap();
+            record_launch(&conn, "steam-30", 1_000).unwrap();
+            conn.execute(
+                "INSERT INTO games (provider, external_id, title, installed, cover_url, logo, logo_url, size_bytes)
+                 VALUES ('epic', 'Fallout', 'Fallout', 1, 'https://x/c.jpg', 'l.png', 'https://x/l.png', 42)",
+                [],
+            )
+            .unwrap();
+            put_info(&conn, "epic-Fallout", "cloud-saves", "off", 10).unwrap();
+            put_info(&conn, "epic-Other", "cloud-saves", "default", 10).unwrap();
+            put_info(&conn, "epic-Fallout", "cloud-saves-sync", r#"{"at":5}"#, 10).unwrap();
+            put_info(&conn, "epic-Fallout", "twin", "{}", 10).unwrap();
+            put_info(&conn, "epic-Fallout", "twin2", "{}", 10).unwrap();
+            put_info(&conn, "epic-Fallout", "twin3", "[30]", 10).unwrap();
+        }
+
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), 2);
+        let settings = [("igdb_client_id".into(), "abc".into()), ("steam_account".into(), "noah".into())];
+        assert_eq!(all_settings(&conn), settings);
+        assert_eq!(launches(&conn).unwrap(), HashMap::from([("steam-30".to_string(), 1_000)]));
+        // The choice moved; "default" means no choice, so nothing moved for it.
+        assert_eq!(pref(&conn, "epic-Fallout", "cloud_saves").unwrap().as_deref(), Some("off"));
+        assert_eq!(pref(&conn, "epic-Other", "cloud_saves").unwrap(), None);
+        let kinds: Vec<String> = conn
+            .prepare("SELECT kind FROM info ORDER BY kind")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(kinds, ["cloud-saves-sync", "twin3"]);
+        let games = load(&conn).unwrap();
+        assert_eq!(games.len(), 1);
+        let g = &games[0];
+        assert_eq!((g.title.as_str(), g.size_bytes), ("Fallout", Some(42)));
+        assert_eq!(g.art.cover.url.as_deref(), Some("https://x/c.jpg"));
+        assert!(g.dlc.is_empty() && !g.update_available && !g.cloud_saves);
+        assert!(!columns(&conn, "games").iter().any(|c| c.starts_with("logo")));
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn fresh_file_gets_latest_schema() {
+        let dir = temp_dir("fresh");
+        let conn = open(&dir.join("sub").join("library.sqlite")).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), STEPS.len());
+        let journal: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        assert_eq!(journal, "wal");
+        let games = columns(&conn, "games");
+        assert!(["dlc", "update_available", "cloud_saves", "size_bytes"].iter().all(|c| games.iter().any(|g| g == c)));
+        assert!(!games.iter().any(|c| c.starts_with("logo")));
+        assert_eq!(columns(&conn, "game_prefs"), ["key", "name", "value"]);
+        assert_eq!(columns(&conn, "playtime"), ["key", "started", "seconds"]);
+        set_pref(&conn, "epic-A", "cloud_saves", Some("on")).unwrap();
+        set_pref(&conn, "epic-A", "cloud_saves", Some("off")).unwrap();
+        assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap().as_deref(), Some("off"));
+        set_pref(&conn, "epic-A", "cloud_saves", None).unwrap();
+        assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap(), None);
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn open_twice_is_a_no_op() {
+        let dir = temp_dir("twice");
+        let path = dir.join("library.sqlite");
+        v3_file(&path, &[("a", "1")]);
+        let first = open(&path).unwrap();
+        set_pref(&first, "epic-A", "cloud_saves", Some("on")).unwrap();
+        // A second connection while the first is open, then a fresh one after it closed.
+        let second = open(&path).unwrap();
+        assert_eq!(user_version(&second).unwrap(), STEPS.len());
+        drop((first, second));
+        let third = open(&path).unwrap();
+        assert_eq!(all_settings(&third), [("a".into(), "1".into())]);
+        assert_eq!(pref(&third, "epic-A", "cloud_saves").unwrap().as_deref(), Some("on"));
+        drop(third);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_v3_file_is_renamed_and_kept() {
+        let settings_of = |path: &Path| all_settings(&open(path).unwrap());
+
+        // No file at all: a fresh library.sqlite.
+        let dir = temp_dir("rename-none");
+        assert_eq!(file_in(&dir), dir.join("library.sqlite"));
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // Only the v3 file: renamed, with its (empty, so not hot) journal.
+        let dir = temp_dir("rename-only");
+        v3_file(&dir.join("library-v3.sqlite"), &[("steam_account", "noah")]);
+        std::fs::write(dir.join("library-v3.sqlite-journal"), b"").unwrap();
+        let path = file_in(&dir);
+        assert_eq!(path, dir.join("library.sqlite"));
+        assert!(!dir.join("library-v3.sqlite").exists() && !dir.join("library-v3.sqlite-journal").exists());
+        assert!(dir.join("library.sqlite-journal").exists());
+        assert_eq!(settings_of(&path), [("steam_account".into(), "noah".into())]);
+        // From then on, nothing moves.
+        assert_eq!(file_in(&dir), path);
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // Both files: library.sqlite wins and the v3 file is left alone.
+        let dir = temp_dir("rename-both");
+        v3_file(&dir.join("library-v3.sqlite"), &[("who", "old")]);
+        drop(open(&dir.join("library.sqlite")).unwrap());
+        set_setting(&open(&dir.join("library.sqlite")).unwrap(), "who", Some("new")).unwrap();
+        let path = file_in(&dir);
+        assert_eq!(path, dir.join("library.sqlite"));
+        assert_eq!(settings_of(&path), [("who".into(), "new".into())]);
+        let old = Connection::open(dir.join("library-v3.sqlite")).unwrap();
+        assert_eq!((all_settings(&old), user_version(&old).unwrap()), (vec![("who".into(), "old".into())], 0));
+        drop(old);
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // A library.sqlite from the first builds (a games table, no settings) is set aside, and v3 adopted.
+        let dir = temp_dir("rename-leftover");
+        v3_file(&dir.join("library-v3.sqlite"), &[("who", "v3")]);
+        Connection::open(dir.join("library.sqlite"))
+            .unwrap()
+            .execute_batch("CREATE TABLE games (provider TEXT, external_id TEXT, title TEXT, logo TEXT)")
+            .unwrap();
+        let path = file_in(&dir);
+        assert_eq!(path, dir.join("library.sqlite"));
+        assert!(dir.join("library-v1.sqlite").exists() && !dir.join("library-v3.sqlite").exists());
+        assert_eq!(settings_of(&path), [("who".into(), "v3".into())]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Another instance holding the v3 file open blocks the rename on Windows: it is copied instead.
+    #[cfg(windows)]
+    #[test]
+    fn old_v3_file_held_open_is_copied() {
+        let dir = temp_dir("rename-held");
+        let old = dir.join("library-v3.sqlite");
+        v3_file(&old, &[("who", "v3")]);
+        let held = Connection::open(&old).unwrap();
+        assert_eq!(all_settings(&held).len(), 1);
+        let path = file_in(&dir);
+        assert_eq!(path, dir.join("library.sqlite"));
+        assert!(old.exists());
+        assert_eq!(all_settings(&open(&path).unwrap()), [("who".into(), "v3".into())]);
+        let tmp = |e: std::io::Result<std::fs::DirEntry>| e.unwrap().path().extension() == Some("tmp".as_ref());
+        assert!(!std::fs::read_dir(&dir).unwrap().any(tmp));
+        drop(held);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
