@@ -27,19 +27,27 @@ pub struct Dirs {
     pub amazon: PathBuf,
 }
 
+/// `%LOCALAPPDATA%`.
+pub fn local_app_data() -> PathBuf {
+    directories::BaseDirs::new().expect("Windows always has a home dir").data_local_dir().to_path_buf()
+}
+
 impl Dirs {
     pub fn new() -> Self {
-        let dirs = directories::ProjectDirs::from("", "", "launcher").expect("Windows always has a home dir");
+        let local = local_app_data();
+        // `%LOCALAPPDATA%\Guild\{data,cache}`, the layout of `ProjectDirs::from("", "", "Guild")`.
+        let root = crate::migrate::root(&local);
+        let (data, cache) = (root.join("data"), root.join("cache"));
         Self {
             // Holds the owner's data too; its name never changes (see `db::STEPS`).
-            db: db::file_in(dirs.data_local_dir()),
-            art: dirs.cache_dir().join("art"),
-            thumbs: dirs.cache_dir().join("thumbs"),
-            logs: dirs.data_local_dir().join("logs"),
-            custom: dirs.data_local_dir().join("custom"),
-            tools: dirs.data_local_dir().join("tools"),
-            gog: dirs.data_local_dir().join("gog"),
-            amazon: dirs.data_local_dir().join("amazon"),
+            db: db::file_in(&data),
+            art: cache.join("art"),
+            thumbs: cache.join("thumbs"),
+            logs: data.join("logs"),
+            custom: data.join("custom"),
+            tools: data.join("tools"),
+            gog: data.join("gog"),
+            amazon: data.join("amazon"),
         }
     }
 }

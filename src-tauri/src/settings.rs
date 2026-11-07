@@ -125,7 +125,7 @@ pub fn set_signed_out(conn: &Connection, store: &str, on: bool) -> Result<(), Ms
     db::set_setting(conn, &format!("signed_out_{store}"), on.then_some("true")).map_err(Msg::from)
 }
 
-const SERVICE: &str = "dev.noah.gamelauncher";
+const SERVICE: &str = "cloud.biem.guild";
 const SECRET_USER: &str = "igdb-client-secret";
 const GRID_KEY_USER: &str = "steamgriddb";
 pub const STEAM_TOKEN_USER: &str = "steam-refresh-token";
@@ -158,6 +158,14 @@ pub fn steam_token() -> Option<String> {
 /// Saves the Steam refresh token, or deletes it for `None`. Errors never include the value.
 pub fn set_steam_token(value: Option<&str>) -> Result<(), Msg> {
     write(STEAM_TOKEN_USER, value)
+}
+
+/// Moves the secrets saved under the name before the rename (`migrate::secrets`).
+pub fn move_secrets() {
+    // `entry` registers Credential Manager as the default store first.
+    if entry(SECRET_USER).is_ok() {
+        crate::migrate::secrets(keyring_core::Entry::new, SERVICE, &[SECRET_USER, GRID_KEY_USER, STEAM_TOKEN_USER]);
+    }
 }
 
 /// Windows Credential Manager, registered once as keyring-core's default store.

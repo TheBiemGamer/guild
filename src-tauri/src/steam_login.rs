@@ -87,7 +87,7 @@ pub async fn begin(http: &reqwest::Client) -> Result<QrSession, Msg> {
     let req = CAuthentication_BeginAuthSessionViaQR_Request {
         website_id: Some("Client".into()),
         device_details: MessageField::some(CAuthentication_DeviceDetails {
-            device_friendly_name: Some("Game Launcher".into()),
+            device_friendly_name: Some("Guild".into()),
             platform_type: Some(EnumOrUnknown::new(EAuthTokenPlatformType::k_EAuthTokenPlatformType_SteamClient)),
             ..Default::default()
         }),

@@ -1,5 +1,5 @@
 ---
-name: Game Launcher
+name: Guild
 description: "A Windows desktop launcher for Steam and Epic games, in the owner's 'Ambient' look: sleek, modern, gradient."
 colors:
   bg: "#0e0e14"
@@ -160,7 +160,7 @@ components:
     rounded: "{rounded.panel}"
 ---
 
-# Design System: Game Launcher
+# Design System: Guild
 
 ## Overview
 
@@ -317,7 +317,7 @@ Top bar only, left to right (mockup v7): search, the store selector (All · the 
 40x22 pill switch, white 18% off, `accent` on, white knob; `role="switch"`.
 
 ### Tray and notifications
-- **Tray icon:** the app icon, tooltip "Game Launcher". Left-click shows and focuses the window. Menu: Open · Downloads (shows the window and opens the Downloads popover when something is downloading) · separator · Quit.
+- **Tray icon:** the app icon, tooltip "Guild". Left-click shows and focuses the window. Menu: Open · Downloads (shows the window and opens the Downloads popover when something is downloading) · separator · Quit.
 - **Close:** with "Keep running in the tray when closed" on (default) the window's close button hides it to the tray and downloads go on; off, it quits. Started by Windows, the window stays in the tray.
 - **Toasts:** a Windows toast titled with the game when a download finishes: "Ready to play" (install, Steam download), "Updated", "Files verified" or "Repaired". None for failures (shown in-app) or cancelled jobs.
 

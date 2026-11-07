@@ -101,7 +101,7 @@ impl std::error::Error for Msg {}
 /// Text shown outside the webview: window titles, the tray, toasts. Same codes and words as `msg.<code>` in the
 /// UI's language files (a test checks); a code missing from a language falls back to English.
 const EN: &[(&str, &str)] = &[
-    ("appName", "Game Launcher"),
+    ("appName", "Guild"),
     ("trayOpen", "Open"),
     ("trayDownloads", "Downloads"),
     ("trayQuit", "Quit"),
@@ -116,7 +116,7 @@ const EN: &[(&str, &str)] = &[
 
 /// Dutch, as in `src/lib/i18n/nl.json`.
 const NL: &[(&str, &str)] = &[
-    ("appName", "Game Launcher"),
+    ("appName", "Guild"),
     ("trayOpen", "Openen"),
     ("trayDownloads", "Downloads"),
     ("trayQuit", "Afsluiten"),

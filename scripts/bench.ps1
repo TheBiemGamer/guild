@@ -1,9 +1,9 @@
 # Scroll benchmark: runs the release build with LAUNCHER_BENCH, prints its frame stats and peak memory.
 #   pwsh scripts/bench.ps1 4000
-#   pwsh scripts/bench.ps1 15000 -Exe path\to\launcher.exe
+#   pwsh scripts/bench.ps1 15000 -Exe path\to\Guild.exe
 param(
   [Parameter(Mandatory)] [int]$Speed,
-  [string]$Exe = (Join-Path $PSScriptRoot '..\src-tauri\target\release\launcher.exe')
+  [string]$Exe = (Join-Path $PSScriptRoot '..\src-tauri\target\release\Guild.exe')
 )
 $ErrorActionPreference = 'Stop'
 

@@ -709,7 +709,7 @@ fn guard_store() -> impl GuardDataStore {
 async fn password_login(app: &AppHandle, generation: u64, account: &str, password: &str, handler: UiConfirmation) -> LoginStep {
     let login = async {
         let servers = ServerList::discover().await.map_err(|_| msg!(cantReachSteam))?;
-        let client = ClientInfo::new("Game Launcher".into());
+        let client = ClientInfo::new("Guild".into());
         Session::login(&servers, account, password, guard_store(), handler, &client).await.map_err(|e| login_message(&e))
     };
     let connection = match login.await {

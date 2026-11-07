@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-11-06T00:00:00.000Z",
-  "title": "Design System: Game Launcher",
+  "title": "Design System: Guild",
   "extensions": {
     "colorMeta": {
       "bg": { "role": "neutral", "displayName": "Ink Black", "canonical": "#0e0e14", "tonalRamp": ["#08080c", "#0e0e14", "#16161f", "#1f1f2a", "#2c2c3a", "#5a5c70", "#8d90a3", "#eef0f6"] },

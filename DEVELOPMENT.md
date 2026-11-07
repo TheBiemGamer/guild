@@ -1,6 +1,6 @@
 # Development
 
-Game Launcher is built with Tauri 2, Svelte 5 + TypeScript, and Rust.
+Guild is built with Tauri 2, Svelte 5 + TypeScript, and Rust.
 
 ## Build from source
 
@@ -9,7 +9,7 @@ You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) st
 ```bash
 npm install
 npm run tauri dev                       # run in development
-npm run tauri build -- --no-bundle      # release exe: src-tauri/target/release/launcher.exe
+npm run tauri build -- --no-bundle      # release exe: src-tauri/target/release/Guild.exe
 npm run tauri build                     # installer (needs the signing key, see Releasing)
 ```
 
@@ -94,7 +94,7 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, bui
 ### Each release
 
 1. `npm run bump X.Y.Z` sets the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`.
-2. Add a `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, with `### New` or `### Fixed` groups of `- ` lines. It becomes the release notes and what the app shows before updating.
+2. Add a `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, with `### New`, `### Changed` or `### Fixed` groups of `- ` lines. It becomes the release notes and what the app shows before updating.
 3. Commit, then tag and push the tag:
 
    ```bash

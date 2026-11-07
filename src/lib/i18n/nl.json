@@ -139,7 +139,7 @@
   "msg.notInQueue": "Deze game staat niet in de downloadwachtrij.",
   "msg.cantCancelInstall": "Kan de installatie niet annuleren: {detail}",
   "msg.cantPauseDownload": "Kan de download niet pauzeren: {detail}",
-  "msg.appName": "Game Launcher",
+  "msg.appName": "Guild",
   "msg.trayOpen": "Openen",
   "msg.trayDownloads": "Downloads",
   "msg.trayQuit": "Afsluiten",

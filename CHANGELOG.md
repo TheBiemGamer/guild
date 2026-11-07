@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — unreleased
+
+### Changed
+
+- The app is now called Guild. Your library, settings, logins and Start with Windows carry over the first time it starts.
+- Updating from 0.1.0 installs Guild as a new app. Afterwards, uninstall Game Launcher in Windows Settings → Apps; your library stays.
+
 ## 0.1.0 — 2026-11-07
 
 ### New

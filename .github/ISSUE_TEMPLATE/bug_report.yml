@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in the launcher doesn't work.
+description: Something in Guild doesn't work.
 body:
   - type: textarea
     id: what

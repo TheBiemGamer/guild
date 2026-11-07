@@ -139,7 +139,7 @@
   "msg.notInQueue": "This game isn't in the download queue.",
   "msg.cantCancelInstall": "Couldn't cancel the install: {detail}",
   "msg.cantPauseDownload": "Couldn't pause the download: {detail}",
-  "msg.appName": "Game Launcher",
+  "msg.appName": "Guild",
   "msg.trayOpen": "Open",
   "msg.trayDownloads": "Downloads",
   "msg.trayQuit": "Quit",

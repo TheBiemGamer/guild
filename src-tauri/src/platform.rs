@@ -60,6 +60,35 @@ pub fn gog_folder(name: &str, install: &std::path::Path) -> Option<std::path::Pa
     })
 }
 
+#[cfg(windows)]
+const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+/// Task Manager's Startup apps switch for a Run entry.
+#[cfg(windows)]
+const RUN_APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+
+/// Whether the current user's Run entry `name` is on, read as tauri-plugin-autostart reads it: on unless Task
+/// Manager's value ends in a nonzero time. `None` when there is no entry.
+#[cfg(windows)]
+pub fn autostart(name: &str) -> Option<bool> {
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    hkcu.open_subkey(RUN).and_then(|k| k.get_raw_value(name)).ok()?;
+    let approved = hkcu.open_subkey(RUN_APPROVED).and_then(|k| k.get_raw_value(name));
+    Some(approved.map_or(true, |v| v.bytes.len() < 8 || v.bytes.iter().rev().take(8).all(|b| *b == 0)))
+}
+
+/// Deletes the current user's Run entry `name` and its Task Manager switch; a missing one is fine.
+#[cfg(windows)]
+pub fn remove_autostart(name: &str) -> std::io::Result<()> {
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    for key in [RUN, RUN_APPROVED] {
+        match hkcu.open_subkey_with_flags(key, winreg::enums::KEY_SET_VALUE).and_then(|k| k.delete_value(name)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// "Windows 11 (build 26200)", from the registry; builds from 22000 on are Windows 11.
 #[cfg(windows)]
 pub fn windows_version() -> String {

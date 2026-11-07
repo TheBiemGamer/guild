@@ -19,6 +19,7 @@ mod info;
 mod library;
 mod links;
 mod log;
+mod migrate;
 mod platform;
 mod settings;
 mod steam_login;
@@ -35,6 +36,8 @@ fn main() {
     let bindings = bindings();
     #[cfg(debug_assertions)]
     export_bindings(&bindings);
+    // Before anything opens a file in the app's folder; logged once the log (in that folder) is open.
+    let moved = migrate::folder(&cache::local_app_data());
     tauri::Builder::default()
         // First, so a second launch exits before the others set anything up.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::reveal(app)))
@@ -44,9 +47,14 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::AppState::new())
         .on_window_event(tray::on_window_event)
-        .setup(|app| {
+        .setup(move |app| {
             log::init(&cache::Dirs::new().logs);
-            tracing::info!("launcher {} started on {}", app.package_info().version, platform::windows_version());
+            tracing::info!("Guild {} started on {}", app.package_info().version, platform::windows_version());
+            if let Some(moved) = moved {
+                tracing::info!("app folder: {moved}");
+            }
+            settings::move_secrets();
+            migrate::autostart(app.handle());
             commands::apply_language(app.handle());
             tray::build(app.handle())?;
             // Started by Windows: stay in the tray; neither `ready` nor the safety net shows the window.
