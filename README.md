@@ -71,7 +71,7 @@ Some of these connections aren't official and can break when a store changes som
 
 ## Thanks
 
-Guild stands on [Tauri](https://tauri.app) and [Svelte](https://svelte.dev). Epic, GOG and Amazon support exists because of [Legendary](https://github.com/derrod/legendary), [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl) and [Nile](https://github.com/imLinguin/nile), and how to drive them came from reading [Heroic Games Launcher](https://heroicgameslauncher.com). Game data and art come from [GOG GamesDB](https://gamesdb.gog.com), [IGDB](https://www.igdb.com) and [SteamGridDB](https://www.steamgriddb.com), and the store logos from [Simple Icons](https://simpleicons.org).
+Guild is built on [Tauri](https://tauri.app) and [Svelte](https://svelte.dev), with help from [Claude Code](https://claude.com/claude-code). Epic, GOG and Amazon support exists because of [Legendary](https://github.com/derrod/legendary), [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl) and [Nile](https://github.com/imLinguin/nile), and how to drive them came from reading [Heroic Games Launcher](https://heroicgameslauncher.com). Game data and art come from [GOG GamesDB](https://gamesdb.gog.com), [IGDB](https://www.igdb.com) and [SteamGridDB](https://www.steamgriddb.com), and the store logos from [Simple Icons](https://simpleicons.org).
 
 ## Contributing
 
