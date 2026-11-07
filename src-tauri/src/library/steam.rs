@@ -90,6 +90,7 @@ pub fn owned_games(owned: &[OwnedGame], librarycache: &Path) -> Vec<Game> {
                 last_played: o.last_played.map(|s| UNIX_EPOCH + Duration::from_secs(s)),
                 size_bytes: None,
                 art: art(o.appid, &librarycache.join(&id)),
+                dlc: Vec::new(),
                 external_id: id,
             }
         })
@@ -184,6 +185,20 @@ fn parse_play_stats(text: &str) -> PlayStats {
     stats
 }
 
+/// DLC app ids from PICS app info text VDF (`extended.listofdlc`, comma-separated).
+pub fn dlc_ids(appinfo_vdf: &str) -> Vec<u32> {
+    let Ok(vdf) = keyvalues_parser::parse(appinfo_vdf) else { return Vec::new() };
+    let vdf = Vdf::from(vdf);
+    let list = child(&vdf.value, "extended").and_then(|e| child(e, "listofdlc")).and_then(Value::get_str);
+    list.into_iter().flat_map(|l| l.split(',')).filter_map(|id| id.trim().parse().ok()).collect()
+}
+
+/// The app's name from PICS app info text VDF (`common.name`).
+pub fn app_name(appinfo_vdf: &str) -> Option<String> {
+    let vdf = Vdf::from(keyvalues_parser::parse(appinfo_vdf).ok()?);
+    Some(child(child(&vdf.value, "common")?, "name")?.get_str()?.to_owned())
+}
+
 /// Child value by key, ignoring case: Steam writes both "apps" and "Apps".
 pub(crate) fn child<'a>(value: &'a Value<'a>, key: &str) -> Option<&'a Value<'a>> {
     value.get_obj()?.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(key))?.1.first()
@@ -227,6 +242,7 @@ fn to_game(library: &Library, app: &App, librarycache: &Path) -> Game {
         last_played: None,
         size_bytes: app.size_on_disk.filter(|_| installed),
         art: art(app.app_id, &librarycache.join(app.app_id.to_string())),
+        dlc: Vec::new(),
     }
 }
 
@@ -270,6 +286,16 @@ fn local_art(dir: &Path) -> Art {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_dlc_list_and_name_from_app_info() {
+        let vdf = r#""appinfo" { "common" { "name" "Base Game" } "extended" { "listofdlc" "10, 20,x" } }"#;
+        assert_eq!(dlc_ids(vdf), [10, 20]);
+        assert_eq!(app_name(vdf).as_deref(), Some("Base Game"));
+        assert!(dlc_ids(r#""appinfo" { "common" { "name" "No DLC" } }"#).is_empty());
+        assert!(dlc_ids("not vdf {").is_empty());
+        assert_eq!(app_name("not vdf {"), None);
+    }
 
     fn fixtures() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/steam")

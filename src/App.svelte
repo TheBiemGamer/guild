@@ -76,23 +76,23 @@
   })
 
   /** The Epic copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
-  let confirming = $state<{ game: { key: string; title: string }; anchor: DOMRect; go: () => void } | null>(null)
+  let confirming = $state<{ game: { key: string; title: string }; anchor: DOMRect; go: (withDlc: boolean) => void } | null>(null)
 
   /** Steam installs in its own dialog; an Epic copy asks here first, with size and folder. */
-  function confirmInstall(key: string, title: string, anchor: DOMRect, go: () => void) {
+  function confirmInstall(key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) {
     if (key.startsWith('epic-')) confirming = { game: { key, title }, anchor, go }
-    else go()
+    else go(true)
   }
 
   /** `key` is the card's chosen copy. */
   function install(key: string, anchor: DOMRect) {
     const title = lib.games.find((g) => g.chosen === key)?.title ?? ''
-    confirmInstall(key, title, anchor, () => act('install', key))
+    confirmInstall(key, title, anchor, (withDlc) => act('install', key, { withDlc }))
   }
 
-  async function act(action: Action, key: string) {
+  async function act(action: Action, key: string, options: api.ActOptions = {}) {
     try {
-      await api.act(action, key)
+      await api.act(action, key, options)
     } catch (e) {
       error = api.message(e)
     }
@@ -312,10 +312,10 @@
       anchor={confirming.anchor}
       folder={settings?.epicInstallDir}
       oncancel={() => (confirming = null)}
-      onconfirm={() => {
+      onconfirm={(withDlc) => {
         const { go } = confirming!
         confirming = null
-        go()
+        go(withDlc)
       }}
     />
     {/key}

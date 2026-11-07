@@ -39,7 +39,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './api'
-  import type { Action, Detail, GameInfo, LinkKind, Progress, TimeToBeat } from './api'
+  import type { ActOptions, Action, Detail, Dlc, GameInfo, LinkKind, Progress, TimeToBeat } from './api'
   import PlayButton from './PlayButton.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
@@ -57,7 +57,7 @@
     /** This game's art for the window tint; null when it has none. */
     ontint: (url: string | null) => void
     /** Install through the library's flow: an Epic copy asks in the install popup first, then calls `go`. */
-    onconfirminstall: (key: string, title: string, anchor: DOMRect, go: () => void) => void
+    onconfirminstall: (key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) => void
   } = $props()
 
   // undefined: still loading. null: the answer is "none".
@@ -68,6 +68,7 @@
   /** Local screenshot URLs; undefined while downloading, when their slots stay reserved. */
   let shots = $state<string[] | undefined>(undefined)
   let ttb = $state<TimeToBeat | null | undefined>(undefined)
+  let dlcs = $state<Dlc[]>([])
   let busy = $state<string | null>(null)
   let confirming = $state(false)
   let menuOpen = $state(false)
@@ -87,6 +88,7 @@
     if (!active || active === document.body) target()?.focus()
   }
 
+  let dlcFor = ''
   // Each answer lands only if this is still the game asked about.
   $effect(() => {
     const key = gameKey
@@ -95,6 +97,13 @@
     api.game(key).then(
       (g) => alive && (game = g),
       (e) => alive && onerror(api.message(e)),
+    )
+    // Asked again after each reload, for the DLC's installed state; another game's list is cleared at once.
+    if (key !== dlcFor) dlcs = []
+    dlcFor = key
+    api.dlc(key).then(
+      (d) => alive && (dlcs = d),
+      () => {},
     )
     return () => {
       alive = false
@@ -154,13 +163,13 @@
 
   const labels: Record<Action, string> = { play: 'Launching…', install: 'Installing…', uninstall: 'Uninstalling…' }
 
-  async function act(action: Action, key = copy!.key) {
+  async function act(action: Action, key = copy!.key, options: ActOptions = {}) {
     confirming = false
     menuOpen = false
     busy = labels[action]
     keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
     try {
-      await api.act(action, key)
+      await api.act(action, key, options)
     } catch (e) {
       onerror(api.message(e))
     } finally {
@@ -364,7 +373,9 @@
                 onplay={() => act('play')}
                 oninstall={() => {
                   const key = copy!.key // the copy shown when the popup opens, not when it is confirmed
-                  onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), () => act('install', key))
+                  onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), (withDlc) =>
+                    act('install', key, { withDlc }),
+                  )
                 }}
               />
               {#if busy === 'Installing…' && copy!.provider === 'epic'}
@@ -450,6 +461,28 @@
               {@render chips('Store pages', storeLinks)}
               {@render chips('Info', infoLinks)}
             </dl>
+            {#if dlcs.length}
+              <h2 class="sub">DLC</h2>
+              <ul class="dlc">
+                {#each dlcs as d (`${d.copy}|${d.id}`)}
+                  <li>
+                    <span class="dlc-title">{d.title}</span>
+                    <span class="dlc-state">{d.installed ? 'Installed' : 'Not installed'}</span>
+                    <!-- Legendary adds a DLC to an installed game only. -->
+                    {#if d.copy && !busy && game.copies.find((c) => c.key === d.copy)?.installed}
+                      <button
+                        class="chip"
+                        class:danger={d.installed}
+                        aria-label="{d.installed ? 'Uninstall' : 'Install'} {d.title}"
+                        onclick={() => act(d.installed ? 'uninstall' : 'install', d.copy!, { dlc: d.id })}
+                      >
+                        {d.installed ? 'Uninstall' : 'Install'}
+                      </button>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
           </section>
         {/if}
       </div>
@@ -879,6 +912,37 @@
 
   .path {
     overflow-wrap: anywhere;
+  }
+
+  .panel h2.sub {
+    margin: 16px 0 8px;
+  }
+
+  .dlc {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .dlc li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+  }
+
+  .dlc-title {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .dlc-state {
+    flex: none;
+    font-size: 12px;
+    color: var(--text-2);
   }
 
   .gone {

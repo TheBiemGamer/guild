@@ -86,6 +86,17 @@ pub struct Game {
     /// Bytes on disk for an installed game; `None` until measured.
     pub size_bytes: Option<u64>,
     pub art: Art,
+    /// Owned DLC whose base game this is. Only Epic fills it; Steam's comes from the `dlc` command.
+    // shortcut: not saved in SQLite, so it is empty until the first Epic scan after startup.
+    pub dlc: Vec<Dlc>,
+}
+
+/// A DLC under its base game. `id` is the store's id for it (Legendary's app name).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dlc {
+    pub id: String,
+    pub title: String,
+    pub installed: bool,
 }
 
 impl Game {

@@ -6,7 +6,7 @@
 //! - `list-installed --json`: `[{app_name, title, install_path, …}]`
 //! - `status --json`: `{account: "<not logged in>" | name, …}`
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-use super::{Art, CREATE_NO_WINDOW, Error, Game, Image, Progress, Provider, ProviderKind};
+use super::{Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, Provider, ProviderKind};
 
 /// What a running install reports back.
 #[derive(Debug, Clone)]
@@ -49,11 +49,11 @@ impl Provider for Epic {
     }
 
     fn install(&self, game: &Game) -> Result<(), Error> {
-        install(game, None, |_| {})
+        install(&game.external_id, true, None, |_| {})
     }
 
     fn uninstall(&self, game: &Game) -> Result<(), Error> {
-        run(legendary(&["-y", "uninstall", &game.external_id]))
+        uninstall(&game.external_id)
     }
 
     /// Epic has no RunningAppID: the app watches the process of games it launched (`executable`).
@@ -67,11 +67,18 @@ impl Provider for Epic {
     }
 }
 
-/// Runs a hidden `legendary install`, reporting its pid and progress as they come.
-/// Returns once the download ends; killing the pid (see `cancel`) ends it with an error.
-/// Installs under `base_path` when given, else in Legendary's default folder.
-pub fn install(game: &Game, base_path: Option<&Path>, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
-    let mut command = legendary(&["-y", "install", &game.external_id, "--skip-sdl"]);
+/// Runs a hidden `legendary install` of a game or a DLC (Legendary's app name), reporting its pid and
+/// progress as they come. Returns once the download ends; killing the pid (see `cancel`) ends it with an error.
+/// Installs under `base_path` when given, else in Legendary's default folder; a DLC goes into its game's folder.
+/// `with_dlc` installs the game's owned DLC too (Legendary 0.20: `--with-dlcs` / `--skip-dlcs`).
+pub fn install(
+    app_name: &str,
+    with_dlc: bool,
+    base_path: Option<&Path>,
+    mut on_event: impl FnMut(InstallEvent),
+) -> Result<(), Error> {
+    let dlc = if with_dlc { "--with-dlcs" } else { "--skip-dlcs" };
+    let mut command = legendary(&["-y", "install", app_name, "--skip-sdl", dlc]);
     if let Some(dir) = base_path {
         command.arg("--base-path").arg(dir);
     }
@@ -92,6 +99,11 @@ pub fn install(game: &Game, base_path: Option<&Path>, mut on_event: impl FnMut(I
     }
     let status = child.wait()?;
     if status.success() { Ok(()) } else { Err(format!("Legendary install failed ({status}): {last_line}").into()) }
+}
+
+/// Uninstalls a game or a DLC (Legendary's app name).
+pub fn uninstall(app_name: &str) -> Result<(), Error> {
+    run(legendary(&["-y", "uninstall", app_name]))
 }
 
 /// Stops an install started by `install`, including Legendary's download worker processes.
@@ -247,14 +259,34 @@ fn is_game(item: &Value) -> bool {
 
 /// Owned games, marked installed where Legendary has them, plus installed items missing
 /// from the owned list (e.g. imported ones). Owned items that aren't games are left out unless
-/// installed, so nothing installed disappears.
+/// installed, so nothing installed disappears. A DLC (`addons`) goes under its base game, found by
+/// the catalog id in its `mainGameItem`; one whose base isn't owned is left out like other non-games.
 fn games(owned: &Value, installed: &Value) -> Vec<Game> {
     let mut installed: HashMap<&str, &Value> =
         installed.as_array().into_iter().flatten().filter_map(|g| Some((g["app_name"].as_str()?, g))).collect();
-    let mut games: Vec<Game> = owned
+    // `list --json` nests DLC in its base game's `dlcs`; flattened, the catalog id finds the base either way.
+    let items: Vec<&Value> = owned
         .as_array()
         .into_iter()
         .flatten()
+        .flat_map(|g| std::iter::once(g).chain(g["dlcs"].as_array().into_iter().flatten()))
+        .collect();
+    let catalog_ids: HashSet<&str> = items.iter().filter_map(|g| g["metadata"]["id"].as_str()).collect();
+    let mut dlc: HashMap<&str, Vec<Dlc>> = HashMap::new();
+    let items: Vec<&Value> = items
+        .into_iter()
+        .filter(|g| {
+            let base = g["metadata"]["mainGameItem"]["id"].as_str().filter(|id| catalog_ids.contains(id));
+            let (Some(name), Some(base), true) = (g["app_name"].as_str(), base, has_category(g, "addons")) else {
+                return true;
+            };
+            let title = g["app_title"].as_str().unwrap_or(name).to_owned();
+            dlc.entry(base).or_default().push(Dlc { id: name.to_owned(), title, installed: installed.remove(name).is_some() });
+            false
+        })
+        .collect();
+    let mut games: Vec<Game> = items
+        .into_iter()
         .filter_map(|g| {
             let name = g["app_name"].as_str()?;
             let local = installed.remove(name);
@@ -262,7 +294,10 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
                 return None;
             }
             let title = g["app_title"].as_str().or(local.and_then(|l| l["title"].as_str())).unwrap_or(name);
-            Some(game(name, title, local, art(&g["metadata"])))
+            let mut game = game(name, title, local, art(&g["metadata"]));
+            game.dlc = g["metadata"]["id"].as_str().and_then(|id| dlc.remove(id)).unwrap_or_default();
+            game.dlc.sort_by(|a, b| a.title.cmp(&b.title));
+            Some(game)
         })
         .collect();
     games.extend(installed.into_iter().map(|(name, local)| {
@@ -283,6 +318,7 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         last_played: None,
         size_bytes: installed.and_then(|l| l["install_size"].as_u64()),
         art,
+        dlc: Vec::new(),
     }
 }
 
@@ -371,6 +407,40 @@ mod tests {
         assert!(spotify.installed);
         assert_eq!(spotify.title, "Spotify Music and Podcasts");
         assert_eq!(all.len(), 2);
+    }
+
+    const LONESOME_ROAD: &str = "4fa3d8d9b2cb4714a19a38d1a598be8f";
+
+    fn lonesome_road(installed: bool) -> Dlc {
+        Dlc { id: LONESOME_ROAD.into(), title: "Fallout New Vegas®: Lonesome Road™".into(), installed }
+    }
+
+    #[test]
+    fn addon_attaches_to_its_base_game() {
+        assert_eq!(games(&categories(), &Value::Null)[0].dlc, [lonesome_road(false)]);
+
+        // Installed, it shows as installed under its game, not as a game of its own.
+        let installed = serde_json::json!([{ "app_name": LONESOME_ROAD, "title": "Lonesome Road", "is_dlc": true }]);
+        let all = games(&categories(), &installed);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].dlc, [lonesome_road(true)]);
+
+        // `list --json` nests DLC under its base game's `dlcs`.
+        let mut list = categories();
+        let dlc = list.as_array_mut().unwrap().remove(1);
+        list[0]["dlcs"] = serde_json::json!([dlc]);
+        assert_eq!(games(&list, &Value::Null)[0].dlc, [lonesome_road(false)]);
+    }
+
+    #[test]
+    fn dlc_without_base_in_library_is_hidden() {
+        const SAND_PATCH: &str = "0e07b42c0ffe4cfdb2095568f461f38f";
+        let all = games(&categories(), &Value::Null);
+        assert!(all.iter().all(|g| g.external_id != SAND_PATCH && g.dlc.iter().all(|d| d.id != SAND_PATCH)));
+
+        // Installed, it stays as its own entry: nothing installed disappears.
+        let installed = serde_json::json!([{ "app_name": SAND_PATCH, "title": "Sand Patch Grade", "is_dlc": true }]);
+        assert!(games(&categories(), &installed).iter().any(|g| g.external_id == SAND_PATCH));
     }
 
     #[test]

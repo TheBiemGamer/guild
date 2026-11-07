@@ -75,6 +75,7 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
             last_played: r.get::<_, Option<i64>>(6)?.map(|s| UNIX_EPOCH + Duration::from_secs(s as u64)),
             size_bytes: r.get::<_, Option<i64>>(15)?.map(|b| b as u64),
             art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)?, logo: image(r, 13)? },
+            dlc: Vec::new(),
         }))
     })?;
     // Rows from an unknown provider (e.g. written by a newer build) are skipped.
@@ -197,6 +198,7 @@ mod tests {
                 logo: Image { path: None, url: Some("https://x/l.png".into()) },
                 ..Art::default()
             },
+            dlc: Vec::new(),
         }
     }
 

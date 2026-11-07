@@ -9,7 +9,8 @@
     anchor: DOMRect
     /** The saved install folder; null means Legendary's own, undefined that settings aren't read yet. */
     folder: string | null | undefined
-    onconfirm: () => void
+    /** `withDlc`: the "Include DLC" box, on by default. */
+    onconfirm: (withDlc: boolean) => void
     oncancel: () => void
   } = $props()
 
@@ -21,6 +22,7 @@
   let height = $state(0)
   /** undefined while Legendary is looking it up, null when it couldn't tell. */
   let size = $state<string | null | undefined>(undefined)
+  let withDlc = $state(true)
 
   // Right of the cover, or left when the window's edge is in the way; kept inside the window.
   const x = $derived(
@@ -70,8 +72,9 @@
   <h4>Install {game.title}?</h4>
   <p>{size === undefined ? 'Checking size…' : size === null ? 'Size unavailable' : `${size} download`}</p>
   <p class="folder">{folder === undefined ? '' : `To ${folder ?? "Legendary's default folder"}`}</p>
+  <label class="dlc"><input type="checkbox" bind:checked={withDlc} />Include DLC</label>
   <div class="buttons">
-    <button class="pill" bind:this={installButton} onclick={onconfirm}>Install</button>
+    <button class="pill" bind:this={installButton} onclick={() => onconfirm(withDlc)}>Install</button>
     <button class="glass" onclick={oncancel}>Cancel</button>
   </div>
 </div>
@@ -105,6 +108,23 @@
   .folder {
     min-height: 1.4em;
     overflow-wrap: anywhere;
+  }
+
+  .dlc {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+    margin-top: 4px;
+    font-size: 14px;
+    color: var(--text-2);
+  }
+
+  .dlc input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
   }
 
   .buttons {

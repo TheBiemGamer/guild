@@ -84,7 +84,13 @@ export const loadCache = () => invoke<void>('load_cache')
 /** `owned` forces a fresh owned-games fetch; without it the 6 h rule applies. Resolves to whether the library changed. */
 export const refresh = (epic: boolean, owned: boolean) => invoke<boolean>('refresh', { epic, owned })
 export const game = (key: string) => invoke<Detail | null>('game', { key })
-export const act = (action: Action, key: string) => invoke<void>('act', { action, key })
+/** `withDlc`: an Epic install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the Epic copy `key`. */
+export interface ActOptions { withDlc?: boolean; dlc?: string }
+export const act = (action: Action, key: string, options: ActOptions = {}) => invoke<void>('act', { action, key, ...options })
+/** A DLC under its game. `copy` is the Epic copy's key for Install and Uninstall; null for Steam, which installs DLC itself. */
+export interface Dlc { id: string; title: string; installed: boolean; copy: string | null }
+/** The game's owned DLC: Epic's from the library, Steam's asked from Steam (connected account only, cached). */
+export const dlc = (key: string) => invoke<Dlc[]>('dlc', { key })
 /** Epic download size like "27.3 GB" (asks Legendary online, cached); null when unknown. */
 export const downloadSize = (key: string) => remembered('size', key, () => invoke<string | null>('download_size', { key }))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */

@@ -39,6 +39,7 @@ fn main() {
             commands::game::detail_art,
             commands::game::act,
             commands::game::download_size,
+            commands::game::dlc,
             commands::game::game_info,
             commands::game::screenshots,
             commands::game::time_to_beat,

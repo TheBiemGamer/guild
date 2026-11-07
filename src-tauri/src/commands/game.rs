@@ -161,14 +161,21 @@ pub enum Action {
 }
 
 /// Steam requests return at once (Steam shows its own dialogs). Epic requests return when
-/// Legendary is done; installs report progress through `poll` meanwhile.
+/// Legendary is done; installs report progress through `poll` meanwhile, under the game's key.
+/// `with_dlc` (Epic install, default on) installs the owned DLC too. `dlc` installs or uninstalls
+/// one DLC of the Epic copy `key` instead of the game.
 #[tauri::command]
-pub async fn act(app: AppHandle, action: Action, key: String) -> Res<()> {
+pub async fn act(app: AppHandle, action: Action, key: String, with_dlc: Option<bool>, dlc: Option<String>) -> Res<()> {
     let game = app.state::<AppState>().game(&key).ok_or("This game is no longer in the library.")?;
-    blocking(move || act_blocking(&app, action, &game)).await
+    if let Some(id) = &dlc
+        && (action == Action::Play || !game.dlc.iter().any(|d| &d.id == id))
+    {
+        return Err("This DLC is no longer in the library.".into());
+    }
+    blocking(move || act_blocking(&app, action, &game, with_dlc.unwrap_or(true), dlc.as_deref())).await
 }
 
-fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
+fn act_blocking(app: &AppHandle, action: Action, game: &Game, with_dlc: bool, dlc: Option<&str>) -> Res<()> {
     let state = app.state::<AppState>();
     let key = game.key();
     let store = game.provider.provider();
@@ -195,7 +202,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
         }),
         Action::Install => {
             let base = open_db(&state).map(|c| settings::load(&c).epic_install_dir).unwrap_or_default();
-            let result = epic::install(game, base.as_deref(), |event| {
+            let result = epic::install(dlc.unwrap_or(&game.external_id), with_dlc, base.as_deref(), |event| {
                 let mut s = state.lock();
                 match event {
                     InstallEvent::Started(pid) => _ = s.install_pids.insert(key.clone(), pid),
@@ -208,7 +215,7 @@ fn act_blocking(app: &AppHandle, action: Action, game: &Game) -> Res<()> {
             // A cancelled install fails by design; don't report it.
             if s.cancelled.remove(&key) { Ok(()) } else { result }
         }
-        Action::Uninstall => store.uninstall(game),
+        Action::Uninstall => epic::uninstall(dlc.unwrap_or(&game.external_id)),
     };
     if action != Action::Play {
         rescan(app, true);
@@ -242,12 +249,8 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
                     .ok()
                     .flatten()
             });
-            // Never connected: no reason to touch Credential Manager.
             let token = match (&fresh, steam_id, conn.as_ref()) {
-                (None, Some(_), Some(c)) => cache::db::setting(c, settings::STEAM_ACCOUNT)
-                    .ok()
-                    .flatten()
-                    .and_then(|_| settings::steam_token()),
+                (None, Some(_), Some(c)) => steam_token(c),
                 _ => None,
             };
             (fresh, token)
@@ -295,6 +298,95 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<String> {
         }
     };
     bytes.parse().ok().map(view::size_label)
+}
+
+/// The saved Steam token. Never connected: no reason to touch Credential Manager.
+fn steam_token(conn: &Connection) -> Option<String> {
+    cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().and_then(|_| settings::steam_token())
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DlcView {
+    id: String,
+    title: String,
+    installed: bool,
+    /// The Epic copy's key, for Install and Uninstall; `None` for Steam, which installs DLC itself.
+    copy: Option<String>,
+}
+
+/// Info cache kind for a Steam copy's owned DLC, as JSON `[[appid, name], ...]`.
+const DLC: &str = "dlc";
+
+/// DLC for the game page: an Epic copy's from the library scan, then a Steam copy's owned DLC
+/// (asked from Steam, which logs on, so only with a connected account; cached a week). A Steam DLC
+/// named like an Epic one is shown once. Failures leave the Steam part out.
+#[tauri::command]
+pub async fn dlc(app: AppHandle, key: String) -> Vec<DlcView> {
+    let (mut rows, steam) = {
+        let state = app.state::<AppState>();
+        let s = state.lock();
+        let Some(entry) = entries::find(&s.entries, &s.games, &key) else { return Vec::new() };
+        let copies: Vec<&Game> = entry.copies.iter().map(|&i| &s.games[i]).collect();
+        (epic_dlc(&copies), copies.iter().find(|g| g.provider == ProviderKind::Steam).map(|g| (g.key(), g.installed)))
+    };
+    let Some((steam_key, installed)) = steam else { return rows };
+    for (id, title) in steam_dlc(&app, steam_key).await.unwrap_or_default() {
+        if !rows.iter().any(|r| r.title.eq_ignore_ascii_case(&title)) {
+            // shortcut: Steam installs owned DLC with the game, so a Steam DLC counts as installed with it.
+            rows.push(DlcView { id: id.to_string(), title, installed, copy: None });
+        }
+    }
+    rows
+}
+
+fn epic_dlc(copies: &[&Game]) -> Vec<DlcView> {
+    copies
+        .iter()
+        .flat_map(|g| {
+            g.dlc.iter().map(|d| DlcView {
+                id: d.id.clone(),
+                title: d.title.clone(),
+                installed: d.installed,
+                copy: Some(g.key()),
+            })
+        })
+        .collect()
+}
+
+/// A Steam copy's owned DLC as (app id, name): cached, else fetched with one Steam logon at a time.
+async fn steam_dlc(app: &AppHandle, key: String) -> Option<Vec<(u32, String)>> {
+    let appid: u32 = key.strip_prefix("steam-")?.parse().ok()?;
+    let (cached, token) = blocking({
+        let (app, key) = (app.clone(), key.clone());
+        move || {
+            let conn = open_db(&app.state::<AppState>())?;
+            Some(match cache::db::cached_info(&conn, &key, DLC, INFO_MAX_AGE_SECS, unix_now()).ok().flatten() {
+                Some(json) => (Some(json), None),
+                None => (None, steam_token(&conn)),
+            })
+        }
+    })
+    .await?;
+    if let Some(json) = cached {
+        return serde_json::from_str(&json).ok();
+    }
+    let list = {
+        let state = app.state::<AppState>();
+        let _one = state.steam_size.lock().await;
+        steam_size::fetch_owned_dlc(&token?, appid).await
+    }
+    .inspect_err(|e| eprintln!("steam dlc {key}: {e}"))
+    .ok()?;
+    let json = serde_json::to_string(&list).ok()?;
+    let app = app.clone();
+    blocking(move || {
+        if let Some(c) = open_db(&app.state::<AppState>()) {
+            _ = cache::db::put_info(&c, &key, DLC, &json, unix_now());
+        }
+    })
+    .await;
+    Some(list)
 }
 
 /// Steam `appdetails` JSON for an app, cached as `steam-<appid>` (the same entry a Steam copy uses).
@@ -580,6 +672,17 @@ mod tests {
     fn pumpkin_detail(games: &[Game], twins: &HashMap<String, u32>) -> Detail {
         let entries = entries::group(games, twins);
         detail(&entries[0], games, twins, UNIX_EPOCH + Duration::from_secs(1_000 * 86_400))
+    }
+
+    #[test]
+    fn epic_dlc_rows_carry_their_copy_key() {
+        let mut games = pumpkin(None, None);
+        games[0].dlc = vec![crate::library::Dlc { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: true }];
+        let rows = epic_dlc(&games.iter().collect::<Vec<_>>());
+        assert_eq!(
+            rows,
+            [DlcView { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: true, copy: Some("epic-Pumpkin".into()) }]
+        );
     }
 
     #[test]

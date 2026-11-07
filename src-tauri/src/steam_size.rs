@@ -1,15 +1,16 @@
-//! Download size of a Steam game that isn't installed, from its app info (PICS) on Steam's servers.
+//! Download size and owned DLC of a Steam game, from its app info (PICS) on Steam's servers.
 
 use std::time::Duration;
 
 use keyvalues_parser::Vdf;
-use steam_vent::ConnectionTrait;
+use steam_vent::{Connection as Session, ConnectionTrait};
 use steam_vent_proto_steam::steammessages_clientserver_appinfo::{
     CMsgClientPICSProductInfoRequest, CMsgClientPICSProductInfoResponse,
     cmsg_client_picsproduct_info_request::AppInfo,
 };
+use steam_vent_proto_steam::steammessages_store_steamclient::CStore_GetUserGameInterestState_Request;
 
-use crate::library::steam::child;
+use crate::library::steam::{self, child};
 use crate::steam_owned;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -52,34 +53,74 @@ pub fn parse_download_size(appinfo_vdf: &str) -> Option<u64> {
 /// connection when done.
 pub async fn fetch_appinfo(token: &str, appid: u32) -> Result<String, String> {
     tokio::time::timeout(TIMEOUT, async {
-        let session = steam_owned::connect(token)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
-        let request = CMsgClientPICSProductInfoRequest {
-            apps: vec![AppInfo {
-                appid: Some(appid),
-                only_public_obsolete: Some(true),
-                ..Default::default()
-            }],
-            meta_data_only: Some(false),
-            single_response: Some(true),
-            ..Default::default()
-        };
-        let response: CMsgClientPICSProductInfoResponse =
-            session.job(request).await.map_err(|e| e.to_string())?;
-        let buffer = response
-            .apps
-            .first()
-            .and_then(|a| a.buffer.as_deref())
-            .ok_or("no app info")?;
-        // The buffer is text VDF with a trailing NUL.
-        Ok(String::from_utf8_lossy(buffer)
-            .trim()
-            .trim_matches('\0')
-            .to_owned())
+        let session = steam_owned::connect(token).await.map_err(|e| format!("{e:?}"))?;
+        let (_, vdf) = appinfo(&session, vec![appid]).await?.into_iter().next().ok_or("no app info")?;
+        Ok(vdf)
     })
     .await
     .unwrap_or_else(|_| Err("timed out".into()))
+}
+
+/// The DLC of `appid` this account owns, as (app id, name), in Steam's order. Steam's own clients
+/// list a game's DLC in its app info (`extended.listofdlc`) and the store says per app whether the
+/// account owns it (`Store.GetUserGameInterestState`, asked side by side). One logon, dropped when done.
+pub async fn fetch_owned_dlc(token: &str, appid: u32) -> Result<Vec<(u32, String)>, String> {
+    tokio::time::timeout(TIMEOUT, async {
+        let session = steam_owned::connect(token).await.map_err(|e| format!("{e:?}"))?;
+        let base = appinfo(&session, vec![appid]).await?;
+        let checks: Vec<_> = base
+            .first()
+            .map(|(_, vdf)| steam::dlc_ids(vdf))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| {
+                let session = session.clone();
+                tauri::async_runtime::spawn(async move {
+                    let request = CStore_GetUserGameInterestState_Request { appid: Some(id), ..Default::default() };
+                    session.service_method(request).await.map(|r| (id, r.owned()))
+                })
+            })
+            .collect();
+        let mut owned = Vec::new();
+        for check in checks {
+            // One unanswered check would silently drop a DLC; fail so nothing wrong is cached.
+            let (id, is_owned) = check.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+            if is_owned {
+                owned.push(id);
+            }
+        }
+        if owned.is_empty() {
+            return Ok(Vec::new());
+        }
+        let names: std::collections::HashMap<u32, String> = appinfo(&session, owned.clone())
+            .await?
+            .into_iter()
+            .filter_map(|(id, vdf)| Some((id, steam::app_name(&vdf)?)))
+            .collect();
+        Ok(owned.into_iter().filter_map(|id| Some((id, names.get(&id)?.clone()))).collect())
+    })
+    .await
+    .unwrap_or_else(|_| Err("timed out".into()))
+}
+
+/// Public PICS app info for `appids` as (app id, text VDF), in one request.
+async fn appinfo(session: &Session, appids: Vec<u32>) -> Result<Vec<(u32, String)>, String> {
+    let request = CMsgClientPICSProductInfoRequest {
+        apps: appids
+            .into_iter()
+            .map(|appid| AppInfo { appid: Some(appid), only_public_obsolete: Some(true), ..Default::default() })
+            .collect(),
+        meta_data_only: Some(false),
+        single_response: Some(true),
+        ..Default::default()
+    };
+    let response: CMsgClientPICSProductInfoResponse = session.job(request).await.map_err(|e| e.to_string())?;
+    // Each buffer is text VDF with a trailing NUL.
+    Ok(response
+        .apps
+        .iter()
+        .filter_map(|a| Some((a.appid(), String::from_utf8_lossy(a.buffer.as_deref()?).trim().trim_matches('\0').to_owned())))
+        .collect())
 }
 
 #[cfg(test)]

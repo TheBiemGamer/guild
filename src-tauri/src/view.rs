@@ -127,6 +127,7 @@ pub(crate) mod tests {
             last_played: last.map(|s| UNIX_EPOCH + Duration::from_secs(s)),
             size_bytes: None,
             art: Art::default(),
+            dlc: Vec::new(),
         }
     }
 
