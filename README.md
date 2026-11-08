@@ -26,7 +26,7 @@ You can sort by title, recent play, playtime or length, filter by store and inst
 
 ## Install
 
-Download `x64-setup.exe` from the [latest release](https://github.com/TheBiemGamer/game-launcher/releases/latest) and run it. It installs for your Windows user only, so it doesn't ask for admin rights.
+Download the file ending in `x64-setup.exe` from the [latest release](https://github.com/TheBiemGamer/game-launcher/releases/latest) and run it. It installs for your Windows user only, so it doesn't ask for admin rights.
 
 Guild isn't code-signed yet, so Windows SmartScreen may warn you the first time. Click More info, then Run anyway. After that, Guild tells you when there's a new version and installs it when you say so.
 
@@ -67,7 +67,7 @@ Your library, settings and play history stay on your PC in `%LOCALAPPDATA%\Guild
 - IGDB and SteamGridDB, only if you add their keys
 - GitHub, to check for Guild updates and to download a store tool when you ask for it
 
-Some of these connections aren't official and can break when a store changes something. When one fails, a dot shows on the Settings button.
+Some of these connections aren't official and can break when a store changes something. When a store login stops working, a dot shows on the Settings button.
 
 ## Thanks
 

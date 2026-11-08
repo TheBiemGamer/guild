@@ -101,16 +101,16 @@ pub fn default_copy(entry: &Entry, games: &[Game]) -> usize {
     best
 }
 
-/// Known minutes summed over the copies, and whether more than one copy contributed.
-pub fn playtime(entry: &Entry, games: &[Game]) -> (Option<u64>, bool) {
-    let known: Vec<u64> = entry
+/// Known minutes summed over the copies, and the stores of the copies that contributed.
+pub fn playtime(entry: &Entry, games: &[Game]) -> (Option<u64>, Vec<ProviderKind>) {
+    let known: Vec<(u64, ProviderKind)> = entry
         .copies
         .iter()
-        .filter_map(|&i| games[i].playtime_minutes)
+        .filter_map(|&i| Some((games[i].playtime_minutes?, games[i].provider)))
         .collect();
     (
-        (!known.is_empty()).then(|| known.iter().sum()),
-        known.len() > 1,
+        (!known.is_empty()).then(|| known.iter().map(|&(m, _)| m).sum()),
+        known.into_iter().map(|(_, p)| p).collect(),
     )
 }
 
@@ -486,16 +486,22 @@ mod tests {
     }
 
     #[test]
-    fn playtime_sums_and_flags_both_stores() {
+    fn playtime_sums_and_names_the_stores() {
         let (mut games, twins) = pumpkin();
         let entry = group(&games, &twins).remove(0);
         games[1].playtime_minutes = Some(120);
         games[0].playtime_minutes = Some(30);
-        assert_eq!(playtime(&entry, &games), (Some(150), true));
+        assert_eq!(
+            playtime(&entry, &games),
+            (Some(150), vec![ProviderKind::Steam, ProviderKind::Epic])
+        );
         games[0].playtime_minutes = None;
-        assert_eq!(playtime(&entry, &games), (Some(120), false));
+        assert_eq!(
+            playtime(&entry, &games),
+            (Some(120), vec![ProviderKind::Steam])
+        );
         games[1].playtime_minutes = None;
-        assert_eq!(playtime(&entry, &games), (None, false));
+        assert_eq!(playtime(&entry, &games), (None, vec![]));
     }
 
     #[test]

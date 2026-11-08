@@ -96,9 +96,9 @@
 </script>
 
 <div class="pop" role="dialog" aria-label={t('filters.title')} tabindex="-1" use:popover={{ anchor, close: onclose }}>
-  {#each groups as group (group.label)}
-    <h3 id="filter-{group.label}">{group.label}</h3>
-    <div class="toggles" role="group" aria-labelledby="filter-{group.label}">
+  {#each groups as group, i (group.label)}
+    <h3 id="filter-group-{i}">{group.label}</h3>
+    <div class="toggles" role="group" aria-labelledby="filter-group-{i}">
       {#each group.filters as f (f)}
         <button aria-pressed={filters.includes(f)} onclick={() => (filters = toggleFilter(filters, f))}>{filterName(f, collections)}</button>
       {/each}
@@ -126,14 +126,20 @@
               onblur={() => saveRename(c)}
             />
           {:else}
-            <button class="name" data-name={c.id} title={t('filters.rename')} onclick={() => startRename(c)}>{c.name}</button>
+            <button
+              class="name"
+              data-name={c.id}
+              title={t('filters.rename')}
+              aria-label={t('filters.renameNamed', { name: c.name })}
+              onclick={() => startRename(c)}>{c.name}</button
+            >
             <button class="x" data-delete={c.id} aria-label={t('filters.deleteNamed', { name: c.name })} onclick={() => askDelete(c)}>✕</button>
           {/if}
         </div>
       {:else}
         <p class="note">{t('filters.noCollections')}</p>
       {/each}
-      {#if problem}<p class="note problem" title={problem}>{problem}</p>{/if}
+      {#if problem}<p class="note problem" role="alert" title={problem}>{problem}</p>{/if}
     </div>
   {/if}
 </div>
@@ -149,7 +155,7 @@
     border-radius: 12px;
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
   }
 
   .pop:focus-visible {

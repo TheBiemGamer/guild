@@ -216,6 +216,27 @@
     await reload()
   }
 
+  /** Legendary's install from the empty Epic library: null when idle, else its percent once known. */
+  let legendaryJob = $state<{ percent: number | null } | null>(null)
+
+  async function installLegendary() {
+    legendaryJob = { percent: null }
+    try {
+      await api.installTool('legendary', (percent) => (legendaryJob = { percent }))
+    } catch (e) {
+      error = api.message(e)
+    }
+    legendaryJob = null
+    await reload()
+  }
+
+  function clearSearchAndFilters() {
+    query = ''
+    store = null
+    installedOnly = false
+    filters = []
+  }
+
   async function logIn() {
     loggingIn = true
     try {
@@ -461,6 +482,10 @@
   const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + (view.sections ? 0 : LABEL_H))
   /** The Epic filter with no Epic games at all: say why and offer the fix. */
   const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
+  /** Store, Installed or a Filters filter is on. */
+  const filtered = $derived(store !== null || installedOnly || filters.length > 0)
+  /** A finished scan found nothing: Rust's lone "no games found" status. */
+  const noGames = $derived(lib.total === 0 && lib.status.length === 1 && lib.status[0].code === 'noGamesFound')
 </script>
 
 <svelte:window onmouseup={mouseNav} onauxclick={mouseNav} />
@@ -500,7 +525,7 @@
   {#if updatedTo}
     {@const notes = installedNotes(updatedTo)}
     {@const [before, after] = around('app.updatedTo', 'version')}
-    <div class="notice">
+    <div class="notice" role="status">
       <span>{before}<b>{updatedTo}</b>{after}</span>
       {#if notes}
         <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
@@ -520,14 +545,14 @@
     </div>
   {/if}
   {#if lib.epicNotice}
-    <div class="notice">
+    <div class="notice" role="status">
       <span>{t('app.epicLoggedOut')}</span>
       <button class="glass" onclick={() => openSettings()}>{t('toolbar.settings')}</button>
       <button class="close" onclick={dismissNotice} aria-label={t('common.dismiss')}>✕</button>
     </div>
   {/if}
   {#if error}
-    <div class="notice error">
+    <div class="notice error" role="alert">
       <span>{error}</span>
       <button class="close" onclick={() => (error = null)} aria-label={t('common.dismiss')}>✕</button>
     </div>
@@ -594,6 +619,13 @@
         <div class="empty">
           <p>{t('app.noLegendary')}</p>
           <small>{t('app.noLegendaryHint')}</small>
+          <div class="actions">
+            <button class="pill" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
+              {#if legendaryJob === null}{t('settings.installTool', { tool: 'Legendary' })}
+              {:else if legendaryJob.percent === null}{t('settings.job.install')}
+              {:else}{t('settings.job.installPercent', { percent: legendaryJob.percent })}{/if}
+            </button>
+          </div>
         </div>
       {:else if epicEmpty && lib.epic === 'loggedOut'}
         <div class="empty">
@@ -605,9 +637,28 @@
           <p>{t('app.epicUnreachable')}</p>
           <small>{t('app.epicUnreachableHint')}</small>
         </div>
+      {:else if started && lib.total > 0}
+        <div class="empty">
+          <p>{t('app.noMatch')}</p>
+          <small>{query && filtered ? t('app.noMatchQueryFilters', { query }) : query ? t('app.noMatchQuery', { query }) : t('app.noMatchFilters')}</small>
+          <div class="actions">
+            <button class="glass" onclick={clearSearchAndFilters}>
+              {query && filtered ? t('app.clearAll') : query ? t('app.clearSearch') : t('app.clearFilters')}
+            </button>
+          </div>
+        </div>
+      {:else if started && noGames}
+        <div class="empty">
+          <p>{t('app.noGames')}</p>
+          <small>{t('app.noGamesHint')}</small>
+          <div class="actions">
+            <button class="pill" onclick={() => openSettings('accounts')}>{t('app.openSettings')}</button>
+            <button class="glass" onclick={() => openAddGame()}>{t('toolbar.addGame')}</button>
+          </div>
+        </div>
       {:else if started}
         <div class="empty">
-          <p>{lib.total > 0 ? t('app.noMatch') : lib.status.map(api.message).join('\n')}</p>
+          <p>{lib.status.map(api.message).join('\n')}</p>
         </div>
       {/if}
     </div>
@@ -713,7 +764,7 @@
 
   .notice.error {
     border-color: rgb(239 68 68 / 0.35);
-    color: #fecaca;
+    color: var(--error-text);
   }
 
   .close {
@@ -777,5 +828,18 @@
 
   .empty small {
     color: var(--text-3);
+  }
+
+  .empty .actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  /* The glass second action matches the white pill beside it (its 1px border makes up the padding). */
+  .empty .actions .glass {
+    padding: 8px 20px;
+    border-radius: 999px;
   }
 </style>

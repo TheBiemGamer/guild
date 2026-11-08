@@ -96,10 +96,10 @@
     z-index: 30;
     box-sizing: border-box;
     padding: 16px;
-    border-radius: 14px;
+    border-radius: var(--radius-modal);
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 20px 50px rgb(0 0 0 / 0.65);
+    box-shadow: var(--shadow-modal);
   }
 
   h4 {

@@ -567,10 +567,10 @@
     <nav aria-label={t('settings.sectionsLabel')}>
       <h2>{t('toolbar.settings')}</h2>
       {#each sections as name (name)}
-        <button class="item" class:on={active === name} onclick={() => go(name)}>
+        <button class="item" class:on={active === name} aria-current={active === name ? 'true' : undefined} onclick={() => go(name)}>
           {@render icon(name)}
           {t(`settings.section.${name}`)}
-          {#if name === 'accounts' && attention}<i class="dot"></i>{/if}
+          {#if name === 'accounts' && attention}<i class="dot" aria-hidden="true"></i><span class="visually-hidden">{t('settings.needsAttention')}</span>{/if}
         </button>
       {/each}
     </nav>
@@ -688,12 +688,12 @@
                   </div>
                 </div>
               {/if}
-              {#if importNote}<p class="note" title={importNote}>{importNote}</p>{/if}
+              {#if importNote}<p class="note" role="status" title={importNote}>{importNote}</p>{/if}
               <div class="row">
                 <div>{t('settings.eglSync')}<span>{t('settings.eglSyncHint')}</span></div>
                 <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? t('settings.syncing') : t('settings.sync')}</button>
               </div>
-              {#if eglNote}<p class="note" title={eglNote}>{eglNote}</p>{/if}
+              {#if eglNote}<p class="note" role="status" title={eglNote}>{eglNote}</p>{/if}
               {#if legendary?.update}
                 <div class="row">
                   <div>Legendary {legendary.version ?? ''}<span>{t('settings.toolAvailable', { version: legendary.pinned })}</span></div>
@@ -701,7 +701,7 @@
                     {legendaryJob ? jobLabel('update', legendaryJob) : t('play.update')}
                   </button>
                 </div>
-                {#if legendaryError}<p class="note" title={legendaryError}>{legendaryError}</p>{/if}
+                {#if legendaryError}<p class="note" role="status" title={legendaryError}>{legendaryError}</p>{/if}
               {/if}
             </div>
           {/if}
@@ -768,7 +768,7 @@
                 <div>{t('settings.importInstall')}</div>
                 <button class="btn" disabled={gogImporting} onclick={gogImport}>{gogImporting ? t('settings.importing') : t('settings.importButton')}</button>
               </div>
-              {#if gogImportNote}<p class="note" title={gogImportNote}>{gogImportNote}</p>{/if}
+              {#if gogImportNote}<p class="note" role="status" title={gogImportNote}>{gogImportNote}</p>{/if}
               {#if gogdl?.update}
                 <div class="row">
                   <div>gogdl {gogdl.version ?? ''}<span>{t('settings.toolAvailable', { version: gogdl.pinned })}</span></div>
@@ -776,7 +776,7 @@
                     {gogdlJob ? jobLabel('update', gogdlJob) : t('play.update')}
                   </button>
                 </div>
-                {#if gogdlError}<p class="note" title={gogdlError}>{gogdlError}</p>{/if}
+                {#if gogdlError}<p class="note" role="status" title={gogdlError}>{gogdlError}</p>{/if}
               {/if}
             </div>
           {/if}
@@ -853,7 +853,7 @@
                   </div>
                 </div>
               {/if}
-              {#if amazonImportNote}<p class="note" title={amazonImportNote}>{amazonImportNote}</p>{/if}
+              {#if amazonImportNote}<p class="note" role="status" title={amazonImportNote}>{amazonImportNote}</p>{/if}
               {#if nile?.update}
                 <div class="row">
                   <div>Nile {nile.version ?? ''}<span>{t('settings.toolAvailable', { version: nile.pinned })}</span></div>
@@ -861,7 +861,7 @@
                     {nileJob ? jobLabel('update', nileJob) : t('play.update')}
                   </button>
                 </div>
-                {#if nileError}<p class="note" title={nileError}>{nileError}</p>{/if}
+                {#if nileError}<p class="note" role="status" title={nileError}>{nileError}</p>{/if}
               {/if}
             </div>
           {/if}
@@ -1018,7 +1018,7 @@
 
       <section id={id('about')}>
         <h3>{t('settings.section.about')}</h3>
-        <h4>{t('settings.group.version')}</h4>
+        <h4>{t('settings.group.updates')}</h4>
         <div class="group">
           <div class="r">
             {@render tile('about')}
@@ -1094,11 +1094,11 @@
     display: grid;
     grid-template-columns: 190px 1fr;
     overflow: hidden;
-    border-radius: 18px;
+    border-radius: var(--radius-modal);
     background: rgb(22 22 32 / 0.82);
     backdrop-filter: blur(24px);
     border: 1px solid rgb(255 255 255 / 0.1);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
   }
 
   nav {
@@ -1249,7 +1249,7 @@
     padding: 8px 12px;
     border-radius: 10px;
     border: 1px solid rgb(239 68 68 / 0.35);
-    color: #fecaca;
+    color: var(--error-text);
   }
 
   /* One rounded group per heading; its rows (and an open Options panel) are split by thin lines. No overflow
@@ -1526,7 +1526,7 @@
   }
 
   .ok {
-    color: #4ade80;
+    color: var(--success);
   }
 
   .link {

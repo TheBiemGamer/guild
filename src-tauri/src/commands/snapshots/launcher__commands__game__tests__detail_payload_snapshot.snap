@@ -32,7 +32,7 @@ expression: detail
   ],
   "chosen": "steam-635320",
   "playtimeMinutes": 120,
-  "playtimeBoth": false,
+  "playtimeStores": [],
   "lastPlayed": "[time]",
   "lastPlayedStore": "epic",
   "links": [

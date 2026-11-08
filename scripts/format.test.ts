@@ -118,7 +118,7 @@ test('how long to beat: minutes under an hour, else the nearest hour', () => {
 
 test('group names', () => {
   assert.equal(groupLabel('thisWeek'), 'This week')
-  assert.equal(groupLabel('played100h'), '100–500 h')
+  assert.equal(groupLabel('played100h'), '100-500 h')
   assert.equal(groupLabel('beat0h'), 'Under 5 h')
   assert.equal(groupLabel('neverPlayed'), 'Never played')
   assert.equal(groupLabel('favorites'), 'Favorites')

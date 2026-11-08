@@ -52,6 +52,11 @@
   /** Waiting in the queue, or first but paused: the hover shows the busy pill with Cancel or Resume. */
   const waiting = $derived(queued && queued.state !== 'active' ? queued : null)
 
+  /** The status chip's id: the cover button is described by it. */
+  const statusId = $props.id()
+  /** A badge or chip shows (the same order as the markup; the progress strip has no text). */
+  const hasStatus = $derived(running || !!waiting || (!progress && ((game.installed && game.update) || !!statText || !game.installed)))
+
   let el: HTMLDivElement
   // undefined: still asking. null: no art, so the title shows.
   let art = $state<Cover | null | undefined>(undefined)
@@ -101,6 +106,8 @@
     onpointerleave={() => clearTimeout(resting)}
     onfocus={() => prefetch(game)}
     title={game.title}
+    aria-label={t('common.openGame', { title: game.title })}
+    aria-describedby={hasStatus ? statusId : undefined}
   >
     {#if art === null}
       <span class="name">{game.title}</span>
@@ -141,20 +148,20 @@
   </span>
 
   {#if running}
-    <span class="badge">{t('play.playing')}</span>
+    <span class="badge" id={statusId}>{t('play.playing')}</span>
   {:else if waiting}
-    <span class="chip">{waiting.state === 'paused' ? t('downloads.paused') : t('card.queued')}</span>
+    <span class="chip" id={statusId}>{waiting.state === 'paused' ? t('downloads.paused') : t('card.queued')}</span>
   {:else if progress}
     <span class="strip"><span style="width: {progress.fraction * 100}%"></span></span>
   {:else if game.installed && game.update}
-    <span class="chip">
+    <span class="chip" id={statusId}>
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       {t('play.update')}
     </span>
   {:else if statText}
-    <span class="chip stat">{statText}</span>
+    <span class="chip stat" id={statusId}>{statText}</span>
   {:else if !game.installed}
-    <span class="chip">
+    <span class="chip" id={statusId}>
       <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
       {t('common.install')}
     </span>

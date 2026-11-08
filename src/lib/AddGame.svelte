@@ -173,10 +173,10 @@
     max-height: calc(100% - 48px);
     overflow-y: auto;
     padding: 18px;
-    border-radius: 16px;
+    border-radius: var(--radius-modal);
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
   }
 
   h3 {
@@ -314,7 +314,7 @@
     padding: 8px 12px;
     border-radius: 10px;
     border: 1px solid rgb(239 68 68 / 0.35);
-    color: #fecaca;
+    color: var(--error-text);
   }
 
   .foot {

@@ -34,7 +34,7 @@ pwsh scripts/bench.ps1 4000
 pwsh scripts/bench.ps1 15000
 ```
 
-It passes with 0–2 frames slower than 1.5× the median frame time.
+It passes with 0-2 frames slower than 1.5× the median frame time.
 
 ### Snapshot tests
 
@@ -96,7 +96,7 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, bui
 ### Each release
 
 1. `npm run bump X.Y.Z` sets the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`.
-2. Add a `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, with `### New`, `### Changed` or `### Fixed` groups of `- ` lines. It becomes the release notes and what the app shows before updating.
+2. Add a `## X.Y.Z, YYYY-MM-DD` section to `CHANGELOG.md`, with `### New`, `### Changed` or `### Fixed` groups of `- ` lines. It becomes the release notes and what the app shows before updating.
 3. Commit, then tag and push the tag:
 
    ```bash

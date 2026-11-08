@@ -1,5 +1,6 @@
 <script lang="ts" generics="T extends string">
   import { popover } from './popover'
+  import Check from './Check.svelte'
 
   let {
     value = $bindable(),
@@ -55,6 +56,7 @@
   {#each options as o (o.value)}
     <button class="o" role="menuitemradio" aria-checked={o.value === value} onclick={() => pick(o.value)}>
       {o.label}
+      {#if o.value === value}<Check />{/if}
     </button>
   {/each}
 </div>
@@ -70,7 +72,7 @@
     border-radius: 12px;
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
   }
 
   .pop:focus-visible {
@@ -97,10 +99,5 @@
 
   .o[aria-checked='true'] {
     color: var(--text);
-  }
-
-  .o[aria-checked='true']::after {
-    content: '✓';
-    color: var(--text-2);
   }
 </style>

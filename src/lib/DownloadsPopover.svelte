@@ -156,7 +156,7 @@
     border-radius: 12px;
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
   }
 
   .pop:focus-visible {

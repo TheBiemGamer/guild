@@ -150,7 +150,14 @@
       <circle cx="11" cy="11" r="6.5" />
       <path d="m16 16 4 4" />
     </svg>
-    <input type="search" placeholder={t('toolbar.search')} aria-keyshortcuts="Control+K" bind:this={search} bind:value={query} />
+    <input
+      type="search"
+      placeholder={t('toolbar.search')}
+      aria-label={t('toolbar.search')}
+      aria-keyshortcuts="Control+K"
+      bind:this={search}
+      bind:value={query}
+    />
     {#if !query}<kbd aria-hidden="true">{t('toolbar.shortcut')}</kbd>{/if}
   </label>
 
@@ -318,6 +325,12 @@
   .search:focus-within {
     border-color: var(--glass-on-line);
     background: var(--glass-strong);
+  }
+
+  /* The input draws no outline of its own, so the field shows the keyboard focus. */
+  .search:has(input:focus-visible) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
   }
 
   .search input {

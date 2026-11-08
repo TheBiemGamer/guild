@@ -28,7 +28,7 @@
 </script>
 
 <NotesPopover version={update.version} sub={t('update.youHave', { version: current })} notes={update.notes} {anchor} {onclose}>
-  {#if error}<p class="error">{error}</p>{/if}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if running}<p>{t('update.closeGame')}</p>{/if}
   <div class="foot">
     <button class="glass" disabled={installing} onclick={() => onclose(true)}>{t('update.later')}</button>
