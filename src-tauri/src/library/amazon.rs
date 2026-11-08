@@ -1235,14 +1235,6 @@ mod tests {
         .unwrap()
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("launcher-amazon-{name}-{}", std::process::id()));
-        _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     fn output(code: u32, stderr: &[u8]) -> Output {
         use std::os::windows::process::ExitStatusExt;
         Output {
@@ -1321,16 +1313,17 @@ mod tests {
 
     #[test]
     fn current_user_needs_a_user_id() {
-        let dir = temp_dir("user");
-        assert!(!has_user(&dir));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(!has_user(dir));
         std::fs::write(
             dir.join("current_user.json"),
             fixture("sample-current_user.json"),
         )
         .unwrap();
-        assert!(has_user(&dir));
+        assert!(has_user(dir));
         assert_eq!(
-            current_user(&dir).as_ref().and_then(name_of).as_deref(),
+            current_user(dir).as_ref().and_then(name_of).as_deref(),
             Some("Test")
         );
         std::fs::write(
@@ -1338,16 +1331,16 @@ mod tests {
             r#"{"name": " ", "user_id": " "}"#,
         )
         .unwrap();
-        assert!(!has_user(&dir));
-        assert_eq!(current_user(&dir).as_ref().and_then(name_of), None);
+        assert!(!has_user(dir));
+        assert_eq!(current_user(dir).as_ref().and_then(name_of), None);
         std::fs::write(dir.join("current_user.json"), "{not json").unwrap();
-        assert!(!has_user(&dir));
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!has_user(dir));
     }
 
     #[test]
     fn logging_out_forgets_the_account_and_keeps_the_installs() {
-        let dir = temp_dir("logout");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         assert!(forget_login(&dir.join("missing")).is_ok());
         for file in [
             "current_user.json",
@@ -1360,14 +1353,13 @@ mod tests {
         }
         std::fs::create_dir_all(dir.join("manifests")).unwrap();
         std::fs::create_dir_all(dir.join("SDK").join("Amazon Games Services")).unwrap();
-        forget_login(&dir).unwrap();
-        let mut left: Vec<String> = std::fs::read_dir(&dir)
+        forget_login(dir).unwrap();
+        let mut left: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         left.sort();
         assert_eq!(left, ["SDK", "installed.json", "manifests"]);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1406,7 +1398,8 @@ mod tests {
 
     #[test]
     fn library_json_becomes_games() {
-        let dir = temp_dir("library");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let library: Value = serde_json::from_slice(&fixture("sample-library.json")).unwrap();
         let ldoj = "amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633";
         let installed = HashMap::from([
@@ -1414,7 +1407,7 @@ mod tests {
                 ldoj.to_string(),
                 Installed {
                     id: ldoj.into(),
-                    path: dir.clone(),
+                    path: dir.to_path_buf(),
                     size: Some(4_200_000_000),
                 },
             ),
@@ -1437,7 +1430,6 @@ mod tests {
         insta::assert_snapshot!(
             format!("{games:#?}").replace(&format!("{dir:?}"), "\"[temp dir]\"")
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1700,25 +1692,26 @@ mod tests {
 
     #[test]
     fn a_patch_file_written_during_the_job_is_a_failed_download() {
-        let dir = temp_dir("patch");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let before = SystemTime::now() - Duration::from_secs(60);
         std::fs::create_dir_all(dir.join("Data")).unwrap();
         std::fs::write(dir.join("Data").join("level1.pak"), "x").unwrap();
-        assert!(!leftover_patch(&dir, before));
+        assert!(!leftover_patch(dir, before));
         std::fs::write(dir.join("Data").join("level1.pak.patch"), "").unwrap();
-        assert!(leftover_patch(&dir, before));
+        assert!(leftover_patch(dir, before));
         // One from before the job started isn't this job's.
         assert!(!leftover_patch(
-            &dir,
+            dir,
             SystemTime::now() + Duration::from_secs(60)
         ));
         assert!(!leftover_patch(&dir.join("missing"), before));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_move_rewrites_only_the_games_path() {
-        let dir = temp_dir("move");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let file = dir.join("installed.json");
         let other = r#"{"id": "b", "version": "2", "path": "C:\\B", "size": 2}"#;
         std::fs::write(&file, format!(r#"[{{"id": "a", "version": "1", "path": "C:\\A", "size": 1, "extra": true}}, {other}]"#)).unwrap();
@@ -1740,7 +1733,6 @@ mod tests {
             entries
         );
         assert!(!dir.join("installed.json.tmp").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1858,33 +1850,34 @@ mod tests {
 
     #[test]
     fn play_needs_the_launch_file_and_its_program() {
-        let dir = temp_dir("play");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let refused = |dir: &Path| {
             launch("x", dir, &LaunchOptions::default())
                 .unwrap_err()
                 .to_string()
         };
-        assert_eq!(refused(&dir), "noLaunchFile");
+        assert_eq!(refused(dir), "noLaunchFile");
         std::fs::write(dir.join("fuel.json"), fixture("sample-fuel.json")).unwrap();
         assert!(
-            refused(&dir).starts_with("gameProgramMissing"),
+            refused(dir).starts_with("gameProgramMissing"),
             "{}",
-            refused(&dir)
+            refused(dir)
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn updates_show_on_installed_games_only() {
         let library: Value = serde_json::from_slice(&fixture("sample-library.json")).unwrap();
-        let dir = temp_dir("updates");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let ldoj = "amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633";
         let dote = "amzn1.adg.product.e9b762cd-e130-4c5b-aaf5-070d785d1cd2";
         let installed = HashMap::from([(
             ldoj.to_string(),
             Installed {
                 id: ldoj.into(),
-                path: dir.clone(),
+                path: dir.to_path_buf(),
                 size: None,
             },
         )]);
@@ -1892,12 +1885,12 @@ mod tests {
         let games = games(&library, &installed, &HashMap::new(), &updates);
         assert!(games[0].update_available);
         assert!(!games[1].update_available);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn the_last_update_answer_is_kept_until_forgotten() {
-        let dir = temp_dir("updates-cache");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let conn = db::open(&dir.join("library.sqlite")).unwrap();
         assert_eq!(cached(&conn, FOREVER, 1_000), None);
         db::put_info(&conn, UPDATES_KEY, UPDATES, r#"["a"]"#, 1_000).unwrap();
@@ -1916,8 +1909,6 @@ mod tests {
         );
         forget_updates(Some(&conn));
         assert_eq!(cached(&conn, FOREVER, 1_000), None);
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1939,13 +1930,14 @@ mod tests {
     #[test]
     #[ignore]
     fn real_nile_logged_out() {
-        let config = temp_dir("real");
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path();
         let version = Command::new(tools::NILE.exe())
             .arg("--version")
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&version.stdout).starts_with(tools::NILE.version));
-        let status = run_short(nile_in(&config, ["auth", "--status"]), SYNC_TIMEOUT).unwrap();
+        let status = run_short(nile_in(config, ["auth", "--status"]), SYNC_TIMEOUT).unwrap();
         assert!(String::from_utf8_lossy(&status.stdout).contains("\"LoggedIn\": false"));
         assert!(
             config
@@ -1954,16 +1946,15 @@ mod tests {
                 .join("Amazon Games Services")
                 .is_dir()
         );
-        let sync = run_short(nile_in(&config, ["library", "sync"]), SYNC_TIMEOUT);
+        let sync = run_short(nile_in(config, ["library", "sync"]), SYNC_TIMEOUT);
         assert_eq!(classify_sync(sync.as_ref()), Login::LoggedOut);
         let login = run_short(
-            nile_in(&config, ["auth", "--login", "--non-interactive"]),
+            nile_in(config, ["auth", "--login", "--non-interactive"]),
             SYNC_TIMEOUT,
         )
         .unwrap();
         let sign_in = parse_sign_in(&login.stdout).expect("a sign-in answer");
         assert!(crate::amazon_login::sign_in_page(&sign_in.url).is_some());
-        std::fs::remove_dir_all(&config).unwrap();
     }
 
     #[test]

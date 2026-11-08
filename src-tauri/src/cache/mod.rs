@@ -147,17 +147,11 @@ fn average_color(image: &image::RgbImage) -> String {
 mod tests {
     use super::*;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("launcher-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn creates_then_reuses_cached_thumbnail() {
         use image::RgbaImage;
-        let dir = temp_dir("thumb-test");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let src = dir.join("src.png");
         RgbaImage::new(600, 900).save(&src).unwrap();
         let header = dir.join("header.png");
@@ -167,33 +161,33 @@ mod tests {
         std::fs::copy(&src, &bare).unwrap();
         let size = |p: (PathBuf, Option<String>)| image::image_dimensions(p.0).unwrap();
 
-        let first = thumbnail(&src, &dir, "a").unwrap().0;
+        let first = thumbnail(&src, dir, "a").unwrap().0;
         assert_eq!(first, dir.join("a.jpg"));
         assert_eq!(image::image_dimensions(first).unwrap(), (THUMB_W, THUMB_H));
         // Landscape art keeps its shape instead of being stretched to 2:3.
-        assert_eq!(size(thumbnail(&header, &dir, "h").unwrap()), (240, 112));
+        assert_eq!(size(thumbnail(&header, dir, "h").unwrap()), (240, 112));
         assert_eq!(
-            size(thumbnail(&bare, &dir, "b").unwrap()),
+            size(thumbnail(&bare, dir, "b").unwrap()),
             (THUMB_W, THUMB_H)
         );
 
         // Source gone: second call must come from the cache.
         std::fs::remove_file(&src).unwrap();
-        assert_eq!(thumbnail(&src, &dir, "a").unwrap().0, dir.join("a.jpg"));
+        assert_eq!(thumbnail(&src, dir, "a").unwrap().0, dir.join("a.jpg"));
 
         // No cache and no source is an error, not a panic.
-        assert!(thumbnail(&src, &dir, "missing").is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(thumbnail(&src, dir, "missing").is_err());
     }
 
     #[test]
     fn thumbnail_writes_average_color() {
-        let dir = temp_dir("color-test");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let src = dir.join("solid.png");
         image::RgbImage::from_pixel(600, 900, image::Rgb([200, 40, 90]))
             .save(&src)
             .unwrap();
-        let (path, color) = thumbnail(&src, &dir, "s").unwrap();
+        let (path, color) = thumbnail(&src, dir, "s").unwrap();
         assert_eq!(color.as_deref(), Some("#c8285a"));
         assert_eq!(
             std::fs::read_to_string(dir.join("s.color")).unwrap(),
@@ -201,7 +195,7 @@ mod tests {
         );
         // A thumbnail cached before colours were stored gets one from the JPEG (close, not exact).
         std::fs::remove_file(dir.join("s.color")).unwrap();
-        let (again, color) = thumbnail(&src, &dir, "s").unwrap();
+        let (again, color) = thumbnail(&src, dir, "s").unwrap();
         assert_eq!(again, path);
         let rgb = u32::from_str_radix(&color.unwrap()[1..], 16)
             .unwrap()
@@ -210,12 +204,12 @@ mod tests {
             assert!(got.abs_diff(want) <= 4, "{got} vs {want}");
         }
         assert!(dir.join("s.color").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn resolve_prefers_existing_local_file_and_skips_missing_one() {
-        let dir = temp_dir("resolve-test");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let local = dir.join("local.jpg");
         std::fs::write(&local, b"x").unwrap();
         let cached = dir.join("cached");
@@ -238,14 +232,14 @@ mod tests {
             assert_eq!(resolve(&gone, &http, cached.clone()).await, Some(cached));
             assert_eq!(resolve(&gone, &http, dir.join("nothing")).await, None);
         });
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Hits the real Steam CDN: `cargo test -- --ignored`.
     #[test]
     #[ignore = "network"]
     fn downloads_once_and_treats_404_as_missing() {
-        let dir = temp_dir("cdn-test");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let http = reqwest::Client::new();
         let cdn = "https://shared.steamstatic.com/store_item_assets/steam/apps";
         tauri::async_runtime::block_on(async {
@@ -262,6 +256,5 @@ mod tests {
             };
             assert_eq!(resolve(&missing, &http, dir.join("missing")).await, None);
         });
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

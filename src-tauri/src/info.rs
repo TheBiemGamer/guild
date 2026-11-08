@@ -353,7 +353,7 @@ pub fn cached_or_run_tool(
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use super::*;
 
@@ -363,10 +363,10 @@ mod tests {
         std::fs::read_to_string(path).unwrap()
     }
 
-    fn temp_db(name: &str) -> (Connection, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("launcher-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        (db::open(&dir.join("t.sqlite")).unwrap(), dir)
+    fn temp_db() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open(&dir.path().join("t.sqlite")).unwrap();
+        (dir, conn)
     }
 
     #[test]
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn one_epic_list_caches_every_game() {
-        let (conn, dir) = temp_db("info-epic-all");
+        let (_dir, conn) = temp_db();
         let list = serde_json::json!([
             {"app_name": "Pumpkin", "metadata": epic_fixture()},
             {"app_name": "Fortnite", "metadata": {"title": "Fortnite", "description": "Fortnite"}},
@@ -478,8 +478,6 @@ mod tests {
             db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_200).unwrap(),
             None
         );
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -531,7 +529,7 @@ mod tests {
 
     #[test]
     fn gamesdb_details_cache_keeps_finds_longer_than_misses() {
-        let (conn, dir) = temp_db("info-gamesdb");
+        let (_dir, conn) = temp_db();
         let day = 24 * 60 * 60;
         gamesdb_cached_or_fetch(Some(&conn), "epic-A", 0, || Some("{}".into()));
         gamesdb_cached_or_fetch(Some(&conn), "epic-B", 0, || Some("null".into()));
@@ -541,8 +539,6 @@ mod tests {
         assert_eq!(again("epic-B", 6 * day), "null");
         assert_eq!(again("epic-B", 8 * day), "new");
         assert_eq!(again("epic-A", 31 * day), "new");
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -560,7 +556,7 @@ mod tests {
 
     #[test]
     fn failed_fetch_is_not_cached() {
-        let (conn, dir) = temp_db("info-failed");
+        let (_dir, conn) = temp_db();
         assert_eq!(
             cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || None),
             None
@@ -585,13 +581,11 @@ mod tests {
             cached_or_fetch(None, "steam-1", DETAILS, 100, 1_000, || Some("x".into())).as_deref(),
             Some("x")
         );
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn fresh_cache_is_used_without_fetching_and_kinds_stay_apart() {
-        let (conn, dir) = temp_db("info-cached");
+        let (_dir, conn) = temp_db();
         db::put_info(&conn, "epic-A", DETAILS, "old", 1_000).unwrap();
         let got = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_050, || {
             panic!("must not fetch")
@@ -619,7 +613,5 @@ mod tests {
             Some("new".into())
         });
         assert_eq!(fresh.as_deref(), Some("new"));
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

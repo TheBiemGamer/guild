@@ -957,7 +957,8 @@ mod tests {
 
     #[test]
     fn override_exe_must_be_inside_install_dir() {
-        let root = std::env::temp_dir().join(format!("launcher-exe-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let game = root.join("Game");
         std::fs::create_dir_all(game.join("bin")).unwrap();
         std::fs::write(game.join("bin").join("game.exe"), b"").unwrap();
@@ -983,7 +984,6 @@ mod tests {
         assert!(override_exe(&game, "").is_err());
         assert!(override_exe(&game, r"Z:\elsewhere\game.exe").is_err());
         assert!(override_exe(&root.join("Gone"), "game.exe").is_err());
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     fn fixture(name: &str) -> Value {
@@ -1411,15 +1411,15 @@ mod tests {
 
     #[test]
     fn import_requires_existing_folder() {
-        let dir = std::env::temp_dir();
-        assert!(super::import_requires_existing_folder(&dir).is_ok());
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(super::import_requires_existing_folder(dir).is_ok());
         assert!(
             super::import_requires_existing_folder(&dir.join("launcher-no-such-folder")).is_err()
         );
-        let file = dir.join(format!("launcher-import-{}.txt", std::process::id()));
+        let file = dir.join("import.txt");
         std::fs::write(&file, "x").unwrap();
         assert!(super::import_requires_existing_folder(&file).is_err());
-        _ = std::fs::remove_file(file);
     }
 
     #[test]

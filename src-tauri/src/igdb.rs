@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn epic_url_is_remembered_and_overwritten() {
-        let conn = temp_db("epic-url");
+        let (_dir, conn) = temp_db();
         assert_eq!(epic_url(&conn, "epic-A"), None);
         remember_epic_url(&conn, "epic-A", "https://store.epicgames.com/a");
         remember_epic_url(&conn, "epic-A", "https://store.epicgames.com/b");
@@ -539,18 +539,15 @@ mod tests {
         );
     }
 
-    fn temp_db(name: &str) -> Connection {
-        let path = std::env::temp_dir().join(format!(
-            "launcher-igdb-{name}-{}.sqlite",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        db::open(&path).unwrap()
+    fn temp_db() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open(&dir.path().join("t.sqlite")).unwrap();
+        (dir, conn)
     }
 
     #[test]
     fn found_answers_last_30_days_and_missing_ones_7() {
-        let conn = temp_db("ttb");
+        let (_dir, conn) = temp_db();
         let day = 24 * 60 * 60;
         let ttb = TimeToBeat {
             hastily: None,
@@ -576,7 +573,7 @@ mod tests {
 
     #[test]
     fn all_normally_keeps_known_times_of_any_age() {
-        let conn = temp_db("all-normally");
+        let (_dir, conn) = temp_db();
         let ttb = |normally| {
             Some(TimeToBeat {
                 hastily: Some(60),

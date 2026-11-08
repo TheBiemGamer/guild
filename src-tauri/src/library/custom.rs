@@ -223,8 +223,8 @@ mod tests {
 
     #[test]
     fn only_existing_exe_files_launch() {
-        let dir = std::env::temp_dir().join(format!("launcher-custom-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let (exe, bat) = (dir.join("game.EXE"), dir.join("game.bat"));
         std::fs::write(&exe, b"").unwrap();
         std::fs::write(&bat, b"").unwrap();
@@ -232,13 +232,12 @@ mod tests {
         assert!(check_exe(&bat.to_string_lossy()).is_err());
         assert!(check_exe(&dir.join("gone.exe").to_string_lossy()).is_err());
         assert!(launch(&row(&dir.join("gone.exe").to_string_lossy(), "")).is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn game_is_installed_while_the_exe_exists_and_finds_its_cover() {
-        let root =
-            std::env::temp_dir().join(format!("launcher-custom-game-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let covers = root.join("custom");
         std::fs::create_dir_all(covers.join("18f2a")).unwrap();
         let exe = root.join("game.exe");
@@ -248,7 +247,7 @@ mod tests {
             (g.key(), g.title.as_str(), g.installed),
             ("custom-18f2a".into(), "Hollow Knight", false)
         );
-        assert_eq!(g.install_dir.as_deref(), Some(root.as_path()));
+        assert_eq!(g.install_dir.as_deref(), Some(root));
         assert_eq!(g.art.cover.path, None);
         std::fs::write(&exe, b"").unwrap();
         std::fs::write(covers.join("18f2a").join("cover.png"), b"x").unwrap();
@@ -259,6 +258,5 @@ mod tests {
             Some(covers.join("18f2a").join("cover.png"))
         );
         assert_eq!(g.art.hero, g.art.cover);
-        std::fs::remove_dir_all(&root).unwrap();
     }
 }

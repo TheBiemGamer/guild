@@ -217,11 +217,10 @@ mod tests {
         std::fs::read_to_string(path).unwrap()
     }
 
-    fn temp_db(name: &str) -> Connection {
-        let dir = std::env::temp_dir().join(format!("gamesdb-{name}-{}", std::process::id()));
-        _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        db::open(&dir.join("t.sqlite")).unwrap()
+    fn temp_db() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open(&dir.path().join("t.sqlite")).unwrap();
+        (dir, conn)
     }
 
     fn releases(rows: &[(&str, &str)]) -> String {
@@ -315,7 +314,7 @@ mod tests {
 
     #[test]
     fn twin_cache_keeps_misses_and_expires() {
-        let conn = temp_db("cache");
+        let (_dir, conn) = temp_db();
         let day = 24 * 60 * 60;
         assert_eq!(cached(&conn, "epic-a", 1000), None);
         remember(&conn, "epic-a", &[], None, 1000);
@@ -507,7 +506,7 @@ mod tests {
 
     #[test]
     fn gog_covers_come_from_the_twin_cache() {
-        let conn = temp_db("covers");
+        let (_dir, conn) = temp_db();
         remember(
             &conn,
             "gog-1",
@@ -551,7 +550,7 @@ mod tests {
 
     #[test]
     fn old_single_answers_are_asked_again() {
-        let conn = temp_db("old");
+        let (_dir, conn) = temp_db();
         db::put_info(&conn, "epic-Brill", "twin2", r#"{"steam":null}"#, 1000).unwrap();
         assert_eq!(cached(&conn, "epic-Brill", 1000), None);
         assert!(all_cached(&conn, 1000).is_empty());

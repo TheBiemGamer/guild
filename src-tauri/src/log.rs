@@ -138,53 +138,46 @@ pub fn init(dir: &Path) {
 mod tests {
     use super::*;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("launcher-log-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     fn read(dir: &Path, n: usize) -> Option<String> {
         fs::read_to_string(name(dir, n)).ok()
     }
 
     #[test]
     fn rotate_shifts_files_and_drops_the_oldest() {
-        let dir = temp_dir("rotate");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         for n in 0..KEEP {
-            fs::write(name(&dir, n), n.to_string()).unwrap();
+            fs::write(name(dir, n), n.to_string()).unwrap();
         }
-        rotate(&dir);
-        assert_eq!(read(&dir, 0), None);
+        rotate(dir);
+        assert_eq!(read(dir, 0), None);
         for n in 1..KEEP {
-            assert_eq!(read(&dir, n), Some((n - 1).to_string()));
+            assert_eq!(read(dir, n), Some((n - 1).to_string()));
         }
-        assert!(!name(&dir, KEEP).exists());
-        fs::remove_dir_all(&dir).unwrap();
+        assert!(!name(dir, KEEP).exists());
     }
 
     #[test]
     fn rolls_an_oversized_file_at_open_and_on_write() {
-        let dir = temp_dir("roll");
-        File::create(name(&dir, 0))
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        File::create(name(dir, 0))
             .unwrap()
             .set_len(MAX_BYTES + 1)
             .unwrap();
-        let mut log = Log::open(&dir).unwrap();
+        let mut log = Log::open(dir).unwrap();
         assert_eq!(log.len, 0);
-        assert_eq!(fs::metadata(name(&dir, 1)).unwrap().len(), MAX_BYTES + 1);
+        assert_eq!(fs::metadata(name(dir, 1)).unwrap().len(), MAX_BYTES + 1);
 
         log.append(b"first\n").unwrap();
         log.len = MAX_BYTES;
         log.append(b"last\n").unwrap();
         assert_eq!(log.len, 0);
-        assert_eq!(read(&dir, 1).unwrap(), "first\nlast\n");
-        assert_eq!(fs::metadata(name(&dir, 2)).unwrap().len(), MAX_BYTES + 1);
+        assert_eq!(read(dir, 1).unwrap(), "first\nlast\n");
+        assert_eq!(fs::metadata(name(dir, 2)).unwrap().len(), MAX_BYTES + 1);
         log.append(b"next\n").unwrap();
-        assert_eq!(read(&dir, 0).unwrap(), "next\n");
+        assert_eq!(read(dir, 0).unwrap(), "next\n");
         drop(log);
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

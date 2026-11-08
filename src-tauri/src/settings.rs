@@ -228,20 +228,16 @@ fn write(user: &str, value: Option<&str>) -> Result<(), Msg> {
 mod tests {
     use super::*;
 
-    fn memory() -> Connection {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "launcher-settings-test-{}-{n}.sqlite",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        db::open(&path).unwrap()
+    fn memory() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open(&dir.path().join("t.sqlite")).unwrap();
+        (dir, conn)
     }
 
     #[test]
     fn defaults_have_every_switch_on() {
-        let s = load(&memory());
+        let (_dir, conn) = memory();
+        let s = load(&conn);
         assert!(
             s.show_banner
                 && s.ambient
@@ -265,7 +261,7 @@ mod tests {
 
     #[test]
     fn language_loads_back_and_rejects_unknown_codes() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         update(&conn, LANGUAGE, Some("nl")).unwrap();
         assert!(update(&conn, LANGUAGE, Some("fr")).is_err());
         assert_eq!(load(&conn).language, "nl");
@@ -275,7 +271,7 @@ mod tests {
 
     #[test]
     fn sort_loads_back_and_rejects_unknown_names() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         update(&conn, LIBRARY_SORT, Some("longestToBeat")).unwrap();
         assert!(update(&conn, LIBRARY_SORT, Some("size")).is_err());
         assert_eq!(load(&conn).sort, Sort::LongestToBeat);
@@ -283,16 +279,17 @@ mod tests {
 
     #[test]
     fn old_library_group_is_ignored() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         // Saved by an older build; the sort sets the grouping now.
         db::set_setting(&conn, "library_group", Some("playtime")).unwrap();
         assert!(update(&conn, "library_group", Some("store")).is_err());
-        assert_eq!(load(&conn), load(&memory()));
+        let (_fresh_dir, fresh) = memory();
+        assert_eq!(load(&conn), load(&fresh));
     }
 
     #[test]
     fn saved_values_load_back() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         let dir = std::env::temp_dir();
         update(&conn, SHOW_BANNER, Some("false")).unwrap();
         update(&conn, CLOUD_SAVES, Some("false")).unwrap();
@@ -350,14 +347,14 @@ mod tests {
 
     #[test]
     fn update_never_stores_a_rejected_value() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         assert!(update(&conn, "igdb_secret", Some("x")).is_err());
         assert_eq!(db::setting(&conn, "igdb_secret").unwrap(), None);
     }
 
     #[test]
     fn updated_is_said_once_and_only_after_an_older_version() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         // First start: nothing to announce, but remembered.
         assert_eq!(take_updated(&conn, "0.2.0"), None);
         assert_eq!(take_updated(&conn, "0.2.0"), None);
@@ -376,7 +373,7 @@ mod tests {
 
     #[test]
     fn signed_out_is_internal_and_round_trips() {
-        let conn = memory();
+        let (_dir, conn) = memory();
         assert!(!signed_out(&conn, "gog"));
         set_signed_out(&conn, "gog", true).unwrap();
         assert!(signed_out(&conn, "gog") && !signed_out(&conn, "epic"));

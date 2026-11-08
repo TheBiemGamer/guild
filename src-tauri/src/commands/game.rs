@@ -2175,8 +2175,8 @@ mod tests {
 
     #[test]
     fn launch_options_round_trip() {
-        let dir =
-            std::env::temp_dir().join(format!("launcher-launch-options-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let conn = cache::db::open(&dir.join("library.sqlite")).unwrap();
         assert_eq!(launch_options_of(&conn, "epic-A"), LaunchOptions::default());
         let options = LaunchOptions {
@@ -2200,8 +2200,6 @@ mod tests {
             cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS).unwrap(),
             None
         );
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn pumpkin(steam_last: Option<u64>, epic_last: Option<u64>) -> Vec<Game> {
@@ -2265,8 +2263,8 @@ mod tests {
 
     #[test]
     fn steam_dlc_queued_caller_reads_what_the_first_cached() {
-        let path = std::env::temp_dir().join(format!("launcher-dlc-{}.db", std::process::id()));
-        let _ = std::fs::remove_file(&path);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("t.sqlite");
         let conn = cache::db::open(&path).unwrap();
         // Before the lock: nothing yet, so it would log on.
         let (cached, failed) = cached_dlc(&conn, "steam-1", 1_000);

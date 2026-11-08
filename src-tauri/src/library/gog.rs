@@ -1556,8 +1556,8 @@ mod tests {
 
     #[test]
     fn login_file_needs_the_galaxy_client() {
-        let dir = std::env::temp_dir().join(format!("launcher-gog-auth-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let file = dir.join("auth.json");
         assert!(!has_login(&file));
         std::fs::write(&file, format!(r#"{{"{CLIENT_ID}": {FAKE}, "123": {{}}}}"#)).unwrap();
@@ -1566,7 +1566,6 @@ mod tests {
         assert!(!has_login(&file));
         std::fs::write(&file, "{not json").unwrap();
         assert!(!has_login(&file));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1658,17 +1657,15 @@ mod tests {
 
     #[test]
     fn installed_needs_the_record_and_the_info_file() {
-        let dir =
-            std::env::temp_dir().join(format!("launcher-gog-installed-{}", std::process::id()));
-        _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let mut products = products("products2.json");
         products.insert(
             1445725644,
             json!({"title": "Phantom Liberty", "game_type": "dlc", "images": {}, "dlcs": []}),
         );
         let owned = [1423049311, 1445725644];
-        let installs = HashMap::from([("gog-1423049311".to_string(), dir.clone())]);
+        let installs = HashMap::from([("gog-1423049311".to_string(), dir.to_path_buf())]);
         let list = || {
             games(
                 &owned,
@@ -1684,7 +1681,7 @@ mod tests {
         std::fs::write(dir.join("goggame-1423049311.info"), "{}").unwrap();
         let game = list();
         assert!(game.installed);
-        assert_eq!(game.install_dir.as_deref(), Some(dir.as_path()));
+        assert_eq!(game.install_dir.as_deref(), Some(dir));
         assert!(!game.dlc[0].installed);
         std::fs::write(dir.join("goggame-1445725644.info"), "{}").unwrap();
         assert!(list().dlc[0].installed);
@@ -1699,7 +1696,6 @@ mod tests {
             )[0]
             .installed
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1732,13 +1728,6 @@ mod tests {
             assert!(t["dlcs"].is_array());
             assert_eq!(t.as_object().unwrap().len(), 4);
         }
-    }
-
-    fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("launcher-gog-{name}-{}", std::process::id()));
-        _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
     }
 
     fn strings(args: &[OsString]) -> Vec<String> {
@@ -2048,43 +2037,44 @@ mod tests {
 
     #[test]
     fn the_install_folder_tells_language_build_and_dlc() {
-        let dir = temp("local");
-        prison_architect(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        prison_architect(dir);
         assert_eq!(
-            local(&dir, "1441974651"),
+            local(dir, "1441974651"),
             Local {
                 lang: "en-US".into(),
                 dlcs: vec!["1716751705".into()]
             }
         );
         assert_eq!(
-            installed_build(&dir, "1441974651").as_deref(),
+            installed_build(dir, "1441974651").as_deref(),
             Some("55136646198962890")
         );
         // Without a buildId in the info file, the `.id` file has it; with neither, no build.
         std::fs::write(dir.join("goggame-1716751705.id"), r#"{"buildId": "77"}"#).unwrap();
-        assert_eq!(installed_build(&dir, "1716751705").as_deref(), Some("77"));
-        assert_eq!(installed_build(&dir, "9"), None);
+        assert_eq!(installed_build(dir, "1716751705").as_deref(), Some("77"));
+        assert_eq!(installed_build(dir, "9"), None);
         assert_eq!(
-            local(&temp("empty"), "1"),
+            local(tempfile::tempdir().unwrap().path(), "1"),
             Local {
                 lang: "en-US".into(),
                 dlcs: vec![]
             }
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn an_update_shows_when_the_folder_has_another_build() {
-        let dir = temp("update");
-        prison_architect(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        prison_architect(dir);
         let owned = [1441974651];
         let products = HashMap::from([(
             1441974651,
             json!({"title": "Prison Architect", "game_type": "game", "images": {}, "dlcs": []}),
         )]);
-        let installs = HashMap::from([("gog-1441974651".to_string(), dir.clone())]);
+        let installs = HashMap::from([("gog-1441974651".to_string(), dir.to_path_buf())]);
         let update = |latest: &[(u64, &str)]| {
             let latest = latest.iter().map(|&(id, b)| (id, b.to_string())).collect();
             games(&owned, &products, &installs, &latest, &HashMap::new())[0].update_available
@@ -2102,19 +2092,19 @@ mod tests {
             &HashMap::new(),
         );
         assert!(!missing[0].update_available);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    fn test_db(name: &str) -> (PathBuf, Connection) {
-        let dir = temp(name);
-        let conn = db::open(&dir.join("library.sqlite")).unwrap();
+    fn test_db() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open(&dir.path().join("library.sqlite")).unwrap();
         (dir, conn)
     }
 
     #[test]
     fn uninstall_deletes_only_a_folder_holding_the_game() {
         // Id 0 is no real product, so gogdl's real manifest and support folders have nothing of it to delete.
-        let (root, conn) = test_db("uninstall");
+        let (tmp, conn) = test_db();
+        let root = tmp.path();
         let dir = root.join("Game");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -2148,13 +2138,12 @@ mod tests {
             None
         );
         assert!(save_stamps(&conn, "gog-0").is_empty());
-        drop(conn);
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn move_renames_on_the_same_drive_and_updates_the_record() {
-        let (root, conn) = test_db("move");
+        let (tmp, conn) = test_db();
+        let root = tmp.path();
         let from = root.join("a").join("Prison Architect");
         std::fs::create_dir_all(&from).unwrap();
         prison_architect(&from);
@@ -2184,14 +2173,13 @@ mod tests {
                 .contains("otherDriveMove")
         );
         assert!(to.is_dir());
-        drop(conn);
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn play_starts_the_primary_task() {
-        let dir = temp("play");
-        prison_architect(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        prison_architect(dir);
         let info = read_json(&dir.join("goggame-1441974651.info")).unwrap();
         // The launcher task is primary, so it runs (and is watched), not the hidden game task.
         let task = play_task(&info).unwrap();
@@ -2247,13 +2235,12 @@ mod tests {
         assert_eq!(play_task(&json!({})), None);
         // The program missing from the folder: refused before anything starts.
         assert!(
-            launch("1441974651", &dir, &LaunchOptions::default())
+            launch("1441974651", dir, &LaunchOptions::default())
                 .unwrap_err()
                 .to_string()
                 .contains("gameProgramMissing")
         );
-        assert!(launch("1", &dir, &LaunchOptions::default()).is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(launch("1", dir, &LaunchOptions::default()).is_err());
     }
 
     #[test]
@@ -2422,10 +2409,11 @@ mod tests {
     #[test]
     #[ignore]
     fn real_gogdl_info_without_login() {
-        let root = std::env::temp_dir().join(format!("launcher-gogdl-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let exe = root.join("gogdl").join("gogdl.exe");
         let http = reqwest::Client::new();
-        tauri::async_runtime::block_on(crate::tools::install_to(&http, &tools::GOGDL, &root))
+        tauri::async_runtime::block_on(crate::tools::install_to(&http, &tools::GOGDL, root))
             .unwrap();
         let data = root.join("data");
         std::fs::create_dir_all(&data).unwrap();
@@ -2450,7 +2438,6 @@ mod tests {
         let info: Value = serde_json::from_str(line).unwrap();
         assert!(info["size"]["en-US"]["download_size"].is_u64());
         assert_eq!(info["folder_name"], "Last Day of June");
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

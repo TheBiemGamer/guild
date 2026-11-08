@@ -646,13 +646,6 @@ mod tests {
         conn
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("launcher-db-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     /// A file as the v3 build left it: step 1 only, `user_version` 0, rollback journal.
     fn v3_file(path: &Path, settings: &[(&str, &str)]) {
         let conn = Connection::open(path).unwrap();
@@ -725,7 +718,8 @@ mod tests {
 
     #[test]
     fn migrates_v3_file_keeping_settings_and_launches() {
-        let dir = temp_dir("migrate");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let path = dir.join("library.sqlite");
         v3_file(
             &path,
@@ -786,13 +780,12 @@ mod tests {
                 .iter()
                 .any(|c| c.starts_with("logo"))
         );
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn fresh_file_gets_latest_schema() {
-        let dir = temp_dir("fresh");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let conn = open(&dir.join("sub").join("library.sqlite")).unwrap();
         assert_eq!(user_version(&conn).unwrap(), STEPS.len());
         let journal: String = conn
@@ -823,13 +816,12 @@ mod tests {
         );
         set_pref(&conn, "epic-A", "cloud_saves", None).unwrap();
         assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap(), None);
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn open_twice_is_a_no_op() {
-        let dir = temp_dir("twice");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let path = dir.join("library.sqlite");
         v3_file(&path, &[("a", "1")]);
         let first = open(&path).unwrap();
@@ -845,7 +837,6 @@ mod tests {
             Some("on")
         );
         drop(third);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -853,15 +844,16 @@ mod tests {
         let settings_of = |path: &Path| all_settings(&open(path).unwrap());
 
         // No file at all: a fresh library.sqlite.
-        let dir = temp_dir("rename-none");
-        assert_eq!(file_in(&dir), dir.join("library.sqlite"));
-        std::fs::remove_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert_eq!(file_in(dir), dir.join("library.sqlite"));
 
         // Only the v3 file: renamed, with its (empty, so not hot) journal.
-        let dir = temp_dir("rename-only");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         v3_file(&dir.join("library-v3.sqlite"), &[("steam_account", "noah")]);
         std::fs::write(dir.join("library-v3.sqlite-journal"), b"").unwrap();
-        let path = file_in(&dir);
+        let path = file_in(dir);
         assert_eq!(path, dir.join("library.sqlite"));
         assert!(
             !dir.join("library-v3.sqlite").exists()
@@ -873,11 +865,11 @@ mod tests {
             [("steam_account".into(), "noah".into())]
         );
         // From then on, nothing moves.
-        assert_eq!(file_in(&dir), path);
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(file_in(dir), path);
 
         // Both files: library.sqlite wins and the v3 file is left alone.
-        let dir = temp_dir("rename-both");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         v3_file(&dir.join("library-v3.sqlite"), &[("who", "old")]);
         drop(open(&dir.join("library.sqlite")).unwrap());
         set_setting(
@@ -886,7 +878,7 @@ mod tests {
             Some("new"),
         )
         .unwrap();
-        let path = file_in(&dir);
+        let path = file_in(dir);
         assert_eq!(path, dir.join("library.sqlite"));
         assert_eq!(settings_of(&path), [("who".into(), "new".into())]);
         let old = Connection::open(dir.join("library-v3.sqlite")).unwrap();
@@ -894,11 +886,10 @@ mod tests {
             (all_settings(&old), user_version(&old).unwrap()),
             (vec![("who".into(), "old".into())], 0)
         );
-        drop(old);
-        std::fs::remove_dir_all(&dir).unwrap();
 
         // A library.sqlite from the first builds (a games table, no settings) is set aside, and v3 adopted.
-        let dir = temp_dir("rename-leftover");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         v3_file(&dir.join("library-v3.sqlite"), &[("who", "v3")]);
         Connection::open(dir.join("library.sqlite"))
             .unwrap()
@@ -906,23 +897,23 @@ mod tests {
                 "CREATE TABLE games (provider TEXT, external_id TEXT, title TEXT, logo TEXT)",
             )
             .unwrap();
-        let path = file_in(&dir);
+        let path = file_in(dir);
         assert_eq!(path, dir.join("library.sqlite"));
         assert!(dir.join("library-v1.sqlite").exists() && !dir.join("library-v3.sqlite").exists());
         assert_eq!(settings_of(&path), [("who".into(), "v3".into())]);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Another instance holding the v3 file open blocks the rename on Windows: it is copied instead.
     #[cfg(windows)]
     #[test]
     fn old_v3_file_held_open_is_copied() {
-        let dir = temp_dir("rename-held");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let old = dir.join("library-v3.sqlite");
         v3_file(&old, &[("who", "v3")]);
         let held = Connection::open(&old).unwrap();
         assert_eq!(all_settings(&held).len(), 1);
-        let path = file_in(&dir);
+        let path = file_in(dir);
         assert_eq!(path, dir.join("library.sqlite"));
         assert!(old.exists());
         assert_eq!(
@@ -932,14 +923,14 @@ mod tests {
         let tmp = |e: std::io::Result<std::fs::DirEntry>| {
             e.unwrap().path().extension() == Some("tmp".as_ref())
         };
-        assert!(!std::fs::read_dir(&dir).unwrap().any(tmp));
+        assert!(!std::fs::read_dir(dir).unwrap().any(tmp));
         drop(held);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn step_two_file_gets_collections_and_keeps_prefs() {
-        let dir = temp_dir("step3");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let path = dir.join("library.sqlite");
         {
             let conn = Connection::open(&path).unwrap();
@@ -955,13 +946,12 @@ mod tests {
             Some("1")
         );
         assert!(collections(&conn).unwrap().is_empty());
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn step_three_file_gets_custom_games_and_keeps_collections() {
-        let dir = temp_dir("step4");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let path = dir.join("library.sqlite");
         {
             let conn = Connection::open(&path).unwrap();
@@ -982,13 +972,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(custom_game(&conn, "a").unwrap().unwrap().args, "");
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn step_four_file_gets_gog_installs_and_keeps_custom_games() {
-        let dir = temp_dir("step5");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let path = dir.join("library.sqlite");
         {
             let conn = Connection::open(&path).unwrap();
@@ -1026,8 +1015,6 @@ mod tests {
             gog_installs(&conn).unwrap().into_keys().collect::<Vec<_>>(),
             ["gog-2"]
         );
-        drop(conn);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

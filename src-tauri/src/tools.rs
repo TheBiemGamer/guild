@@ -286,14 +286,6 @@ fn place(part: &Path, dest: &Path, digest: &str, expected: &str) -> Result<(), M
 mod tests {
     use super::*;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("launcher-tools-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn hashes_as_lowercase_hex() {
         // SHA-256 of "abc", from FIPS 180-2.
@@ -320,7 +312,8 @@ mod tests {
 
     #[test]
     fn a_matching_download_replaces_the_old_copy() {
-        let dir = temp_dir("match");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let (part, dest) = (dir.join("legendary.exe.part"), dir.join("legendary.exe"));
         fs::write(&part, "new").unwrap();
         fs::write(&dest, "old").unwrap();
@@ -328,12 +321,12 @@ mod tests {
         place(&part, &dest, &digest, &digest).unwrap();
         assert_eq!(fs::read_to_string(&dest).unwrap(), "new");
         assert!(!part.exists());
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_mismatched_download_is_deleted_and_the_old_copy_kept() {
-        let dir = temp_dir("mismatch");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let (part, dest) = (dir.join("legendary.exe.part"), dir.join("legendary.exe"));
         fs::write(&part, "tampered").unwrap();
         fs::write(&dest, "old").unwrap();
@@ -344,12 +337,12 @@ mod tests {
         );
         assert!(!part.exists());
         assert_eq!(fs::read_to_string(&dest).unwrap(), "old");
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn lookup_prefers_ours_then_local_app_data_then_path() {
-        let dir = temp_dir("lookup");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let (root, local) = (dir.join("tools"), dir.join("local"));
         assert_eq!(
             LEGENDARY.locate(&root, Some(&local)),
@@ -370,7 +363,6 @@ mod tests {
         fs::create_dir_all(ours.parent().unwrap()).unwrap();
         fs::write(&ours, "").unwrap();
         assert_eq!(LEGENDARY.locate(&root, Some(&local)), ours);
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -403,13 +395,14 @@ mod tests {
     #[test]
     #[ignore]
     fn real_downloads_match_their_pins() {
-        let dir = temp_dir("real");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let http = reqwest::Client::new();
         tauri::async_runtime::block_on(async {
             for tool in ALL {
-                let part = tool.managed(&dir).with_extension("exe.part");
+                let part = tool.managed(dir).with_extension("exe.part");
                 let digest = download(&http, tool, &part, |_| {}).await.unwrap();
-                let dest = tool.managed(&dir);
+                let dest = tool.managed(dir);
                 place(&part, &dest, &digest, tool.sha256).unwrap();
                 let output = Command::new(&dest).arg("--version").output().unwrap();
                 assert_eq!(
@@ -418,7 +411,6 @@ mod tests {
                 );
             }
         });
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

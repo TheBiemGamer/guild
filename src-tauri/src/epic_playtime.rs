@@ -310,18 +310,13 @@ mod tests {
 
     #[test]
     fn gog_answers_are_read_from_the_cache() {
-        let path = std::env::temp_dir().join(format!(
-            "launcher-gog-playtime-{}.sqlite",
-            std::process::id()
-        ));
-        _ = std::fs::remove_file(&path);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("t.sqlite");
         let conn = db::open(&path).unwrap();
         db::put_info(&conn, "gog-1", gog::PLAYTIME, "42", 0).unwrap();
         // GOG answered without minutes.
         db::put_info(&conn, "gog-2", gog::PLAYTIME, "null", 0).unwrap();
         db::put_info(&conn, "gog-3", "gog-product", "7", 0).unwrap();
         assert_eq!(gog_cached(&conn), HashMap::from([("1".to_string(), 42)]));
-        drop(conn);
-        _ = std::fs::remove_file(&path);
     }
 }

@@ -1287,9 +1287,8 @@ mod tests {
 
     #[test]
     fn a_fetch_finishing_after_disconnect_is_not_saved() {
-        let path =
-            std::env::temp_dir().join(format!("launcher-owned-test-{}.sqlite", std::process::id()));
-        let _ = std::fs::remove_file(&path);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("t.sqlite");
         let conn = cache::db::open(&path).unwrap();
         let owned = [OwnedGame {
             appid: 70,

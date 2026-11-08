@@ -173,16 +173,15 @@ pub fn fresh(conn: &Connection, now_secs: i64) -> bool {
 mod tests {
     use super::*;
 
-    fn db(name: &str) -> Connection {
-        let path =
-            std::env::temp_dir().join(format!("launcher-owned-{name}-{}.db", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        crate::cache::db::open(&path).unwrap()
+    fn db() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::cache::db::open(&dir.path().join("t.sqlite")).unwrap();
+        (dir, conn)
     }
 
     #[test]
     fn owned_round_trips_through_the_info_cache() {
-        let conn = db("roundtrip");
+        let (_dir, conn) = db();
         assert_eq!(cached(&conn), None);
         let games = vec![OwnedGame {
             appid: 70,

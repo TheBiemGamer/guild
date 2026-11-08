@@ -131,14 +131,6 @@ mod tests {
     use keyring_core::api::CredentialStoreApi;
     use std::fs;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("launcher-migrate-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     fn old_install(local: &Path) {
         fs::create_dir_all(local.join("launcher/data/logs")).unwrap();
         fs::write(local.join("launcher/data/library.sqlite"), "db").unwrap();
@@ -147,35 +139,38 @@ mod tests {
 
     #[test]
     fn fresh_pc_uses_the_new_folder() {
-        let local = temp_dir("fresh");
-        assert_eq!(folder(&local), None);
-        assert_eq!(root(&local), local.join("Guild"));
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path();
+        assert_eq!(folder(local), None);
+        assert_eq!(root(local), local.join("Guild"));
         assert!(!local.join("Guild").exists());
     }
 
     #[test]
     fn moves_the_old_folder_once() {
-        let local = temp_dir("move");
-        old_install(&local);
-        assert_eq!(root(&local), local.join("launcher"));
-        assert!(folder(&local).unwrap().starts_with("moved"));
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path();
+        old_install(local);
+        assert_eq!(root(local), local.join("launcher"));
+        assert!(folder(local).unwrap().starts_with("moved"));
         assert_eq!(
             fs::read_to_string(local.join("Guild/data/library.sqlite")).unwrap(),
             "db"
         );
         assert!(local.join("Guild/cache/art").is_dir());
         assert!(!local.join("launcher").exists());
-        assert_eq!(root(&local), local.join("Guild"));
-        assert_eq!(folder(&local), None);
+        assert_eq!(root(local), local.join("Guild"));
+        assert_eq!(folder(local), None);
     }
 
     #[test]
     fn moves_into_the_install_folder_and_leaves_the_exe() {
-        let local = temp_dir("installed");
-        old_install(&local);
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path();
+        old_install(local);
         fs::create_dir_all(local.join("Guild")).unwrap();
         fs::write(local.join("Guild/Guild.exe"), "exe").unwrap();
-        assert!(folder(&local).unwrap().starts_with("moved"));
+        assert!(folder(local).unwrap().starts_with("moved"));
         assert!(local.join("Guild/Guild.exe").exists());
         assert!(local.join("Guild/data/library.sqlite").exists());
         assert!(!local.join("launcher").exists());
@@ -183,36 +178,39 @@ mod tests {
 
     #[test]
     fn a_failed_move_keeps_using_the_old_folder() {
-        let local = temp_dir("failed");
-        old_install(&local);
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path();
+        old_install(local);
         // A file where the folder should go, so creating it fails.
         fs::write(local.join("Guild"), "").unwrap();
-        assert!(folder(&local).unwrap().contains("trying again"));
+        assert!(folder(local).unwrap().contains("trying again"));
         assert!(local.join("launcher/data/library.sqlite").exists());
         assert!(local.join("launcher/cache/art").is_dir());
-        assert_eq!(root(&local), local.join("launcher"));
+        assert_eq!(root(local), local.join("launcher"));
     }
 
     #[test]
     fn leaves_the_old_folder_when_both_have_data() {
-        let local = temp_dir("both");
-        old_install(&local);
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path();
+        old_install(local);
         fs::create_dir_all(local.join("Guild/data")).unwrap();
-        assert!(folder(&local).unwrap().contains("stays"));
+        assert!(folder(local).unwrap().contains("stays"));
         assert!(local.join("launcher/data/library.sqlite").exists());
-        assert_eq!(root(&local), local.join("Guild"));
+        assert_eq!(root(local), local.join("Guild"));
     }
 
     #[test]
     fn moves_only_what_is_missing() {
-        let local = temp_dir("partial");
-        old_install(&local);
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path();
+        old_install(local);
         fs::create_dir_all(local.join("Guild/cache")).unwrap();
-        folder(&local);
+        folder(local);
         assert!(local.join("Guild/data/library.sqlite").exists());
         // The new cache was kept, so the old one is left behind.
         assert!(local.join("launcher/cache/art").is_dir());
-        assert_eq!(root(&local), local.join("Guild"));
+        assert_eq!(root(local), local.join("Guild"));
     }
 
     #[test]

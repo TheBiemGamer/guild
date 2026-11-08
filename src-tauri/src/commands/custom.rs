@@ -278,8 +278,8 @@ mod tests {
 
     #[test]
     fn covers_are_png_or_jpeg_and_replace_the_last_one() {
-        let dir = std::env::temp_dir().join(format!("launcher-cover-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let mut png = Vec::new();
         image::RgbImage::new(2, 3)
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
@@ -291,13 +291,12 @@ mod tests {
                 image::ImageFormat::Jpeg,
             )
             .unwrap();
-        store_cover(&dir, &png).unwrap();
-        assert_eq!(custom::cover_file(&dir), Some(dir.join("cover.png")));
-        store_cover(&dir, &jpg).unwrap();
-        assert_eq!(custom::cover_file(&dir), Some(dir.join("cover.jpg")));
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
-        assert!(store_cover(&dir, b"GIF89a....").is_err());
-        assert_eq!(custom::cover_file(&dir), Some(dir.join("cover.jpg")));
-        std::fs::remove_dir_all(&dir).unwrap();
+        store_cover(dir, &png).unwrap();
+        assert_eq!(custom::cover_file(dir), Some(dir.join("cover.png")));
+        store_cover(dir, &jpg).unwrap();
+        assert_eq!(custom::cover_file(dir), Some(dir.join("cover.jpg")));
+        assert_eq!(std::fs::read_dir(dir).unwrap().count(), 1);
+        assert!(store_cover(dir, b"GIF89a....").is_err());
+        assert_eq!(custom::cover_file(dir), Some(dir.join("cover.jpg")));
     }
 }
