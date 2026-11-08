@@ -235,7 +235,7 @@ fn download(fraction: f32, done: u64, total: u64, secs_left: Option<u64>) -> Pro
 /// The newest `userdata/<account>/config/localconfig.vdf`.
 // shortcut: with several Steam accounts on this PC it follows whoever used Steam last; read loginusers.vdf if that's wrong.
 fn newest_localconfig(steam_root: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(steam_root.join("userdata"))
+    fs_err::read_dir(steam_root.join("userdata"))
         .into_iter()
         .flatten()
         .flatten()
@@ -247,7 +247,7 @@ fn newest_localconfig(steam_root: &Path) -> Option<PathBuf> {
 
 fn read_localconfig(steam_root: &Path) -> Option<String> {
     let path = newest_localconfig(steam_root)?;
-    std::fs::read_to_string(&path)
+    fs_err::read_to_string(&path)
         .inspect_err(|e| tracing::warn!("steam {}: {e}", path.display()))
         .ok()
 }
@@ -388,14 +388,14 @@ pub(crate) fn art(app_id: u32, librarycache_dir: &Path) -> Art {
 /// hash-named subfolders (and `library_capsule`/`library_header` names) for newer ones.
 fn local_art(dir: &Path) -> Art {
     let mut art = Art::default();
-    let files = std::fs::read_dir(dir)
+    let files = fs_err::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .flat_map(|entry| {
             let path = entry.path();
             if path.is_dir() {
-                std::fs::read_dir(&path)
+                fs_err::read_dir(&path)
                     .into_iter()
                     .flatten()
                     .flatten()

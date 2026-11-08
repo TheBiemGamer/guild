@@ -407,7 +407,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
 
 /// Total size of the files under `dir`; a missing folder counts as empty.
 fn dir_size(dir: &std::path::Path) -> u64 {
-    std::fs::read_dir(dir)
+    fs_err::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -496,7 +496,7 @@ pub async fn clear_cache(app: AppHandle) -> Res<()> {
     blocking(move || {
         let dirs = &app.state::<AppState>().dirs;
         for dir in [&dirs.thumbs, &dirs.art] {
-            match std::fs::remove_dir_all(dir) {
+            match fs_err::remove_dir_all(dir) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
@@ -532,7 +532,7 @@ pub fn open_igdb() -> Res<()> {
 #[specta::specta]
 pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
     let dir = &state.dirs.logs;
-    std::fs::create_dir_all(dir).map_err(Msg::system)?;
+    fs_err::create_dir_all(dir).map_err(Msg::system)?;
     std::process::Command::new("explorer.exe")
         .arg(dir)
         .spawn()

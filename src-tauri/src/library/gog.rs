@@ -175,7 +175,7 @@ fn classify(success: bool, stdout: &[u8], stderr: &str, now: f64) -> Auth {
 
 /// `auth.json` has the main login. Parsed into ignored values, so no token is held.
 fn has_login(file: &Path) -> bool {
-    let read = std::fs::read(file)
+    let read = fs_err::read(file)
         .ok()
         .and_then(|b| serde_json::from_slice::<HashMap<String, IgnoredAny>>(&b).ok());
     read.is_some_and(|logins| logins.contains_key(CLIENT_ID))
@@ -185,7 +185,7 @@ fn has_login(file: &Path) -> bool {
 /// `error`, then kept in memory as the login.
 pub fn log_in(code: &str) -> Result<(), Error> {
     let mut cached = lock_auth();
-    std::fs::create_dir_all(dir())?;
+    fs_err::create_dir_all(dir())?;
     let output = crate::platform::tool_output(&mut gogdl(["auth", "--code", code]))?;
     let answer = serde_json::from_slice::<Value>(&output.stdout)
         .ok()
@@ -203,7 +203,7 @@ pub fn log_in(code: &str) -> Result<(), Error> {
 pub fn log_out() -> Result<(), Error> {
     let mut cached = lock_auth();
     *cached = None;
-    match std::fs::remove_file(auth_file()) {
+    match fs_err::remove_file(auth_file()) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
             Err(msg!(cantLogOutGog, detail = e.to_string()).into())
         }
@@ -614,7 +614,7 @@ fn support(id: &str) -> PathBuf {
 
 /// A JSON file, with or without a byte order mark.
 fn read_json(path: &Path) -> Option<Value> {
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = fs_err::read(path).ok()?;
     serde_json::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)).ok()
 }
 
@@ -724,7 +724,7 @@ struct Local {
 
 fn local(dir: &Path, id: &str) -> Local {
     let root = read_json(&dir.join(format!("goggame-{id}.info"))).unwrap_or(Value::Null);
-    let mut dlcs: Vec<String> = std::fs::read_dir(dir)
+    let mut dlcs: Vec<String> = fs_err::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -971,7 +971,7 @@ pub fn install(
         .as_str()
         .filter(|f| !f.is_empty())
         .ok_or(msg!(gogNoFolderName))?;
-    std::fs::create_dir_all(base)?;
+    fs_err::create_dir_all(base)?;
     let dlcs = if with_dlc {
         Dlcs::All
     } else {
@@ -1065,9 +1065,9 @@ pub fn uninstall(conn: &Connection, id: &str, dir: &Path) -> Result<(), Error> {
     if !has_info(dir, id) {
         return Err(msg!(folderNotThisGame, path = dir.display().to_string()).into());
     }
-    std::fs::remove_dir_all(dir)?;
-    _ = std::fs::remove_file(manifest(id));
-    _ = std::fs::remove_dir_all(support(id));
+    fs_err::remove_dir_all(dir)?;
+    _ = fs_err::remove_file(manifest(id));
+    _ = fs_err::remove_dir_all(support(id));
     let key = ProviderKind::Gog.key(id);
     db::set_gog_install(conn, &key, None)?;
     db::delete_info(conn, &key, SAVE_TS)?;
@@ -1103,9 +1103,9 @@ pub fn move_to(conn: &Connection, id: &str, from: &Path, dest: &Path) -> Result<
     if to.exists() {
         return Err(msg!(alreadyExists, path = to.display().to_string()).into());
     }
-    std::fs::rename(from, &to)?;
+    fs_err::rename(from, &to)?;
     if let Err(e) = db::set_gog_install(conn, &ProviderKind::Gog.key(id), Some(&to)) {
-        _ = std::fs::rename(&to, from);
+        _ = fs_err::rename(&to, from);
         return Err(e);
     }
     Ok(())
@@ -1452,7 +1452,7 @@ pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSyn
     let outcomes = folders
         .iter()
         .map(|(name, folder)| {
-            _ = std::fs::create_dir_all(folder);
+            _ = fs_err::create_dir_all(folder);
             let ts = stamps.get(name).map_or("0", String::as_str);
             let command = gogdl(sync_args(folder, id, name, ts, sync));
             match super::epic::run_with_timeout(command, b"", super::epic::SYNC_TIMEOUT) {

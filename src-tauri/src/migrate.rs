@@ -37,8 +37,8 @@ pub fn folder(local: &Path) -> Option<String> {
         ));
     }
     // `data` first: while it can't move (another program has the database open), nothing moves.
-    if let Err(e) = std::fs::create_dir_all(&new)
-        .and_then(|()| std::fs::rename(old.join("data"), new.join("data")))
+    if let Err(e) = fs_err::create_dir_all(&new)
+        .and_then(|()| fs_err::rename(old.join("data"), new.join("data")))
     {
         return Some(format!(
             "moving {} to {}: {e}; trying again next start",
@@ -46,13 +46,13 @@ pub fn folder(local: &Path) -> Option<String> {
             new.display()
         ));
     }
-    for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
+    for entry in fs_err::read_dir(&old).into_iter().flatten().flatten() {
         let to = new.join(entry.file_name());
         if !to.exists() {
-            let _ = std::fs::rename(entry.path(), to);
+            let _ = fs_err::rename(entry.path(), to);
         }
     }
-    Some(match std::fs::remove_dir(&old) {
+    Some(match fs_err::remove_dir(&old) {
         Ok(()) => format!("moved {} to {}", old.display(), new.display()),
         Err(_) => format!(
             "moved {} to {}; some files stayed behind",

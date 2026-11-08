@@ -73,7 +73,7 @@ pub async fn save_custom_game(
         Some(CoverPick::Url(url)) => Some(download(&app.state::<AppState>().http, &url).await?),
         Some(CoverPick::File(path)) => Some(
             blocking(move || {
-                std::fs::read(&path).map_err(|e| msg!(cantReadCover, detail = e.to_string()))
+                fs_err::read(&path).map_err(|e| msg!(cantReadCover, detail = e.to_string()))
             })
             .await?,
         ),
@@ -99,7 +99,7 @@ pub async fn save_custom_game(
         };
         if let Err(e) = cache::db::save_custom_game(&conn, &row) {
             if existing.is_none() {
-                _ = std::fs::remove_dir_all(&dir);
+                _ = fs_err::remove_dir_all(&dir);
             }
             return Err(e.into());
         }
@@ -122,7 +122,7 @@ pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
         let id = custom::id_of(&key).ok_or(msg!(notAddedGame))?;
         let conn = open_db(&state).ok_or(msg!(noDb))?;
         cache::db::delete_custom_game(&conn, id)?;
-        match std::fs::remove_dir_all(state.dirs.custom.join(id)) {
+        match fs_err::remove_dir_all(state.dirs.custom.join(id)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 tracing::warn!("remove cover {key}: {e}")
             }
@@ -164,14 +164,14 @@ fn store_cover(dir: &Path, bytes: &[u8]) -> Res<()> {
         _ => return Err(msg!(coverNotImage)),
     };
     let write = || -> std::io::Result<()> {
-        std::fs::create_dir_all(dir)?;
+        fs_err::create_dir_all(dir)?;
         // Not named `cover.*`, so `cover_file` never finds a half-written one.
         let tmp = dir.join("new-cover.part");
-        std::fs::write(&tmp, bytes)?;
+        fs_err::write(&tmp, bytes)?;
         if let Some(old) = custom::cover_file(dir) {
-            std::fs::remove_file(old)?;
+            fs_err::remove_file(old)?;
         }
-        std::fs::rename(&tmp, dir.join(format!("cover.{ext}")))
+        fs_err::rename(&tmp, dir.join(format!("cover.{ext}")))
     };
     write().map_err(|e| msg!(cantSaveCover, detail = e.to_string()))
 }
@@ -179,9 +179,9 @@ fn store_cover(dir: &Path, bytes: &[u8]) -> Res<()> {
 /// Deletes the game's cached thumbnails, so the card shows the new cover.
 fn forget_thumbs(thumbs: &Path, id: &str) {
     let prefix = format!("{}-", row_key(id));
-    for entry in std::fs::read_dir(thumbs).into_iter().flatten().flatten() {
+    for entry in fs_err::read_dir(thumbs).into_iter().flatten().flatten() {
         if entry.file_name().to_string_lossy().starts_with(&prefix) {
-            _ = std::fs::remove_file(entry.path());
+            _ = fs_err::remove_file(entry.path());
         }
     }
 }

@@ -2,8 +2,8 @@
 //! Each is one pinned GitHub release asset; a download whose SHA-256 differs from the compiled-in hash is
 //! deleted before anything runs it. Bump a tool by changing its version, URL and hash together.
 
+use fs_err::{self as fs, File};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;

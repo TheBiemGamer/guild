@@ -3,8 +3,8 @@
 //! `2026-11-07 14:03:12  WARN steam library: …` in local time. Never log tokens, secrets, passwords or codes.
 //! At 1 MB it rolls to `launcher.1.log`; `launcher.4.log` is the oldest kept.
 
+use fs_err::{self as fs, File, OpenOptions};
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

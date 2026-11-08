@@ -6,6 +6,7 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 directories = "6"
+fs-err = "3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 jiff = "0.2"
 keyring-core = "1"

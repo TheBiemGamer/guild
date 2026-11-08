@@ -97,7 +97,7 @@ const STEPS: &[&str] = &[
 /// Opens the database and brings its schema up to date. Every connection goes through here.
 pub fn open(path: &Path) -> Result<Connection, Error> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        fs_err::create_dir_all(dir)?;
     }
     let mut conn = Connection::open(path)?;
     // Background jobs write while commands do: wait for the lock instead of failing the write.
@@ -170,7 +170,7 @@ pub fn file_in(dir: &Path) -> PathBuf {
                 aside.display()
             ));
         }
-        if let Err(e) = std::fs::rename(&new, &aside) {
+        if let Err(e) = fs_err::rename(&new, &aside) {
             return keep_old(&e);
         }
     }
@@ -210,16 +210,16 @@ fn rename_with_sidecars(old: &Path, new: &Path) -> Result<(), Error> {
         for suffix in SIDECARS {
             let (from, to) = (sidecar(old, suffix), sidecar(new, suffix));
             if from.exists() {
-                std::fs::rename(&from, &to)?;
+                fs_err::rename(&from, &to)?;
                 moved.push((from, to));
             }
         }
-        std::fs::rename(old, new)
+        fs_err::rename(old, new)
     };
     let result = rename();
     if result.is_err() {
         for (from, to) in moved {
-            _ = std::fs::rename(to, from);
+            _ = fs_err::rename(to, from);
         }
     }
     Ok(result?)
@@ -228,14 +228,14 @@ fn rename_with_sidecars(old: &Path, new: &Path) -> Result<(), Error> {
 /// Copies `old` to `new` through SQLite, so a file another instance is writing is copied whole.
 fn copy(old: &Path, new: &Path) -> Result<(), Error> {
     let tmp = new.with_extension(format!("sqlite.{}.tmp", std::process::id()));
-    _ = std::fs::remove_file(&tmp);
+    _ = fs_err::remove_file(&tmp);
     let conn = Connection::open_with_flags(old, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     conn.busy_timeout(Duration::from_secs(5))?;
     conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy()])?;
     drop(conn);
     // A hard link fails when `new` exists, so the copy never replaces a file another instance just made.
-    let linked = std::fs::hard_link(&tmp, new);
-    _ = std::fs::remove_file(&tmp);
+    let linked = fs_err::hard_link(&tmp, new);
+    _ = fs_err::remove_file(&tmp);
     Ok(linked?)
 }
 

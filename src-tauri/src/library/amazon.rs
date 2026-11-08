@@ -206,7 +206,7 @@ fn classify_sync(output: Option<&Output>) -> Login {
 }
 
 fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    serde_json::from_slice(&fs_err::read(path).ok()?).ok()
 }
 
 /// nile's `current_user.json`: `{"name", "user_id"}`, plain.
@@ -329,7 +329,7 @@ pub fn log_out() -> Result<(), Error> {
 /// Deletes the account, its tokens, and the owned games with their sync point (syncs are incremental, so another
 /// account would inherit the list). Installs, manifests and the SDK stay.
 fn forget_login(cfg: &Path) -> std::io::Result<()> {
-    let entries = match std::fs::read_dir(cfg) {
+    let entries = match fs_err::read_dir(cfg) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         entries => entries?,
     };
@@ -342,7 +342,7 @@ fn forget_login(cfg: &Path) -> std::io::Result<()> {
             "current_user.json" | "library.json" | "syncpoint.raw"
         ) || name.ends_with(".enc")
         {
-            match std::fs::remove_file(entry.path()) {
+            match fs_err::remove_file(entry.path()) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
                 _ => {}
             }
@@ -415,7 +415,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         let library = read_json(&cfg.join("library.json")).ok_or("no library.json")?;
         // Under the lock too: every nile run rewrites it in place.
         let installed =
-            parse_installed(&std::fs::read(cfg.join("installed.json")).unwrap_or_default());
+            parse_installed(&fs_err::read(cfg.join("installed.json")).unwrap_or_default());
         if !installed.is_empty() && cached(&conn, UPDATES_MAX_AGE_SECS, now).is_none() {
             check_updates(Some(&conn));
         }
@@ -685,14 +685,14 @@ fn folder_name(library: &Value, id: &str) -> String {
 /// The folder `installed.json` records for the game, when it exists. Callers hold `NILE`.
 fn installed_path(id: &str) -> Option<PathBuf> {
     let mut installed =
-        parse_installed(&std::fs::read(cfg().join("installed.json")).unwrap_or_default());
+        parse_installed(&fs_err::read(cfg().join("installed.json")).unwrap_or_default());
     installed.remove(id).map(|i| i.path).filter(|p| p.is_dir())
 }
 
 /// Whether `dir` holds a `*.patch` file written since `since`: nile's temp file for a download, left behind when the
 /// download failed (nile swallows the error and finishes).
 fn leftover_patch(dir: &Path, since: SystemTime) -> bool {
-    std::fs::read_dir(dir)
+    fs_err::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -878,7 +878,7 @@ pub fn install(
     on_event: impl FnMut(InstallEvent),
 ) -> Result<PathBuf, Error> {
     ensure_login()?;
-    std::fs::create_dir_all(base)?;
+    fs_err::create_dir_all(base)?;
     let folder = base.join(folder_name(
         &read_json(&cfg().join("library.json")).unwrap_or(Value::Null),
         id,
@@ -899,7 +899,7 @@ pub fn install(
     );
     if run.log.contains(NO_SPACE_LINE) {
         // nile made the game's folder before it checked; only an empty one goes.
-        _ = std::fs::remove_dir(&folder);
+        _ = fs_err::remove_dir(&folder);
     }
     result?;
     let dir = recorded.ok_or(msg!(nileNotRecorded))?;
@@ -1016,9 +1016,9 @@ pub fn move_to(id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
         return Err(msg!(alreadyExists, path = to.display().to_string()).into());
     }
     let _nile = lock_between_downloads()?;
-    std::fs::rename(from, &to)?;
+    fs_err::rename(from, &to)?;
     if let Err(e) = set_installed_path(&cfg().join("installed.json"), id, &to) {
-        _ = std::fs::rename(&to, from);
+        _ = fs_err::rename(&to, from);
         return Err(msg!(cantUpdateNileRecord, reason = Msg::from(e)).into());
     }
     Ok(())
@@ -1026,15 +1026,15 @@ pub fn move_to(id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
 
 /// Sets the game's `path` in `installed.json`, keeping every other field, through a temp file renamed into place.
 fn set_installed_path(file: &Path, id: &str, path: &Path) -> Result<(), Error> {
-    let mut entries: Vec<Value> = serde_json::from_slice(&std::fs::read(file)?)?;
+    let mut entries: Vec<Value> = serde_json::from_slice(&fs_err::read(file)?)?;
     let entry = entries
         .iter_mut()
         .find(|e| e["id"] == id)
         .ok_or(msg!(nileNoRecord))?;
     entry["path"] = Value::from(path.to_string_lossy().into_owned());
     let temp = file.with_extension("json.tmp");
-    std::fs::write(&temp, serde_json::to_vec(&entries)?)?;
-    std::fs::rename(&temp, file).inspect_err(|_| _ = std::fs::remove_file(&temp))?;
+    fs_err::write(&temp, serde_json::to_vec(&entries)?)?;
+    fs_err::rename(&temp, file).inspect_err(|_| _ = fs_err::remove_file(&temp))?;
     Ok(())
 }
 
@@ -1090,7 +1090,7 @@ fn strip_json5(text: &str) -> String {
 /// The game's `fuel.json`, its launch file.
 fn read_fuel(dir: &Path) -> Option<Value> {
     serde_json::from_str(&strip_json5(&String::from_utf8_lossy(
-        &std::fs::read(dir.join("fuel.json")).ok()?,
+        &fs_err::read(dir.join("fuel.json")).ok()?,
     )))
     .ok()
 }
@@ -1191,7 +1191,7 @@ fn check_sdk(cfg: &Path) {
     }
     tracing::warn!("nile: the Amazon Games SDK is incomplete; the next Nile run fetches it again");
     if let Some(_nile) = try_lock() {
-        match std::fs::remove_dir_all(&sdk) {
+        match fs_err::remove_dir_all(&sdk) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 tracing::warn!("delete the Amazon Games SDK: {e}")
             }

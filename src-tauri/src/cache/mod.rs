@@ -85,9 +85,9 @@ pub async fn resolve(image: &Image, http: &reqwest::Client, dest: PathBuf) -> Op
     };
     // Write then rename so a crash never leaves a truncated image behind.
     let tmp = dest.with_extension("part");
-    let written = std::fs::create_dir_all(dest.parent()?)
-        .and_then(|()| std::fs::write(&tmp, &bytes))
-        .and_then(|()| std::fs::rename(&tmp, &dest));
+    let written = fs_err::create_dir_all(dest.parent()?)
+        .and_then(|()| fs_err::write(&tmp, &bytes))
+        .and_then(|()| fs_err::rename(&tmp, &dest));
     match written {
         Ok(()) => Some(dest),
         Err(e) => {
@@ -111,22 +111,22 @@ pub fn thumbnail(src: &Path, dir: &Path, key: &str) -> ImageResult<(PathBuf, Opt
     let color_file = dir.join(format!("{key}.color"));
     if cached.exists() {
         // Thumbnails cached before colours were stored get theirs from the JPEG, once.
-        let color = std::fs::read_to_string(&color_file).ok().or_else(|| {
+        let color = fs_err::read_to_string(&color_file).ok().or_else(|| {
             let color = average_color(&open_image(&cached).ok()?.to_rgb8());
-            _ = std::fs::write(&color_file, &color);
+            _ = fs_err::write(&color_file, &color);
             Some(color)
         });
         return Ok((cached, color));
     }
     let thumb = open_image(src)?.thumbnail(THUMB_W, THUMB_H).to_rgb8();
     let color = average_color(&thumb);
-    std::fs::create_dir_all(dir)?;
+    fs_err::create_dir_all(dir)?;
     // The colour is only a placeholder: a failed write is computed again on the next hit.
-    _ = std::fs::write(&color_file, &color);
+    _ = fs_err::write(&color_file, &color);
     // Write then rename, so a cached file is always complete and the hit check above can trust it.
     let tmp = cached.with_extension("tmp");
     DynamicImage::ImageRgb8(thumb).save_with_format(&tmp, image::ImageFormat::Jpeg)?;
-    std::fs::rename(&tmp, &cached)?;
+    fs_err::rename(&tmp, &cached)?;
     Ok((cached, Some(color)))
 }
 

@@ -117,7 +117,7 @@ pub fn game(c: &CustomGame, covers: &Path) -> Game {
 
 /// `cover.<ext>` in `dir`, whatever the extension.
 pub fn cover_file(dir: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(dir)
+    fs_err::read_dir(dir)
         .ok()?
         .flatten()
         .map(|e| e.path())
