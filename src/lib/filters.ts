@@ -140,3 +140,6 @@ export function matches(game: Filterable, on: readonly Filter[], progress: Recor
     return active.length === 0 || active.some((f) => test(f, game, progress))
   })
 }
+
+/** The import picker's search: part of the title, any case, the query trimmed. An empty query matches everything. */
+export const titleMatches = (title: string, query: string): boolean => title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())

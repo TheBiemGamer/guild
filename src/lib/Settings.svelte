@@ -9,6 +9,7 @@
   import SteamLogin from './SteamLogin.svelte'
   import NotesPopover, { installedNotes } from './NotesPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
+  import GamePicker from './GamePicker.svelte'
   import { around, t } from './i18n'
   import { keepOnBackForward } from './outside'
   import igdbSvg from './icons/igdb.svg?raw'
@@ -778,10 +779,8 @@
                       <div class="row stack">
                         <label for="import-game">{t('settings.whichGame', { path: importing.path })}</label>
                         <div class="field">
-                          <select id="import-game" bind:value={importKey}>
-                            {#each importing.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
-                          </select>
-                          <button class="btn" disabled={managing !== null} onclick={runImport}
+                          <GamePicker id="import-game" games={importing.games} bind:value={importKey} />
+                          <button class="btn" disabled={managing !== null || importKey === ''} onclick={runImport}
                             >{managing === 'import' ? t('settings.importing') : t('settings.import')}</button
                           >
                           <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>{t('common.cancel')}</button>
@@ -963,10 +962,8 @@
                       <div class="row stack">
                         <label for="amazon-import-game">{t('settings.whichGame', { path: amazonImport.path })}</label>
                         <div class="field">
-                          <select id="amazon-import-game" bind:value={amazonImportKey}>
-                            {#each amazonImport.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
-                          </select>
-                          <button class="btn" disabled={amazonImporting} onclick={runAmazonImport}
+                          <GamePicker id="amazon-import-game" games={amazonImport.games} bind:value={amazonImportKey} />
+                          <button class="btn" disabled={amazonImporting || amazonImportKey === ''} onclick={runAmazonImport}
                             >{amazonImporting ? t('settings.importing') : t('settings.import')}</button
                           >
                           <button class="btn" disabled={amazonImporting} onclick={() => (amazonImport = null)}>{t('common.cancel')}</button>
@@ -1748,8 +1745,7 @@
     gap: 8px;
   }
 
-  input,
-  select {
+  input {
     flex: 1;
     min-width: 0;
     height: 36px;

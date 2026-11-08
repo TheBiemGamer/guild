@@ -493,6 +493,7 @@
   "settings.syncSaves": "Cloud saves synchroniseren",
   "settings.importInstall": "Bestaande installatie importeren",
   "settings.importButton": "Importeren…",
+  "settings.importNoMatch": "Geen game met die naam",
   "settings.whichGame": "Welke game staat er in {path}?",
   "settings.importing": "Importeren…",
   "settings.import": "Importeren",
