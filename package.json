@@ -10,7 +10,9 @@
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "tauri": "tauri",
     "test": "node --test scripts/filters.test.ts scripts/format.test.ts scripts/changelog.test.ts scripts/messages.test.ts scripts/i18n.test.ts",
-    "bump": "node scripts/bump.ts"
+    "bump": "node scripts/bump.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
@@ -21,6 +23,8 @@
     "@tauri-apps/cli": "^2.12.4",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^24.19.2",
+    "prettier": "^3.9.10",
+    "prettier-plugin-svelte": "^4.1.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.7",
     "typescript": "~6.0.3",

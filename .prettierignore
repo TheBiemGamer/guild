@@ -1,0 +1,11 @@
+src/lib/bindings.ts
+src-tauri/
+dist/
+node_modules/
+covers/
+*.snap
+package-lock.json
+docs/superpowers/
+.superpowers/
+.impeccable/
+.claude/

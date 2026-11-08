@@ -1,0 +1,9 @@
+{
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 160,
+  "trailingComma": "all",
+  "endOfLine": "crlf",
+  "plugins": ["prettier-plugin-svelte"],
+  "overrides": [{ "files": "*.md", "options": { "singleQuote": false } }]
+}
