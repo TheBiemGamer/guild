@@ -1263,7 +1263,7 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
         _ => {
             blocking(move || {
                 let conn = open_db(&app.state::<AppState>());
-                info::cached_or_fetch(
+                info::cached_or_run_tool(
                     conn.as_ref(),
                     &key,
                     "size",
@@ -1562,7 +1562,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
                 return (all != GameInfo::default()).then_some(all);
             }
             // One list answers for every Epic game, so all of them are cached from it.
-            let catalog = info::cached_or_fetch(
+            let catalog = info::cached_or_run_tool(
                 conn.as_ref(),
                 &key,
                 info::DETAILS,

@@ -104,8 +104,6 @@ export function prefetch(card: Card) {
   const quiet = () => {}
   gameInfo(card.key).catch(quiet)
   timeToBeat(card.key).catch(quiet)
-  // Epic and GOG sizes only: a Steam size logs on to Steam, which a passing pointer must not do.
-  if (!card.installed && (card.chosen.startsWith('epic-') || card.chosen.startsWith('gog-'))) downloadSize(card.chosen).catch(quiet)
 }
 /** Downloads and checks a store tool; `onPercent` hears each new whole percent once the size is known. */
 export function installTool(name: ToolView['name'], onPercent: (percent: number) => void) {

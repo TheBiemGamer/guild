@@ -680,7 +680,7 @@ pub fn download_size(info: &Value, dlcs: &[String]) -> Option<u64> {
 /// `gogdl info` for a game, from the cache while under a week old. `None` when gogdl couldn't tell (logged).
 pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
     let key = ProviderKind::Gog.key(id);
-    let json = crate::info::cached_or_fetch(
+    let json = crate::info::cached_or_run_tool(
         conn,
         &key,
         INSTALL_INFO,

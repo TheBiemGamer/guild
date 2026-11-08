@@ -335,6 +335,22 @@ pub fn cached_or_fetch(
     Some(json)
 }
 
+/// `cached_or_fetch` for a fetch that runs a store tool (`legendary info`/`list`, `gogdl info`, `nile install --info`),
+/// one at a time across them all: callers that waited find the answer the one before them cached instead of stacking
+/// tool processes.
+pub fn cached_or_run_tool(
+    conn: Option<&Connection>,
+    key: &str,
+    kind: &str,
+    max_age_secs: i64,
+    now_secs: i64,
+    fetch: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    cached_or_fetch(conn, key, kind, max_age_secs, now_secs, fetch)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};

@@ -596,7 +596,7 @@ fn ensure_login() -> Result<(), Error> {
 /// old. `None` when nile is busy or couldn't tell (logged).
 pub fn download_size(conn: Option<&Connection>, id: &str) -> Option<u64> {
     let key = ProviderKind::Amazon.key(id);
-    let json = info::cached_or_fetch(
+    let json = info::cached_or_run_tool(
         conn,
         &key,
         INSTALL_INFO,
