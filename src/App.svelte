@@ -523,17 +523,7 @@
         <span>{before}<b>{updatedTo}</b>{after}</span>
         {#if notes}
           <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
-          {#if updatedNotesOpen}
-            <NotesPopover
-              version={updatedTo}
-              {notes}
-              anchor={updatedNotesButton}
-              onclose={(refocus) => {
-                updatedNotesOpen = false
-                if (refocus) updatedNotesButton?.focus()
-              }}
-            />
-          {/if}
+          <NotesPopover version={updatedTo} {notes} bind:open={updatedNotesOpen} anchor={updatedNotesButton} />
         {/if}
         <button class="close" onclick={() => (updatedTo = null)} aria-label={t('common.dismiss')}>✕</button>
       </div>

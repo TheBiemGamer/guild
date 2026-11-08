@@ -1287,17 +1287,8 @@
   </div>
 </div>
 
-{#if notesOpen && notes}
-  <!-- Outside the panel: its backdrop blur would trap a fixed popover inside it. -->
-  <NotesPopover
-    version={view.appVersion}
-    {notes}
-    anchor={notesButton}
-    onclose={(refocus) => {
-      notesOpen = false
-      if (refocus) notesButton?.focus()
-    }}
-  />
+{#if notes}
+  <NotesPopover version={view.appVersion} {notes} bind:open={notesOpen} anchor={notesButton} />
 {/if}
 
 {#if connecting}

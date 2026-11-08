@@ -1,27 +1,28 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { Popover } from 'bits-ui'
+  import { tick, type Snippet } from 'svelte'
   import * as api from './api'
   import { commands } from './bindings'
   import { collectionFilter, filterGroups, filterName, toggleFilter, type Collection, type Filter } from './filters'
-  import { popover } from './popover'
   import { t } from './i18n'
+  import { keepOnBackForward } from './outside'
   import Tip from './Tip.svelte'
 
   let {
     filters = $bindable(),
     collections,
     multiStore,
-    anchor,
-    onclose,
+    open = $bindable(),
+    trigger,
     onchanged,
   }: {
     filters: Filter[]
     collections: Collection[]
     /** The library uses more than one store: the Has group shows. */
     multiStore: boolean
-    /** The Filters chip: clicks on it toggle instead of closing from outside. */
-    anchor: HTMLElement | undefined
-    onclose: (refocus: boolean) => void
+    open: boolean
+    /** The Filters chip: spread `props` on it. */
+    trigger: Snippet<[{ props: Record<string, unknown> }]>
     /** After a collection was renamed or deleted. */
     onchanged: () => void
   } = $props()
@@ -36,6 +37,14 @@
   /** Why the last rename or delete failed. */
   let problem = $state<string | null>(null)
   let panel = $state<HTMLDivElement>()
+
+  // Each opening starts with the list closed, as when the popover was mounted per opening.
+  $effect(() => {
+    if (open) return
+    managing = false
+    renaming = deleting = null
+    problem = null
+  })
 
   async function focusIn(selector: string) {
     await tick()
@@ -65,6 +74,7 @@
   function renameKeydown(e: KeyboardEvent, c: Collection) {
     if (e.key === 'Enter') saveRename(c)
     else if (e.key === 'Escape') {
+      // Stopped before bits-ui's Escape listener on document: only the rename ends, not the popover.
       e.preventDefault()
       e.stopPropagation()
       renaming = null
@@ -96,63 +106,81 @@
   }
 </script>
 
-<div class="pop" role="dialog" aria-label={t('filters.title')} tabindex="-1" use:popover={{ anchor, close: onclose }}>
-  {#each groups as group, i (group.label)}
-    <h3 id="filter-group-{i}">{group.label}</h3>
-    <div class="toggles" role="group" aria-labelledby="filter-group-{i}">
-      {#each group.filters as f (f)}
-        <button aria-pressed={filters.includes(f)} onclick={() => (filters = toggleFilter(filters, f))}>{filterName(f, collections)}</button>
-      {/each}
-    </div>
-  {/each}
-  <div class="foot">
-    <button class="link" onclick={() => (filters = [])}>{t('filters.clear')}</button>
-    <button class="link" bind:this={manageButton} aria-expanded={managing} aria-controls="manage-collections" onclick={() => (managing = !managing)}>
-      {t('filters.manage')}
-    </button>
-  </div>
-  {#if managing}
-    <div class="manage" id="manage-collections" bind:this={panel}>
-      {#each collections as c (c.id)}
-        <div class="row">
-          {#if deleting === c.id}
-            <span class="ask">{t('filters.askDelete', { name: c.name })}</span>
-            <button class="small danger" onclick={() => remove(c)}>{t('common.delete')}</button>
-            <button class="small cancel" onclick={() => keep(c)}>{t('common.cancel')}</button>
-          {:else if renaming === c.id}
-            <input
-              aria-label={t('filters.renameNamed', { name: c.name })}
-              bind:value={draft}
-              onkeydown={(e) => renameKeydown(e, c)}
-              onblur={() => saveRename(c)}
-            />
-          {:else}
-            <Tip text={t('filters.rename')}>
-              {#snippet children({ props })}
-                <button {...props} class="name" data-name={c.id} aria-label={t('filters.renameNamed', { name: c.name })} onclick={() => startRename(c)}
-                  >{c.name}</button
-                >
-              {/snippet}
-            </Tip>
-            <button class="x" data-delete={c.id} aria-label={t('filters.deleteNamed', { name: c.name })} onclick={() => askDelete(c)}>✕</button>
-          {/if}
+<Popover.Root bind:open>
+  <Popover.Trigger>
+    {#snippet child({ props })}
+      {@render trigger({ props })}
+    {/snippet}
+  </Popover.Trigger>
+  <Popover.Portal>
+    <Popover.Content align="start" sideOffset={8} collisionPadding={8} onInteractOutside={keepOnBackForward}>
+      {#snippet child({ props, wrapperProps })}
+        <div {...wrapperProps}>
+          <div {...props} class="pop" role="dialog" aria-label={t('filters.title')}>
+            {#each groups as group, i (group.label)}
+              <h3 id="filter-group-{i}">{group.label}</h3>
+              <div class="toggles" role="group" aria-labelledby="filter-group-{i}">
+                {#each group.filters as f (f)}
+                  <button aria-pressed={filters.includes(f)} onclick={() => (filters = toggleFilter(filters, f))}>{filterName(f, collections)}</button>
+                {/each}
+              </div>
+            {/each}
+            <div class="foot">
+              <button class="link" onclick={() => (filters = [])}>{t('filters.clear')}</button>
+              <button class="link" bind:this={manageButton} aria-expanded={managing} aria-controls="manage-collections" onclick={() => (managing = !managing)}>
+                {t('filters.manage')}
+              </button>
+            </div>
+            {#if managing}
+              <div class="manage" id="manage-collections" bind:this={panel}>
+                {#each collections as c (c.id)}
+                  <div class="row">
+                    {#if deleting === c.id}
+                      <span class="ask">{t('filters.askDelete', { name: c.name })}</span>
+                      <button class="small danger" onclick={() => remove(c)}>{t('common.delete')}</button>
+                      <button class="small cancel" onclick={() => keep(c)}>{t('common.cancel')}</button>
+                    {:else if renaming === c.id}
+                      <input
+                        aria-label={t('filters.renameNamed', { name: c.name })}
+                        bind:value={draft}
+                        onkeydown={(e) => renameKeydown(e, c)}
+                        onblur={() => saveRename(c)}
+                      />
+                    {:else}
+                      <Tip text={t('filters.rename')}>
+                        {#snippet children({ props })}
+                          <button
+                            {...props}
+                            class="name"
+                            data-name={c.id}
+                            aria-label={t('filters.renameNamed', { name: c.name })}
+                            onclick={() => startRename(c)}>{c.name}</button
+                          >
+                        {/snippet}
+                      </Tip>
+                      <button class="x" data-delete={c.id} aria-label={t('filters.deleteNamed', { name: c.name })} onclick={() => askDelete(c)}>✕</button>
+                    {/if}
+                  </div>
+                {:else}
+                  <p class="note">{t('filters.noCollections')}</p>
+                {/each}
+                {#if problem}<Tip text={problem} truncated>
+                    {#snippet children({ props })}<p {...props} class="note problem" role="alert">{problem}</p>{/snippet}
+                  </Tip>{/if}
+              </div>
+            {/if}
+          </div>
         </div>
-      {:else}
-        <p class="note">{t('filters.noCollections')}</p>
-      {/each}
-      {#if problem}<Tip text={problem} truncated>
-          {#snippet children({ props })}<p {...props} class="note problem" role="alert">{problem}</p>{/snippet}
-        </Tip>{/if}
-    </div>
-  {/if}
-</div>
+      {/snippet}
+    </Popover.Content>
+  </Popover.Portal>
+</Popover.Root>
 
 <style>
   .pop {
-    position: absolute;
-    z-index: 6;
-    top: 44px;
-    left: 0;
+    /* bits-ui copies this onto its portal wrapper: above the Settings backdrop (20) and every popup (up to 40). */
+    position: relative;
+    z-index: 50;
     width: 360px;
     padding: 12px;
     border-radius: 12px;
