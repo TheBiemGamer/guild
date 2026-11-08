@@ -409,6 +409,8 @@
 
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
+  // Verify, Move and Uninstall: the chosen store copy, installed.
+  const manageable = $derived(!!copy?.installed && !custom)
 
   // Null hides the tile (Epic's unknown playtime, never played).
   const playtime = $derived(game?.playtimeMinutes != null ? playtimeLabel(game.playtimeMinutes) : null)
@@ -668,23 +670,26 @@
           <!-- The chosen Epic or GOG copy's cloud saves; the store's default is in its Settings card's Options. -->
           <section class="panel rows" aria-label={t('detail.tab.saves')}>
             <div class="row">
-              <div class="what">{t('detail.syncSaves')}<small>{t('detail.syncSavesHint')}</small></div>
-              <div class="chips" role="group" aria-label={t('detail.syncSaves')}>
-                {#each [{ value: null, label: t('detail.default') }, { value: true, label: t('common.on') }, { value: false, label: t('common.off') }] as option (option.value)}
-                  <button class="chip" aria-pressed={saves !== null && saves.choice === option.value} onclick={() => setSaves(option.value)}>
+              <span class="key" id="saves-cloud">{t('detail.cloudSaves')}</span>
+              <div class="chips" role="group" aria-labelledby="saves-cloud">
+                {#each [{ value: null, label: t('detail.default'), title: t('detail.syncSavesHint') }, { value: true, label: t('common.on') }, { value: false, label: t('common.off') }] as option (option.value)}
+                  <button
+                    class="chip"
+                    title={option.title}
+                    aria-pressed={saves !== null && saves.choice === option.value}
+                    onclick={() => setSaves(option.value)}
+                  >
                     {option.label}
                   </button>
                 {/each}
               </div>
             </div>
             <div class="row">
-              <div class="what">
-                {t('detail.lastSync')}<small class="last" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</small>
-              </div>
-            </div>
-            <div class="row">
-              <div class="what">{t('detail.syncNow')}<small>{t('detail.syncNowHint')}</small></div>
-              <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}>{syncing ? t('detail.syncing') : t('detail.syncNow')}</button>
+              <span class="key">{t('detail.saves')}</span>
+              <span class="value" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</span>
+              <button class="chip" title={t('detail.syncNowHint')} disabled={!!shown || running || syncing} onclick={syncNow}
+                >{syncing ? t('detail.syncing') : t('detail.syncNow')}</button
+              >
             </div>
           </section>
         {:else if current === 'launch'}
@@ -741,50 +746,56 @@
           <section class="panel rows" aria-label={t('detail.tab.installation')}>
             {#if copy!.installDir}
               <div class="row">
-                <div class="what">
-                  {t('detail.folder')}<small class="path"
-                    >{copy!.installDir}{#if copy!.sizeBytes !== null}{' · '}{sizeLabel(copy!.sizeBytes)}{/if}</small
+                <span class="key">{t('detail.folder')}</span>
+                <span class="value" title={copy!.installDir}>{copy!.installDir}</span>
+                <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.open')}</button>
+                {#if manageable}
+                  <button
+                    class="chip"
+                    title={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}
+                    disabled={!!shown || running}
+                    onclick={move}>{t('detail.moveButton')}</button
                   >
-                </div>
-                <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.openFolder')}</button>
+                {/if}
+              </div>
+            {/if}
+            {#if copy!.sizeBytes !== null || manageable}
+              <div class="row">
+                <span class="key">{t('detail.files')}</span>
+                <span class="value">{copy!.sizeBytes !== null ? sizeLabel(copy!.sizeBytes) : ''}</span>
+                {#if manageable}
+                  <button
+                    class="chip"
+                    title={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}
+                    disabled={!!shown || running}
+                    onclick={() => act('verify')}>{t('detail.verify')}</button
+                  >
+                {/if}
               </div>
             {/if}
             {#if copy!.updateAvailable}
               <div class="row">
-                <div class="what">{t('detail.updateAvailable')}</div>
+                <span class="key">{t('detail.version')}</span>
+                <span class="value">{t('detail.updateAvailable')}</span>
                 <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>{t('play.update')}</button>
                 <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>{t('detail.playOutdated')}</button>
               </div>
             {/if}
-            {#if copy!.installed && !custom}
-              <div class="row">
-                <div class="what">
-                  {t('detail.verify')}<small>{copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}</small>
-                </div>
-                <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>{t('detail.verify')}</button>
-              </div>
-              <div class="row">
-                <div class="what">
-                  {t('detail.move')}<small>{copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}</small>
-                </div>
-                <button class="chip" disabled={!!shown || running} onclick={move}>{t('detail.moveButton')}</button>
-              </div>
-              <div class="row">
-                <div class="what">
-                  {t('detail.uninstall')}{#if copy!.provider === 'steam'}<small>{t('detail.inSteam')}</small>{/if}
-                </div>
-                <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
-                <button
-                  class="chip danger"
-                  disabled={!!shown || running}
-                  onclick={() => {
-                    uninstall()
-                    tick().then(() => confirmCancel?.focus())
-                  }}>{t('detail.uninstall')}</button
-                >
-              </div>
-            {/if}
           </section>
+          {#if manageable}
+            <div class="foot">
+              <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
+              <button
+                class="chip danger"
+                title={copy!.provider === 'steam' ? t('detail.inSteam') : undefined}
+                disabled={!!shown || running}
+                onclick={() => {
+                  uninstall()
+                  tick().then(() => confirmCancel?.focus())
+                }}>{t('detail.uninstall')}</button
+              >
+            </div>
+          {/if}
         {:else}
           {#if savesError}
             <p class="sync-note" title={savesError}>{savesError}</p>
@@ -1391,19 +1402,34 @@
     color: var(--text-3);
   }
 
-  /* One quiet line; the full text is in the title. */
-  .what small.last {
+  /* Installation and Saves rows: what the row is about, its value (one line, full text in the title), then its chips. */
+  .key {
+    flex: none;
+    width: 88px;
+    font-size: 13px;
+    color: var(--text-3);
+  }
+
+  .value {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
 
-  .what small.failed,
-  .sync-note {
-    color: var(--text-2);
+  .value.failed {
+    color: var(--danger-text);
+  }
+
+  .foot {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
   }
 
   .sync-note {
+    color: var(--text-2);
     margin: 16px 0 0;
     font-size: 13px;
     overflow: hidden;
