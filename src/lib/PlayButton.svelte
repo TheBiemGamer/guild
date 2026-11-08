@@ -213,6 +213,9 @@
   }
 
   .menu {
+    /* bits-ui copies this onto its portal wrapper: above the Settings backdrop (20) and every popup (up to 40). */
+    position: relative;
+    z-index: 50;
     width: 290px;
     padding: 4px;
     display: flex;
