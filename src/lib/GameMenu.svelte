@@ -4,6 +4,7 @@
   import type { Listed } from './api'
   import { commands, type Collection } from './bindings'
   import { t } from './i18n'
+  import Check from './Check.svelte'
 
   let {
     game,
@@ -40,6 +41,7 @@
   /** Remove asks first, in the menu. */
   let removing = $state(false)
   let removeCancel = $state<HTMLButtonElement>()
+  const askId = $props.id()
 
   async function askRemove() {
     removing = true
@@ -191,16 +193,18 @@
   {onkeydown}
 >
   {#if removing}
-    <!-- Asks inline, like the Epic uninstall. -->
-    <p class="ask">{t('menu.askRemove', { title: game.title })}</p>
-    <div class="confirm">
-      <button class="danger" tabindex="-1" onclick={remove}>{t('menu.remove')}</button>
-      <button tabindex="-1" bind:this={removeCancel} onclick={() => onclose(true)}>{t('common.cancel')}</button>
+    <!-- Asks inline, like the Epic uninstall: a group of two menu items, named by the question. -->
+    <div role="group" aria-labelledby={askId}>
+      <p class="ask" id={askId}>{t('menu.askRemove', { title: game.title })}</p>
+      <div class="confirm">
+        <button class="danger" role="menuitem" tabindex="-1" onclick={remove}>{t('menu.remove')}</button>
+        <button role="menuitem" tabindex="-1" bind:this={removeCancel} onclick={() => onclose(true)}>{t('common.cancel')}</button>
+      </div>
     </div>
   {:else}
     <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => commands.setFavorite(game.key, !game.favorite))}>
-      {#if game.favorite}<span class="check" aria-hidden="true">✓</span>{/if}
       {t('menu.favorite')}
+      {#if game.favorite}<Check />{/if}
     </button>
     <div class="subwrap">
       <button
@@ -218,8 +222,8 @@
           {#each collections as c (c.id)}
             {@const on = game.collections.includes(c.id)}
             <button role="menuitemcheckbox" aria-checked={on} tabindex="-1" onclick={() => change(() => commands.setInCollection(game.key, c.id, !on))}>
-              {#if on}<span class="check" aria-hidden="true">✓</span>{/if}
               {c.name}
+              {#if on}<Check />{/if}
             </button>
           {/each}
           {#if collections.length}<div class="sep" role="separator"></div>{/if}
@@ -261,7 +265,7 @@
     border-radius: 12px;
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
     color: var(--text);
     text-align: left;
   }
@@ -276,13 +280,14 @@
     outline: none;
   }
 
-  /* Every row leaves room for the check, so the names line up. Buttons from `extra` follow the same rules. */
+  /* Buttons from `extra` follow the same rules. A check sits at the right end. */
   .menu :global(button) {
     position: relative;
     display: flex;
     align-items: center;
+    gap: 12px;
     width: 100%;
-    padding: 8px 10px 8px 36px;
+    padding: 8px 10px;
     border-radius: 8px;
     text-align: left;
     white-space: nowrap;
@@ -303,17 +308,9 @@
     transform: none;
   }
 
-  .check {
-    position: absolute;
-    left: 10px;
-    width: 16px;
-    text-align: center;
-    color: var(--accent-2);
-  }
-
   .more {
     margin-left: auto;
-    padding-left: 16px;
+    padding-left: 4px;
     color: var(--text-3);
   }
 
