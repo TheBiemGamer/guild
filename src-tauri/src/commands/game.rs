@@ -720,10 +720,7 @@ fn run_queue(app: &AppHandle) {
         let store = game.map_or(ProviderKind::Epic, |g| g.provider);
         let paused = {
             let mut s = state.lock();
-            s.install_pids.remove(&key);
-            let paused = std::mem::take(&mut s.interrupted)
-                && result.is_err()
-                && !s.cancelled.contains(&key);
+            let paused = job_paused(&mut s, &key, result.is_err());
             if paused {
                 save_queue(&state, &s.queue);
             }
@@ -741,30 +738,8 @@ fn run_queue(app: &AppHandle) {
             }
         });
         let mut s = state.lock();
-        // A verify that found bad files ends reporting the repair.
-        let repaired = s
-            .progress
-            .remove(&key)
-            .is_some_and(|p| p.action == ProgressAction::Repair);
-        // A cancelled job fails by design; don't report it.
-        let cancelled = s.cancelled.remove(&key);
-        let toast = (result.is_ok() && !cancelled)
-            .then(|| {
-                s.games
-                    .iter()
-                    .find(|g| g.key() == key)
-                    .map(|g| g.title.clone())
-            })
-            .flatten();
-        let outcome = if cancelled {
-            Ok(())
-        } else {
-            result.map_err(|e| store_error(store, e))
-        };
-        s.queue.finish(&key);
+        let (toast, repaired) = finish_job(&mut s, &key, result, store);
         save_queue(&state, &s.queue);
-        report(&mut s, &key, outcome);
-        s.library_changed = true;
         drop(s);
         if let Some(title) = toast {
             super::notify_done(
@@ -774,6 +749,46 @@ fn run_queue(app: &AppHandle) {
             );
         }
     }
+}
+
+/// After a job's process ends: whether Pause stopped it, so it stays at the head and the runner goes on with it.
+fn job_paused(s: &mut Shared, key: &str, failed: bool) -> bool {
+    s.install_pids.remove(key);
+    std::mem::take(&mut s.interrupted) && failed && !s.cancelled.contains(key)
+}
+
+/// Takes a job that ended out of the queue and gives its waiter the outcome. Returns the game's title for the
+/// done toast, and whether a verify repaired files.
+fn finish_job(
+    s: &mut Shared,
+    key: &str,
+    result: Result<(), crate::library::Error>,
+    store: ProviderKind,
+) -> (Option<String>, bool) {
+    // A verify that found bad files ends reporting the repair.
+    let repaired = s
+        .progress
+        .remove(key)
+        .is_some_and(|p| p.action == ProgressAction::Repair);
+    // A cancelled job fails by design; don't report it.
+    let cancelled = s.cancelled.remove(key);
+    let toast = (result.is_ok() && !cancelled)
+        .then(|| {
+            s.games
+                .iter()
+                .find(|g| g.key() == key)
+                .map(|g| g.title.clone())
+        })
+        .flatten();
+    let outcome = if cancelled {
+        Ok(())
+    } else {
+        result.map_err(|e| store_error(store, e))
+    };
+    s.queue.finish(key);
+    report(s, key, outcome);
+    s.library_changed = true;
+    (toast, repaired)
 }
 
 fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::library::Error> {
@@ -1999,6 +2014,115 @@ mod tests {
             })
             .paused
         );
+    }
+
+    /// A runner working on `keys`, in order, with a waiter on each job.
+    fn running(keys: &[&str]) -> (Shared, Vec<std::sync::mpsc::Receiver<Res<()>>>) {
+        let mut s = Shared {
+            queue_running: true,
+            ..Shared::default()
+        };
+        let rxs = keys
+            .iter()
+            .map(|k| {
+                s.queue.push(Job::new(k, QueuedAction::Install));
+                let (tx, rx) = std::sync::mpsc::channel();
+                s.waiters.insert(k.to_string(), tx);
+                rx
+            })
+            .collect();
+        (s, rxs)
+    }
+
+    fn failed() -> Result<(), crate::library::Error> {
+        Err(crate::library::Error::Text("stopped".into()))
+    }
+
+    #[test]
+    fn cancel_before_the_process_starts_stops_it_when_it_does() {
+        let (mut s, rxs) = running(&["epic-a", "epic-b"]);
+        s.cancelled.insert("epic-a".into());
+        assert_eq!(
+            record_event(&mut s, "epic-a", InstallEvent::Started(7)),
+            Some(7)
+        );
+        assert!(!s.interrupted, "a cancelled job isn't interrupted");
+        assert!(!job_paused(&mut s, "epic-a", true));
+        finish_job(&mut s, "epic-a", failed(), ProviderKind::Epic);
+        assert!(rxs[0].recv().unwrap().is_ok(), "a cancel isn't an error");
+        assert!(s.cancelled.is_empty());
+        assert_eq!(s.queue.next().map(|j| j.key.as_str()), Some("epic-b"));
+    }
+
+    #[test]
+    fn a_running_job_starts_unhindered() {
+        let (mut s, _rxs) = running(&["epic-a"]);
+        assert_eq!(
+            record_event(&mut s, "epic-a", InstallEvent::Started(7)),
+            None
+        );
+        assert_eq!(s.install_pids.get("epic-a"), Some(&7));
+        assert!(!s.interrupted);
+    }
+
+    #[test]
+    fn pause_keeps_the_job_at_the_head_until_resume() {
+        let (mut s, rxs) = running(&["epic-a", "epic-b"]);
+        record_event(&mut s, "epic-a", InstallEvent::Started(7));
+        assert_eq!(pause_head(&mut s), Some(7));
+        assert!(s.interrupted);
+        assert!(job_paused(&mut s, "epic-a", true));
+        assert!(!s.interrupted && s.install_pids.is_empty());
+        assert!(s.queue.is_head("epic-a") && s.queue.next().is_none());
+        assert!(
+            rxs[0].try_recv().is_err(),
+            "a paused job has no outcome yet"
+        );
+
+        s.queue.resume();
+        assert_eq!(s.queue.next().map(|j| j.key.as_str()), Some("epic-a"));
+        assert_eq!(
+            record_event(&mut s, "epic-a", InstallEvent::Started(8)),
+            None
+        );
+        assert!(!job_paused(&mut s, "epic-a", false));
+    }
+
+    #[test]
+    fn pause_before_the_process_starts_stops_it_when_it_does() {
+        let (mut s, _rxs) = running(&["epic-a"]);
+        assert_eq!(pause_head(&mut s), None);
+        assert!(!s.interrupted, "nothing to stop yet");
+        assert_eq!(
+            record_event(&mut s, "epic-a", InstallEvent::Started(7)),
+            Some(7)
+        );
+        assert!(s.interrupted);
+        assert!(job_paused(&mut s, "epic-a", true));
+        assert!(s.queue.is_head("epic-a"));
+    }
+
+    #[test]
+    fn a_cancelled_job_is_never_paused() {
+        let (mut s, _rxs) = running(&["epic-a"]);
+        record_event(&mut s, "epic-a", InstallEvent::Started(7));
+        s.cancelled.insert("epic-a".into());
+        assert_eq!(pause_head(&mut s), Some(7));
+        assert!(!job_paused(&mut s, "epic-a", true));
+        finish_job(&mut s, "epic-a", failed(), ProviderKind::Epic);
+        assert!(s.queue.jobs.is_empty());
+    }
+
+    #[test]
+    fn a_failed_job_leaves_the_queue_and_the_next_starts() {
+        let (mut s, rxs) = running(&["epic-a", "epic-b"]);
+        record_event(&mut s, "epic-a", InstallEvent::Started(7));
+        assert!(!job_paused(&mut s, "epic-a", true));
+        let (toast, repaired) = finish_job(&mut s, "epic-a", failed(), ProviderKind::Epic);
+        assert_eq!((toast, repaired), (None, false));
+        assert!(rxs[0].recv().unwrap().is_err());
+        assert!(s.library_changed);
+        assert_eq!(s.queue.next().map(|j| j.key.as_str()), Some("epic-b"));
     }
 
     fn watch(key: &str, upload: Option<SaveSync>) -> Watch {
