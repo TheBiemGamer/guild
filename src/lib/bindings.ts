@@ -520,6 +520,11 @@ export type SettingsView = {
 	/**  The logged-in Amazon account's first name, from Nile's file. */
 	amazonAccount: string | null,
 	amazonInstallDir: string | null,
+	/**
+	 *  Where Epic, GOG and Amazon install without an install folder setting: `%USERPROFILE%\Games`, Legendary's
+	 *  default and the one Guild passes to gogdl and Nile.
+	 */
+	defaultInstallDir: string | null,
 	igdbClientId: string | null,
 	/**  Whether a secret is saved; its value never leaves Credential Manager. */
 	igdbSecretSet: boolean,

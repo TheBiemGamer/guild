@@ -317,6 +317,9 @@ pub struct SettingsView {
     /// The logged-in Amazon account's first name, from Nile's file.
     amazon_account: Option<String>,
     amazon_install_dir: Option<String>,
+    /// Where Epic, GOG and Amazon install without an install folder setting: `%USERPROFILE%\Games`, Legendary's
+    /// default and the one Guild passes to gogdl and Nile.
+    default_install_dir: Option<String>,
     igdb_client_id: Option<String>,
     /// Whether a secret is saved; its value never leaves Credential Manager.
     igdb_secret_set: bool,
@@ -388,6 +391,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             amazon_install_dir: saved
                 .amazon_install_dir
                 .map(|p| p.to_string_lossy().into_owned()),
+            default_install_dir: gog::default_base().map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
             igdb_secret_set: settings::secret().is_some(),
             steamgriddb_key_set: settings::grid_key().is_some(),
@@ -1027,6 +1031,7 @@ mod tests {
             amazon: None,
             amazon_account: None,
             amazon_install_dir: None,
+            default_install_dir: Some(r"C:\Users\Test\Games".into()),
             igdb_client_id: Some("test-client-id".into()),
             igdb_secret_set: true,
             steamgriddb_key_set: false,

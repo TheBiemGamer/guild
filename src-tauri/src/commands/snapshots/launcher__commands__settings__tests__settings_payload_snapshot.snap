@@ -19,6 +19,7 @@ expression: view
   "amazon": null,
   "amazonAccount": null,
   "amazonInstallDir": null,
+  "defaultInstallDir": "C:\\Users\\Test\\Games",
   "igdbClientId": "test-client-id",
   "igdbSecretSet": true,
   "steamgriddbKeySet": false,

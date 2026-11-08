@@ -476,7 +476,6 @@
   "settings.options": "Options",
   "settings.installTool": "Install {tool}",
   "settings.installFolder": "Install folder",
-  "settings.defaultFolder": "Default: Games in your user folder",
   "settings.syncSaves": "Sync cloud saves",
   "settings.importInstall": "Import an existing install",
   "settings.importButton": "Import…",

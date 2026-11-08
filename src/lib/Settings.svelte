@@ -641,7 +641,7 @@
                   <input
                     id="epic-folder"
                     type="text"
-                    placeholder={t('settings.defaultFolder')}
+                    placeholder={view.defaultInstallDir ?? ''}
                     spellcheck="false"
                     bind:value={folder}
                     onblur={saveFolder}
@@ -735,7 +735,7 @@
                   <input
                     id="gog-folder"
                     type="text"
-                    placeholder={t('settings.defaultFolder')}
+                    placeholder={view.defaultInstallDir ?? ''}
                     spellcheck="false"
                     bind:value={gogFolder}
                     onblur={saveGogFolder}
@@ -816,7 +816,7 @@
                   <input
                     id="amazon-folder"
                     type="text"
-                    placeholder={t('settings.defaultFolder')}
+                    placeholder={view.defaultInstallDir ?? ''}
                     spellcheck="false"
                     bind:value={amazonFolder}
                     onblur={saveAmazonFolder}

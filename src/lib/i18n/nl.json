@@ -476,7 +476,6 @@
   "settings.options": "Opties",
   "settings.installTool": "{tool} installeren",
   "settings.installFolder": "Installatiemap",
-  "settings.defaultFolder": "Standaard: Games in je gebruikersmap",
   "settings.syncSaves": "Cloud saves synchroniseren",
   "settings.importInstall": "Bestaande installatie importeren",
   "settings.importButton": "Importeren…",
