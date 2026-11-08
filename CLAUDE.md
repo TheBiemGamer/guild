@@ -23,7 +23,7 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
   - Steam passwords and Steam Guard codes are never stored.
 - **The database** file is `library.sqlite`; never change the file name. Schema changes are new migration steps at the end of `STEPS` in `cache/db.rs` (`PRAGMA user_version` counts the ones run); never edit a step that shipped.
   - Open it only through `cache::db::open`, which sets WAL and the busy timeout and runs the migrations.
-  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections`, `collection_games` (members by copy key) and `custom_games` (games the owner added). Their covers are owner data too: files in `<data_local_dir>/custom/<id>/`, never the cache folder.
+  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections`, `collection_games` (members by copy key), `custom_games` (games the owner added) and `gog_installs` (where each GOG game is installed). Their covers are owner data too: files in `<data_local_dir>/custom/<id>/`, never the cache folder.
   - `info` is cache only: use it with a new `kind` for new cached data, never for anything the owner chose or built up.
 - **Keys:**
   - A store copy is keyed `steam-<appid>`, `epic-<app_name>`, `gog-<product_id>` or `amazon-<product id>` (`amzn1.adg.product.…`); a game the owner added is `custom-<id>` and never merges.
@@ -32,7 +32,7 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 - **Network** work runs in the background and is throttled, and it fails quietly: a dot in Settings, no banners.
   - Steam CM logons must not fan out. Use the single-flight guards.
 - **Commands and their types** reach the UI through the generated `src/lib/bindings.ts` (tauri-specta, `bindings()` in `main.rs`), never hand-written `invoke` calls or types; run `cargo test bindings` after changing them.
-- **User-visible backend text** is message codes (`msg!` in `src-tauri/src/msg.rs`), worded in `src/lib/messages.ts`; never English sentences in Rust errors or statuses. Raw OS, SQLite or tool errors go through as `Msg::system`.
+- **User-visible backend text** is message codes (`msg!` in `src-tauri/src/msg.rs`), worded under `msg.<code>` in `src/lib/i18n/en.json` (and the other language files) and rendered by `src/lib/messages.ts`; never English sentences in Rust errors or statuses. Raw OS, SQLite or tool errors go through as `Msg::system`.
 - **Logging:** app code logs through the `tracing` macros (`info!`, `warn!` for failures, `error!` for lost data or a broken app); `src-tauri/src/log.rs` writes them to `logs/launcher.log` in the local data folder. Never `eprintln!`/`println!`, except the stdout lines the scroll benchmark reads. No `#[instrument]` on functions that take secrets. The log rule for secrets above applies.
 - **Store tools** (Legendary, gogdl, Nile) are pinned in `src-tauri/src/tools.rs` and SHA-256-checked before use; bump one by changing its version, URL and hash together.
 - **New OS-specific code** goes behind `src-tauri/src/platform.rs` with `#[cfg(windows)]`. Linux may come later.

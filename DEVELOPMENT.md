@@ -20,6 +20,8 @@ Every commit must pass these:
 ```bash
 npm run check                                        # svelte-check + tsc
 npm test                                             # frontend unit tests
+npm run format:check                                 # prettier (npm run format to fix)
+cd src-tauri && cargo fmt --check                    # rustfmt (cargo fmt to fix)
 cd src-tauri && cargo test                           # Rust tests
 cd src-tauri && cargo clippy --all-targets -- -D warnings
 cd src-tauri && cargo deny check                    # licenses, advisories, sources (also in CI)
@@ -54,10 +56,10 @@ On PowerShell, set the variable first with `$env:INSTA_UPDATE='always'`. Commit 
 src/                  Svelte UI (App.svelte, src/lib/*)
 src-tauri/src/        Rust backend
   commands/           Tauri commands (library, game page, settings)
-  library/            store integrations (steam.rs, epic.rs)
+  library/            store integrations (steam.rs, epic.rs, gog.rs, amazon.rs, custom.rs)
   cache/              SQLite cache, migrations, art cache
   entries.rs          merges store copies into one card
-  gamesdb.rs          GOG GamesDB lookups (Steam ↔ Epic)
+  gamesdb.rs          GOG GamesDB lookups (Steam ↔ Epic, GOG and Amazon)
   igdb.rs             how long to beat
 scripts/              benchmark and frontend tests
 docs/superpowers/     design specs, plans and mockups
