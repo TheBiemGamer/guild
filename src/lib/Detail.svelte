@@ -40,6 +40,7 @@
 </script>
 
 <script lang="ts">
+  import { DropdownMenu } from 'bits-ui'
   import { onMount, tick } from 'svelte'
   import * as api from './api'
   import type { ActOptions } from './api'
@@ -437,16 +438,6 @@
 
   const run = (f: () => Promise<unknown>) => f().catch((e) => onerror(api.message(e)))
 
-  function closeMenu(refocus: boolean) {
-    menuOpen = false
-    if (refocus) moreButton?.focus()
-  }
-
-  function pick(f: () => void) {
-    closeMenu(true)
-    f()
-  }
-
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
   // Verify, Move and Uninstall: the chosen store copy, installed.
@@ -530,10 +521,18 @@
 
 {#snippet copyItems()}
   {#if copy!.installDir}
-    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => commands.openFolder(copy!.key)))}>{t('detail.openInstallFolder')}</button>
+    <DropdownMenu.Item onSelect={() => run(() => commands.openFolder(copy!.key))}>
+      {#snippet child({ props })}
+        <button {...props}>{t('detail.openInstallFolder')}</button>
+      {/snippet}
+    </DropdownMenu.Item>
   {/if}
   {#if copy!.installed && !custom && !running}
-    <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>{t('detail.uninstall')}</button>
+    <DropdownMenu.Item onSelect={uninstall}>
+      {#snippet child({ props })}
+        <button {...props} class="danger">{t('detail.uninstall')}</button>
+      {/snippet}
+    </DropdownMenu.Item>
   {/if}
 {/snippet}
 
@@ -602,33 +601,24 @@
               <button class="glass round danger" onclick={confirmUninstall}>{t('detail.uninstall')}</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>{t('common.cancel')}</button>
             {:else}
-              <div class="more-wrap">
-                <button
-                  class="glass more"
-                  bind:this={moreButton}
-                  aria-label={t('detail.moreActions')}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  onclick={() => (menuOpen ? closeMenu(true) : (menuOpen = true))}
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-                  </svg>
-                </button>
-                {#if menuOpen}
-                  <GameMenu
-                    {game}
-                    anchor={moreButton}
-                    label={t('detail.moreActions')}
-                    onclose={closeMenu}
-                    {onchanged}
-                    {onerror}
-                    {onedit}
-                    onremoved={onback}
-                    extra={copyActions ? copyItems : undefined}
-                  />
-                {/if}
-              </div>
+              <GameMenu
+                {game}
+                bind:open={menuOpen}
+                label={t('detail.moreActions')}
+                {onchanged}
+                {onerror}
+                {onedit}
+                onremoved={onback}
+                extra={copyActions ? copyItems : undefined}
+              >
+                {#snippet trigger({ props })}
+                  <button {...props} class="glass more" bind:this={moreButton} aria-label={t('detail.moreActions')}>
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                    </svg>
+                  </button>
+                {/snippet}
+              </GameMenu>
               <PlayButton
                 copies={game.copies}
                 chosen={chosenKey}
@@ -1200,10 +1190,6 @@
 
   button.danger {
     color: var(--danger-text);
-  }
-
-  .more-wrap {
-    position: relative;
   }
 
   .more {

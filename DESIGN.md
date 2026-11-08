@@ -251,6 +251,7 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
 - **Popovers** (Filters, Sort, Downloads, Notes, the ⋯ menu, Play with): `surface-2`, `glass-on-line` border, 12px radius, modal shadow.
   - Keyboard (`src/lib/popover.ts`): focus moves in on open, Tab stays inside, Escape closes and returns focus, a click outside closes.
   - Sort, Language and Play with are bits-ui `DropdownMenu`s (`ChoiceMenu.svelte`, `PlayButton.svelte`): the caller's chip is the trigger, focus starts on the chosen item, arrows, Home, End and typing a letter move between items, Escape or a pick returns focus to the chip. Mouse Back and Forward leave them open (`keepOnBackForward`).
+  - The game menu (`GameMenu.svelte`) is a bits-ui `DropdownMenu` too: on the game page the ⋯ button is its trigger; a card's right-click opens the one instance in `App.svelte` at the pointer, and a grid scroll closes it. Focus starts on the first item. Right opens Add to collection, Left or Escape closes only the submenu. Menu and submenu flip and shift to stay 8px inside the window. Keys typed into the new collection's name stay in the field.
   - Chosen rows carry the same check mark (`Check.svelte`).
   - Menus use `menuitemradio` or `menuitemcheckbox`.
   - Destructive confirms ask inline in the menu or row, and focus goes to Cancel.

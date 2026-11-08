@@ -162,15 +162,10 @@
     await reload()
   }
 
-  /** The game menu a card's right-click opened, at the pointer; focus goes back to what had it. */
-  let cardMenu = $state<{ game: Card; x: number; y: number; back: HTMLElement | null } | null>(null)
+  /** The game menu a card's right-click opened, at the pointer; bits-ui returns focus to what had it. */
+  let cardMenu = $state<{ game: Card; x: number; y: number } | null>(null)
   function openCardMenu(game: Card, x: number, y: number) {
-    cardMenu = { game, x, y, back: document.activeElement instanceof HTMLElement ? document.activeElement : null }
-  }
-  function closeCardMenu(refocus: boolean) {
-    const back = cardMenu?.back
-    cardMenu = null
-    if (refocus && back?.isConnected) back.focus({ preventScroll: true })
+    cardMenu = { game, x, y }
   }
 
   $effect(() => {
@@ -689,8 +684,8 @@
       <GameMenu
         game={cardMenu.game}
         at={cardMenu}
+        bind:open={() => cardMenu !== null, (o) => !o && (cardMenu = null)}
         label={cardMenu.game.title}
-        onclose={closeCardMenu}
         onchanged={reload}
         onerror={(m) => (error = m)}
         onedit={openAddGame}
