@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { Dialog } from 'bits-ui'
   import { untrack } from 'svelte'
   import * as api from './api'
   import type { CustomGame, GridCover } from './bindings'
   import { nameFromExe } from './format'
-  import { popover } from './popover'
   import Tip from './Tip.svelte'
   import { around, t } from './i18n'
+  import { keepOnBackForward } from './outside'
 
   let {
     edit = null,
@@ -15,8 +16,7 @@
   }: {
     /** The game being edited, as saved; null adds a new one. */
     edit?: ({ key: string } & CustomGame) | null
-    /** `refocus`: put focus back where it was before the dialog opened. */
-    onclose: (refocus: boolean) => void
+    onclose: () => void
     /** After a save: the library reloads. The new game's page doesn't open. */
     onsaved: () => void
     /** Opens Settings at Extra metadata, where the SteamGridDB key goes. */
@@ -37,6 +37,7 @@
   /** The name last filled in from a program: picking another program replaces it, never a typed name. */
   let suggested = ''
   let first = true
+  let open = $state(true)
 
   // Adding waits for the search, so the cover it picks first isn't left out.
   const ready = $derived(exe !== '' && name.trim() !== '' && (covers !== undefined || !!start || !!file))
@@ -91,7 +92,7 @@
     try {
       await api.saveCustomGame(start?.key ?? null, { name: name.trim(), exe, args }, cover)
       onsaved()
-      onclose(true)
+      onclose()
     } catch (e) {
       error = api.message(e)
     }
@@ -99,73 +100,82 @@
   }
 </script>
 
-<div class="backdrop">
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="add-title" use:popover={{ anchor: undefined, close: onclose }}>
-    <h3 id="add-title">{start ? t('addGame.editTitle') : t('toolbar.addGame')}</h3>
+<Dialog.Root bind:open onOpenChange={(o) => o || onclose()}>
+  <Dialog.Portal>
+    <Dialog.Overlay>
+      {#snippet child({ props })}<div {...props} class="backdrop"></div>{/snippet}
+    </Dialog.Overlay>
+    <Dialog.Content onInteractOutside={keepOnBackForward}>
+      {#snippet child({ props })}
+        <div {...props} class="dialog" aria-labelledby="add-title">
+          <h3 id="add-title">{start ? t('addGame.editTitle') : t('toolbar.addGame')}</h3>
 
-    <div class="f">
-      <label for="add-exe">{t('addGame.program')}</label>
-      <div class="in">
-        <Tip text={exe} truncated>
-          {#snippet children({ props })}
-            <input {...props} id="add-exe" readonly value={exe} spellcheck="false" onclick={browse} />
-          {/snippet}
-        </Tip>
-        <button class="glass" onclick={browse}>{t('common.browse')}</button>
-      </div>
-    </div>
-    <div class="f">
-      <label for="add-name">{t('menu.name')}</label>
-      <input id="add-name" type="text" spellcheck="false" autocomplete="off" bind:value={name} />
-    </div>
-    <div class="f">
-      <label for="add-args">{t('addGame.arguments')}</label>
-      <input id="add-args" type="text" spellcheck="false" autocomplete="off" placeholder={t('addGame.optional')} bind:value={args} />
-    </div>
+          <div class="f">
+            <label for="add-exe">{t('addGame.program')}</label>
+            <div class="in">
+              <Tip text={exe} truncated>
+                {#snippet children({ props })}
+                  <input {...props} id="add-exe" readonly value={exe} spellcheck="false" onclick={browse} />
+                {/snippet}
+              </Tip>
+              <button class="glass" onclick={browse}>{t('common.browse')}</button>
+            </div>
+          </div>
+          <div class="f">
+            <label for="add-name">{t('menu.name')}</label>
+            <input id="add-name" type="text" spellcheck="false" autocomplete="off" bind:value={name} />
+          </div>
+          <div class="f">
+            <label for="add-args">{t('addGame.arguments')}</label>
+            <input id="add-args" type="text" spellcheck="false" autocomplete="off" placeholder={t('addGame.optional')} bind:value={args} />
+          </div>
 
-    <div class="f">
-      <span class="label" id="add-cover">{t('addGame.cover')}</span>
-      {#if covers === null}
-        {@const [before, after] = around('addGame.noKey', 'link')}
-        <p class="note">{before}<button class="link" onclick={onsettings}>{t('addGame.noKeyLink')}</button>{after}</p>
-        <div class="in file">
-          <button class="glass" onclick={pickFile}>{t('addGame.useFile')}</button>
-          {#if file}<Tip text={file}>
-              {#snippet children({ props })}<span {...props}>{fileName}</span>{/snippet}
-            </Tip>{/if}
-        </div>
-      {:else}
-        <!-- Four slots always, so nothing moves while the search runs. -->
-        <div class="covers" role="group" aria-labelledby="add-cover">
-          {#each [0, 1, 2, 3] as i (i)}
-            {@const c = covers?.[i]}
-            {#if c}
-              <button class="c" aria-pressed={picked === i} aria-label={t('addGame.coverNumber', { number: i + 1 })} onclick={() => pickCover(i)}>
-                <img src={c.thumb} alt="" />
-              </button>
+          <div class="f">
+            <span class="label" id="add-cover">{t('addGame.cover')}</span>
+            {#if covers === null}
+              {@const [before, after] = around('addGame.noKey', 'link')}
+              <p class="note">{before}<button class="link" onclick={onsettings}>{t('addGame.noKeyLink')}</button>{after}</p>
+              <div class="in file">
+                <button class="glass" onclick={pickFile}>{t('addGame.useFile')}</button>
+                {#if file}<Tip text={file}>
+                    {#snippet children({ props })}<span {...props}>{fileName}</span>{/snippet}
+                  </Tip>{/if}
+              </div>
             {:else}
-              <span class="c" aria-hidden="true"></span>
+              <!-- Four slots always, so nothing moves while the search runs. -->
+              <div class="covers" role="group" aria-labelledby="add-cover">
+                {#each [0, 1, 2, 3] as i (i)}
+                  {@const c = covers?.[i]}
+                  {#if c}
+                    <button class="c" aria-pressed={picked === i} aria-label={t('addGame.coverNumber', { number: i + 1 })} onclick={() => pickCover(i)}>
+                      <img src={c.thumb} alt="" />
+                    </button>
+                  {:else}
+                    <span class="c" aria-hidden="true"></span>
+                  {/if}
+                {/each}
+              </div>
+              <small
+                ><Tip text={file ?? ''}>
+                  {#snippet children({ props })}<span {...props}>{file ? fileName : t('addGame.fromGrid')}</span>{/snippet}
+                </Tip>
+                ·
+                <button class="link" onclick={pickFile}>{t('addGame.useFile')}</button></small
+              >
             {/if}
-          {/each}
+          </div>
+
+          {#if error}<p class="error" role="alert">{error}</p>{/if}
+
+          <div class="foot">
+            <button class="glass" onclick={onclose}>{t('common.cancel')}</button>
+            <button class="pill" disabled={!ready || saving} onclick={save}>{start ? t('common.save') : t('addGame.add')}</button>
+          </div>
         </div>
-        <small
-          ><Tip text={file ?? ''}>
-            {#snippet children({ props })}<span {...props}>{file ? fileName : t('addGame.fromGrid')}</span>{/snippet}
-          </Tip>
-          ·
-          <button class="link" onclick={pickFile}>{t('addGame.useFile')}</button></small
-        >
-      {/if}
-    </div>
-
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-
-    <div class="foot">
-      <button class="glass" onclick={() => onclose(true)}>{t('common.cancel')}</button>
-      <button class="pill" disabled={!ready || saving} onclick={save}>{start ? t('common.save') : t('addGame.add')}</button>
-    </div>
-  </div>
-</div>
+      {/snippet}
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <style>
   /* The same scrim as Settings. */
@@ -173,12 +183,15 @@
     position: fixed;
     inset: 0;
     z-index: 20;
-    display: grid;
-    place-items: center;
     background: rgb(8 8 12 / 0.55);
   }
 
   .dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    margin: auto;
+    height: fit-content;
     width: min(520px, calc(100% - 48px));
     max-height: calc(100% - 48px);
     overflow-y: auto;

@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { Dialog } from 'bits-ui'
+  import { onMount, tick } from 'svelte'
   import * as api from './api'
   import { commands, type LoginStep } from './bindings'
   import { t } from './i18n'
+  import { keepOnBackForward } from './outside'
 
   let {
     onclose,
@@ -21,6 +23,7 @@
   let alive = true
 
   let accountInput = $state<HTMLInputElement>()
+  let codeInput = $state<HTMLInputElement>()
   let svg = $state<string | null>(null)
   let scanned = $state(false)
   let qrFailure = $state<string | null>(null)
@@ -66,6 +69,8 @@
         phase = 'code'
         codeKind = step.kind
         code = ''
+        // The field replaces the login form, which held focus.
+        tick().then(() => codeInput?.focus())
         return
     }
   }
@@ -87,9 +92,15 @@
     follow(commands.steamPasswordCode(code))
   }
 
+  let open = $state(true)
+
+  /** bits-ui asks before `bind:this` has run, so the account field gets focus after this update. */
+  function opened(e: Event) {
+    e.preventDefault()
+    tick().then(() => accountInput?.focus())
+  }
+
   onMount(() => {
-    const before = document.activeElement
-    accountInput?.focus()
     let timer: ReturnType<typeof setTimeout> | undefined
     let failures = 0
 
@@ -129,81 +140,81 @@
       clearTimeout(timer)
       commands.steamConnectCancel().catch(() => {})
       commands.steamLoginCancel().catch(() => {})
-      if (before instanceof HTMLElement && before.isConnected) before.focus()
     }
   })
-
-  // Settings also closes on Escape; this dialog takes the key first.
-  function onkeydown(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return
-    e.stopImmediatePropagation()
-    onclose()
-  }
 </script>
 
-<svelte:window onkeydowncapture={onkeydown} />
+<Dialog.Root bind:open onOpenChange={(o) => o || onclose()}>
+  <Dialog.Portal>
+    <Dialog.Overlay>
+      {#snippet child({ props })}<div {...props} class="backdrop"></div>{/snippet}
+    </Dialog.Overlay>
+    <Dialog.Content onInteractOutside={keepOnBackForward} onOpenAutoFocus={opened}>
+      {#snippet child({ props })}
+        <div {...props} class="dialog" aria-labelledby="steam-login-title">
+          <button class="close" onclick={onclose} aria-label={t('common.close')}>✕</button>
+          <h4 id="steam-login-title">{t('steam.title')}</h4>
+          <div class="cols">
+            <div class="side">
+              {#if phase === 'approve'}
+                <p>{approveByEmail ? t('steam.approveEmail') : t('steam.approvePhone')}</p>
+              {:else if phase === 'code' || phase === 'checking'}
+                <form onsubmit={sendCode}>
+                  <label for="steam-code">
+                    {codeKind === 'email' ? t('steam.codeEmail') : t('steam.codeApp')}
+                  </label>
+                  <input id="steam-code" type="text" autocomplete="off" spellcheck="false" bind:this={codeInput} bind:value={code} />
+                  <button class="pill" disabled={phase === 'checking' || !code.trim()}>
+                    {phase === 'checking' ? t('steam.checking') : t('steam.submit')}
+                  </button>
+                </form>
+                {#if phase === 'checking'}<p class="hint">{t('steam.slow')}</p>{/if}
+              {:else}
+                <form onsubmit={signIn}>
+                  <label for="steam-account">{t('steam.account')}</label>
+                  <input id="steam-account" type="text" autocomplete="off" spellcheck="false" bind:this={accountInput} bind:value={account} />
+                  <label for="steam-password">{t('steam.password')}</label>
+                  <input id="steam-password" type="password" autocomplete="off" bind:value={password} />
+                  <button class="pill" disabled={phase === 'busy' || !account.trim() || !password}>
+                    {phase === 'busy' ? t('common.loggingIn') : t('common.logIn')}
+                  </button>
+                </form>
+              {/if}
+              {#if error}<p class="fail" role="alert">{error}</p>{/if}
+            </div>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="steam-login-title">
-    <button class="close" onclick={onclose} aria-label={t('common.close')}>✕</button>
-    <h4 id="steam-login-title">{t('steam.title')}</h4>
-    <div class="cols">
-      <div class="side">
-        {#if phase === 'approve'}
-          <p>{approveByEmail ? t('steam.approveEmail') : t('steam.approvePhone')}</p>
-        {:else if phase === 'code' || phase === 'checking'}
-          <form onsubmit={sendCode}>
-            <label for="steam-code">
-              {codeKind === 'email' ? t('steam.codeEmail') : t('steam.codeApp')}
-            </label>
-            <!-- svelte-ignore a11y_autofocus -->
-            <input id="steam-code" type="text" autocomplete="off" spellcheck="false" autofocus bind:value={code} />
-            <button class="pill" disabled={phase === 'checking' || !code.trim()}>
-              {phase === 'checking' ? t('steam.checking') : t('steam.submit')}
-            </button>
-          </form>
-          {#if phase === 'checking'}<p class="hint">{t('steam.slow')}</p>{/if}
-        {:else}
-          <form onsubmit={signIn}>
-            <label for="steam-account">{t('steam.account')}</label>
-            <input id="steam-account" type="text" autocomplete="off" spellcheck="false" bind:this={accountInput} bind:value={account} />
-            <label for="steam-password">{t('steam.password')}</label>
-            <input id="steam-password" type="password" autocomplete="off" bind:value={password} />
-            <button class="pill" disabled={phase === 'busy' || !account.trim() || !password}>
-              {phase === 'busy' ? t('common.loggingIn') : t('common.logIn')}
-            </button>
-          </form>
-        {/if}
-        {#if error}<p class="fail" role="alert">{error}</p>{/if}
-      </div>
-
-      <div class="side qr-side">
-        {#if qrFailure}
-          <p class="fail" role="alert">{qrFailure}</p>
-        {:else}
-          <div class="qr" aria-hidden="true">
-            {#if svg}{@html svg}{/if}
+            <div class="side qr-side">
+              {#if qrFailure}
+                <p class="fail" role="alert">{qrFailure}</p>
+              {:else}
+                <div class="qr" aria-hidden="true">
+                  {#if svg}{@html svg}{/if}
+                </div>
+                <p>{scanned ? t('steam.approveScanned') : t('steam.scan')}</p>
+              {/if}
+            </div>
           </div>
-          <p>{scanned ? t('steam.approveScanned') : t('steam.scan')}</p>
-        {/if}
-      </div>
-    </div>
-  </div>
-</div>
+        </div>
+      {/snippet}
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <style>
+  /* Above Settings (20) and its popovers (30). */
   .backdrop {
     position: fixed;
     inset: 0;
     z-index: 40;
-    display: grid;
-    place-items: center;
     background: rgb(0 0 0 / 0.5);
   }
 
   .dialog {
-    position: relative;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    margin: auto;
+    height: fit-content;
     box-sizing: border-box;
     width: min(560px, calc(100% - 32px));
     padding: 16px;

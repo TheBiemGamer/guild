@@ -257,12 +257,8 @@
     settingsOpen = settings !== null
   }
 
-  /** What had focus before the Add a game dialog opened. */
-  let addOpener: HTMLElement | null = null
-
   /** Adds a game, or edits the added game `key`. */
   async function openAddGame(key?: string) {
-    addOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     if (!key) {
       adding = 'new'
       return
@@ -273,12 +269,6 @@
     } catch (e) {
       error = api.message(e)
     }
-  }
-
-  function closeAddGame(refocus: boolean) {
-    adding = null
-    if (refocus && addOpener?.isConnected) addOpener.focus({ preventScroll: true })
-    addOpener = null
   }
 
   /** After a setting changed: the panel, the tint and the banner follow, and a logout changes the library. */
@@ -687,10 +677,10 @@
     {#key adding}
       <AddGame
         edit={adding === 'new' ? null : adding}
-        onclose={closeAddGame}
+        onclose={() => (adding = null)}
         onsaved={reload}
         onsettings={() => {
-          closeAddGame(false)
+          adding = null
           openSettings('services')
         }}
       />

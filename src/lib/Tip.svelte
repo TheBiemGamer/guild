@@ -44,6 +44,9 @@
     display: inline-flex;
   }
   :global(.tip) {
+    /* bits-ui copies this onto its portal wrapper: above dialogs (20, 40) and popovers and menus (30, 50). */
+    position: relative;
+    z-index: 60;
     max-width: 320px;
     padding: 5px 9px;
     border: 1px solid var(--glass-on-line);
