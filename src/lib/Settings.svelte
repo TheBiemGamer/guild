@@ -8,6 +8,9 @@
   import NotesPopover, { installedNotes } from './NotesPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { around, t } from './i18n'
+  import igdbSvg from './icons/igdb.svg?raw'
+  // Multicolour, so an <img>; `no-inline` keeps it out of data: URLs, which the CSP blocks.
+  import gridFile from './icons/steamgriddb.svg?no-inline'
 
   let {
     view,
@@ -51,6 +54,8 @@
     onlogin: () => void
   } = $props()
 
+  // Simple Icons ship one path per logo, like StoreIcon reads them.
+  const igdbPath = /\sd="([^"]+)"/.exec(igdbSvg)?.[1] ?? ''
   /** Section ids; `settings.section.<id>` names them. */
   const sections = ['accounts', 'general', 'services', 'about'] as const
   /** 24px stroke icons, one path each: the section list and the row tiles. */
@@ -917,7 +922,9 @@
         <h3>{t('settings.section.services')}</h3>
         <div class="group">
           <div class="r">
-            <span class="tile mark">IG</span>
+            <div class="logo igdb">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d={igdbPath} fill="currentColor" /></svg>
+            </div>
             <div class="what">
               IGDB
               <small>
@@ -977,7 +984,7 @@
             </div>
           {/if}
           <div class="r">
-            <span class="tile mark">SG</span>
+            <div class="logo grid"><img src={gridFile} width="22" height="22" alt="" /></div>
             <div class="what">
               SteamGridDB
               <small>
@@ -1341,11 +1348,6 @@
     color: var(--text);
   }
 
-  .tile.mark {
-    font-size: 11px;
-    font-weight: 700;
-  }
-
   /* The Language menu hangs under its button, right-aligned (ChoiceMenu). */
   .choice {
     position: relative;
@@ -1431,6 +1433,14 @@
 
   .logo.amazon {
     background: #232f3e;
+  }
+
+  .logo.igdb {
+    background: #9147ff;
+  }
+
+  .logo.grid {
+    background: rgb(255 255 255 / 0.06);
   }
 
   /* Accounts in the section list: a store needs the owner. */
