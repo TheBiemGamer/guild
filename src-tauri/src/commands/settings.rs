@@ -548,7 +548,7 @@ pub fn report_problem(app: AppHandle) -> Res<()> {
     let version = app.package_info().version.to_string();
     let os = crate::platform::windows_version();
     let url = format!(
-        "https://github.com/TheBiemGamer/game-launcher/issues/new?template=bug_report.yml&version={}&os={}",
+        "https://github.com/TheBiemGamer/guild/issues/new?template=bug_report.yml&version={}&os={}",
         percent_encode(&version),
         percent_encode(&os)
     );
