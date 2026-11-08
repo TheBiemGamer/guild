@@ -89,16 +89,6 @@ impl ProviderKind {
         }
     }
 
-    pub fn provider(self) -> &'static dyn Provider {
-        match self {
-            Self::Steam => &steam::Steam,
-            Self::Epic => &epic::Epic,
-            Self::Gog => &gog::Gog,
-            Self::Amazon => &amazon::Amazon,
-            Self::Custom => &custom::Custom,
-        }
-    }
-
     /// Unique across providers; safe as a file name.
     pub fn key(self, external_id: &str) -> String {
         format!("{}-{external_id}", self.as_str())
@@ -185,18 +175,6 @@ impl Game {
     pub fn key(&self) -> String {
         self.provider.key(&self.external_id)
     }
-}
-
-/// Every action hands off to the store client and returns once the request is made.
-pub trait Provider: Sync {
-    fn list_games(&self) -> Result<Vec<Game>, Error>;
-    fn launch(&self, game: &Game) -> Result<(), Error>;
-    fn install(&self, game: &Game) -> Result<(), Error>;
-    fn uninstall(&self, game: &Game) -> Result<(), Error>;
-    /// `external_id` of the game this store reports as running, if any.
-    fn running_game(&self) -> Option<String>;
-    /// `None` when no download is in progress for `game`.
-    fn download_progress(&self, game: &Game) -> Option<Progress>;
 }
 
 /// Opens a store URI (`steam://…`, `com.epicgames.launcher://…`) with its registered handler.

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{Art, Error, Game, Image, Progress, Provider, ProviderKind};
+use super::{Art, Error, Game, Image, ProviderKind};
 use crate::cache::Dirs;
 use crate::msg::Msg;
 
@@ -22,8 +22,6 @@ pub struct CustomGame {
     pub added: i64,
 }
 
-pub struct Custom;
-
 /// Every added game, from the database, its covers under `dirs.custom`.
 pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
     let conn = crate::cache::db::open(&dirs.db)?;
@@ -33,40 +31,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         .collect())
 }
 
-/// Listed by `list` and played by `commands::game::act_custom`, which know the app's folders.
-fn not_here() -> Error {
-    msg!(customNotHere).into()
-}
-
-impl Provider for Custom {
-    fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Err(not_here())
-    }
-
-    fn launch(&self, _game: &Game) -> Result<(), Error> {
-        Err(not_here())
-    }
-
-    /// A not-installed added game is one whose program is gone.
-    fn install(&self, game: &Game) -> Result<(), Error> {
-        Err(missing(&game.title))
-    }
-
-    fn uninstall(&self, _game: &Game) -> Result<(), Error> {
-        Err(msg!(customUninstall).into())
-    }
-
-    /// Watched through its process once launched from here (`commands::Watch`).
-    fn running_game(&self) -> Option<String> {
-        None
-    }
-
-    fn download_progress(&self, _game: &Game) -> Option<Progress> {
-        None
-    }
-}
-
-fn missing(title: &str) -> Error {
+pub fn missing(title: &str) -> Error {
     msg!(customProgramMissing, title = title).into()
 }
 

@@ -14,7 +14,7 @@ use crate::cache;
 use crate::entries::{self, Entry};
 use crate::epic_playtime;
 use crate::library::epic::{self, Login};
-use crate::library::steam::{owned_games, with_owned};
+use crate::library::steam::{self, owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
 use crate::library::{amazon, gog};
 use crate::msg::Msg;
@@ -828,9 +828,7 @@ fn scan(
     dirs: &cache::Dirs,
     http: &reqwest::Client,
 ) -> (ScanResults, Option<(Login, gog::Login, amazon::Login)>) {
-    let steam = ProviderKind::Steam
-        .provider()
-        .list_games()
+    let steam = steam::list_games()
         .map_err(Msg::from)
         .map(|installed| match owned {
             Some(owned) => with_owned(installed, owned),
@@ -842,12 +840,7 @@ fn scan(
         return (results, None);
     }
     let login = epic::login_state();
-    let games = epic_result(login, || {
-        ProviderKind::Epic
-            .provider()
-            .list_games()
-            .map_err(Msg::from)
-    });
+    let games = epic_result(login, || epic::list_games().map_err(Msg::from));
     results.push((ProviderKind::Epic, games));
     let (gog_login, creds) = gog::login();
     let games = match creds {
@@ -1111,10 +1104,7 @@ pub async fn poll(app: AppHandle) -> Poll {
 
 fn poll_blocking(app: &AppHandle) -> Poll {
     let state = app.state::<AppState>();
-    let steam_running = ProviderKind::Steam
-        .provider()
-        .running_game()
-        .map(|id| ProviderKind::Steam.key(&id));
+    let steam_running = steam::running_game().map(|id| ProviderKind::Steam.key(&id));
     // Our own process answers at once; an Epic game's name is looked up after the lock is let go.
     let watch = state.lock().watch.as_mut().map(|w| {
         let running = match &mut w.process {
@@ -1159,7 +1149,9 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         .map(|g| {
             (
                 g.key(),
-                g.provider.provider().download_progress(g),
+                (g.provider == ProviderKind::Steam)
+                    .then(|| steam::download_progress(g))
+                    .flatten(),
                 g.installed,
             )
         })

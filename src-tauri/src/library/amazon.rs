@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::epic::{InstallEvent, LaunchOptions, split_args};
 use super::gog::{Fed, feed, inside, parse_progress};
-use super::{Art, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
+use super::{Art, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::info::{self, GameInfo};
 use crate::msg::Msg;
@@ -349,39 +349,6 @@ fn forget_login(cfg: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-pub struct Amazon;
-
-/// Listed by `list`; installs and launches come through `commands::game`.
-fn not_here() -> Error {
-    msg!(amazonNotHere).into()
-}
-
-impl Provider for Amazon {
-    fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Err(not_here())
-    }
-
-    fn launch(&self, _game: &Game) -> Result<(), Error> {
-        Err(not_here())
-    }
-
-    fn install(&self, _game: &Game) -> Result<(), Error> {
-        Err(not_here())
-    }
-
-    fn uninstall(&self, _game: &Game) -> Result<(), Error> {
-        Err(not_here())
-    }
-
-    fn running_game(&self) -> Option<String> {
-        None
-    }
-
-    fn download_progress(&self, _game: &Game) -> Option<Progress> {
-        None
-    }
 }
 
 /// The owned Amazon games: `nile library sync`, then its `library.json`. Skipped while another nile run holds `NILE`

@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
 use super::{AppState, Res, blocking};
-use crate::library::ProviderKind;
+use crate::library::steam;
 
 #[derive(Serialize, specta::Type)]
 pub struct UpdateInfo {
@@ -90,8 +90,7 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<(
 async fn game_running(app: &AppHandle) -> bool {
     let app = app.clone();
     blocking(move || {
-        ProviderKind::Steam.provider().running_game().is_some()
-            || app.state::<AppState>().lock().watch.is_some()
+        steam::running_game().is_some() || app.state::<AppState>().lock().watch.is_some()
     })
     .await
 }

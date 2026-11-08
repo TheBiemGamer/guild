@@ -20,7 +20,7 @@ use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
-use crate::library::{amazon, gog};
+use crate::library::{amazon, gog, steam};
 use crate::links::{self, LinkKind};
 use crate::msg::{Msg, Param};
 use crate::platform::kill_tree;
@@ -305,7 +305,6 @@ fn act_blocking(
 ) -> Res<Option<Conflict>> {
     let state = app.state::<AppState>();
     let key = game.key();
-    let store = game.provider.provider();
     let play = matches!(action, Action::Play | Action::PlayOutdated);
     if play
         && game.provider != ProviderKind::Steam
@@ -314,10 +313,7 @@ fn act_blocking(
         return Err(msg!(closeGameFirst));
     }
     if action == Action::Uninstall {
-        let steam = ProviderKind::Steam
-            .provider()
-            .running_game()
-            .map(|id| ProviderKind::Steam.key(&id));
+        let steam = steam::running_game().map(|id| ProviderKind::Steam.key(&id));
         if card_running(&state.lock(), &key, steam.as_deref()) {
             return Err(msg!(closeGameFirst));
         }
@@ -328,11 +324,11 @@ fn act_blocking(
         }
         let result = match action {
             Action::Play | Action::PlayOutdated => {
-                store.launch(game).inspect(|()| record_play(&state, &key))
+                steam::launch(game).inspect(|()| record_play(&state, &key))
             }
-            Action::Install => store.install(game),
+            Action::Install => steam::install(game),
             Action::Update => Err(msg!(steamUpdatesItself).into()),
-            Action::Uninstall => store.uninstall(game),
+            Action::Uninstall => steam::uninstall(game),
             Action::Verify => {
                 crate::library::open_uri(&format!("steam://validate/{}", game.external_id))
             }
@@ -578,7 +574,6 @@ fn act_amazon(
 
 /// A game the owner added only plays: its program starts, watched like an Epic game to time the session.
 fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
-    let store = game.provider.provider();
     let result = match action {
         Action::Play | Action::PlayOutdated => {
             let conn = open_db(state).ok_or(msg!(noDb))?;
@@ -596,8 +591,9 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
                 });
             })
         }
-        Action::Install => store.install(game),
-        Action::Uninstall => store.uninstall(game),
+        // A not-installed added game is one whose program is gone.
+        Action::Install => Err(crate::library::custom::missing(&game.title)),
+        Action::Uninstall => Err(msg!(customUninstall).into()),
         Action::Update | Action::Verify | Action::Move => Err(msg!(addedGamesOnlyPlay).into()),
     };
     result.map_err(Msg::from)

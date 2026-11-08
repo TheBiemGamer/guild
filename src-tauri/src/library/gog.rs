@@ -21,7 +21,7 @@ use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
 use super::epic::{InstallEvent, LaunchOptions, SaveSync, SyncOutcome, split_args};
-use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
+use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::msg::Msg;
 use crate::tools;
@@ -249,44 +249,6 @@ fn id_text(v: &Value) -> Option<String> {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
         _ => None,
-    }
-}
-
-pub struct Gog;
-
-/// Listed by `list`, which knows the app's folders and HTTP client; installed and uninstalled through `commands::game`.
-fn not_here() -> Error {
-    msg!(gogNotHere).into()
-}
-
-impl Provider for Gog {
-    fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Err(not_here())
-    }
-
-    fn launch(&self, game: &Game) -> Result<(), Error> {
-        let dir = game
-            .install_dir
-            .as_deref()
-            .filter(|_| game.installed)
-            .ok_or(msg!(notInstalled))?;
-        launch(&game.external_id, dir, &LaunchOptions::default()).map(drop)
-    }
-
-    fn install(&self, _game: &Game) -> Result<(), Error> {
-        Err(not_here())
-    }
-
-    fn uninstall(&self, _game: &Game) -> Result<(), Error> {
-        Err(not_here())
-    }
-
-    fn running_game(&self) -> Option<String> {
-        None
-    }
-
-    fn download_progress(&self, _game: &Game) -> Option<Progress> {
-        None
     }
 }
 

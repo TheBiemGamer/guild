@@ -9,7 +9,7 @@ use keyvalues_parser::{Value, Vdf};
 use steamlocate::app::StateFlag;
 use steamlocate::{App, Library, SteamDir};
 
-use super::{Art, Error, Game, Progress, ProgressAction, Provider, ProviderKind};
+use super::{Art, Error, Game, Progress, ProgressAction, ProviderKind};
 use crate::steam_owned::OwnedGame;
 
 /// Playtime in minutes and last played time, per app id.
@@ -21,69 +21,64 @@ const NOT_GAMES: &[u32] = &[228980];
 
 const CDN: &str = "https://shared.steamstatic.com/store_item_assets/steam/apps";
 
-pub struct Steam;
-
-impl Provider for Steam {
-    fn list_games(&self) -> Result<Vec<Game>, Error> {
-        let steam = SteamDir::locate()?;
-        let librarycache = steam.path().join("appcache").join("librarycache");
-        let mut games = Vec::new();
-        for library in steam.libraries()? {
-            match library {
-                Ok(library) => games.extend(library_games(&library, &librarycache)),
-                // e.g. a library on an unplugged drive; the others still load.
-                Err(e) => tracing::warn!("steam library: {e}"),
-            }
+pub fn list_games() -> Result<Vec<Game>, Error> {
+    let steam = SteamDir::locate()?;
+    let librarycache = steam.path().join("appcache").join("librarycache");
+    let mut games = Vec::new();
+    for library in steam.libraries()? {
+        match library {
+            Ok(library) => games.extend(library_games(&library, &librarycache)),
+            // e.g. a library on an unplugged drive; the others still load.
+            Err(e) => tracing::warn!("steam library: {e}"),
         }
-        let stats = play_stats(steam.path());
-        for game in &mut games {
-            if let Some(&(playtime, last_played)) =
-                game.external_id.parse().ok().and_then(|id| stats.get(&id))
-            {
-                game.playtime_minutes = playtime;
-                game.last_played = last_played;
-            }
+    }
+    let stats = play_stats(steam.path());
+    for game in &mut games {
+        if let Some(&(playtime, last_played)) =
+            game.external_id.parse().ok().and_then(|id| stats.get(&id))
+        {
+            game.playtime_minutes = playtime;
+            game.last_played = last_played;
         }
-        Ok(games)
     }
-
-    /// Starts Steam first if it isn't running.
-    fn launch(&self, game: &Game) -> Result<(), Error> {
-        super::open_uri(&format!("steam://rungameid/{}", game.external_id))
-    }
-
-    /// Steam shows its own install dialog.
-    fn install(&self, game: &Game) -> Result<(), Error> {
-        super::open_uri(&format!("steam://install/{}", game.external_id))
-    }
-
-    /// Steam shows its own confirmation dialog.
-    fn uninstall(&self, game: &Game) -> Result<(), Error> {
-        super::open_uri(&format!("steam://uninstall/{}", game.external_id))
-    }
-
-    fn running_game(&self) -> Option<String> {
-        let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-            .open_subkey(r"Software\Valve\Steam")
-            .ok()?;
-        let id = running_id(steam.get_value("RunningAppID"))?;
-        // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
-        // trust it while the Steam process it was written by is still alive.
-        steam_alive(steam_pid()?).then_some(id)
-    }
-
-    fn download_progress(&self, game: &Game) -> Option<Progress> {
-        let (app, _) = SteamDir::locate()
-            .ok()?
-            .find_app(game.external_id.parse().ok()?)
-            .ok()??;
-        let pid = steam_pid();
-        let writes = pid.and_then(crate::platform::process_bytes_written);
-        let mut anchors = ANCHORS.lock().unwrap_or_else(|e| e.into_inner());
-        progress(&app, &mut anchors, pid.zip(writes), Instant::now())
-    }
+    Ok(games)
 }
 
+/// Starts Steam first if it isn't running.
+pub fn launch(game: &Game) -> Result<(), Error> {
+    super::open_uri(&format!("steam://rungameid/{}", game.external_id))
+}
+
+/// Steam shows its own install dialog.
+pub fn install(game: &Game) -> Result<(), Error> {
+    super::open_uri(&format!("steam://install/{}", game.external_id))
+}
+
+/// Steam shows its own confirmation dialog.
+pub fn uninstall(game: &Game) -> Result<(), Error> {
+    super::open_uri(&format!("steam://uninstall/{}", game.external_id))
+}
+
+pub fn running_game() -> Option<String> {
+    let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Valve\Steam")
+        .ok()?;
+    let id = running_id(steam.get_value("RunningAppID"))?;
+    // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
+    // trust it while the Steam process it was written by is still alive.
+    steam_alive(steam_pid()?).then_some(id)
+}
+
+pub fn download_progress(game: &Game) -> Option<Progress> {
+    let (app, _) = SteamDir::locate()
+        .ok()?
+        .find_app(game.external_id.parse().ok()?)
+        .ok()??;
+    let pid = steam_pid();
+    let writes = pid.and_then(crate::platform::process_bytes_written);
+    let mut anchors = ANCHORS.lock().unwrap_or_else(|e| e.into_inner());
+    progress(&app, &mut anchors, pid.zip(writes), Instant::now())
+}
 /// The Steam client's pid, as Steam last wrote it.
 fn steam_pid() -> Option<u32> {
     let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)

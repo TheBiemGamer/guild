@@ -18,8 +18,7 @@ use serde_json::Value;
 use crate::msg::Msg;
 
 use super::{
-    Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, Provider,
-    ProviderKind,
+    Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind,
 };
 
 /// What a running install reports back.
@@ -41,35 +40,8 @@ pub enum Login {
     Unreachable,
 }
 
-pub struct Epic;
-
-impl Provider for Epic {
-    fn list_games(&self) -> Result<Vec<Game>, Error> {
-        Ok(games(&json(&["list", "--json"])?, &installed_list()?))
-    }
-
-    /// Waits for Legendary, so a failure (e.g. an update is required) reaches the UI.
-    fn launch(&self, game: &Game) -> Result<(), Error> {
-        launch(&game.external_id, &LaunchOptions::default(), false)
-    }
-
-    fn install(&self, game: &Game) -> Result<(), Error> {
-        install(&game.external_id, Some(true), None, |_| {})
-    }
-
-    fn uninstall(&self, game: &Game) -> Result<(), Error> {
-        uninstall(&game.external_id)
-    }
-
-    /// Epic has no RunningAppID: the app watches the process of games it launched (`executable`).
-    fn running_game(&self) -> Option<String> {
-        None
-    }
-
-    /// Progress arrives through `install`'s events instead.
-    fn download_progress(&self, _game: &Game) -> Option<Progress> {
-        None
-    }
+pub fn list_games() -> Result<Vec<Game>, Error> {
+    Ok(games(&json(&["list", "--json"])?, &installed_list()?))
 }
 
 /// A copy's own launch options, kept in `game_prefs` as JSON. `exe` is relative to the install folder.
