@@ -531,7 +531,9 @@
 {#snippet switchRow(name: Icon, setting: string, on: boolean, label: string, hint?: string)}
   <div class="r">
     {@render tile(name)}
-    <div class="what"><span id="{setting}-label">{label}</span>{#if hint}<small>{hint}</small>{/if}</div>
+    <div class="what">
+      <span id="{setting}-label">{label}</span>{#if hint}<small>{hint}</small>{/if}
+    </div>
     <button class="toggle" role="switch" aria-checked={on} aria-labelledby="{setting}-label" onclick={() => toggle(setting, !on)}></button>
   </div>
 {/snippet}
@@ -679,7 +681,9 @@
                     <select id="import-game" bind:value={importKey}>
                       {#each importing.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
                     </select>
-                    <button class="btn" disabled={managing !== null} onclick={runImport}>{managing === 'import' ? t('settings.importing') : t('settings.import')}</button>
+                    <button class="btn" disabled={managing !== null} onclick={runImport}
+                      >{managing === 'import' ? t('settings.importing') : t('settings.import')}</button
+                    >
                     <button class="btn" disabled={managing !== null} onclick={() => (importing = null)}>{t('common.cancel')}</button>
                   </div>
                 </div>
@@ -706,13 +710,7 @@
             <div class="logo gog"><StoreIcon provider="gog" size={17} /></div>
             {@render who('GOG', gog)}
             {#if view.gog !== 'noGogdl'}
-              <button
-                class="btn opt"
-                class:open={gogOptions}
-                aria-expanded={gogOptions}
-                aria-controls="gog-options"
-                onclick={() => (gogOptions = !gogOptions)}
-              >
+              <button class="btn opt" class:open={gogOptions} aria-expanded={gogOptions} aria-controls="gog-options" onclick={() => (gogOptions = !gogOptions)}>
                 {t('settings.options')}
                 {@render chevron()}
               </button>
@@ -848,7 +846,9 @@
                     <select id="amazon-import-game" bind:value={amazonImportKey}>
                       {#each amazonImport.games as g (g.key)}<option value={g.key}>{g.title}</option>{/each}
                     </select>
-                    <button class="btn" disabled={amazonImporting} onclick={runAmazonImport}>{amazonImporting ? t('settings.importing') : t('settings.import')}</button>
+                    <button class="btn" disabled={amazonImporting} onclick={runAmazonImport}
+                      >{amazonImporting ? t('settings.importing') : t('settings.import')}</button
+                    >
                     <button class="btn" disabled={amazonImporting} onclick={() => (amazonImport = null)}>{t('common.cancel')}</button>
                   </div>
                 </div>
@@ -1022,7 +1022,9 @@
         <div class="group">
           <div class="r">
             {@render tile('about')}
-            <div class="what">{t('settings.version', { version: view.appVersion })}{#if versionNote}<small>{versionNote}</small>{/if}</div>
+            <div class="what">
+              {t('settings.version', { version: view.appVersion })}{#if versionNote}<small>{versionNote}</small>{/if}
+            </div>
             {#if notes}
               <button class="btn" bind:this={notesButton} aria-haspopup="dialog" aria-expanded={notesOpen} onclick={() => (notesOpen = !notesOpen)}>
                 {t('app.whatsNew')}

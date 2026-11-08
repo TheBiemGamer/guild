@@ -16,14 +16,19 @@ const known = (key: string) => keys.has(key) || keys.has(`${key}_other`)
 test('every key the UI asks for has English words', () => {
   const asked = [...sources.matchAll(/\b(?:t|around)\(\s*'([\w.]+)'/g)].map((m) => m[1])
   assert.ok(asked.length > 300, `found only ${asked.length} keys`)
-  assert.deepEqual([...new Set(asked)].filter((k) => !known(k)), [])
+  assert.deepEqual(
+    [...new Set(asked)].filter((k) => !known(k)),
+    [],
+  )
   // Keys made from a value, like t(`group.${id}`): at least one key fits the pattern.
   const made = [...sources.matchAll(/\bt\(\s*`([\w.]*)\$\{[^}]+\}([\w.]*)`/g)]
   assert.ok(made.length > 5)
-  const unmatched = made.map((m) => `${m[1]}…${m[2]}`).filter((p) => {
-    const [before, after] = p.split('…')
-    return ![...keys].some((k) => k.startsWith(before) && k.endsWith(after) && k.length > before.length + after.length)
-  })
+  const unmatched = made
+    .map((m) => `${m[1]}…${m[2]}`)
+    .filter((p) => {
+      const [before, after] = p.split('…')
+      return ![...keys].some((k) => k.startsWith(before) && k.endsWith(after) && k.length > before.length + after.length)
+    })
   assert.deepEqual(unmatched, [])
 })
 
@@ -57,8 +62,16 @@ const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) 
 
 test('nl.json has exactly the English keys, with the same placeholders', { skip: !existsSync(join(src, 'lib', 'i18n', 'nl.json')) }, () => {
   const nl: Record<string, string> = JSON.parse(readFileSync(join(src, 'lib', 'i18n', 'nl.json'), 'utf8'))
-  assert.deepEqual([...keys].filter((k) => !(k in nl)), [], 'missing in nl.json')
-  assert.deepEqual(Object.keys(nl).filter((k) => !keys.has(k)), [], 'not in en.json')
+  assert.deepEqual(
+    [...keys].filter((k) => !(k in nl)),
+    [],
+    'missing in nl.json',
+  )
+  assert.deepEqual(
+    Object.keys(nl).filter((k) => !keys.has(k)),
+    [],
+    'not in en.json',
+  )
   // A singular may spell its number out ("een dag geleden").
   const fills = (key: string, text: string) => placeholders(text).filter((p) => !(key.endsWith('_one') && p === 'n'))
   for (const [key, text] of Object.entries(nl)) assert.deepEqual(fills(key, text), fills(key, english[key]), key)

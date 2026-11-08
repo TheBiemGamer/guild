@@ -4,7 +4,13 @@
   import { sizeLabel } from './format'
   import { t } from './i18n'
 
-  let { game, anchor, folder, onconfirm, oncancel }: {
+  let {
+    game,
+    anchor,
+    folder,
+    onconfirm,
+    oncancel,
+  }: {
     /** The Epic, GOG or Amazon copy's key and the game's title. */
     game: { key: string; title: string }
     /** The cover's rectangle; the popup opens beside it. */
@@ -27,9 +33,7 @@
   let withDlc = $state(true)
 
   // Right of the cover, or left when the window's edge is in the way; kept inside the window.
-  const x = $derived(
-    anchor.right + GAP + WIDTH <= window.innerWidth - GAP ? anchor.right + GAP : Math.max(GAP, anchor.left - GAP - WIDTH),
-  )
+  const x = $derived(anchor.right + GAP + WIDTH <= window.innerWidth - GAP ? anchor.right + GAP : Math.max(GAP, anchor.left - GAP - WIDTH))
   const y = $derived(Math.max(GAP, Math.min(anchor.top, window.innerHeight - height - GAP)))
 
   onMount(() => {
@@ -37,7 +41,10 @@
     installButton.focus()
     // Answers arriving after the popup is gone are dropped.
     let alive = true
-    downloadSize(game.key).then((bytes) => alive && (size = bytes), () => alive && (size = null))
+    downloadSize(game.key).then(
+      (bytes) => alive && (size = bytes),
+      () => alive && (size = null),
+    )
 
     // The grid scrolls under a fixed popup, so a scroll anywhere closes it.
     const onscroll = () => oncancel()

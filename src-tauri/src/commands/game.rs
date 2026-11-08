@@ -9,16 +9,16 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use super::library::rescan;
-use super::{allow, blocking, open_db, queue_view, unix_now, AppState, Res, Shared, Watch};
+use super::{AppState, Res, Shared, Watch, allow, blocking, open_db, queue_view, unix_now};
 use crate::cache;
-use crate::downloads::{Job, Queue, QueueView, QueuedAction, DOWNLOAD_QUEUE};
+use crate::downloads::{DOWNLOAD_QUEUE, Job, Queue, QueueView, QueuedAction};
 use crate::entries::{self, Entry};
 use crate::gamesdb;
 use crate::igdb;
 use crate::info::{self, GameInfo};
 use crate::library::epic::{self, InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
-use crate::library::{amazon, gog};
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
+use crate::library::{amazon, gog};
 use crate::links::{self, LinkKind};
 use crate::msg::{Msg, Param};
 use crate::platform::kill_tree;
@@ -79,7 +79,12 @@ pub fn game(app: AppHandle, key: String) -> Option<Detail> {
     let state = app.state::<AppState>();
     let s = state.lock();
     let entry = entries::find(&s.entries, &s.games, &key)?;
-    let gog = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Gog).map(Game::key);
+    let gog = entry
+        .copies
+        .iter()
+        .map(|&i| &s.games[i])
+        .find(|g| g.provider == ProviderKind::Gog)
+        .map(Game::key);
     let detail = detail(entry, &s.games, &s.twins, &s.lists);
     drop(s);
     if let Some(gog) = gog {
@@ -88,7 +93,12 @@ pub fn game(app: AppHandle, key: String) -> Option<Detail> {
     Some(detail)
 }
 
-fn detail(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>, lists: &view::Lists) -> Detail {
+fn detail(
+    entry: &Entry,
+    games: &[Game],
+    twins: &HashMap<String, u32>,
+    lists: &view::Lists,
+) -> Detail {
     let (minutes, both) = entries::playtime(entry, games);
     let chosen = &games[entries::default_copy(entry, games)];
     // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone shows only known playtime.
@@ -147,7 +157,11 @@ pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
     if !dir.is_dir() {
         return Err(msg!(installFolderMissing, path = dir.display().to_string()));
     }
-    std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(Msg::system)
+    std::process::Command::new("explorer.exe")
+        .arg(dir)
+        .spawn()
+        .map(drop)
+        .map_err(Msg::system)
 }
 
 /// Opens one of the game page's links in the default browser. The URL is built here from the kind.
@@ -159,8 +173,16 @@ pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
         let (appid, title, epic_key) = {
             let s = state.lock();
             let entry = entries::find(&s.entries, &s.games, &key).ok_or(msg!(gameNotInLibrary))?;
-            let epic = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Epic);
-            (entries::steam_appid(entry, &s.games, &s.twins), s.games[entry.copies[0]].title.clone(), epic.map(|g| g.key()))
+            let epic = entry
+                .copies
+                .iter()
+                .map(|&i| &s.games[i])
+                .find(|g| g.provider == ProviderKind::Epic);
+            (
+                entries::steam_appid(entry, &s.games, &s.twins),
+                s.games[entry.copies[0]].title.clone(),
+                epic.map(|g| g.key()),
+            )
         };
         let epic_url = epic_key.and_then(|k| igdb::epic_url(&open_db(&state)?, &k));
         let url = links::url(kind, appid, epic_url.as_deref(), &title).ok_or(msg!(noPageThere))?;
@@ -178,11 +200,15 @@ pub struct DetailArt {
 #[specta::specta]
 pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
     let state = app.state::<AppState>();
-    let Some(game) = state.game(&key) else { return DetailArt::default() };
+    let Some(game) = state.game(&key) else {
+        return DetailArt::default();
+    };
     let dir = state.dirs.art.join(&key);
     // The game page shows a text title, so the logo art isn't fetched.
     let hero = cache::resolve(&game.art.hero, &state.http, dir.join("hero")).await;
-    DetailArt { hero: hero.and_then(|p| allow(&app, p)) }
+    DetailArt {
+        hero: hero.and_then(|p| allow(&app, p)),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
@@ -233,15 +259,34 @@ pub async fn act(
     keep: Option<Keep>,
     dest: Option<String>,
 ) -> Res<Option<Conflict>> {
-    let game = app.state::<AppState>().game(&key).ok_or(msg!(gameNotInLibrary))?;
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .ok_or(msg!(gameNotInLibrary))?;
     if let Some(id) = &dlc
-        && (matches!(action, Action::Play | Action::PlayOutdated) || !game.dlc.iter().any(|d| &d.id == id))
+        && (matches!(action, Action::Play | Action::PlayOutdated)
+            || !game.dlc.iter().any(|d| &d.id == id))
     {
         return Err(msg!(dlcNotInLibrary));
     }
     // A DLC install is just that DLC.
-    let with_dlc = if dlc.is_some() { None } else { Some(with_dlc.unwrap_or(true)) };
-    blocking(move || act_blocking(&app, action, &game, with_dlc, dlc.as_deref(), keep, dest.as_deref())).await
+    let with_dlc = if dlc.is_some() {
+        None
+    } else {
+        Some(with_dlc.unwrap_or(true))
+    };
+    blocking(move || {
+        act_blocking(
+            &app,
+            action,
+            &game,
+            with_dlc,
+            dlc.as_deref(),
+            keep,
+            dest.as_deref(),
+        )
+    })
+    .await
 }
 
 fn act_blocking(
@@ -261,14 +306,20 @@ fn act_blocking(
             state.lock().tracked.insert(key.clone());
         }
         let result = match action {
-            Action::Play | Action::PlayOutdated => store.launch(game).inspect(|()| record_play(&state, &key)),
+            Action::Play | Action::PlayOutdated => {
+                store.launch(game).inspect(|()| record_play(&state, &key))
+            }
             Action::Install => store.install(game),
             Action::Update => Err(msg!(steamUpdatesItself).into()),
             Action::Uninstall => store.uninstall(game),
-            Action::Verify => crate::library::open_uri(&format!("steam://validate/{}", game.external_id)),
+            Action::Verify => {
+                crate::library::open_uri(&format!("steam://validate/{}", game.external_id))
+            }
             Action::Move => crate::library::open_uri("steam://open/storage"),
         };
-        return result.map(|()| None).map_err(|e| store_error(ProviderKind::Steam, e));
+        return result
+            .map(|()| None)
+            .map_err(|e| store_error(ProviderKind::Steam, e));
     }
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
@@ -279,7 +330,11 @@ fn act_blocking(
         Action::Verify => Some(QueuedAction::Verify),
         _ => None,
     };
-    if matches!(game.provider, ProviderKind::Gog | ProviderKind::Amazon) && action == Action::Install && dlc.is_none() && game.installed {
+    if matches!(game.provider, ProviderKind::Gog | ProviderKind::Amazon)
+        && action == Action::Install
+        && dlc.is_none()
+        && game.installed
+    {
         return Err(store_error(game.provider, msg!(alreadyInstalled)));
     }
     // The job checks again with a fresh answer.
@@ -287,8 +342,15 @@ fn act_blocking(
         return Err(store_error(game.provider, msg!(updateFirst)));
     }
     if let Some(queued) = queued {
-        let dest = (queued == QueuedAction::Install).then(|| install_base(&state, game.provider)).flatten();
-        let job = Job { dlc: dlc.map(str::to_string), with_dlc, dest, ..Job::new(&key, queued) };
+        let dest = (queued == QueuedAction::Install)
+            .then(|| install_base(&state, game.provider))
+            .flatten();
+        let job = Job {
+            dlc: dlc.map(str::to_string),
+            with_dlc,
+            dest,
+            ..Job::new(&key, queued)
+        };
         return enqueue(app, job).map(|()| None);
     }
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
@@ -300,23 +362,35 @@ fn act_blocking(
             Err(conflict) => return Ok(Some(conflict)),
         };
         let options = checked_launch_options(open_db(&state).as_ref(), game)?;
-        let dir = installed_dir(game).ok_or_else(|| store_error(ProviderKind::Gog, msg!(notInstalled)))?;
-        let exe = gog::launch(&game.external_id, dir, &options).map_err(|e| store_error(ProviderKind::Gog, e))?;
+        let dir = installed_dir(game)
+            .ok_or_else(|| store_error(ProviderKind::Gog, msg!(notInstalled)))?;
+        let exe = gog::launch(&game.external_id, dir, &options)
+            .map_err(|e| store_error(ProviderKind::Gog, e))?;
         record_play(&state, &key);
-        state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload });
+        state.lock().watch = Some(Watch {
+            key,
+            exe,
+            since: Instant::now(),
+            seen: false,
+            upload,
+        });
         return Ok(None);
     }
     if game.provider == ProviderKind::Gog {
         let result = act_gog(&state, action, game, dlc, dest);
         rescan(app, true);
-        return result.map(|()| None).map_err(|e| store_error(ProviderKind::Gog, e));
+        return result
+            .map(|()| None)
+            .map_err(|e| store_error(ProviderKind::Gog, e));
     }
     if game.provider == ProviderKind::Amazon {
         let result = act_amazon(&state, action, game, dest);
         if !matches!(action, Action::Play | Action::PlayOutdated) {
             rescan(app, true);
         }
-        return result.map(|()| None).map_err(|e| store_error(ProviderKind::Amazon, e));
+        return result
+            .map(|()| None)
+            .map_err(|e| store_error(ProviderKind::Amazon, e));
     }
     let result = match action {
         Action::Play | Action::PlayOutdated => {
@@ -329,7 +403,10 @@ fn act_blocking(
                 record_play(&state, &key);
                 // The game started either way; without its exe name it just isn't shown as running.
                 // shortcut: unwatched, its saves aren't uploaded either; the next Play asks about the newer local save.
-                let alternative = options.exe.as_deref().and_then(|e| std::path::Path::new(e).file_name());
+                let alternative = options
+                    .exe
+                    .as_deref()
+                    .and_then(|e| std::path::Path::new(e).file_name());
                 let exe = match alternative {
                     Some(name) => Some(name.to_string_lossy().into_owned()),
                     None => epic::executable(game).unwrap_or_else(|e| {
@@ -337,14 +414,25 @@ fn act_blocking(
                         None
                     }),
                 };
-                state.lock().watch = exe.map(|exe| Watch { key: key.clone(), exe, since: Instant::now(), seen: false, upload });
+                state.lock().watch = exe.map(|exe| Watch {
+                    key: key.clone(),
+                    exe,
+                    since: Instant::now(),
+                    seen: false,
+                    upload,
+                });
             })
         }
         // Not cancellable: stopped halfway, Legendary's record and the folder disagree.
         Action::Move => {
             let on_event = |event| _ = record_event(&mut state.lock(), &key, event);
             let result = match dest {
-                Some(dest) => epic::move_to(&game.external_id, game.install_dir.as_deref(), dest, on_event),
+                Some(dest) => epic::move_to(
+                    &game.external_id,
+                    game.install_dir.as_deref(),
+                    dest,
+                    on_event,
+                ),
                 None => Err(msg!(pickMoveFolder).into()),
             };
             let mut s = state.lock();
@@ -358,7 +446,9 @@ fn act_blocking(
     if !matches!(action, Action::Play | Action::PlayOutdated) {
         rescan(app, true);
     }
-    result.map(|()| None).map_err(|e| store_error(ProviderKind::Epic, e))
+    result
+        .map(|()| None)
+        .map_err(|e| store_error(ProviderKind::Epic, e))
 }
 
 /// `{store}: {reason}`, like "GOG: Close the game first."
@@ -372,21 +462,36 @@ fn store_error(store: ProviderKind, reason: impl Into<Msg>) -> Msg {
 fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     let saved = open_db(state).map(|c| settings::load(&c));
     let dir = match provider {
-        ProviderKind::Gog => saved.and_then(|s| s.gog_install_dir).or_else(gog::default_base),
-        ProviderKind::Amazon => saved.and_then(|s| s.amazon_install_dir).or_else(gog::default_base),
+        ProviderKind::Gog => saved
+            .and_then(|s| s.gog_install_dir)
+            .or_else(gog::default_base),
+        ProviderKind::Amazon => saved
+            .and_then(|s| s.amazon_install_dir)
+            .or_else(gog::default_base),
         _ => saved.and_then(|s| s.epic_install_dir),
     };
     dir.map(|p| p.to_string_lossy().into_owned())
 }
 
 /// A GOG copy's actions outside the queue, but Play. A DLC uninstall is an update without it, so it reports progress like Move.
-fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, dest: Option<&str>) -> Result<(), crate::library::Error> {
+fn act_gog(
+    state: &AppState,
+    action: Action,
+    game: &Game,
+    dlc: Option<&str>,
+    dest: Option<&str>,
+) -> Result<(), crate::library::Error> {
     let key = game.key();
     let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
     let conn = cache::db::open(&state.dirs.db)?;
     match (action, dlc) {
         (Action::Play | Action::PlayOutdated, _) => unreachable!("played in act_blocking"),
-        (Action::Move, _) => gog::move_to(&conn, &game.external_id, dir, std::path::Path::new(dest.ok_or(msg!(pickMoveFolder))?)),
+        (Action::Move, _) => gog::move_to(
+            &conn,
+            &game.external_id,
+            dir,
+            std::path::Path::new(dest.ok_or(msg!(pickMoveFolder))?),
+        ),
         (Action::Uninstall, None) => gog::uninstall(&conn, &game.external_id, dir),
         (Action::Uninstall, Some(dlc)) => {
             let on_event = |event| _ = record_event(&mut state.lock(), &key, event);
@@ -402,7 +507,12 @@ fn act_gog(state: &AppState, action: Action, game: &Game, dlc: Option<&str>, des
 
 /// An Amazon copy's actions outside the queue. Play starts its `fuel.json` program and watches it to time the session:
 /// Amazon keeps no playtime and has no cloud saves. Play without updating is Play.
-fn act_amazon(state: &AppState, action: Action, game: &Game, dest: Option<&str>) -> Result<(), crate::library::Error> {
+fn act_amazon(
+    state: &AppState,
+    action: Action,
+    game: &Game,
+    dest: Option<&str>,
+) -> Result<(), crate::library::Error> {
     let key = game.key();
     let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
     match action {
@@ -410,10 +520,20 @@ fn act_amazon(state: &AppState, action: Action, game: &Game, dest: Option<&str>)
             let options = checked_launch_options(open_db(state).as_ref(), game)?;
             let exe = amazon::launch(&game.external_id, dir, &options)?;
             record_play(state, &key);
-            state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload: None });
+            state.lock().watch = Some(Watch {
+                key,
+                exe,
+                since: Instant::now(),
+                seen: false,
+                upload: None,
+            });
             Ok(())
         }
-        Action::Move => amazon::move_to(&game.external_id, dir, std::path::Path::new(dest.ok_or(msg!(pickMoveFolder))?)),
+        Action::Move => amazon::move_to(
+            &game.external_id,
+            dir,
+            std::path::Path::new(dest.ok_or(msg!(pickMoveFolder))?),
+        ),
         Action::Uninstall => amazon::uninstall(open_db(state).as_ref(), &game.external_id),
         Action::Install | Action::Update | Action::Verify => unreachable!("queued"),
     }
@@ -425,11 +545,18 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
     let result = match action {
         Action::Play | Action::PlayOutdated => {
             let conn = open_db(state).ok_or(msg!(noDb))?;
-            let row = cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
+            let row =
+                cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
             crate::library::custom::launch(&row).map(|exe| {
                 record_play(state, &key);
-                state.lock().watch = Some(Watch { key, exe, since: Instant::now(), seen: false, upload: None });
+                state.lock().watch = Some(Watch {
+                    key,
+                    exe,
+                    since: Instant::now(),
+                    seen: false,
+                    upload: None,
+                });
             })
         }
         Action::Install => store.install(game),
@@ -445,7 +572,9 @@ fn record_event(s: &mut Shared, key: &str, event: InstallEvent) -> Option<u32> {
     match event {
         InstallEvent::Started(pid) => {
             s.install_pids.insert(key.to_string(), pid);
-            let stop = s.queue.is_head(key) && s.queue_running && (s.cancelled.contains(key) || s.queue.paused);
+            let stop = s.queue.is_head(key)
+                && s.queue_running
+                && (s.cancelled.contains(key) || s.queue.paused);
             s.interrupted |= stop && !s.cancelled.contains(key);
             stop.then_some(pid)
         }
@@ -457,7 +586,8 @@ fn record_event(s: &mut Shared, key: &str, event: InstallEvent) -> Option<u32> {
 }
 
 fn save_queue(state: &AppState, queue: &Queue) {
-    let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::set_setting(&c, DOWNLOAD_QUEUE, Some(&queue.to_json())));
+    let saved = cache::db::open(&state.dirs.db)
+        .and_then(|c| cache::db::set_setting(&c, DOWNLOAD_QUEUE, Some(&queue.to_json())));
     if let Err(e) = saved {
         tracing::warn!("download queue: {e}");
     }
@@ -554,7 +684,9 @@ fn run_queue(app: &AppHandle) {
         let paused = {
             let mut s = state.lock();
             s.install_pids.remove(&key);
-            let paused = std::mem::take(&mut s.interrupted) && result.is_err() && !s.cancelled.contains(&key);
+            let paused = std::mem::take(&mut s.interrupted)
+                && result.is_err()
+                && !s.cancelled.contains(&key);
             if paused {
                 save_queue(&state, &s.queue);
             }
@@ -567,20 +699,36 @@ fn run_queue(app: &AppHandle) {
         rescan(app, true);
         let mut s = state.lock();
         // A verify that found bad files ends reporting the repair.
-        let repaired = s.progress.remove(&key).is_some_and(|p| p.action == ProgressAction::Repair);
+        let repaired = s
+            .progress
+            .remove(&key)
+            .is_some_and(|p| p.action == ProgressAction::Repair);
         // A cancelled job fails by design; don't report it.
         let cancelled = s.cancelled.remove(&key);
         let toast = (result.is_ok() && !cancelled)
-            .then(|| s.games.iter().find(|g| g.key() == key).map(|g| g.title.clone()))
+            .then(|| {
+                s.games
+                    .iter()
+                    .find(|g| g.key() == key)
+                    .map(|g| g.title.clone())
+            })
             .flatten();
-        let outcome = if cancelled { Ok(()) } else { result.map_err(|e| store_error(store, e)) };
+        let outcome = if cancelled {
+            Ok(())
+        } else {
+            result.map_err(|e| store_error(store, e))
+        };
         s.queue.finish(&key);
         save_queue(&state, &s.queue);
         report(&mut s, &key, outcome);
         s.library_changed = true;
         drop(s);
         if let Some(title) = toast {
-            super::notify_done(app, &title, crate::downloads::done_message(job.action, repaired));
+            super::notify_done(
+                app,
+                &title,
+                crate::downloads::done_message(job.action, repaired),
+            );
         }
     }
 }
@@ -613,13 +761,28 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
 }
 
 /// A queued GOG job. Each makes sure of the login first; an install writes the game's record once its files are in.
-fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(InstallEvent)) -> Result<(), crate::library::Error> {
+fn run_gog_job(
+    state: &AppState,
+    game: &Game,
+    job: &Job,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), crate::library::Error> {
     let id = &game.external_id;
     let dir = || installed_dir(game).ok_or(msg!(notInstalled));
     match (job.action, &job.dlc) {
         (QueuedAction::Install, None) => {
-            let base = job.dest.as_deref().map(PathBuf::from).ok_or(msg!(noInstallBase))?;
-            let dir = gog::install(open_db(state).as_ref(), id, &base, job.with_dlc != Some(false), on_event)?;
+            let base = job
+                .dest
+                .as_deref()
+                .map(PathBuf::from)
+                .ok_or(msg!(noInstallBase))?;
+            let dir = gog::install(
+                open_db(state).as_ref(),
+                id,
+                &base,
+                job.with_dlc != Some(false),
+                on_event,
+            )?;
             gog::record_install(&cache::db::open(&state.dirs.db)?, id, &dir)
         }
         (QueuedAction::Install, Some(dlc)) => gog::change_dlc(id, dir()?, dlc, true, on_event),
@@ -629,12 +792,21 @@ fn run_gog_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(In
 }
 
 /// A queued Amazon job; each holds nile for its whole run.
-fn run_amazon_job(state: &AppState, game: &Game, job: &Job, on_event: impl FnMut(InstallEvent)) -> Result<(), crate::library::Error> {
+fn run_amazon_job(
+    state: &AppState,
+    game: &Game,
+    job: &Job,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), crate::library::Error> {
     let id = &game.external_id;
     let dir = || installed_dir(game).ok_or(msg!(notInstalled));
     match job.action {
         QueuedAction::Install => {
-            let base = job.dest.as_deref().map(PathBuf::from).ok_or(msg!(noInstallBase))?;
+            let base = job
+                .dest
+                .as_deref()
+                .map(PathBuf::from)
+                .ok_or(msg!(noInstallBase))?;
             amazon::install(id, &base, on_event).map(drop)
         }
         QueuedAction::Update => amazon::update(open_db(state).as_ref(), id, dir()?, on_event),
@@ -648,35 +820,48 @@ const LAUNCH_OPTIONS: &str = "launch_options";
 
 fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
     let json = cache::db::pref(conn, key, LAUNCH_OPTIONS).ok().flatten();
-    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+    json.and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default()
 }
 
 fn store_launch_options(conn: &Connection, key: &str, options: &LaunchOptions) -> Res<()> {
-    let json = (*options != LaunchOptions::default()).then(|| serde_json::to_string(options).unwrap_or_default());
+    let json = (*options != LaunchOptions::default())
+        .then(|| serde_json::to_string(options).unwrap_or_default());
     cache::db::set_pref(conn, key, LAUNCH_OPTIONS, json.as_deref()).map_err(Msg::from)
 }
 
 /// An installed copy's launch options, with the alternative executable checked again: the folder
 /// may have changed since it was saved.
 fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchOptions> {
-    let mut options = conn.map(|c| launch_options_of(c, &game.key())).unwrap_or_default();
+    let mut options = conn
+        .map(|c| launch_options_of(c, &game.key()))
+        .unwrap_or_default();
     if let Some(exe) = &options.exe {
         let dir = installed_dir(game).ok_or(msg!(noInstallFolder))?;
-        options.exe = Some(epic::override_exe(dir, exe).map_err(|e| msg!(alternativeExe, reason = Msg::from(e)))?);
+        options.exe = Some(
+            epic::override_exe(dir, exe)
+                .map_err(|e| msg!(alternativeExe, reason = Msg::from(e)))?,
+        );
     }
     Ok(options)
 }
 
 /// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own).
 fn has_launch_options(g: &Game) -> bool {
-    g.installed && matches!(g.provider, ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon)
+    g.installed
+        && matches!(
+            g.provider,
+            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+        )
 }
 
 /// The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others.
 #[tauri::command]
 #[specta::specta]
 pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions> {
-    app.state::<AppState>().game(&key).filter(has_launch_options)?;
+    app.state::<AppState>()
+        .game(&key)
+        .filter(has_launch_options)?;
     blocking(move || Some(launch_options_of(&open_db(&app.state::<AppState>())?, &key))).await
 }
 
@@ -684,7 +869,11 @@ pub async fn launch_options(app: AppHandle, key: String) -> Option<LaunchOptions
 /// stored relative to the install folder, and only when it is a file inside it. Returns what was stored.
 #[tauri::command]
 #[specta::specta]
-pub async fn set_launch_options(app: AppHandle, key: String, mut options: LaunchOptions) -> Res<LaunchOptions> {
+pub async fn set_launch_options(
+    app: AppHandle,
+    key: String,
+    mut options: LaunchOptions,
+) -> Res<LaunchOptions> {
     let game = app
         .state::<AppState>()
         .game(&key)
@@ -706,8 +895,12 @@ pub async fn set_launch_options(app: AppHandle, key: String, mut options: Launch
 #[tauri::command]
 #[specta::specta]
 pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()> {
-    let game = state.game(&key).filter(|g| g.provider == ProviderKind::Steam).ok_or(msg!(notFromSteam))?;
-    crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id)).map_err(Msg::from)
+    let game = state
+        .game(&key)
+        .filter(|g| g.provider == ProviderKind::Steam)
+        .ok_or(msg!(notFromSteam))?;
+    crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id))
+        .map_err(Msg::from)
 }
 
 /// `game_prefs` name for an Epic or GOG copy's own cloud save choice, `on` or `off`; none follows its store's setting.
@@ -730,7 +923,11 @@ struct SyncRecord {
 }
 
 fn saves_choice(conn: &Connection, key: &str) -> Option<bool> {
-    match cache::db::pref(conn, key, SAVES_CHOICE).ok().flatten()?.as_str() {
+    match cache::db::pref(conn, key, SAVES_CHOICE)
+        .ok()
+        .flatten()?
+        .as_str()
+    {
         "on" => Some(true),
         "off" => Some(false),
         _ => None,
@@ -738,17 +935,31 @@ fn saves_choice(conn: &Connection, key: &str) -> Option<bool> {
 }
 
 fn last_sync(conn: &Connection, key: &str) -> Option<SyncRecord> {
-    let json = cache::db::cached_info(conn, key, SAVES_SYNC, FOREVER, unix_now()).ok().flatten()?;
+    let json = cache::db::cached_info(conn, key, SAVES_SYNC, FOREVER, unix_now())
+        .ok()
+        .flatten()?;
     serde_json::from_str(&json).ok()
 }
 
 /// What a sync leaves for the Saves tab. A conflict found before launch leaves nothing: nothing ran.
 fn sync_record(outcome: &SyncOutcome, at: i64) -> Option<SyncRecord> {
     Some(match outcome {
-        SyncOutcome::Synced => SyncRecord { at, error: None, cloud_newer: false },
+        SyncOutcome::Synced => SyncRecord {
+            at,
+            error: None,
+            cloud_newer: false,
+        },
         // A GOG conflict changed nothing either: the next Play asks.
-        SyncOutcome::CloudNewer | SyncOutcome::Conflict => SyncRecord { at, error: None, cloud_newer: true },
-        SyncOutcome::Failed(e) => SyncRecord { at, error: Some(e.clone().into()), cloud_newer: false },
+        SyncOutcome::CloudNewer | SyncOutcome::Conflict => SyncRecord {
+            at,
+            error: None,
+            cloud_newer: true,
+        },
+        SyncOutcome::Failed(e) => SyncRecord {
+            at,
+            error: Some(e.clone().into()),
+            cloud_newer: false,
+        },
         SyncOutcome::LocalNewer => return None,
     })
 }
@@ -758,9 +969,12 @@ fn record_sync(conn: Option<&Connection>, key: &str, outcome: &SyncOutcome) {
         tracing::warn!("sync saves {key}: {e}");
     }
     let at = unix_now();
-    let (Some(conn), Some(mut record)) = (conn, sync_record(outcome, at)) else { return };
+    let (Some(conn), Some(mut record)) = (conn, sync_record(outcome, at)) else {
+        return;
+    };
     // A failure changed nothing, so a newer cloud save left by the last upload still waits to be asked about.
-    record.cloud_newer |= record.error.is_some() && last_sync(conn, key).is_some_and(|r| r.cloud_newer);
+    record.cloud_newer |=
+        record.error.is_some() && last_sync(conn, key).is_some_and(|r| r.cloud_newer);
     let json = serde_json::to_string(&record).unwrap_or_default();
     if let Err(e) = cache::db::put_info(conn, key, SAVES_SYNC, &json, at) {
         tracing::warn!("record sync {key}: {e}");
@@ -790,18 +1004,31 @@ fn sync_copy(conn: Option<&Connection>, game: &Game, sync: SaveSync) -> SyncOutc
 /// Syncs an Epic or GOG game's cloud saves before it launches, when it has them and syncing is on for it.
 /// Returns how to upload after the game exits (`None`: no syncing), or the conflict to ask about instead
 /// of launching. A failed sync is remembered and never stops the launch.
-fn saves_before_play(state: &AppState, game: &Game, keep: Option<Keep>) -> Result<Option<SaveSync>, Conflict> {
+fn saves_before_play(
+    state: &AppState,
+    game: &Game,
+    keep: Option<Keep>,
+) -> Result<Option<SaveSync>, Conflict> {
     let key = game.key();
     let conn = open_db(state);
     let store_default = |c: &Connection| {
         let saved = settings::load(c);
-        if game.provider == ProviderKind::Gog { saved.gog_cloud_saves } else { saved.cloud_saves }
+        if game.provider == ProviderKind::Gog {
+            saved.gog_cloud_saves
+        } else {
+            saved.cloud_saves
+        }
     };
-    let enabled = conn.as_ref().is_none_or(|c| saves_choice(c, &key).unwrap_or_else(|| store_default(c)));
+    let enabled = conn
+        .as_ref()
+        .is_none_or(|c| saves_choice(c, &key).unwrap_or_else(|| store_default(c)));
     if !game.cloud_saves || !enabled {
         return Ok(None);
     }
-    let cloud_newer = conn.as_ref().and_then(|c| last_sync(c, &key)).is_some_and(|r| r.cloud_newer);
+    let cloud_newer = conn
+        .as_ref()
+        .and_then(|c| last_sync(c, &key))
+        .is_some_and(|r| r.cloud_newer);
     let Some(download) = pre_launch_sync(keep, cloud_newer)? else {
         // Keep local: the upload afterwards sends this PC's save whatever the cloud holds.
         return Ok(Some(SaveSync::KeepLocal));
@@ -844,20 +1071,31 @@ fn saves_view(choice: Option<bool>, last: Option<SyncRecord>) -> SavesView {
     let (synced_at, error) = match last {
         None => (None, None),
         Some(SyncRecord { error: Some(e), .. }) => (None, Some(msg!(savesDidntSync, reason = e))),
-        Some(SyncRecord { cloud_newer: true, .. }) => (None, Some(msg!(cloudSaveNewer))),
+        Some(SyncRecord {
+            cloud_newer: true, ..
+        }) => (None, Some(msg!(cloudSaveNewer))),
         Some(r) => (Some(r.at), None),
     };
-    SavesView { choice, synced_at, error }
+    SavesView {
+        choice,
+        synced_at,
+        error,
+    }
 }
 
 /// The Saves tab of an Epic or GOG copy (`key`); `None` for a copy without cloud saves.
 #[tauri::command]
 #[specta::specta]
 pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
-    app.state::<AppState>().game(&key).filter(|g| g.installed && g.cloud_saves)?;
+    app.state::<AppState>()
+        .game(&key)
+        .filter(|g| g.installed && g.cloud_saves)?;
     blocking(move || {
         let conn = open_db(&app.state::<AppState>())?;
-        Some(saves_view(saves_choice(&conn, &key), last_sync(&conn, &key)))
+        Some(saves_view(
+            saves_choice(&conn, &key),
+            last_sync(&conn, &key),
+        ))
     })
     .await
 }
@@ -866,7 +1104,10 @@ pub async fn saves(app: AppHandle, key: String) -> Option<SavesView> {
 #[tauri::command]
 #[specta::specta]
 pub async fn set_saves(app: AppHandle, key: String, choice: Option<bool>) -> Res<()> {
-    app.state::<AppState>().game(&key).filter(|g| g.cloud_saves).ok_or(msg!(noCloudSaves))?;
+    app.state::<AppState>()
+        .game(&key)
+        .filter(|g| g.cloud_saves)
+        .ok_or(msg!(noCloudSaves))?;
     blocking(move || {
         let conn = open_db(&app.state::<AppState>()).ok_or(msg!(noDb))?;
         let value = choice.map(|on| if on { "on" } else { "off" });
@@ -915,13 +1156,22 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
         ProviderKind::Gog => {
             let dlcs: Vec<String> = game.dlc.iter().map(|d| d.id.clone()).collect();
             return blocking(move || {
-                let info = gog::install_info(open_db(&app.state::<AppState>()).as_ref(), &game.external_id)?;
+                let info = gog::install_info(
+                    open_db(&app.state::<AppState>()).as_ref(),
+                    &game.external_id,
+                )?;
                 gog::download_size(&info, &dlcs)
             })
             .await;
         }
         ProviderKind::Amazon => {
-            return blocking(move || amazon::download_size(open_db(&app.state::<AppState>()).as_ref(), &game.external_id)).await;
+            return blocking(move || {
+                amazon::download_size(
+                    open_db(&app.state::<AppState>()).as_ref(),
+                    &game.external_id,
+                )
+            })
+            .await;
         }
         ProviderKind::Custom => return None,
     };
@@ -995,12 +1245,17 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
 
 /// The cached download size in bytes, if fresh.
 fn cached_size(conn: &Connection, key: &str) -> Option<String> {
-    cache::db::cached_info(conn, key, "size", SIZE_MAX_AGE_SECS, unix_now()).ok().flatten()
+    cache::db::cached_info(conn, key, "size", SIZE_MAX_AGE_SECS, unix_now())
+        .ok()
+        .flatten()
 }
 
 /// The saved Steam token. Never connected: no reason to touch Credential Manager.
 fn steam_token(conn: &Connection) -> Option<String> {
-    cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().and_then(|_| settings::steam_token())
+    cache::db::setting(conn, settings::STEAM_ACCOUNT)
+        .ok()
+        .flatten()
+        .and_then(|_| settings::steam_token())
 }
 
 #[derive(Debug, PartialEq, Serialize, specta::Type)]
@@ -1049,11 +1304,25 @@ pub async fn steam_dlc(app: AppHandle, key: String) -> Vec<SteamDlc> {
     let steam_key = {
         let state = app.state::<AppState>();
         let s = state.lock();
-        entries::find(&s.entries, &s.games, &key)
-            .and_then(|e| e.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Steam).map(Game::key))
+        entries::find(&s.entries, &s.games, &key).and_then(|e| {
+            e.copies
+                .iter()
+                .map(|&i| &s.games[i])
+                .find(|g| g.provider == ProviderKind::Steam)
+                .map(Game::key)
+        })
     };
-    let Some(steam_key) = steam_key else { return Vec::new() };
-    steam_owned_dlc(&app, steam_key).await.into_iter().map(|(id, title)| SteamDlc { id: id.to_string(), title }).collect()
+    let Some(steam_key) = steam_key else {
+        return Vec::new();
+    };
+    steam_owned_dlc(&app, steam_key)
+        .await
+        .into_iter()
+        .map(|(id, title)| SteamDlc {
+            id: id.to_string(),
+            title,
+        })
+        .collect()
 }
 
 #[derive(Debug, PartialEq)]
@@ -1076,28 +1345,51 @@ fn dlc_step(cached: Option<&str>, failed_recently: bool, has_dlc: Option<bool>) 
 
 /// The cached list and whether a lookup failed recently.
 fn cached_dlc(conn: &Connection, key: &str, now: i64) -> (Option<String>, bool) {
-    let cached = |kind, max_age| cache::db::cached_info(conn, key, kind, max_age, now).ok().flatten();
-    (cached(DLC, INFO_MAX_AGE_SECS), cached(DLC_FAILED, DLC_RETRY_SECS).is_some())
+    let cached = |kind, max_age| {
+        cache::db::cached_info(conn, key, kind, max_age, now)
+            .ok()
+            .flatten()
+    };
+    (
+        cached(DLC, INFO_MAX_AGE_SECS),
+        cached(DLC_FAILED, DLC_RETRY_SECS).is_some(),
+    )
 }
 
 /// A Steam copy's owned DLC as (app id, name). Answers from the cache when it can; otherwise logs on,
 /// one logon at a time, and remembers the answer or the failure.
 async fn steam_owned_dlc(app: &AppHandle, key: String) -> Vec<(u32, String)> {
-    let Some(appid) = key.strip_prefix("steam-").and_then(|id| id.parse::<u32>().ok()) else { return Vec::new() };
+    let Some(appid) = key
+        .strip_prefix("steam-")
+        .and_then(|id| id.parse::<u32>().ok())
+    else {
+        return Vec::new();
+    };
     // Everything that can answer is checked before the lock, so this never waits behind another logon for nothing.
     let (step, token) = blocking({
         let (app, key) = (app.clone(), key.clone());
         move || {
             let state = app.state::<AppState>();
-            let Some(conn) = open_db(&state) else { return (DlcStep::Answer(Vec::new()), None) };
+            let Some(conn) = open_db(&state) else {
+                return (DlcStep::Answer(Vec::new()), None);
+            };
             let now = unix_now();
             let (cached, failed) = cached_dlc(&conn, &key, now);
             let has_dlc = (cached.is_none() && !failed)
-                .then(|| parse_details(steam_details(Some(&conn), &state.http, &appid.to_string(), now)))
+                .then(|| {
+                    parse_details(steam_details(
+                        Some(&conn),
+                        &state.http,
+                        &appid.to_string(),
+                        now,
+                    ))
+                })
                 .flatten()
                 .and_then(|i| i.has_dlc);
             let step = dlc_step(cached.as_deref(), failed, has_dlc);
-            let token = (step == DlcStep::LogOn).then(|| steam_token(&conn)).flatten();
+            let token = (step == DlcStep::LogOn)
+                .then(|| steam_token(&conn))
+                .flatten();
             (step, token)
         }
     })
@@ -1105,14 +1397,18 @@ async fn steam_owned_dlc(app: &AppHandle, key: String) -> Vec<(u32, String)> {
     if let DlcStep::Answer(list) = step {
         return list;
     }
-    let Some(token) = token else { return Vec::new() };
+    let Some(token) = token else {
+        return Vec::new();
+    };
     let state = app.state::<AppState>();
     let _one = state.steam_size.lock().await;
     // A caller that queued on the lock may find its answer cached by the one before it.
     let again = blocking({
         let (app, key) = (app.clone(), key.clone());
         move || {
-            let Some(conn) = open_db(&app.state::<AppState>()) else { return DlcStep::Answer(Vec::new()) };
+            let Some(conn) = open_db(&app.state::<AppState>()) else {
+                return DlcStep::Answer(Vec::new());
+            };
             let (cached, failed) = cached_dlc(&conn, &key, unix_now());
             dlc_step(cached.as_deref(), failed, None)
         }
@@ -1123,7 +1419,10 @@ async fn steam_owned_dlc(app: &AppHandle, key: String) -> Vec<(u32, String)> {
     }
     let result = steam_size::fetch_owned_dlc(&token, appid).await;
     let (kind, json) = match &result {
-        Ok(list) => (DLC, serde_json::to_string(list).unwrap_or_else(|_| "[]".into())),
+        Ok(list) => (
+            DLC,
+            serde_json::to_string(list).unwrap_or_else(|_| "[]".into()),
+        ),
         Err(e) => {
             tracing::warn!("steam dlc {key}: {e}");
             (DLC_FAILED, "null".into())
@@ -1140,13 +1439,20 @@ async fn steam_owned_dlc(app: &AppHandle, key: String) -> Vec<(u32, String)> {
 }
 
 /// Steam `appdetails` JSON for an app, cached as `steam-<appid>` (the same entry a Steam copy uses).
-fn steam_details(conn: Option<&Connection>, http: &reqwest::Client, appid: &str, now: i64) -> Option<String> {
+fn steam_details(
+    conn: Option<&Connection>,
+    http: &reqwest::Client,
+    appid: &str,
+    now: i64,
+) -> Option<String> {
     let key = format!("steam-{appid}");
     info::cached_or_fetch(conn, &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
         let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&l=english");
-        let body = tauri::async_runtime::block_on(async { http.get(url).send().await?.error_for_status()?.text().await })
-            .inspect_err(|e| tracing::warn!("appdetails {key}: {e}"))
-            .ok()?;
+        let body = tauri::async_runtime::block_on(async {
+            http.get(url).send().await?.error_for_status()?.text().await
+        })
+        .inspect_err(|e| tracing::warn!("appdetails {key}: {e}"))
+        .ok()?;
         serde_json::to_string(&info::parse_steam_appdetails(&body, appid)?).ok()
     })
 }
@@ -1167,11 +1473,15 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 #[specta::specta]
 pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
     // A game the owner added has no store to ask.
-    let game = app.state::<AppState>().game(&key).filter(|g| g.provider != ProviderKind::Custom)?;
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| g.provider != ProviderKind::Custom)?;
     let twin = {
         let state = app.state::<AppState>();
         let s = state.lock();
-        entries::find(&s.entries, &s.games, &key).and_then(|e| entries::steam_appid(e, &s.games, &s.twins))
+        entries::find(&s.entries, &s.games, &key)
+            .and_then(|e| entries::steam_appid(e, &s.games, &s.twins))
     };
     let details = {
         let (app, key, game) = (app.clone(), key.clone(), game.clone());
@@ -1192,7 +1502,11 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
                 });
                 parse_details(json)
             };
-            let steam_twin = || twin.and_then(|id| parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now)));
+            let steam_twin = || {
+                twin.and_then(|id| {
+                    parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now))
+                })
+            };
             if game.provider == ProviderKind::Gog {
                 let all = match (gamesdb(), steam_twin()) {
                     (Some(base), Some(extra)) => info::fill_missing(base, extra),
@@ -1202,20 +1516,35 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
             }
             if game.provider == ProviderKind::Amazon {
                 let base = amazon::details(&game.external_id).unwrap_or_default();
-                let all = steam_twin().or_else(gamesdb).map_or(base.clone(), |extra| info::fill_missing(base, extra));
+                let all = steam_twin()
+                    .or_else(gamesdb)
+                    .map_or(base.clone(), |extra| info::fill_missing(base, extra));
                 return (all != GameInfo::default()).then_some(all);
             }
             // One list answers for every Epic game, so all of them are cached from it.
-            let catalog = info::cached_or_fetch(conn.as_ref(), &key, info::DETAILS, INFO_MAX_AGE_SECS, now, || {
-                let list = epic::catalog().inspect_err(|e| tracing::warn!("legendary list {key}: {e}")).ok()?;
-                let all = info::epic_details(&list);
-                if let Some(c) = &conn
-                    && let Err(e) = info::remember_all(c, &all, now)
-                {
-                    tracing::warn!("epic details cache: {e}");
-                }
-                Some(all.into_iter().find(|(k, _)| *k == key).map_or_else(|| "null".into(), |(_, json)| json))
-            });
+            let catalog = info::cached_or_fetch(
+                conn.as_ref(),
+                &key,
+                info::DETAILS,
+                INFO_MAX_AGE_SECS,
+                now,
+                || {
+                    let list = epic::catalog()
+                        .inspect_err(|e| tracing::warn!("legendary list {key}: {e}"))
+                        .ok()?;
+                    let all = info::epic_details(&list);
+                    if let Some(c) = &conn
+                        && let Err(e) = info::remember_all(c, &all, now)
+                    {
+                        tracing::warn!("epic details cache: {e}");
+                    }
+                    Some(
+                        all.into_iter()
+                            .find(|(k, _)| *k == key)
+                            .map_or_else(|| "null".into(), |(_, json)| json),
+                    )
+                },
+            );
             let base = parse_details(catalog).unwrap_or_default();
             // A twin whose store page is gone still has GamesDB.
             let extra = steam_twin().or_else(gamesdb);
@@ -1246,7 +1575,10 @@ pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<
         .enumerate()
         .map(|(n, url)| {
             let (http, dest) = (state.http.clone(), dir.join(format!("shot{n}")));
-            let image = Image { path: None, url: Some(url) };
+            let image = Image {
+                path: None,
+                url: Some(url),
+            };
             tauri::async_runtime::spawn(async move { cache::resolve(&image, &http, dest).await })
         })
         .collect();
@@ -1271,8 +1603,13 @@ pub struct TimeToBeatView {
 
 fn time_to_beat_view(t: igdb::TimeToBeat) -> Option<TimeToBeatView> {
     let known = |secs: Option<u64>| secs.filter(|&s| s > 0);
-    let shown = TimeToBeatView { normally: known(t.normally), hastily: known(t.hastily), completely: known(t.completely) };
-    (shown.normally.is_some() || shown.hastily.is_some() || shown.completely.is_some()).then_some(shown)
+    let shown = TimeToBeatView {
+        normally: known(t.normally),
+        hastily: known(t.hastily),
+        completely: known(t.completely),
+    };
+    (shown.normally.is_some() || shown.hastily.is_some() || shown.completely.is_some())
+        .then_some(shown)
 }
 
 /// A Steam app id matches by id; otherwise an Epic copy matches by exact title. The Epic page URL
@@ -1332,7 +1669,11 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
     let (appid, title, epic_key) = {
         let s = state.lock();
         let entry = entries::find(&s.entries, &s.games, &key)?;
-        let epic = entry.copies.iter().map(|&i| &s.games[i]).find(|g| g.provider == ProviderKind::Epic);
+        let epic = entry
+            .copies
+            .iter()
+            .map(|&i| &s.games[i])
+            .find(|g| g.provider == ProviderKind::Epic);
         (
             entries::steam_appid(entry, &s.games, &s.twins),
             epic.map_or_else(String::new, |g| g.title.clone()),
@@ -1361,7 +1702,17 @@ pub async fn time_to_beat(app: AppHandle, key: String) -> Option<TimeToBeatView>
         return answer.and_then(time_to_beat_view);
     }
     let (client_id, secret) = credentials?;
-    let answer = match look_up_time_to_beat(&app, &state, &client_id, &secret, appid, &title, epic_key.as_deref()).await {
+    let answer = match look_up_time_to_beat(
+        &app,
+        &state,
+        &client_id,
+        &secret,
+        appid,
+        &title,
+        epic_key.as_deref(),
+    )
+    .await
+    {
         Ok(answer) => answer,
         Err(e) => {
             tracing::warn!("how long to beat {key}: {e}");
@@ -1402,14 +1753,20 @@ pub async fn test_igdb(app: AppHandle) -> Res<()> {
         let app = app.clone();
         blocking(move || {
             let conn = cache::db::open(&app.state::<AppState>().dirs.db)?;
-            let client_id = settings::load(&conn).igdb_client_id.ok_or(msg!(enterClientId))?;
+            let client_id = settings::load(&conn)
+                .igdb_client_id
+                .ok_or(msg!(enterClientId))?;
             let secret = settings::secret().ok_or(msg!(saveClientSecret))?;
             Ok::<_, Msg>((client_id, secret))
         })
         .await?
     };
     let token = igdb::token(&state.http, &client_id, &secret).await?;
-    state.igdb.lock().expect("token cache lock poisoned").store(token.clone());
+    state
+        .igdb
+        .lock()
+        .expect("token cache lock poisoned")
+        .store(token.clone());
     igdb::game_id_for_steam(&state.http, &token, &client_id, 447040).await?;
     Ok(())
 }
@@ -1420,7 +1777,8 @@ fn record_play(state: &AppState, key: &str) {
     if let Some(g) = state.lock().games.iter_mut().find(|g| g.key() == key) {
         g.last_played = Some(UNIX_EPOCH + Duration::from_secs(secs as u64));
     }
-    let saved = cache::db::open(&state.dirs.db).and_then(|c| cache::db::record_launch(&c, key, secs));
+    let saved =
+        cache::db::open(&state.dirs.db).and_then(|c| cache::db::record_launch(&c, key, secs));
     if let Err(e) = saved {
         tracing::warn!("record launch: {e}");
     }
@@ -1452,7 +1810,10 @@ pub async fn cancel_install(app: AppHandle, key: String) -> Res<QueueView> {
     };
     start_queue(&app);
     if let Some(pid) = pid {
-        blocking(move || kill_tree(pid).map_err(|e| msg!(cantCancelInstall, detail = e.to_string()))).await?;
+        blocking(move || {
+            kill_tree(pid).map_err(|e| msg!(cantCancelInstall, detail = e.to_string()))
+        })
+        .await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
 }
@@ -1470,7 +1831,10 @@ pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
         pid
     };
     if let Some(pid) = pid {
-        blocking(move || kill_tree(pid).map_err(|e| msg!(cantPauseDownload, detail = e.to_string()))).await?;
+        blocking(move || {
+            kill_tree(pid).map_err(|e| msg!(cantPauseDownload, detail = e.to_string()))
+        })
+        .await?;
     }
     Ok(queue_view(&app.state::<AppState>().lock()))
 }
@@ -1478,7 +1842,12 @@ pub async fn pause_downloads(app: AppHandle) -> Res<QueueView> {
 /// Pauses the queue. Returns the pid of the active job's process, for the caller to stop.
 fn pause_head(s: &mut Shared) -> Option<u32> {
     s.queue.pause();
-    let head = s.queue.jobs.first().map(|j| j.key.clone()).filter(|_| s.queue_running);
+    let head = s
+        .queue
+        .jobs
+        .first()
+        .map(|j| j.key.clone())
+        .filter(|_| s.queue_running);
     let pid = head.and_then(|k| s.install_pids.get(&k).copied());
     s.interrupted |= pid.is_some();
     pid
@@ -1511,7 +1880,10 @@ pub(super) fn stop_queue_for_restart(app: &AppHandle) -> bool {
 /// The queue as stored across an update restart. The live queue stays paused, so the runner can't start
 /// the next job before the app exits.
 fn stored_for_restart(queue: &Queue, was_paused: bool) -> Queue {
-    Queue { paused: was_paused, ..queue.clone() }
+    Queue {
+        paused: was_paused,
+        ..queue.clone()
+    }
 }
 
 /// Starts the head job again with the same command.
@@ -1533,7 +1905,11 @@ pub fn resume_downloads(app: AppHandle) -> QueueView {
 #[specta::specta]
 pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> QueueView {
     let mut s = state.lock();
-    let moved = if up { s.queue.move_up(&key) } else { s.queue.move_down(&key) };
+    let moved = if up {
+        s.queue.move_up(&key)
+    } else {
+        s.queue.move_down(&key)
+    };
     if moved {
         save_queue(&state, &s.queue);
     }
@@ -1547,38 +1923,68 @@ mod tests {
 
     #[test]
     fn restart_keeps_live_queue_paused_and_stores_its_own_flag() {
-        let mut s = Shared { queue_running: true, ..Shared::default() };
+        let mut s = Shared {
+            queue_running: true,
+            ..Shared::default()
+        };
         s.queue.push(Job::new("epic-a", QueuedAction::Install));
         s.install_pids.insert("epic-a".into(), 42);
         assert_eq!(pause_head(&mut s), Some(42));
         assert!(s.queue.paused && s.interrupted);
 
-        let stored = Queue::restore(Some(&stored_for_restart(&s.queue, false).to_json()), |_| true);
+        let stored = Queue::restore(Some(&stored_for_restart(&s.queue, false).to_json()), |_| {
+            true
+        });
         assert!(!stored.paused, "a running queue resumes after the restart");
         assert_eq!(stored.jobs, s.queue.jobs);
-        assert!(s.queue.paused, "the live queue stays paused until the app exits");
-        assert!(Queue::restore(Some(&stored_for_restart(&s.queue, true).to_json()), |_| true).paused);
+        assert!(
+            s.queue.paused,
+            "the live queue stays paused until the app exits"
+        );
+        assert!(
+            Queue::restore(Some(&stored_for_restart(&s.queue, true).to_json()), |_| {
+                true
+            })
+            .paused
+        );
     }
 
     #[test]
     fn launch_options_round_trip() {
-        let dir = std::env::temp_dir().join(format!("launcher-launch-options-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("launcher-launch-options-{}", std::process::id()));
         let conn = cache::db::open(&dir.join("library.sqlite")).unwrap();
         assert_eq!(launch_options_of(&conn, "epic-A"), LaunchOptions::default());
-        let options = LaunchOptions { args: "-dx11".into(), offline: true, skip_version_check: false, exe: Some(r"bin\game.exe".into()) };
+        let options = LaunchOptions {
+            args: "-dx11".into(),
+            offline: true,
+            skip_version_check: false,
+            exe: Some(r"bin\game.exe".into()),
+        };
         store_launch_options(&conn, "epic-A", &options).unwrap();
         assert_eq!(launch_options_of(&conn, "epic-A"), options);
         assert_eq!(launch_options_of(&conn, "epic-B"), LaunchOptions::default());
-        let json = cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS).unwrap().unwrap();
-        assert_eq!(json, r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe"}"#);
+        let json = cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            json,
+            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe"}"#
+        );
         store_launch_options(&conn, "epic-A", &LaunchOptions::default()).unwrap();
-        assert_eq!(cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS).unwrap(), None);
+        assert_eq!(
+            cache::db::pref(&conn, "epic-A", LAUNCH_OPTIONS).unwrap(),
+            None
+        );
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn pumpkin(steam_last: Option<u64>, epic_last: Option<u64>) -> Vec<Game> {
-        let steam = Game { external_id: "635320".into(), ..game("Pumpkin Jack", true, Some(120), steam_last) };
+        let steam = Game {
+            external_id: "635320".into(),
+            ..game("Pumpkin Jack", true, Some(120), steam_last)
+        };
         let epic = Game {
             provider: ProviderKind::Epic,
             external_id: "Pumpkin".into(),
@@ -1595,21 +2001,39 @@ mod tests {
     #[test]
     fn epic_dlc_rows_carry_their_copy_key() {
         let mut games = pumpkin(None, None);
-        games[0].dlc = vec![crate::library::Dlc { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: true }];
+        games[0].dlc = vec![crate::library::Dlc {
+            id: "PumpkinDlc".into(),
+            title: "Pumpkin Hat".into(),
+            installed: true,
+        }];
         let rows = epic_dlc(&games.iter().collect::<Vec<_>>());
         assert_eq!(
             rows,
-            [DlcView { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: true, copy: Some("epic-Pumpkin".into()) }]
+            [DlcView {
+                id: "PumpkinDlc".into(),
+                title: "Pumpkin Hat".into(),
+                installed: true,
+                copy: Some("epic-Pumpkin".into())
+            }]
         );
     }
 
     #[test]
     fn steam_dlc_logs_on_only_when_nothing_answers() {
         let list = r#"[[10,"Hat"]]"#;
-        assert_eq!(dlc_step(Some(list), true, Some(false)), DlcStep::Answer(vec![(10, "Hat".into())]));
+        assert_eq!(
+            dlc_step(Some(list), true, Some(false)),
+            DlcStep::Answer(vec![(10, "Hat".into())])
+        );
         // A recent failure or a store page without DLC answers "none" without a logon.
-        assert_eq!(dlc_step(None, true, Some(true)), DlcStep::Answer(Vec::new()));
-        assert_eq!(dlc_step(None, false, Some(false)), DlcStep::Answer(Vec::new()));
+        assert_eq!(
+            dlc_step(None, true, Some(true)),
+            DlcStep::Answer(Vec::new())
+        );
+        assert_eq!(
+            dlc_step(None, false, Some(false)),
+            DlcStep::Answer(Vec::new())
+        );
         // Unknown or listed DLC, nothing cached: log on. A broken cache entry counts as nothing cached.
         assert_eq!(dlc_step(None, false, None), DlcStep::LogOn);
         assert_eq!(dlc_step(Some("junk"), false, Some(true)), DlcStep::LogOn);
@@ -1626,7 +2050,10 @@ mod tests {
         // After the lock: the first caller's answer is there.
         cache::db::put_info(&conn, "steam-1", DLC, r#"[[10,"Hat"]]"#, 1_000).unwrap();
         let (cached, failed) = cached_dlc(&conn, "steam-1", 1_001);
-        assert_eq!(dlc_step(cached.as_deref(), failed, None), DlcStep::Answer(vec![(10, "Hat".into())]));
+        assert_eq!(
+            dlc_step(cached.as_deref(), failed, None),
+            DlcStep::Answer(vec![(10, "Hat".into())])
+        );
         // A failure is remembered for 6 h only.
         cache::db::put_info(&conn, "steam-2", DLC_FAILED, "null", 1_000).unwrap();
         assert!(cached_dlc(&conn, "steam-2", 1_000 + DLC_RETRY_SECS).1);
@@ -1638,38 +2065,85 @@ mod tests {
         assert_eq!(pre_launch_sync(None, false), Ok(Some(SaveSync::Download)));
         // A newer cloud save left over from the last upload is never downloaded without asking.
         assert_eq!(pre_launch_sync(None, true), Err(Conflict::CloudNewer));
-        assert_eq!(pre_launch_sync(Some(Keep::Cloud), true), Ok(Some(SaveSync::KeepCloud)));
+        assert_eq!(
+            pre_launch_sync(Some(Keep::Cloud), true),
+            Ok(Some(SaveSync::KeepCloud))
+        );
         assert_eq!(pre_launch_sync(Some(Keep::Local), false), Ok(None));
     }
 
     #[test]
     fn sync_records_show_in_the_saves_tab() {
         let shown = |outcome: SyncOutcome| saves_view(None, sync_record(&outcome, 1_000));
-        assert_eq!(shown(SyncOutcome::Synced), SavesView { choice: None, synced_at: Some(1_000), error: None });
+        assert_eq!(
+            shown(SyncOutcome::Synced),
+            SavesView {
+                choice: None,
+                synced_at: Some(1_000),
+                error: None
+            }
+        );
         let failed = shown(SyncOutcome::Failed(Msg::system("Login failed!"))).error;
-        assert_eq!(failed, Some(msg!(savesDidntSync, reason = Msg::system("Login failed!"))));
+        assert_eq!(
+            failed,
+            Some(msg!(savesDidntSync, reason = Msg::system("Login failed!")))
+        );
         // Stored with its code, so it is shown in the app's language.
-        let json = serde_json::to_string(&sync_record(&SyncOutcome::Failed(msg!(savesTimedOut)), 7).unwrap()).unwrap();
-        assert_eq!(json, r#"{"at":7,"error":{"code":"savesTimedOut","params":{}}}"#);
-        assert_eq!(serde_json::from_str::<SyncRecord>(&json).unwrap().error, Some(Param::Msg(msg!(savesTimedOut))));
+        let json = serde_json::to_string(
+            &sync_record(&SyncOutcome::Failed(msg!(savesTimedOut)), 7).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"at":7,"error":{"code":"savesTimedOut","params":{}}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncRecord>(&json).unwrap().error,
+            Some(Param::Msg(msg!(savesTimedOut)))
+        );
         // A row stored before message codes holds English; it is shown as is.
         let old: SyncRecord = serde_json::from_str(r#"{"at":7,"error":"Login failed!"}"#).unwrap();
-        assert_eq!(saves_view(None, Some(old)).error, Some(msg!(savesDidntSync, reason = "Login failed!")));
+        assert_eq!(
+            saves_view(None, Some(old)).error,
+            Some(msg!(savesDidntSync, reason = "Login failed!"))
+        );
         assert!(shown(SyncOutcome::CloudNewer).error.is_some());
         assert_eq!(sync_record(&SyncOutcome::LocalNewer, 1_000), None);
         // A GOG conflict changed nothing: the next Play asks, as after a newer cloud save.
-        assert!(sync_record(&SyncOutcome::Conflict, 1_000).unwrap().cloud_newer);
-        assert_eq!(saves_view(Some(false), None), SavesView { choice: Some(false), synced_at: None, error: None });
+        assert!(
+            sync_record(&SyncOutcome::Conflict, 1_000)
+                .unwrap()
+                .cloud_newer
+        );
+        assert_eq!(
+            saves_view(Some(false), None),
+            SavesView {
+                choice: Some(false),
+                synced_at: None,
+                error: None
+            }
+        );
         // Stored as JSON in the info table and read back.
-        let json = serde_json::to_string(&sync_record(&SyncOutcome::CloudNewer, 7).unwrap()).unwrap();
+        let json =
+            serde_json::to_string(&sync_record(&SyncOutcome::CloudNewer, 7).unwrap()).unwrap();
         assert_eq!(json, r#"{"at":7,"cloud_newer":true}"#);
-        assert_eq!(serde_json::from_str::<SyncRecord>(r#"{"at":7}"#).unwrap(), SyncRecord { at: 7, error: None, cloud_newer: false });
+        assert_eq!(
+            serde_json::from_str::<SyncRecord>(r#"{"at":7}"#).unwrap(),
+            SyncRecord {
+                at: 7,
+                error: None,
+                cloud_newer: false
+            }
+        );
     }
 
     #[test]
     fn detail_for_a_merged_entry() {
         let games = pumpkin(None, None);
-        let d = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let d = pumpkin_detail(
+            &games,
+            &HashMap::from([("epic-Pumpkin".to_string(), 635320)]),
+        );
         assert_eq!(d.key, "steam-635320");
         assert_eq!(d.chosen, "steam-635320");
         assert_eq!(d.copies.len(), 2);
@@ -1681,7 +2155,10 @@ mod tests {
     #[test]
     fn last_played_store_only_for_merged_entries() {
         let games = pumpkin(Some(86_400), Some(2 * 86_400));
-        let merged = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let merged = pumpkin_detail(
+            &games,
+            &HashMap::from([("epic-Pumpkin".to_string(), 635320)]),
+        );
         assert_eq!(merged.last_played_store, Some(ProviderKind::Epic));
         assert_eq!(merged.last_played, Some(2 * 86_400));
         let single = pumpkin_detail(&games, &HashMap::new());
@@ -1693,11 +2170,20 @@ mod tests {
         let mut games = pumpkin(Some(86_400), Some(2 * 86_400));
         games[1].install_dir = Some(r"C:\Games\Pumpkin Jack".into());
         games[1].size_bytes = Some(4 << 30);
-        games[0].dlc = vec![crate::library::Dlc { id: "PumpkinDlc".into(), title: "Pumpkin Hat".into(), installed: false }];
-        let detail = pumpkin_detail(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        games[0].dlc = vec![crate::library::Dlc {
+            id: "PumpkinDlc".into(),
+            title: "Pumpkin Hat".into(),
+            installed: false,
+        }];
+        let detail = pumpkin_detail(
+            &games,
+            &HashMap::from([("epic-Pumpkin".to_string(), 635320)]),
+        );
         // Paths and times stand in as placeholders; a missing one stays null.
         let placeholder = |text: &'static str| {
-            insta::dynamic_redaction(move |value, _| if value.is_nil() { value } else { text.into() })
+            insta::dynamic_redaction(
+                move |value, _| if value.is_nil() { value } else { text.into() },
+            )
         };
         insta::assert_json_snapshot!(detail, { ".copies[].installDir" => placeholder("[path]"), ".lastPlayed" => placeholder("[time]") });
     }

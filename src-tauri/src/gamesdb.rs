@@ -49,7 +49,10 @@ pub fn parse_steam_apps(json: &str) -> Result<Vec<u32>, String> {
     let r: Response = serde_json::from_str(json).map_err(|e| format!("gamesdb: {e}"))?;
     let mut ids = BTreeSet::new();
     for rel in r.game.releases.iter().filter(|r| r.platform_id == "steam") {
-        let id = rel.external_id.strip_prefix("steam_").unwrap_or(&rel.external_id);
+        let id = rel
+            .external_id
+            .strip_prefix("steam_")
+            .unwrap_or(&rel.external_id);
         match id.parse::<u32>() {
             Ok(n) if id.bytes().all(|b| b.is_ascii_digit()) => ids.insert(n),
             _ => continue,
@@ -61,7 +64,13 @@ pub fn parse_steam_apps(json: &str) -> Result<Vec<u32>, String> {
 /// The game's portrait cover at its original size; `None` when GamesDB has none.
 pub fn parse_cover(json: &str) -> Option<String> {
     let r: Response = serde_json::from_str(json).ok()?;
-    Some(r.game.vertical_cover?.url_format.replace("{formatter}", "").replace("{ext}", "jpg"))
+    Some(
+        r.game
+            .vertical_cover?
+            .url_format
+            .replace("{formatter}", "")
+            .replace("{ext}", "jpg"),
+    )
 }
 
 /// The twin among the listed Steam apps: the only one in `owned` (the owner's Steam games), else the
@@ -84,12 +93,21 @@ pub fn steam_ids(games: &[crate::library::Game]) -> HashSet<u32> {
 }
 
 /// `resolve` for every Epic, GOG or Amazon game key with a list.
-pub fn resolve_all(lists: &HashMap<String, Vec<u32>>, owned: &HashSet<u32>) -> HashMap<String, u32> {
-    lists.iter().filter_map(|(key, apps)| Some((key.clone(), resolve(apps, owned)?))).collect()
+pub fn resolve_all(
+    lists: &HashMap<String, Vec<u32>>,
+    owned: &HashSet<u32>,
+) -> HashMap<String, u32> {
+    lists
+        .iter()
+        .filter_map(|(key, apps)| Some((key.clone(), resolve(apps, owned)?)))
+        .collect()
 }
 
 /// Asks GamesDB for the Steam apps and the cover of an Epic, GOG or Amazon copy key. A 404 means GamesDB doesn't know the game.
-pub async fn look_up(http: &reqwest::Client, key: &str) -> Result<(Vec<u32>, Option<String>), String> {
+pub async fn look_up(
+    http: &reqwest::Client,
+    key: &str,
+) -> Result<(Vec<u32>, Option<String>), String> {
     match fetch(http, key).await? {
         Some(body) => Ok((parse_steam_apps(&body)?, parse_cover(&body))),
         None => Ok((Vec::new(), None)),
@@ -100,15 +118,23 @@ pub async fn look_up(http: &reqwest::Client, key: &str) -> Result<(Vec<u32>, Opt
 /// An Amazon game is looked up by its product id only.
 // shortcut: GamesDB keeps some Amazon releases under a bare UUID instead, maybe `legacyProductIds`; unverified, so not tried.
 fn release_url(key: &str) -> Option<String> {
-    let (platform, id) =
-        key.split_once('-').filter(|(p, id)| matches!(*p, "epic" | "gog" | "amazon") && !id.is_empty())?;
-    Some(format!("{URL}/{platform}/external_releases/{}", percent_encode(id)))
+    let (platform, id) = key
+        .split_once('-')
+        .filter(|(p, id)| matches!(*p, "epic" | "gog" | "amazon") && !id.is_empty())?;
+    Some(format!(
+        "{URL}/{platform}/external_releases/{}",
+        percent_encode(id)
+    ))
 }
 
 /// GamesDB's answer body for an Epic, GOG or Amazon copy key; `None` when it doesn't know the game (404).
 pub async fn fetch(http: &reqwest::Client, key: &str) -> Result<Option<String>, String> {
     let url = release_url(key).ok_or_else(|| format!("gamesdb: no platform for {key}"))?;
-    let resp = http.get(url).send().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
+    let resp = http
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("{UNREACHABLE}: {e}"))?;
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -116,7 +142,10 @@ pub async fn fetch(http: &reqwest::Client, key: &str) -> Result<Option<String>, 
     if !status.is_success() {
         return Err(format!("gamesdb: HTTP {status}"));
     }
-    let body = resp.text().await.map_err(|e| format!("{UNREACHABLE}: {e}"))?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("{UNREACHABLE}: {e}"))?;
     Ok(Some(body))
 }
 
@@ -130,31 +159,42 @@ struct Stored {
 
 /// The cached answer: `Some(vec![])` is a remembered "no Steam app", `None` means ask GamesDB.
 pub fn cached(conn: &Connection, key: &str, now_secs: i64) -> Option<Vec<u32>> {
-    let json = db::cached_info(conn, key, TWIN, TWIN_MAX_AGE_SECS, now_secs).ok().flatten()?;
+    let json = db::cached_info(conn, key, TWIN, TWIN_MAX_AGE_SECS, now_secs)
+        .ok()
+        .flatten()?;
     serde_json::from_str::<Stored>(&json).ok().map(|s| s.steam)
 }
 
 pub fn remember(conn: &Connection, key: &str, apps: &[u32], cover: Option<&str>, now_secs: i64) {
-    if let Ok(json) = serde_json::to_string(&Stored { steam: apps.to_vec(), cover: cover.map(str::to_owned) }) {
+    if let Ok(json) = serde_json::to_string(&Stored {
+        steam: apps.to_vec(),
+        cover: cover.map(str::to_owned),
+    }) {
         _ = db::put_info(conn, key, TWIN, &json, now_secs);
     }
 }
 
 /// Every fresh cached answer with its game key.
 fn all_stored(conn: &Connection, now_secs: i64) -> Vec<(String, Stored)> {
-    let Ok(mut stmt) = conn.prepare("SELECT key, json FROM info WHERE kind = ?1 AND fetched >= ?2") else {
+    let Ok(mut stmt) = conn.prepare("SELECT key, json FROM info WHERE kind = ?1 AND fetched >= ?2")
+    else {
         return Vec::new();
     };
     let rows = stmt.query_map(rusqlite::params![TWIN, now_secs - TWIN_MAX_AGE_SECS], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
     });
     let Ok(rows) = rows else { return Vec::new() };
-    rows.flatten().filter_map(|(key, json)| Some((key, serde_json::from_str::<Stored>(&json).ok()?))).collect()
+    rows.flatten()
+        .filter_map(|(key, json)| Some((key, serde_json::from_str::<Stored>(&json).ok()?)))
+        .collect()
 }
 
 /// Every fresh cached Steam app list by Epic, GOG or Amazon game key.
 pub fn all_cached(conn: &Connection, now_secs: i64) -> HashMap<String, Vec<u32>> {
-    all_stored(conn, now_secs).into_iter().map(|(key, s)| (key, s.steam)).collect()
+    all_stored(conn, now_secs)
+        .into_iter()
+        .map(|(key, s)| (key, s.steam))
+        .collect()
 }
 
 /// Every fresh cached cover of a GOG or Amazon game, by its key.
@@ -171,7 +211,9 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gamesdb").join(name);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/gamesdb")
+            .join(name);
         std::fs::read_to_string(path).unwrap()
     }
 
@@ -183,8 +225,10 @@ mod tests {
     }
 
     fn releases(rows: &[(&str, &str)]) -> String {
-        let list: Vec<String> =
-            rows.iter().map(|(p, id)| format!(r#"{{"platform_id":"{p}","external_id":"{id}"}}"#)).collect();
+        let list: Vec<String> = rows
+            .iter()
+            .map(|(p, id)| format!(r#"{{"platform_id":"{p}","external_id":"{id}"}}"#))
+            .collect();
         format!(r#"{{"game":{{"releases":[{}]}}}}"#, list.join(","))
     }
 
@@ -194,12 +238,19 @@ mod tests {
 
     #[test]
     fn pumpkin_lists_last_day_of_june() {
-        assert_eq!(parse_steam_apps(&fixture("pumpkin.json")).unwrap(), [635320]);
+        assert_eq!(
+            parse_steam_apps(&fixture("pumpkin.json")).unwrap(),
+            [635320]
+        );
     }
 
     #[test]
     fn no_steam_release_lists_nothing() {
-        assert!(parse_steam_apps(&releases(&[("gog", "1"), ("epic", "x")])).unwrap().is_empty());
+        assert!(
+            parse_steam_apps(&releases(&[("gog", "1"), ("epic", "x")]))
+                .unwrap()
+                .is_empty()
+        );
         assert!(parse_steam_apps("nope").is_err());
     }
 
@@ -212,13 +263,23 @@ mod tests {
     fn different_steam_apps_are_all_listed() {
         let rows = releases(&[("steam", "2"), ("steam", "steam_1"), ("steam", "1")]);
         assert_eq!(parse_steam_apps(&rows).unwrap(), [1, 2]);
-        assert_eq!(parse_steam_apps(&fixture("brill.json")).unwrap(), [381210, 471230]);
-        assert_eq!(parse_steam_apps(&fixture("heather.json")).unwrap(), [100003, 1174180]);
+        assert_eq!(
+            parse_steam_apps(&fixture("brill.json")).unwrap(),
+            [381210, 471230]
+        );
+        assert_eq!(
+            parse_steam_apps(&fixture("heather.json")).unwrap(),
+            [100003, 1174180]
+        );
     }
 
     #[test]
     fn non_numeric_steam_id_is_skipped() {
-        assert!(parse_steam_apps(&releases(&[("steam", "abc")])).unwrap().is_empty());
+        assert!(
+            parse_steam_apps(&releases(&[("steam", "abc")]))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -242,8 +303,14 @@ mod tests {
         // Not owned: still the twin, for links and How long to beat; `entries::group` won't merge it.
         assert_eq!(resolve(&[635320], &owned(&[])), Some(635320));
         assert_eq!(resolve(&[], &owned(&[635320])), None);
-        let lists = HashMap::from([("epic-A".to_string(), vec![635320]), ("epic-B".to_string(), vec![])]);
-        assert_eq!(resolve_all(&lists, &owned(&[])), HashMap::from([("epic-A".to_string(), 635320)]));
+        let lists = HashMap::from([
+            ("epic-A".to_string(), vec![635320]),
+            ("epic-B".to_string(), vec![]),
+        ]);
+        assert_eq!(
+            resolve_all(&lists, &owned(&[])),
+            HashMap::from([("epic-A".to_string(), 635320)])
+        );
     }
 
     #[test]
@@ -254,7 +321,10 @@ mod tests {
         remember(&conn, "epic-a", &[], None, 1000);
         remember(&conn, "epic-b", &[381210, 471230], None, 1000);
         assert_eq!(cached(&conn, "epic-a", 1000 + day), Some(vec![]));
-        assert_eq!(cached(&conn, "epic-b", 1000 + day), Some(vec![381210, 471230]));
+        assert_eq!(
+            cached(&conn, "epic-b", 1000 + day),
+            Some(vec![381210, 471230])
+        );
         let all = all_cached(&conn, 1000 + day);
         assert_eq!(all.len(), 2);
         assert_eq!(all["epic-b"], [381210, 471230]);
@@ -270,9 +340,14 @@ mod tests {
     #[ignore]
     fn leftover_same_title_pairs() {
         use crate::library::ProviderKind;
-        let path = std::env::var_os("LAUNCHER_DB").map_or_else(|| crate::cache::Dirs::new().db, Into::into);
-        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let path = std::env::var_os("LAUNCHER_DB")
+            .map_or_else(|| crate::cache::Dirs::new().db, Into::into);
+        let conn =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let games = db::load(&conn).unwrap();
         let mut lists = all_cached(&conn, now);
         let steam = steam_ids(&games);
@@ -281,17 +356,33 @@ mod tests {
             .enumerate()
             .filter(|(_, g)| g.provider == ProviderKind::Epic)
             .flat_map(|(e, eg)| {
-                games.iter().enumerate().filter(move |(_, sg)| {
-                    sg.provider == ProviderKind::Steam && sg.title.trim().eq_ignore_ascii_case(eg.title.trim())
-                }).map(move |(s, _)| (e, s))
+                games
+                    .iter()
+                    .enumerate()
+                    .filter(move |(_, sg)| {
+                        sg.provider == ProviderKind::Steam
+                            && sg.title.trim().eq_ignore_ascii_case(eg.title.trim())
+                    })
+                    .map(move |(s, _)| (e, s))
             })
             .collect();
         let apart = |lists: &HashMap<String, Vec<u32>>| -> Vec<(usize, usize)> {
             let entries = crate::entries::group(&games, &resolve_all(lists, &steam));
-            let together = |e, s| entries.iter().any(|en| en.copies.contains(&e) && en.copies.contains(&s));
-            pairs.iter().copied().filter(|&(e, s)| !together(e, s)).collect()
+            let together = |e, s| {
+                entries
+                    .iter()
+                    .any(|en| en.copies.contains(&e) && en.copies.contains(&s))
+            };
+            pairs
+                .iter()
+                .copied()
+                .filter(|&(e, s)| !together(e, s))
+                .collect()
         };
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .unwrap();
         let mut asked = 0;
         for (e, _) in apart(&lists) {
             let key = games[e].key();
@@ -309,16 +400,26 @@ mod tests {
         }
         let twins = resolve_all(&lists, &steam);
         let left = apart(&lists);
-        println!("{} same-title pairs, {} apart, {asked} asked from GamesDB", pairs.len(), left.len());
+        println!(
+            "{} same-title pairs, {} apart, {asked} asked from GamesDB",
+            pairs.len(),
+            left.len()
+        );
         for (e, s) in left {
             let (eg, sg) = (&games[e], &games[s]);
             let id: u32 = sg.external_id.parse().unwrap();
             let why = match (lists.get(&eg.key()), twins.get(&eg.key())) {
                 (None, _) => "no GamesDB answer".to_string(),
-                (Some(apps), _) if apps.is_empty() => "GamesDB lists no Steam app (or doesn't know the game)".to_string(),
-                (Some(apps), _) if !apps.contains(&id) => format!("GamesDB lists {apps:?}, not {id}"),
+                (Some(apps), _) if apps.is_empty() => {
+                    "GamesDB lists no Steam app (or doesn't know the game)".to_string()
+                }
+                (Some(apps), _) if !apps.contains(&id) => {
+                    format!("GamesDB lists {apps:?}, not {id}")
+                }
                 (Some(apps), None) => format!("several listed apps owned: {apps:?}"),
-                (Some(_), Some(&t)) if t == id => "another Epic game claims the same app".to_string(),
+                (Some(_), Some(&t)) if t == id => {
+                    "another Epic game claims the same app".to_string()
+                }
                 (Some(_), Some(t)) => format!("resolved to {t}"),
             };
             println!("{} | {} | {} | {why}", eg.title, eg.key(), sg.key());
@@ -327,19 +428,27 @@ mod tests {
 
     #[test]
     fn gog_release_lists_its_steam_twin_and_cover() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gog/gdb-1425609977.json");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/gog/gdb-1425609977.json");
         let body = std::fs::read_to_string(path).unwrap();
         assert_eq!(parse_steam_apps(&body).unwrap(), [635320]);
         assert_eq!(
             parse_cover(&body).as_deref(),
-            Some("https://images.gog.com/279e02c9da2d01c299b54fcdab89ccad3a88d46c05e3dcdf904f13611895ed67.jpg?namespace=gamesdb")
+            Some(
+                "https://images.gog.com/279e02c9da2d01c299b54fcdab89ccad3a88d46c05e3dcdf904f13611895ed67.jpg?namespace=gamesdb"
+            )
         );
         assert_eq!(parse_cover(&fixture("pumpkin.json")), None);
         assert_eq!(parse_cover("nope"), None);
     }
 
     fn amazon_fixture(name: &str) -> String {
-        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/amazon").join(name)).unwrap()
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/amazon")
+                .join(name),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -347,7 +456,13 @@ mod tests {
         let ldoj = amazon_fixture("gdb-amzn1-last-day-of-june.json");
         assert_eq!(parse_steam_apps(&ldoj).unwrap(), [635320]);
         assert!(parse_cover(&ldoj).is_some_and(|c| c.starts_with("https://images.gog.com/")));
-        assert!(parse_steam_apps(&amazon_fixture("gdb-amzn1-dungeon-of-the-endless-no-steam.json")).unwrap().is_empty());
+        assert!(
+            parse_steam_apps(&amazon_fixture(
+                "gdb-amzn1-dungeon-of-the-endless-no-steam.json"
+            ))
+            .unwrap()
+            .is_empty()
+        );
         // `fetch` turns the 404 into "unknown" before parsing; its body isn't a game.
         assert!(parse_steam_apps(&amazon_fixture("gdb-404.json")).is_err());
     }
@@ -366,12 +481,23 @@ mod tests {
     #[test]
     fn release_url_takes_the_platform_from_the_key() {
         let url = |key| release_url(key);
-        assert_eq!(url("epic-Pumpkin").as_deref(), Some("https://gamesdb.gog.com/platforms/epic/external_releases/Pumpkin"));
-        assert_eq!(url("gog-1425609977").as_deref(), Some("https://gamesdb.gog.com/platforms/gog/external_releases/1425609977"));
-        assert_eq!(url("epic-a b").as_deref(), Some("https://gamesdb.gog.com/platforms/epic/external_releases/a%20b"));
+        assert_eq!(
+            url("epic-Pumpkin").as_deref(),
+            Some("https://gamesdb.gog.com/platforms/epic/external_releases/Pumpkin")
+        );
+        assert_eq!(
+            url("gog-1425609977").as_deref(),
+            Some("https://gamesdb.gog.com/platforms/gog/external_releases/1425609977")
+        );
+        assert_eq!(
+            url("epic-a b").as_deref(),
+            Some("https://gamesdb.gog.com/platforms/epic/external_releases/a%20b")
+        );
         assert_eq!(
             url("amazon-amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633").as_deref(),
-            Some("https://gamesdb.gog.com/platforms/amazon/external_releases/amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633")
+            Some(
+                "https://gamesdb.gog.com/platforms/amazon/external_releases/amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633"
+            )
         );
         assert_eq!(url("amazon-"), None);
         assert_eq!(url("steam-70"), None);
@@ -382,15 +508,39 @@ mod tests {
     #[test]
     fn gog_covers_come_from_the_twin_cache() {
         let conn = temp_db("covers");
-        remember(&conn, "gog-1", &[635320], Some("https://images.gog.com/c.jpg"), 1000);
+        remember(
+            &conn,
+            "gog-1",
+            &[635320],
+            Some("https://images.gog.com/c.jpg"),
+            1000,
+        );
         remember(&conn, "gog-2", &[], None, 1000);
-        remember(&conn, "epic-a", &[], Some("https://images.gog.com/e.jpg"), 1000);
-        remember(&conn, "amazon-p", &[], Some("https://images.gog.com/a.jpg"), 1000);
+        remember(
+            &conn,
+            "epic-a",
+            &[],
+            Some("https://images.gog.com/e.jpg"),
+            1000,
+        );
+        remember(
+            &conn,
+            "amazon-p",
+            &[],
+            Some("https://images.gog.com/a.jpg"),
+            1000,
+        );
         assert_eq!(
             covers(&conn, 1000),
             HashMap::from([
-                ("gog-1".to_string(), "https://images.gog.com/c.jpg".to_string()),
-                ("amazon-p".to_string(), "https://images.gog.com/a.jpg".to_string()),
+                (
+                    "gog-1".to_string(),
+                    "https://images.gog.com/c.jpg".to_string()
+                ),
+                (
+                    "amazon-p".to_string(),
+                    "https://images.gog.com/a.jpg".to_string()
+                ),
             ])
         );
         assert_eq!(all_cached(&conn, 1000)["gog-1"], [635320]);

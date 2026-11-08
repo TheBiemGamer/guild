@@ -52,9 +52,7 @@
     overflow: hidden;
     pointer-events: none;
     /* Neutral: a faint cool lift in the top-left corner, otherwise near-black. */
-    background:
-      radial-gradient(90% 70% at 15% -10%, rgb(70 76 104 / 0.35), transparent 70%),
-      var(--bg);
+    background: radial-gradient(90% 70% at 15% -10%, rgb(70 76 104 / 0.35), transparent 70%), var(--bg);
   }
 
   canvas {
@@ -74,11 +72,6 @@
   .shade {
     position: absolute;
     inset: 0;
-    background: linear-gradient(
-      180deg,
-      rgb(12 12 18 / 0.15) 0%,
-      rgb(12 12 18 / 0.72) 42%,
-      rgb(12 12 18 / 0.94) 78%
-    );
+    background: linear-gradient(180deg, rgb(12 12 18 / 0.15) 0%, rgb(12 12 18 / 0.72) 42%, rgb(12 12 18 / 0.94) 78%);
   }
 </style>

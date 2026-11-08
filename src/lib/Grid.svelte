@@ -5,7 +5,25 @@
   import { commands, type Card, type Progress, type QueueView, type Section } from './bindings'
   import { groupLabel } from './format'
 
-  let { games, sections = null, stat = null, resetKey, running, progress, queue, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu, benchSpeed, header, headerHeight = 0 }: {
+  let {
+    games,
+    sections = null,
+    stat = null,
+    resetKey,
+    running,
+    progress,
+    queue,
+    onopen,
+    onplay,
+    oninstall,
+    oncancel,
+    onresume,
+    onfavorite,
+    onmenu,
+    benchSpeed,
+    header,
+    headerHeight = 0,
+  }: {
     games: Card[]
     /** Labelled runs of `games`, each starting on its own row under a label row; null for one plain run. */
     sections?: Section[] | null
@@ -53,7 +71,12 @@
   const cols = $derived(Math.max(1, Math.floor((width - GAP) / (CARD_W + GAP))))
 
   /** A row of cards (`games[start..start + count]`), or a group label (`label` set). */
-  interface Row { y: number; start: number; count: number; label?: string }
+  interface Row {
+    y: number
+    start: number
+    count: number
+    label?: string
+  }
 
   // Groups flatten into label rows and card rows. Rebuilt when the list or the width changes, not on scroll.
   const layout = $derived.by(() => {
@@ -127,13 +150,7 @@
   })
 </script>
 
-<div
-  class="grid"
-  bind:this={el}
-  bind:clientWidth={width}
-  bind:clientHeight={height}
-  onscroll={() => (scrollTop = el.scrollTop)}
->
+<div class="grid" bind:this={el} bind:clientWidth={width} bind:clientHeight={height} onscroll={() => (scrollTop = el.scrollTop)}>
   <div class="sizer" style="height: {layout.height}px">
     {#if header && width > 0}
       <div class="header" style="left: {left}px; width: {span}px; height: {headerHeight}px">

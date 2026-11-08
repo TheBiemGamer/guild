@@ -7,15 +7,15 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use super::{allow, blocking, open_db, regroup, AppState, Res, Shared};
+use super::{AppState, Res, Shared, allow, blocking, open_db, regroup};
 use crate::bench;
 use crate::cache;
 use crate::entries::{self, Entry};
 use crate::epic_playtime;
 use crate::library::epic::{self, Login};
-use crate::library::{amazon, gog};
 use crate::library::steam::{owned_games, with_owned};
 use crate::library::{Game, Progress, ProviderKind};
+use crate::library::{amazon, gog};
 use crate::msg::Msg;
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
@@ -117,18 +117,50 @@ pub fn library(
     lists: Vec<String>,
 ) -> Library {
     let s = state.lock();
-    let mut shown = view::arrange(&s.games, &s.entries, &query, store, installed_only, sort, &s.ttb);
-    view::hide(&mut shown, &s.entries, &s.games, &s.lists, lists.iter().any(|f| f == "hidden"));
-    let mut groups = view::group(&shown, &s.entries, &s.games, &s.ttb, sort, SystemTime::now(), &jiff::tz::TimeZone::system());
+    let mut shown = view::arrange(
+        &s.games,
+        &s.entries,
+        &query,
+        store,
+        installed_only,
+        sort,
+        &s.ttb,
+    );
+    view::hide(
+        &mut shown,
+        &s.entries,
+        &s.games,
+        &s.lists,
+        lists.iter().any(|f| f == "hidden"),
+    );
+    let mut groups = view::group(
+        &shown,
+        &s.entries,
+        &s.games,
+        &s.ttb,
+        sort,
+        SystemTime::now(),
+        &jiff::tz::TimeZone::system(),
+    );
     if lists != ["favorites"] {
         groups = view::favorites_first(&shown, groups, &s.entries, &s.games, &s.lists);
     }
     let (games, groups) = sections(&s.games, &s.entries, &s.ttb, &s.lists, shown, groups);
-    let [epic_attention, gog_attention, amazon_attention] = attentions(s.epic_login, s.gog_login, s.amazon_login, &s.games, s.signed_out);
+    let [epic_attention, gog_attention, amazon_attention] = attentions(
+        s.epic_login,
+        s.gog_login,
+        s.amazon_login,
+        &s.games,
+        s.signed_out,
+    );
     Library {
         games,
         groups,
-        total: s.entries.iter().filter(|e| !s.lists.hidden(e, &s.games)).count(),
+        total: s
+            .entries
+            .iter()
+            .filter(|e| !s.lists.hidden(e, &s.games))
+            .count(),
         status: s.status.clone(),
         epic: s.epic_login,
         epic_attention,
@@ -167,12 +199,29 @@ fn attentions(
 ) -> [bool; 3] {
     let has = |p: ProviderKind| games.iter().any(|g| g.provider == p);
     [
-        epic.is_some_and(|l| attention(l == Login::LoggedIn, l == Login::Unreachable, has(ProviderKind::Epic), epic_out)),
+        epic.is_some_and(|l| {
+            attention(
+                l == Login::LoggedIn,
+                l == Login::Unreachable,
+                has(ProviderKind::Epic),
+                epic_out,
+            )
+        }),
         gog.is_some_and(|l| {
-            attention(l == gog::Login::LoggedIn, l == gog::Login::Unreachable, has(ProviderKind::Gog), gog_out)
+            attention(
+                l == gog::Login::LoggedIn,
+                l == gog::Login::Unreachable,
+                has(ProviderKind::Gog),
+                gog_out,
+            )
         }),
         amazon.is_some_and(|l| {
-            attention(l == amazon::Login::LoggedIn, l == amazon::Login::Unreachable, has(ProviderKind::Amazon), amazon_out)
+            attention(
+                l == amazon::Login::LoggedIn,
+                l == amazon::Login::Unreachable,
+                has(ProviderKind::Amazon),
+                amazon_out,
+            )
         }),
     ]
 }
@@ -190,8 +239,20 @@ fn sections(
     if groups.is_empty() {
         return (shown.iter().map(card).collect(), Vec::new());
     }
-    let cards = groups.iter().flat_map(|(_, ids)| ids.iter().map(card)).collect();
-    (cards, groups.into_iter().map(|(group, ids)| Section { group, count: ids.len() }).collect())
+    let cards = groups
+        .iter()
+        .flat_map(|(_, ids)| ids.iter().map(card))
+        .collect();
+    (
+        cards,
+        groups
+            .into_iter()
+            .map(|(group, ids)| Section {
+                group,
+                count: ids.len(),
+            })
+            .collect(),
+    )
 }
 
 /// The toolbar's sort as last saved, the version this start updated to (`settings::take_updated`), and the UI's
@@ -234,7 +295,11 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
         fill_twins(app.clone());
         let saved = settings::load(&conn);
         let updated_to = settings::take_updated(&conn, &app.package_info().version.to_string());
-        Ok(ViewPrefs { sort: saved.sort, updated_to, ui_language: crate::msg::language() })
+        Ok(ViewPrefs {
+            sort: saved.sort,
+            updated_to,
+            ui_language: crate::msg::language(),
+        })
     })
     .await
 }
@@ -287,13 +352,20 @@ pub(crate) fn fill_twins(app: AppHandle) {
                 .lock()
                 .games
                 .iter()
-                .filter(|g| matches!(g.provider, ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon))
+                .filter(|g| {
+                    matches!(
+                        g.provider,
+                        ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+                    )
+                })
                 .map(Game::key)
                 .collect();
             let Some(conn) = open_db(&state) else { return };
             let now = super::unix_now();
             // Cached answers are already in `twin_lists` (load_cache), so only the unanswered remain.
-            keys.into_iter().filter(|key| crate::gamesdb::cached(&conn, key, now).is_none()).collect::<Vec<_>>()
+            keys.into_iter()
+                .filter(|key| crate::gamesdb::cached(&conn, key, now).is_none())
+                .collect::<Vec<_>>()
         };
         for (i, key) in pending.into_iter().enumerate() {
             if i > 0 {
@@ -302,15 +374,21 @@ pub(crate) fn fill_twins(app: AppHandle) {
             match crate::gamesdb::look_up(&state.http, &key).await {
                 Ok((apps, cover)) => {
                     if let Some(conn) = open_db(&state) {
-                        crate::gamesdb::remember(&conn, &key, &apps, cover.as_deref(), super::unix_now());
+                        crate::gamesdb::remember(
+                            &conn,
+                            &key,
+                            &apps,
+                            cover.as_deref(),
+                            super::unix_now(),
+                        );
                     }
                     let mut s = state.lock();
                     // A GOG or Amazon game's grid art: until the next scan of its store reads it from the cache.
                     // shortcut: a card whose header was already shown keeps it until the UI asks for its cover again.
-                    let covered = s
-                        .games
-                        .iter_mut()
-                        .find(|g| matches!(g.provider, ProviderKind::Gog | ProviderKind::Amazon) && g.key() == key);
+                    let covered = s.games.iter_mut().find(|g| {
+                        matches!(g.provider, ProviderKind::Gog | ProviderKind::Amazon)
+                            && g.key() == key
+                    });
                     if let (Some(game), Some(url)) = (covered, cover) {
                         game.art.cover.url = Some(url);
                         s.library_changed = true;
@@ -371,7 +449,16 @@ pub(super) fn refresh_gog_playtime(app: AppHandle, only: Option<String>) {
                 return;
             }
             s.gog_playtime_running = true;
-            only.map_or_else(|| s.games.iter().filter(|g| g.provider == ProviderKind::Gog).map(Game::key).collect(), |k| vec![k])
+            only.map_or_else(
+                || {
+                    s.games
+                        .iter()
+                        .filter(|g| g.provider == ProviderKind::Gog)
+                        .map(Game::key)
+                        .collect()
+                },
+                |k| vec![k],
+            )
         };
         let _running = Running(app.clone(), |s: &mut Shared| &mut s.gog_playtime_running);
         let job = app.clone();
@@ -380,10 +467,18 @@ pub(super) fn refresh_gog_playtime(app: AppHandle, only: Option<String>) {
             let conn = open_db(&state)?;
             let launched = cache::db::launches(&conn).ok()?;
             let now = super::unix_now();
-            let due: Vec<String> =
-                keys.into_iter().filter(|k| (opened || launched.contains_key(k)) && gog::playtime_due(&conn, k, now)).collect();
+            let due: Vec<String> = keys
+                .into_iter()
+                .filter(|k| {
+                    (opened || launched.contains_key(k)) && gog::playtime_due(&conn, k, now)
+                })
+                .collect();
             // The login last: it may run gogdl to refresh the token.
-            if due.is_empty() { None } else { Some((due, gog::login().1?)) }
+            if due.is_empty() {
+                None
+            } else {
+                Some((due, gog::login().1?))
+            }
         })
         .await;
         let Some((due, creds)) = due else { return };
@@ -391,11 +486,15 @@ pub(super) fn refresh_gog_playtime(app: AppHandle, only: Option<String>) {
             if i > 0 {
                 tokio::time::sleep(gog::PLAYTIME_GAP).await;
             }
-            let Some(id) = key.strip_prefix("gog-") else { continue };
+            let Some(id) = key.strip_prefix("gog-") else {
+                continue;
+            };
             match gog::fetch_playtime(&state.http, &creds, id).await {
                 Ok(minutes) => {
                     let json = minutes.map_or_else(|| "null".to_string(), |m| m.to_string());
-                    if let Some(Err(e)) = open_db(&state).map(|c| cache::db::put_info(&c, key, gog::PLAYTIME, &json, super::unix_now())) {
+                    if let Some(Err(e)) = open_db(&state).map(|c| {
+                        cache::db::put_info(&c, key, gog::PLAYTIME, &json, super::unix_now())
+                    }) {
                         tracing::warn!("gog playtime save: {e}");
                     }
                 }
@@ -437,7 +536,9 @@ fn record_session(state: &AppState, key: &str, played: Duration) {
 pub(crate) fn refresh_owned(app: AppHandle, force: bool) {
     tauri::async_runtime::spawn(async move {
         let job = app.clone();
-        let Some((token, _running)) = blocking(move || owned_job(&job, force)).await else { return };
+        let Some((token, _running)) = blocking(move || owned_job(&job, force)).await else {
+            return;
+        };
         let result = steam_owned::fetch(&token).await;
         drop(token);
         if let Err(e) = &result {
@@ -476,7 +577,9 @@ fn owned_job(app: &AppHandle, force: bool) -> Option<(String, Running)> {
     }
     let conn = open_db(&state)?;
     // Never connected: nothing to fetch, and no reason to touch Credential Manager.
-    cache::db::setting(&conn, settings::STEAM_ACCOUNT).ok().flatten()?;
+    cache::db::setting(&conn, settings::STEAM_ACCOUNT)
+        .ok()
+        .flatten()?;
     if !force && steam_owned::fresh(&conn, super::unix_now()) {
         return None;
     }
@@ -504,14 +607,18 @@ fn remember_if_connected(conn: &rusqlite::Connection, games: &[OwnedGame], now: 
 }
 
 fn steam_connected(conn: &rusqlite::Connection) -> bool {
-    cache::db::setting(conn, settings::STEAM_ACCOUNT).ok().flatten().is_some()
+    cache::db::setting(conn, settings::STEAM_ACCOUNT)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 fn finish_owned(app: &AppHandle, outcome: OwnedOutcome) {
     let state = app.state::<AppState>();
     match outcome {
         OwnedOutcome::Store(games) => {
-            let saved = open_db(&state).is_some_and(|conn| remember_if_connected(&conn, &games, super::unix_now()));
+            let saved = open_db(&state)
+                .is_some_and(|conn| remember_if_connected(&conn, &games, super::unix_now()));
             if !saved {
                 return;
             }
@@ -551,7 +658,10 @@ type ScanResults = Vec<(ProviderKind, Result<Vec<Game>, Msg>)>;
 /// The owned games as `Game`s, or `None` when Steam can't be found.
 fn build_owned(owned: &[OwnedGame]) -> Option<Vec<Game>> {
     let steam = steamlocate::SteamDir::locate().ok()?;
-    Some(owned_games(owned, &steam.path().join("appcache").join("librarycache")))
+    Some(owned_games(
+        owned,
+        &steam.path().join("appcache").join("librarycache"),
+    ))
 }
 
 /// The built owned games; built from the cached list the first time.
@@ -575,7 +685,14 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
     let owned = owned(&state);
     let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
     let signed_out = logins.map(|(e, g, a)| {
-        signed_out(&state, [e == Login::LoggedIn, g == gog::Login::LoggedIn, a == amazon::Login::LoggedIn])
+        signed_out(
+            &state,
+            [
+                e == Login::LoggedIn,
+                g == gog::Login::LoggedIn,
+                a == amazon::Login::LoggedIn,
+            ],
+        )
     });
     let mut s = state.lock();
     if let Some((login, gog_login, amazon_login)) = logins {
@@ -597,7 +714,11 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
         Err(e) => tracing::warn!("launch history: {e}"),
     }
     // Only a finished scan may claim the library is empty.
-    s.status = if merged.errors.is_empty() { vec![msg!(noGamesFound)] } else { merged.errors };
+    s.status = if merged.errors.is_empty() {
+        vec![msg!(noGamesFound)]
+    } else {
+        merged.errors
+    };
     if merged.games == s.games {
         return false;
     }
@@ -612,8 +733,12 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
     s.games = merged.games.clone();
     regroup(&mut s);
     drop(s);
-    let saved = cache::db::open(&state.dirs.db)
-        .and_then(|mut conn| merged.scanned.iter().try_for_each(|&p| cache::db::replace(&mut conn, p, &merged.games)));
+    let saved = cache::db::open(&state.dirs.db).and_then(|mut conn| {
+        merged
+            .scanned
+            .iter()
+            .try_for_each(|&p| cache::db::replace(&mut conn, p, &merged.games))
+    });
     if let Err(e) = saved {
         tracing::warn!("library cache save: {e}");
     }
@@ -622,9 +747,15 @@ pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
 
 /// The Epic, GOG and Amazon "logged out on purpose" flags; a store found logged in clears its flag.
 fn signed_out(state: &AppState, logged_in: [bool; 3]) -> [bool; 3] {
-    let Some(conn) = open_db(state) else { return [false; 3] };
+    let Some(conn) = open_db(state) else {
+        return [false; 3];
+    };
     let mut flags = [false; 3];
-    for ((flag, store), logged_in) in flags.iter_mut().zip(["epic", "gog", "amazon"]).zip(logged_in) {
+    for ((flag, store), logged_in) in flags
+        .iter_mut()
+        .zip(["epic", "gog", "amazon"])
+        .zip(logged_in)
+    {
         *flag = settings::signed_out(&conn, store);
         if *flag && logged_in {
             *flag = false;
@@ -642,21 +773,32 @@ fn scan(
     dirs: &cache::Dirs,
     http: &reqwest::Client,
 ) -> (ScanResults, Option<(Login, gog::Login, amazon::Login)>) {
-    let steam = ProviderKind::Steam.provider().list_games().map_err(Msg::from).map(|installed| match owned {
-        Some(owned) => with_owned(installed, owned),
-        None => installed,
-    });
+    let steam = ProviderKind::Steam
+        .provider()
+        .list_games()
+        .map_err(Msg::from)
+        .map(|installed| match owned {
+            Some(owned) => with_owned(installed, owned),
+            None => installed,
+        });
     let custom = crate::library::custom::list(dirs).map_err(Msg::from);
     let mut results = vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)];
     if !online {
         return (results, None);
     }
     let login = epic::login_state();
-    let games = epic_result(login, || ProviderKind::Epic.provider().list_games().map_err(Msg::from));
+    let games = epic_result(login, || {
+        ProviderKind::Epic
+            .provider()
+            .list_games()
+            .map_err(Msg::from)
+    });
     results.push((ProviderKind::Epic, games));
     let (gog_login, creds) = gog::login();
     let games = match creds {
-        Some(creds) => gog::list(http, dirs, &creds).map_err(|e| Msg::system(format!("{GOG_QUIET}: {e}"))),
+        Some(creds) => {
+            gog::list(http, dirs, &creds).map_err(|e| Msg::system(format!("{GOG_QUIET}: {e}")))
+        }
         None => Err(Msg::system(format!("{GOG_QUIET}: {gog_login:?}"))),
     };
     results.push((ProviderKind::Gog, games));
@@ -673,7 +815,10 @@ const GOG_QUIET: &str = "GOG unavailable";
 const AMAZON_QUIET: &str = "Amazon unavailable";
 
 /// Only a logged-in Epic is listed. Any other state is an `Err`, so `merge` keeps the cached Epic games.
-fn epic_result(login: Login, list: impl FnOnce() -> Result<Vec<Game>, Msg>) -> Result<Vec<Game>, Msg> {
+fn epic_result(
+    login: Login,
+    list: impl FnOnce() -> Result<Vec<Game>, Msg>,
+) -> Result<Vec<Game>, Msg> {
     let quiet = |why: &str| Err(Msg::system(format!("{EPIC_QUIET}: {why}")));
     match login {
         Login::LoggedIn => list(),
@@ -726,8 +871,11 @@ struct Merged {
 
 /// Stores not scanned, or whose scan failed, keep what we last knew.
 fn merge(current: &[Game], results: ScanResults) -> Merged {
-    let mut games: Vec<Game> =
-        current.iter().filter(|g| results.iter().all(|(p, _)| *p != g.provider)).cloned().collect();
+    let mut games: Vec<Game> = current
+        .iter()
+        .filter(|g| results.iter().all(|(p, _)| *p != g.provider))
+        .cloned()
+        .collect();
     let (mut scanned, mut errors) = (Vec::new(), Vec::new());
     for (provider, result) in results {
         match result {
@@ -754,7 +902,11 @@ fn merge(current: &[Game], results: ScanResults) -> Merged {
         }
     }
     view::sort_by_title(&mut games);
-    Merged { games, scanned, errors }
+    Merged {
+        games,
+        scanned,
+        errors,
+    }
 }
 
 /// Shows the window, which starts hidden. The UI calls this once the first screen has its covers;
@@ -774,7 +926,10 @@ pub fn show_window(app: &AppHandle, by: &str) {
         return;
     }
     // Read by the benchmark; a GUI build has no stdout, so it goes nowhere otherwise.
-    println!("window shown after {} ms by {by}", state.started.elapsed().as_millis());
+    println!(
+        "window shown after {} ms by {by}",
+        state.started.elapsed().as_millis()
+    );
     if let Some(window) = app.get_webview_window("main")
         && let Err(e) = window.show()
     {
@@ -807,7 +962,9 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     let key = game.key();
     let art_dir = state.dirs.art.join(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {
-        let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else { continue };
+        let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else {
+            continue;
+        };
         let (thumbs, thumb_key) = (state.dirs.thumbs.clone(), thumb_key(&game, slot, &src));
         match blocking(move || cache::thumbnail(&src, &thumbs, &thumb_key)).await {
             Ok((path, color)) => return allow(&app, path).map(|src| Cover { src, color }),
@@ -820,7 +977,13 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
 /// The thumbnail's cache key. An added game's cover can be replaced under the same path, so its key carries
 /// the file's modified time; store art never changes under its key.
 fn thumb_key(game: &Game, slot: &str, src: &std::path::Path) -> String {
-    let modified = || src.metadata().and_then(|m| m.modified()).ok()?.duration_since(std::time::UNIX_EPOCH).ok();
+    let modified = || {
+        src.metadata()
+            .and_then(|m| m.modified())
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+    };
     match modified().filter(|_| game.provider == ProviderKind::Custom) {
         Some(at) => format!("{}-{slot}-{}", game.key(), at.as_millis()),
         None => format!("{}-{slot}", game.key()),
@@ -855,13 +1018,22 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
             break;
         }
     }
-    Some(Featured { key: card.key, chosen: card.chosen, copy_keys: card.copy_keys, title: card.title, hero })
+    Some(Featured {
+        key: card.key,
+        chosen: card.chosen,
+        copy_keys: card.copy_keys,
+        title: card.title,
+        hero,
+    })
 }
 
 /// The featured entry as a card, and its first copy (for the art).
 fn featured_pick(games: &[Game], entries: &[Entry], lists: &Lists) -> Option<(Card, Game)> {
     let e = view::featured(games, entries, lists)?;
-    Some((card(e, games, &HashMap::new(), lists), games[e.copies[0]].clone()))
+    Some((
+        card(e, games, &HashMap::new(), lists),
+        games[e.copies[0]].clone(),
+    ))
 }
 
 #[derive(Serialize, specta::Type)]
@@ -884,8 +1056,15 @@ pub async fn poll(app: AppHandle) -> Poll {
 
 fn poll_blocking(app: &AppHandle) -> Poll {
     let state = app.state::<AppState>();
-    let steam_running = ProviderKind::Steam.provider().running_game().map(|id| ProviderKind::Steam.key(&id));
-    let watch = state.lock().watch.as_ref().map(|w| (w.key.clone(), w.exe.clone(), w.since));
+    let steam_running = ProviderKind::Steam
+        .provider()
+        .running_game()
+        .map(|id| ProviderKind::Steam.key(&id));
+    let watch = state
+        .lock()
+        .watch
+        .as_ref()
+        .map(|w| (w.key.clone(), w.exe.clone(), w.since));
     let watched = watch.and_then(|(key, exe, since)| {
         if epic::is_running(&exe) {
             if let Some(w) = state.lock().watch.as_mut().filter(|w| w.since == since) {
@@ -911,9 +1090,22 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     });
     let tracked: Vec<Game> = {
         let s = state.lock();
-        s.games.iter().filter(|g| s.tracked.contains(&g.key())).cloned().collect()
+        s.games
+            .iter()
+            .filter(|g| s.tracked.contains(&g.key()))
+            .cloned()
+            .collect()
     };
-    let results = tracked.iter().map(|g| (g.key(), g.provider.provider().download_progress(g), g.installed)).collect();
+    let results = tracked
+        .iter()
+        .map(|g| {
+            (
+                g.key(),
+                g.provider.provider().download_progress(g),
+                g.installed,
+            )
+        })
+        .collect();
     let finished = apply_steam_progress(&mut state.lock(), results);
     if !finished.is_empty() {
         rescan(app, false);
@@ -924,19 +1116,37 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         // A download that stopped without installing the game (cancelled in Steam) gets no toast.
         let installed: Vec<String> = finished
             .iter()
-            .filter_map(|key| s.games.iter().find(|g| &g.key() == key && g.installed).map(|g| g.title.clone()))
+            .filter_map(|key| {
+                s.games
+                    .iter()
+                    .find(|g| &g.key() == key && g.installed)
+                    .map(|g| g.title.clone())
+            })
             .collect();
-        (s.progress.clone(), take_changed(&mut s, !finished.is_empty()), queue, installed)
+        (
+            s.progress.clone(),
+            take_changed(&mut s, !finished.is_empty()),
+            queue,
+            installed,
+        )
     };
     for title in installed {
         super::notify_done(app, &title, crate::msg::native("readyToPlay"));
     }
-    Poll { running: steam_running.or(watched), progress, changed, queue }
+    Poll {
+        running: steam_running.or(watched),
+        progress,
+        changed,
+        queue,
+    }
 }
 
 /// Records polled Steam progress. Returns the keys of the downloads that were showing progress and just ended.
 /// Not-installed games stay tracked: the user may still be in Steam's install dialog.
-fn apply_steam_progress(s: &mut Shared, results: Vec<(String, Option<Progress>, bool)>) -> Vec<String> {
+fn apply_steam_progress(
+    s: &mut Shared,
+    results: Vec<(String, Option<Progress>, bool)>,
+) -> Vec<String> {
     let mut finished = Vec::new();
     for (key, progress, installed) in results {
         match progress {
@@ -978,10 +1188,16 @@ mod tests {
 
     #[test]
     fn a_fetch_finishing_after_disconnect_is_not_saved() {
-        let path = std::env::temp_dir().join(format!("launcher-owned-test-{}.sqlite", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("launcher-owned-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let conn = cache::db::open(&path).unwrap();
-        let owned = [OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 3, last_played: None }];
+        let owned = [OwnedGame {
+            appid: 70,
+            name: "Half-Life".into(),
+            playtime_minutes: 3,
+            last_played: None,
+        }];
         assert!(!steam_connected(&conn));
         assert!(!remember_if_connected(&conn, &owned, 100));
         assert!(steam_owned::cached(&conn).is_none());
@@ -993,14 +1209,20 @@ mod tests {
 
     #[test]
     fn card_and_featured_play_the_only_installed_copy() {
-        let steam = Game { external_id: "635320".into(), ..game("Pumpkin Jack", false, None, Some(100)) };
+        let steam = Game {
+            external_id: "635320".into(),
+            ..game("Pumpkin Jack", false, None, Some(100))
+        };
         let epic = Game {
             provider: ProviderKind::Epic,
             external_id: "Pumpkin".into(),
             ..game("Pumpkin Jack", true, None, Some(50))
         };
         let games = vec![epic, steam];
-        let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let entries = entries::group(
+            &games,
+            &HashMap::from([("epic-Pumpkin".to_string(), 635320)]),
+        );
         let c = card(&entries[0], &games, &HashMap::new(), &Lists::default());
         assert_eq!(c.key, "steam-635320");
         assert_eq!(c.chosen, "epic-Pumpkin");
@@ -1032,12 +1254,18 @@ mod tests {
         let fresh = game("new steam", true, None, None);
 
         // Steam-only rescan: Epic's game stays, Steam's list is replaced.
-        let merged = merge(&current, vec![(ProviderKind::Steam, Ok(vec![fresh.clone()]))]);
+        let merged = merge(
+            &current,
+            vec![(ProviderKind::Steam, Ok(vec![fresh.clone()]))],
+        );
         assert_eq!(merged.games, vec![epic_game.clone(), fresh.clone()]);
         assert_eq!(merged.scanned, vec![ProviderKind::Steam]);
 
         // Offline: Epic's scan fails, so its last known games stay and it isn't saved over.
-        let results = vec![(ProviderKind::Steam, Ok(vec![fresh.clone()])), (ProviderKind::Epic, Err(Msg::system("offline")))];
+        let results = vec![
+            (ProviderKind::Steam, Ok(vec![fresh.clone()])),
+            (ProviderKind::Epic, Err(Msg::system("offline"))),
+        ];
         let merged = merge(&current, results);
         assert_eq!(merged.games, vec![epic_game, fresh]);
         assert_eq!(merged.scanned, vec![ProviderKind::Steam]);
@@ -1049,7 +1277,10 @@ mod tests {
         for login in [Login::LoggedOut, Login::NoLegendary, Login::Unreachable] {
             assert!(epic_result(login, || panic!("must not list")).is_err());
         }
-        assert_eq!(epic_result(Login::LoggedIn, || Ok(vec![])).unwrap().len(), 0);
+        assert_eq!(
+            epic_result(Login::LoggedIn, || Ok(vec![])).unwrap().len(),
+            0
+        );
     }
 
     #[test]
@@ -1057,7 +1288,10 @@ mod tests {
         let mut epic_game = game("Fortnite", true, None, None);
         epic_game.provider = ProviderKind::Epic;
         for login in [Login::LoggedOut, Login::NoLegendary, Login::Unreachable] {
-            let results = vec![(ProviderKind::Epic, epic_result(login, || panic!("must not list")))];
+            let results = vec![(
+                ProviderKind::Epic,
+                epic_result(login, || panic!("must not list")),
+            )];
             let merged = merge(&[epic_game.clone()], results);
             assert!(merged.errors.is_empty(), "{login:?}");
             assert_eq!(merged.games, vec![epic_game.clone()]);
@@ -1067,45 +1301,152 @@ mod tests {
 
     #[test]
     fn stores_in_use_follow_toolbar_order_without_custom() {
-        let copy = |provider| Game { provider, ..game("A", false, None, None) };
+        let copy = |provider| Game {
+            provider,
+            ..game("A", false, None, None)
+        };
         assert_eq!(stores_in_use(&[]), []);
-        let games = [copy(ProviderKind::Custom), copy(ProviderKind::Amazon), copy(ProviderKind::Steam), copy(ProviderKind::Amazon)];
-        assert_eq!(stores_in_use(&games), [ProviderKind::Steam, ProviderKind::Amazon]);
+        let games = [
+            copy(ProviderKind::Custom),
+            copy(ProviderKind::Amazon),
+            copy(ProviderKind::Steam),
+            copy(ProviderKind::Amazon),
+        ];
+        assert_eq!(
+            stores_in_use(&games),
+            [ProviderKind::Steam, ProviderKind::Amazon]
+        );
     }
 
     #[test]
     fn only_a_store_that_was_set_up_and_broke_raises_the_dot() {
-        let copy = |provider| Game { provider, ..game("A", false, None, None) };
+        let copy = |provider| Game {
+            provider,
+            ..game("A", false, None, None)
+        };
         let none: [Game; 0] = [];
-        let all = [copy(ProviderKind::Epic), copy(ProviderKind::Gog), copy(ProviderKind::Amazon)];
+        let all = [
+            copy(ProviderKind::Epic),
+            copy(ProviderKind::Gog),
+            copy(ProviderKind::Amazon),
+        ];
         // Never set up: no tool, or never logged in, with no games cached.
-        assert_eq!(attentions(Some(Login::NoLegendary), Some(gog::Login::NoGogdl), Some(amazon::Login::NoNile), &none, [false; 3]), [false; 3]);
-        assert_eq!(attentions(Some(Login::LoggedOut), Some(gog::Login::LoggedOut), Some(amazon::Login::LoggedOut), &none, [false; 3]), [false; 3]);
+        assert_eq!(
+            attentions(
+                Some(Login::NoLegendary),
+                Some(gog::Login::NoGogdl),
+                Some(amazon::Login::NoNile),
+                &none,
+                [false; 3]
+            ),
+            [false; 3]
+        );
+        assert_eq!(
+            attentions(
+                Some(Login::LoggedOut),
+                Some(gog::Login::LoggedOut),
+                Some(amazon::Login::LoggedOut),
+                &none,
+                [false; 3]
+            ),
+            [false; 3]
+        );
         // Used before (games cached), then logged out or the tool went missing.
-        assert_eq!(attentions(Some(Login::LoggedOut), Some(gog::Login::LoggedOut), Some(amazon::Login::LoggedOut), &all, [false; 3]), [true; 3]);
-        assert_eq!(attentions(Some(Login::NoLegendary), Some(gog::Login::NoGogdl), Some(amazon::Login::NoNile), &all, [false; 3]), [true; 3]);
+        assert_eq!(
+            attentions(
+                Some(Login::LoggedOut),
+                Some(gog::Login::LoggedOut),
+                Some(amazon::Login::LoggedOut),
+                &all,
+                [false; 3]
+            ),
+            [true; 3]
+        );
+        assert_eq!(
+            attentions(
+                Some(Login::NoLegendary),
+                Some(gog::Login::NoGogdl),
+                Some(amazon::Login::NoNile),
+                &all,
+                [false; 3]
+            ),
+            [true; 3]
+        );
         // A login that can't be checked is always a problem.
-        let unreachable = (Some(Login::Unreachable), Some(gog::Login::Unreachable), Some(amazon::Login::Unreachable));
-        assert_eq!(attentions(unreachable.0, unreachable.1, unreachable.2, &none, [false; 3]), [true; 3]);
+        let unreachable = (
+            Some(Login::Unreachable),
+            Some(gog::Login::Unreachable),
+            Some(amazon::Login::Unreachable),
+        );
+        assert_eq!(
+            attentions(
+                unreachable.0,
+                unreachable.1,
+                unreachable.2,
+                &none,
+                [false; 3]
+            ),
+            [true; 3]
+        );
         // Logged in, or not known yet: no dot.
-        assert_eq!(attentions(Some(Login::LoggedIn), Some(gog::Login::LoggedIn), Some(amazon::Login::LoggedIn), &all, [false; 3]), [false; 3]);
+        assert_eq!(
+            attentions(
+                Some(Login::LoggedIn),
+                Some(gog::Login::LoggedIn),
+                Some(amazon::Login::LoggedIn),
+                &all,
+                [false; 3]
+            ),
+            [false; 3]
+        );
         assert_eq!(attentions(None, None, None, &all, [false; 3]), [false; 3]);
         // Each store counts only its own games.
         let gog_only = [copy(ProviderKind::Gog)];
-        assert_eq!(attentions(Some(Login::LoggedOut), Some(gog::Login::LoggedOut), Some(amazon::Login::LoggedOut), &gog_only, [false; 3]), [false, true, false]);
+        assert_eq!(
+            attentions(
+                Some(Login::LoggedOut),
+                Some(gog::Login::LoggedOut),
+                Some(amazon::Login::LoggedOut),
+                &gog_only,
+                [false; 3]
+            ),
+            [false, true, false]
+        );
         // Logged out on purpose: no dot, cached games or not, and an unreachable store isn't expected to answer.
-        let logged_out = (Some(Login::LoggedOut), Some(gog::Login::LoggedOut), Some(amazon::Login::LoggedOut));
-        assert_eq!(attentions(logged_out.0, logged_out.1, logged_out.2, &all, [true; 3]), [false; 3]);
-        assert_eq!(attentions(unreachable.0, unreachable.1, unreachable.2, &all, [true; 3]), [false; 3]);
+        let logged_out = (
+            Some(Login::LoggedOut),
+            Some(gog::Login::LoggedOut),
+            Some(amazon::Login::LoggedOut),
+        );
+        assert_eq!(
+            attentions(logged_out.0, logged_out.1, logged_out.2, &all, [true; 3]),
+            [false; 3]
+        );
+        assert_eq!(
+            attentions(unreachable.0, unreachable.1, unreachable.2, &all, [true; 3]),
+            [false; 3]
+        );
         // Only the store logged out of on purpose stays quiet.
-        assert_eq!(attentions(logged_out.0, logged_out.1, logged_out.2, &all, [false, true, false]), [true, false, true]);
+        assert_eq!(
+            attentions(
+                logged_out.0,
+                logged_out.1,
+                logged_out.2,
+                &all,
+                [false, true, false]
+            ),
+            [true, false, true]
+        );
     }
 
     #[test]
     fn failed_gog_scans_keep_the_cache_quietly() {
         let mut gog_game = game("Last Day of June", false, None, None);
         gog_game.provider = ProviderKind::Gog;
-        let results = vec![(ProviderKind::Gog, Err(Msg::system(format!("{GOG_QUIET}: offline"))))];
+        let results = vec![(
+            ProviderKind::Gog,
+            Err(Msg::system(format!("{GOG_QUIET}: offline"))),
+        )];
         let merged = merge(&[gog_game.clone()], results);
         assert!(merged.errors.is_empty());
         assert_eq!(merged.games, vec![gog_game.clone()]);
@@ -1121,7 +1462,13 @@ mod tests {
         let mut amazon_game = game("Last Day of June", false, None, None);
         amazon_game.provider = ProviderKind::Amazon;
         for e in ["busy", "Unreachable", "not logged in"] {
-            let merged = merge(&[amazon_game.clone()], vec![(ProviderKind::Amazon, Err(Msg::system(format!("{AMAZON_QUIET}: {e}"))))]);
+            let merged = merge(
+                &[amazon_game.clone()],
+                vec![(
+                    ProviderKind::Amazon,
+                    Err(Msg::system(format!("{AMAZON_QUIET}: {e}"))),
+                )],
+            );
             assert!(merged.errors.is_empty());
             assert_eq!(merged.games, vec![amazon_game.clone()]);
             assert!(merged.scanned.is_empty());
@@ -1133,23 +1480,38 @@ mod tests {
 
     #[test]
     fn logged_out_notice_only_on_change() {
-        assert!(logged_out_since_last_run(Some("loggedIn"), Login::LoggedOut));
-        assert!(!logged_out_since_last_run(Some("loggedOut"), Login::LoggedOut));
+        assert!(logged_out_since_last_run(
+            Some("loggedIn"),
+            Login::LoggedOut
+        ));
+        assert!(!logged_out_since_last_run(
+            Some("loggedOut"),
+            Login::LoggedOut
+        ));
         assert!(!logged_out_since_last_run(None, Login::LoggedOut));
-        assert!(!logged_out_since_last_run(Some("loggedIn"), Login::Unreachable));
+        assert!(!logged_out_since_last_run(
+            Some("loggedIn"),
+            Login::Unreachable
+        ));
     }
 
     #[test]
     fn logging_back_in_clears_the_notice() {
         assert!(epic_notice(false, Some("loggedIn"), Login::LoggedOut));
-        assert!(epic_notice(true, Some("loggedOut"), Login::LoggedOut), "stays until dismissed");
+        assert!(
+            epic_notice(true, Some("loggedOut"), Login::LoggedOut),
+            "stays until dismissed"
+        );
         assert!(!epic_notice(true, Some("loggedOut"), Login::LoggedIn));
         assert!(!epic_notice(true, Some("loggedIn"), Login::LoggedIn));
     }
 
     #[test]
     fn background_library_change_is_reported_once() {
-        let mut s = Shared { library_changed: true, ..Shared::default() };
+        let mut s = Shared {
+            library_changed: true,
+            ..Shared::default()
+        };
         assert!(take_changed(&mut s, false));
         assert!(!take_changed(&mut s, false));
         assert!(take_changed(&mut s, true));
@@ -1157,7 +1519,10 @@ mod tests {
 
     #[test]
     fn steam_progress_tracks_until_done_and_reports_finish_once() {
-        let mut s = Shared { tracked: HashSet::from(["dl".to_string(), "ok".to_string()]), ..Shared::default() };
+        let mut s = Shared {
+            tracked: HashSet::from(["dl".to_string(), "ok".to_string()]),
+            ..Shared::default()
+        };
         let p = Progress {
             fraction: 0.25,
             action: ProgressAction::Download,
@@ -1169,14 +1534,25 @@ mod tests {
         };
 
         // Nothing started yet: the not-installed game stays tracked, the installed one is dropped.
-        assert!(apply_steam_progress(&mut s, vec![("dl".into(), None, false), ("ok".into(), None, true)]).is_empty());
+        assert!(
+            apply_steam_progress(
+                &mut s,
+                vec![("dl".into(), None, false), ("ok".into(), None, true)]
+            )
+            .is_empty()
+        );
         assert_eq!(s.tracked, HashSet::from(["dl".to_string()]));
 
-        assert!(apply_steam_progress(&mut s, vec![("dl".into(), Some(p.clone()), false)]).is_empty());
+        assert!(
+            apply_steam_progress(&mut s, vec![("dl".into(), Some(p.clone()), false)]).is_empty()
+        );
         assert_eq!(s.progress.get("dl"), Some(&p));
 
         // Download finished: progress cleared and reported once.
-        assert_eq!(apply_steam_progress(&mut s, vec![("dl".into(), None, false)]), ["dl"]);
+        assert_eq!(
+            apply_steam_progress(&mut s, vec![("dl".into(), None, false)]),
+            ["dl"]
+        );
         assert!(s.progress.is_empty());
         assert!(apply_steam_progress(&mut s, vec![("dl".into(), None, false)]).is_empty());
     }
@@ -1184,8 +1560,15 @@ mod tests {
     /// Pumpkin Jack on Steam and Epic (one card, a favorite in a collection), and Last Day of June on GOG.
     fn payload_games() -> (Vec<Game>, Vec<Entry>, Lists) {
         let games = vec![
-            Game { external_id: "1425609977".into(), provider: ProviderKind::Gog, ..game("Last Day of June", false, None, None) },
-            Game { external_id: "635320".into(), ..game("Pumpkin Jack", true, Some(120), Some(100)) },
+            Game {
+                external_id: "1425609977".into(),
+                provider: ProviderKind::Gog,
+                ..game("Last Day of June", false, None, None)
+            },
+            Game {
+                external_id: "635320".into(),
+                ..game("Pumpkin Jack", true, Some(120), Some(100))
+            },
             Game {
                 provider: ProviderKind::Epic,
                 external_id: "Pumpkin".into(),
@@ -1193,7 +1576,10 @@ mod tests {
                 ..game("Pumpkin Jack", true, Some(30), Some(50))
             },
         ];
-        let entries = entries::group(&games, &HashMap::from([("epic-Pumpkin".to_string(), 635320)]));
+        let entries = entries::group(
+            &games,
+            &HashMap::from([("epic-Pumpkin".to_string(), 635320)]),
+        );
         let lists = Lists {
             favorite: HashSet::from(["epic-Pumpkin".to_string()]),
             collections: HashMap::from([("steam-635320".to_string(), vec![3])]),
@@ -1207,7 +1593,15 @@ mod tests {
         let (games, entries, lists) = payload_games();
         let ttb = HashMap::from([("steam-635320".to_string(), 6 * 3600)]);
         let shown = view::arrange(&games, &entries, "", None, false, Sort::MostPlayed, &ttb);
-        let groups = view::group(&shown, &entries, &games, &ttb, Sort::MostPlayed, SystemTime::UNIX_EPOCH, &jiff::tz::TimeZone::UTC);
+        let groups = view::group(
+            &shown,
+            &entries,
+            &games,
+            &ttb,
+            Sort::MostPlayed,
+            SystemTime::UNIX_EPOCH,
+            &jiff::tz::TimeZone::UTC,
+        );
         let groups = view::favorites_first(&shown, groups, &entries, &games, &lists);
         let (cards, groups) = sections(&games, &entries, &ttb, &lists, shown, groups);
         let library = Library {
@@ -1240,9 +1634,18 @@ mod tests {
             total_files: None,
         };
         let mut queue = crate::downloads::Queue::default();
-        queue.push(crate::downloads::Job::new("epic-Pumpkin", crate::downloads::QueuedAction::Update));
-        queue.push(crate::downloads::Job::new("gog-1425609977", crate::downloads::QueuedAction::Install));
-        let titles = HashMap::from([("epic-Pumpkin", "Pumpkin Jack"), ("gog-1425609977", "Last Day of June")]);
+        queue.push(crate::downloads::Job::new(
+            "epic-Pumpkin",
+            crate::downloads::QueuedAction::Update,
+        ));
+        queue.push(crate::downloads::Job::new(
+            "gog-1425609977",
+            crate::downloads::QueuedAction::Install,
+        ));
+        let titles = HashMap::from([
+            ("epic-Pumpkin", "Pumpkin Jack"),
+            ("gog-1425609977", "Last Day of June"),
+        ]);
         let poll = Poll {
             running: Some("steam-635320".into()),
             progress: HashMap::from([("epic-Pumpkin".to_string(), progress)]),

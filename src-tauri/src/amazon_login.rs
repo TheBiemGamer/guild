@@ -48,7 +48,11 @@ fn login_code(url: &Url) -> Option<String> {
     if url.scheme() != "https" || !amazon || url.path() != "/" {
         return None;
     }
-    let value = |key: &str| url.query_pairs().find(|(k, _)| k == key).map(|(_, v)| v.into_owned());
+    let value = |key: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    };
     if value("openid.assoc_handle").as_deref() != Some("amzn_sonic_games_launcher") {
         return None;
     }
@@ -65,19 +69,57 @@ mod tests {
     fn takes_code_only_from_the_return_page() {
         let url = |s: &str| Url::parse(s).unwrap();
         assert_eq!(login_code(&url(DONE)), Some("ANabc+123".into()));
-        assert_eq!(login_code(&url(&DONE.replace("www.amazon.com/", "amazon.com/"))), Some("ANabc+123".into()));
-        assert_eq!(login_code(&url(&DONE.replace("www.amazon.com/", "www.amazon.com.evil.com/"))), None);
-        assert_eq!(login_code(&url(&DONE.replace("www.amazon.com/?", "www.amazon.com/ap/signin?"))), None);
+        assert_eq!(
+            login_code(&url(&DONE.replace("www.amazon.com/", "amazon.com/"))),
+            Some("ANabc+123".into())
+        );
+        assert_eq!(
+            login_code(&url(
+                &DONE.replace("www.amazon.com/", "www.amazon.com.evil.com/")
+            )),
+            None
+        );
+        assert_eq!(
+            login_code(&url(
+                &DONE.replace("www.amazon.com/?", "www.amazon.com/ap/signin?")
+            )),
+            None
+        );
         assert_eq!(login_code(&url(&DONE.replace("https://", "http://"))), None);
-        assert_eq!(login_code(&url(&DONE.replace("assoc_handle=amzn_sonic_games_launcher", "assoc_handle=usflex"))), None);
-        assert_eq!(login_code(&url(&DONE.replace("openid.assoc_handle=amzn_sonic_games_launcher&", ""))), None);
-        assert_eq!(login_code(&url(&DONE.replace("authorization_code=ANabc%2B123", "authorization_code="))), None);
-        assert_eq!(login_code(&url("https://www.amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher")), None);
+        assert_eq!(
+            login_code(&url(&DONE.replace(
+                "assoc_handle=amzn_sonic_games_launcher",
+                "assoc_handle=usflex"
+            ))),
+            None
+        );
+        assert_eq!(
+            login_code(&url(
+                &DONE.replace("openid.assoc_handle=amzn_sonic_games_launcher&", "")
+            )),
+            None
+        );
+        assert_eq!(
+            login_code(&url(
+                &DONE.replace("authorization_code=ANabc%2B123", "authorization_code=")
+            )),
+            None
+        );
+        assert_eq!(
+            login_code(&url(
+                "https://www.amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher"
+            )),
+            None
+        );
     }
 
     #[test]
     fn opens_only_nile_sign_in_page() {
-        let stdout = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/amazon/sample-auth-login-stdout.txt")).unwrap();
+        let stdout = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/amazon/sample-auth-login-stdout.txt"),
+        )
+        .unwrap();
         let answer: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
         assert!(sign_in_page(answer["url"].as_str().unwrap()).is_some());
         assert!(sign_in_page("https://www.amazon.com/ap/signin?x=1").is_some());

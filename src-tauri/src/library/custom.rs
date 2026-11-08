@@ -27,7 +27,10 @@ pub struct Custom;
 /// Every added game, from the database, its covers under `dirs.custom`.
 pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
     let conn = crate::cache::db::open(&dirs.db)?;
-    Ok(crate::cache::db::custom_games(&conn)?.iter().map(|c| game(c, &dirs.custom)).collect())
+    Ok(crate::cache::db::custom_games(&conn)?
+        .iter()
+        .map(|c| game(c, &dirs.custom))
+        .collect())
 }
 
 /// Listed by `list` and played by `commands::game::act_custom`, which know the app's folders.
@@ -69,7 +72,12 @@ fn missing(title: &str) -> Error {
 
 /// A new id: the time in hex, short and safe as a file name.
 pub fn new_id() -> String {
-    format!("{:x}", SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()))
+    format!(
+        "{:x}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    )
 }
 
 /// The id in a `custom-<id>` key.
@@ -81,7 +89,10 @@ pub fn id_of(key: &str) -> Option<&str> {
 pub fn game(c: &CustomGame, covers: &Path) -> Game {
     let exe = Path::new(&c.exe);
     // The cover doubles as the hero art: the game page and the banner show it too.
-    let cover = Image { path: cover_file(&covers.join(&c.id)), url: None };
+    let cover = Image {
+        path: cover_file(&covers.join(&c.id)),
+        url: None,
+    };
     Game {
         provider: ProviderKind::Custom,
         external_id: c.id.clone(),
@@ -91,7 +102,11 @@ pub fn game(c: &CustomGame, covers: &Path) -> Game {
         playtime_minutes: None,
         last_played: None,
         size_bytes: None,
-        art: Art { hero: cover.clone(), cover, header: Image::default() },
+        art: Art {
+            hero: cover.clone(),
+            cover,
+            header: Image::default(),
+        },
         dlc: Vec::new(),
         update_available: false,
         cloud_saves: false,
@@ -100,13 +115,20 @@ pub fn game(c: &CustomGame, covers: &Path) -> Game {
 
 /// `cover.<ext>` in `dir`, whatever the extension.
 pub fn cover_file(dir: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_stem() == Some("cover".as_ref()))
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.file_stem() == Some("cover".as_ref()))
 }
 
 /// Only an .exe: Windows runs a .bat or .cmd through cmd.exe, and nothing here goes through a shell.
 pub fn check_exe(exe: &str) -> Result<(), Msg> {
     let path = Path::new(exe);
-    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) {
+    if !path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+    {
         return Err(msg!(pickExe));
     }
     if !path.is_file() {
@@ -130,7 +152,10 @@ fn command(c: &CustomGame) -> Command {
 pub fn launch(c: &CustomGame) -> Result<String, Error> {
     check_exe(&c.exe).map_err(|_| missing(&c.name))?;
     command(c).spawn()?;
-    Ok(Path::new(&c.exe).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+    Ok(Path::new(&c.exe)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -138,13 +163,22 @@ mod tests {
     use super::*;
 
     fn row(exe: &str, args: &str) -> CustomGame {
-        CustomGame { id: "18f2a".into(), name: "Hollow Knight".into(), exe: exe.into(), args: args.into(), added: 1 }
+        CustomGame {
+            id: "18f2a".into(),
+            name: "Hollow Knight".into(),
+            exe: exe.into(),
+            args: args.into(),
+            added: 1,
+        }
     }
 
     #[test]
     fn keys_are_custom_dash_id_and_parse_back() {
         let id = new_id();
-        assert!(!id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()), "{id}");
+        assert!(
+            !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()),
+            "{id}"
+        );
         let key = ProviderKind::Custom.key(&id);
         assert_eq!(key, format!("custom-{id}"));
         assert_eq!(id_of(&key), Some(id.as_str()));
@@ -155,14 +189,29 @@ mod tests {
 
     #[test]
     fn launch_runs_the_exe_in_its_folder_with_split_args() {
-        let c = row(r"D:\Games\Hollow Knight\hollow_knight.exe", r#"-screen-fullscreen 0 -name "Big Boss""#);
+        let c = row(
+            r"D:\Games\Hollow Knight\hollow_knight.exe",
+            r#"-screen-fullscreen 0 -name "Big Boss""#,
+        );
         let command = command(&c);
-        assert_eq!(command.get_program(), r"D:\Games\Hollow Knight\hollow_knight.exe");
-        let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(
+            command.get_program(),
+            r"D:\Games\Hollow Knight\hollow_knight.exe"
+        );
+        let args: Vec<_> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args, ["-screen-fullscreen", "0", "-name", "Big Boss"]);
-        assert_eq!(command.get_current_dir(), Some(Path::new(r"D:\Games\Hollow Knight")));
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new(r"D:\Games\Hollow Knight"))
+        );
         // No arguments: none at all, not one empty one.
-        assert_eq!(super::command(&row(r"C:\x.exe", "  ")).get_args().count(), 0);
+        assert_eq!(
+            super::command(&row(r"C:\x.exe", "  ")).get_args().count(),
+            0
+        );
     }
 
     #[test]
@@ -181,20 +230,27 @@ mod tests {
 
     #[test]
     fn game_is_installed_while_the_exe_exists_and_finds_its_cover() {
-        let root = std::env::temp_dir().join(format!("launcher-custom-game-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("launcher-custom-game-{}", std::process::id()));
         let covers = root.join("custom");
         std::fs::create_dir_all(covers.join("18f2a")).unwrap();
         let exe = root.join("game.exe");
         let c = row(&exe.to_string_lossy(), "");
         let g = game(&c, &covers);
-        assert_eq!((g.key(), g.title.as_str(), g.installed), ("custom-18f2a".into(), "Hollow Knight", false));
+        assert_eq!(
+            (g.key(), g.title.as_str(), g.installed),
+            ("custom-18f2a".into(), "Hollow Knight", false)
+        );
         assert_eq!(g.install_dir.as_deref(), Some(root.as_path()));
         assert_eq!(g.art.cover.path, None);
         std::fs::write(&exe, b"").unwrap();
         std::fs::write(covers.join("18f2a").join("cover.png"), b"x").unwrap();
         let g = game(&c, &covers);
         assert!(g.installed);
-        assert_eq!(g.art.cover.path, Some(covers.join("18f2a").join("cover.png")));
+        assert_eq!(
+            g.art.cover.path,
+            Some(covers.join("18f2a").join("cover.png"))
+        );
         assert_eq!(g.art.hero, g.art.cover);
         std::fs::remove_dir_all(&root).unwrap();
     }

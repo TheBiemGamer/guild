@@ -3,6 +3,7 @@
 Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libraries. Built with Tauri 2, Svelte 5 + TypeScript, and Rust (`src-tauri/src`). Epic goes through the Legendary CLI, GOG through gogdl, Amazon through Nile; Steam through local files and steam-vent.
 
 ## Commands
+
 - Frontend:
   - `npm run check` (svelte-check + tsc)
   - `npm test` (node tests in `scripts/`)
@@ -16,6 +17,7 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 - Every commit must pass check, test, cargo test and clippy, and be formatted (`cargo fmt --check`, `npx prettier --check .`).
 
 ## Rules that aren't obvious from the code
+
 - **Secrets** live only in Windows Credential Manager (service `cloud.biem.guild`): the Steam refresh token, the IGDB secret and the SteamGridDB API key.
   - Never put them in SQLite, files, logs, error strings or `Debug` output, and never send them to the frontend.
   - Steam passwords and Steam Guard codes are never stored.
@@ -47,5 +49,6 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
   - Never stop a `Guild.exe` or `launcher.exe` you didn't start; the owner often runs `tauri dev`.
 
 ## Docs
+
 - Current spec, plan and mockups: `docs/superpowers/specs/2026-11-06-one-library-design.md`, `docs/superpowers/plans/2026-11-06-one-library.md`, and `docs/superpowers/specs/*mockup*.html`.
 - Progress ledger for the running plan (git-ignored): `.superpowers/sdd/2026-11-06-one-library/progress.md`.

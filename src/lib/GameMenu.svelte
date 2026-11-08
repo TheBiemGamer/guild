@@ -5,7 +5,18 @@
   import { commands, type Collection } from './bindings'
   import { t } from './i18n'
 
-  let { game, at = null, anchor, label, onclose, onchanged, onerror, onedit, onremoved, extra }: {
+  let {
+    game,
+    at = null,
+    anchor,
+    label,
+    onclose,
+    onchanged,
+    onerror,
+    onedit,
+    onremoved,
+    extra,
+  }: {
     game: Listed
     /** Opens at the pointer (a card's right-click); otherwise it hangs below its parent, right-aligned. */
     at?: { x: number; y: number } | null
@@ -187,54 +198,54 @@
       <button tabindex="-1" bind:this={removeCancel} onclick={() => onclose(true)}>{t('common.cancel')}</button>
     </div>
   {:else}
-  <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => commands.setFavorite(game.key, !game.favorite))}>
-    {#if game.favorite}<span class="check" aria-hidden="true">✓</span>{/if}
-    {t('menu.favorite')}
-  </button>
-  <div class="subwrap">
-    <button
-      role="menuitem"
-      aria-haspopup="menu"
-      aria-expanded={subOpen}
-      tabindex="-1"
-      bind:this={trigger}
-      onclick={() => (subOpen ? closeSub() : openSub(true))}
-    >
-      {t('menu.addToCollection')}<span class="more" aria-hidden="true">›</span>
+    <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => commands.setFavorite(game.key, !game.favorite))}>
+      {#if game.favorite}<span class="check" aria-hidden="true">✓</span>{/if}
+      {t('menu.favorite')}
     </button>
-    {#if subOpen}
-      <div class="menu sub" class:left={subLeft} role="menu" aria-label={t('menu.addToCollection')} tabindex="-1" bind:this={sub}>
-        {#each collections as c (c.id)}
-          {@const on = game.collections.includes(c.id)}
-          <button role="menuitemcheckbox" aria-checked={on} tabindex="-1" onclick={() => change(() => commands.setInCollection(game.key, c.id, !on))}>
-            {#if on}<span class="check" aria-hidden="true">✓</span>{/if}
-            {c.name}
-          </button>
-        {/each}
-        {#if collections.length}<div class="sep" role="separator"></div>{/if}
-        {#if naming}
-          <input aria-label={t('menu.collectionName')} placeholder={t('menu.name')} bind:value={name} onkeydown={nameKeydown} />
-        {:else}
-          <button role="menuitem" tabindex="-1" bind:this={newButton} onclick={startNaming}>{t('menu.newCollection')}</button>
-        {/if}
-      </div>
+    <div class="subwrap">
+      <button
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={subOpen}
+        tabindex="-1"
+        bind:this={trigger}
+        onclick={() => (subOpen ? closeSub() : openSub(true))}
+      >
+        {t('menu.addToCollection')}<span class="more" aria-hidden="true">›</span>
+      </button>
+      {#if subOpen}
+        <div class="menu sub" class:left={subLeft} role="menu" aria-label={t('menu.addToCollection')} tabindex="-1" bind:this={sub}>
+          {#each collections as c (c.id)}
+            {@const on = game.collections.includes(c.id)}
+            <button role="menuitemcheckbox" aria-checked={on} tabindex="-1" onclick={() => change(() => commands.setInCollection(game.key, c.id, !on))}>
+              {#if on}<span class="check" aria-hidden="true">✓</span>{/if}
+              {c.name}
+            </button>
+          {/each}
+          {#if collections.length}<div class="sep" role="separator"></div>{/if}
+          {#if naming}
+            <input aria-label={t('menu.collectionName')} placeholder={t('menu.name')} bind:value={name} onkeydown={nameKeydown} />
+          {:else}
+            <button role="menuitem" tabindex="-1" bind:this={newButton} onclick={startNaming}>{t('menu.newCollection')}</button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+    <button role="menuitem" tabindex="-1" onclick={() => change(() => commands.setHidden(game.key, !game.hidden))}>
+      {game.hidden ? t('menu.show') : t('menu.hide')}
+    </button>
+    {#if custom || extra}
+      <div class="sep" role="separator"></div>
     {/if}
-  </div>
-  <button role="menuitem" tabindex="-1" onclick={() => change(() => commands.setHidden(game.key, !game.hidden))}>
-    {game.hidden ? t('menu.show') : t('menu.hide')}
-  </button>
-  {#if custom || extra}
-    <div class="sep" role="separator"></div>
-  {/if}
-  {#if custom}
-    <button role="menuitem" tabindex="-1" onclick={edit}>{t('menu.edit')}</button>
-  {/if}
-  {#if extra}
-    {@render extra()}
-  {/if}
-  {#if custom}
-    <button role="menuitem" tabindex="-1" onclick={askRemove}>{t('menu.removeFromLibrary')}</button>
-  {/if}
+    {#if custom}
+      <button role="menuitem" tabindex="-1" onclick={edit}>{t('menu.edit')}</button>
+    {/if}
+    {#if extra}
+      {@render extra()}
+    {/if}
+    {#if custom}
+      <button role="menuitem" tabindex="-1" onclick={askRemove}>{t('menu.removeFromLibrary')}</button>
+    {/if}
   {/if}
 </div>
 

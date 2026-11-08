@@ -5,7 +5,17 @@
   import { t } from './i18n'
   import StoreIcon from './StoreIcon.svelte'
 
-  let { progress, queue, games, anchor, onclose, oncancel, onpause, onresume, onmove }: {
+  let {
+    progress,
+    queue,
+    games,
+    anchor,
+    onclose,
+    oncancel,
+    onpause,
+    onresume,
+    onmove,
+  }: {
     /** `poll`'s map, by copy key. */
     progress: Record<string, Progress>
     /** The Epic, GOG and Amazon download queue; its first job is the active one. */
@@ -39,8 +49,7 @@
   const active = $derived(queue.jobs[0])
   const next = $derived(queue.jobs.slice(1))
   const jobs = $derived(Object.entries(progress))
-  const storeOf = (key: string): Store =>
-    key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : key.startsWith('amazon-') ? 'amazon' : 'steam'
+  const storeOf = (key: string): Store => (key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : key.startsWith('amazon-') ? 'amazon' : 'steam')
   // Epic and GOG jobs outside the queue (Move, a GOG DLC uninstall) show their progress only; Steam's run in Steam.
   const other = $derived(jobs.filter(([k]) => storeOf(k) !== 'steam' && k !== active?.key))
   const steam = $derived(jobs.filter(([k]) => storeOf(k) === 'steam'))
@@ -55,7 +64,16 @@
 
 {#snippet fill(key: string, p: Progress | undefined, paused = false)}
   {@const pct = Math.round((p?.fraction ?? 0) * 100)}
-  <span class="fill" class:paused style="width: {pct}%" role="progressbar" aria-label={t('downloads.progress', { title: title(key) })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}></span>
+  <span
+    class="fill"
+    class:paused
+    style="width: {pct}%"
+    role="progressbar"
+    aria-label={t('downloads.progress', { title: title(key) })}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    aria-valuenow={pct}
+  ></span>
 {/snippet}
 
 {#snippet job(key: string, p: Progress)}
@@ -87,7 +105,12 @@
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
         </button>
       {/if}
-      <button class="glass icon" aria-label={t('downloads.cancelGame', { title: title(active.key) })} title={t('common.cancel')} onclick={() => oncancel(active.key)}>
+      <button
+        class="glass icon"
+        aria-label={t('downloads.cancelGame', { title: title(active.key) })}
+        title={t('common.cancel')}
+        onclick={() => oncancel(active.key)}
+      >
         <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
@@ -106,7 +129,12 @@
         <button class="glass icon" aria-label={t('downloads.moveUp', { title: title(j.key) })} disabled={i === 0} onclick={() => onmove(j.key, true)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
         </button>
-        <button class="glass icon" aria-label={t('downloads.moveDown', { title: title(j.key) })} disabled={i === next.length - 1} onclick={() => onmove(j.key, false)}>
+        <button
+          class="glass icon"
+          aria-label={t('downloads.moveDown', { title: title(j.key) })}
+          disabled={i === next.length - 1}
+          onclick={() => onmove(j.key, false)}
+        >
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
         </button>
         <button class="glass icon" aria-label={t('downloads.remove', { title: title(j.key) })} onclick={() => oncancel(j.key)}>

@@ -15,7 +15,11 @@ const OLD_AUTOSTART: &str = "Game Launcher";
 /// moved (another program had a file open), so nothing starts over empty.
 pub fn root(local: &Path) -> PathBuf {
     let (new, old) = (local.join(FOLDER), local.join(OLD_FOLDER));
-    if !new.join("data").exists() && old.join("data").exists() { old } else { new }
+    if !new.join("data").exists() && old.join("data").exists() {
+        old
+    } else {
+        new
+    }
 }
 
 /// Moves the old folder's contents into the new one unless the new one already has data. Runs before anything
@@ -26,11 +30,21 @@ pub fn folder(local: &Path) -> Option<String> {
         return None;
     }
     if new.join("data").exists() {
-        return Some(format!("{} is in use, so {} stays as it is", new.display(), old.display()));
+        return Some(format!(
+            "{} is in use, so {} stays as it is",
+            new.display(),
+            old.display()
+        ));
     }
     // `data` first: while it can't move (another program has the database open), nothing moves.
-    if let Err(e) = std::fs::create_dir_all(&new).and_then(|()| std::fs::rename(old.join("data"), new.join("data"))) {
-        return Some(format!("moving {} to {}: {e}; trying again next start", old.display(), new.display()));
+    if let Err(e) = std::fs::create_dir_all(&new)
+        .and_then(|()| std::fs::rename(old.join("data"), new.join("data")))
+    {
+        return Some(format!(
+            "moving {} to {}: {e}; trying again next start",
+            old.display(),
+            new.display()
+        ));
     }
     for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
         let to = new.join(entry.file_name());
@@ -40,7 +54,11 @@ pub fn folder(local: &Path) -> Option<String> {
     }
     Some(match std::fs::remove_dir(&old) {
         Ok(()) => format!("moved {} to {}", old.display(), new.display()),
-        Err(_) => format!("moved {} to {}; some files stayed behind", old.display(), new.display()),
+        Err(_) => format!(
+            "moved {} to {}; some files stayed behind",
+            old.display(),
+            new.display()
+        ),
     })
 }
 
@@ -63,13 +81,18 @@ pub fn secrets(
                 Err(keyring_core::Error::NoEntry) => {}
                 other => {
                     other?;
-                    tracing::info!("credential {user}: already under {service}, the old entry stays");
+                    tracing::info!(
+                        "credential {user}: already under {service}, the old entry stays"
+                    );
                     return Ok(false);
                 }
             }
             new.set_password(&secret)?;
             if new.get_password()? != secret {
-                return Err(keyring_core::Error::Invalid(user.to_string(), "read back differently".into()));
+                return Err(keyring_core::Error::Invalid(
+                    user.to_string(),
+                    "read back differently".into(),
+                ));
             }
             old.delete_credential()?;
             Ok(true)
@@ -86,13 +109,18 @@ pub fn secrets(
 #[cfg(windows)]
 pub fn autostart(app: &tauri::AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
-    let Some(on) = crate::platform::autostart(OLD_AUTOSTART) else { return };
+    let Some(on) = crate::platform::autostart(OLD_AUTOSTART) else {
+        return;
+    };
     if on && let Err(e) = app.autolaunch().enable() {
         tracing::warn!("start with windows: turning it on for this exe: {e}");
         return;
     }
     match crate::platform::remove_autostart(OLD_AUTOSTART) {
-        Ok(()) => tracing::info!("start with windows: moved from {OLD_AUTOSTART} ({})", if on { "on" } else { "off" }),
+        Ok(()) => tracing::info!(
+            "start with windows: moved from {OLD_AUTOSTART} ({})",
+            if on { "on" } else { "off" }
+        ),
         Err(e) => tracing::warn!("start with windows: removing the {OLD_AUTOSTART} entry: {e}"),
     }
 }
@@ -104,7 +132,8 @@ mod tests {
     use std::fs;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("launcher-migrate-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("launcher-migrate-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -130,7 +159,10 @@ mod tests {
         old_install(&local);
         assert_eq!(root(&local), local.join("launcher"));
         assert!(folder(&local).unwrap().starts_with("moved"));
-        assert_eq!(fs::read_to_string(local.join("Guild/data/library.sqlite")).unwrap(), "db");
+        assert_eq!(
+            fs::read_to_string(local.join("Guild/data/library.sqlite")).unwrap(),
+            "db"
+        );
         assert!(local.join("Guild/cache/art").is_dir());
         assert!(!local.join("launcher").exists());
         assert_eq!(root(&local), local.join("Guild"));
@@ -187,15 +219,30 @@ mod tests {
     fn secrets_move_once_and_never_overwrite() {
         let store = keyring_core::mock::Store::new().unwrap();
         let entry = |s: &str, u: &str| store.build(s, u, None);
-        entry(OLD_SERVICE, "a").unwrap().set_password("one").unwrap();
-        entry(OLD_SERVICE, "b").unwrap().set_password("old").unwrap();
+        entry(OLD_SERVICE, "a")
+            .unwrap()
+            .set_password("one")
+            .unwrap();
+        entry(OLD_SERVICE, "b")
+            .unwrap()
+            .set_password("old")
+            .unwrap();
         entry("new", "b").unwrap().set_password("new").unwrap();
         secrets(entry, "new", &["a", "b", "c"]);
         assert_eq!(entry("new", "a").unwrap().get_password().unwrap(), "one");
-        assert!(matches!(entry(OLD_SERVICE, "a").unwrap().get_password(), Err(keyring_core::Error::NoEntry)));
+        assert!(matches!(
+            entry(OLD_SERVICE, "a").unwrap().get_password(),
+            Err(keyring_core::Error::NoEntry)
+        ));
         assert_eq!(entry("new", "b").unwrap().get_password().unwrap(), "new");
-        assert_eq!(entry(OLD_SERVICE, "b").unwrap().get_password().unwrap(), "old");
-        assert!(matches!(entry("new", "c").unwrap().get_password(), Err(keyring_core::Error::NoEntry)));
+        assert_eq!(
+            entry(OLD_SERVICE, "b").unwrap().get_password().unwrap(),
+            "old"
+        );
+        assert!(matches!(
+            entry("new", "c").unwrap().get_password(),
+            Err(keyring_core::Error::NoEntry)
+        ));
         secrets(entry, "new", &["a"]);
         assert_eq!(entry("new", "a").unwrap().get_password().unwrap(), "one");
     }
@@ -204,12 +251,18 @@ mod tests {
     fn a_failed_copy_keeps_the_old_secret() {
         let store = keyring_core::mock::Store::new().unwrap();
         let entry = |s: &str, u: &str| store.build(s, u, None);
-        entry(OLD_SERVICE, "a").unwrap().set_password("one").unwrap();
+        entry(OLD_SERVICE, "a")
+            .unwrap()
+            .set_password("one")
+            .unwrap();
         let new = entry("new", "a").unwrap();
         let cred: &keyring_core::mock::Cred = new.as_any().downcast_ref().unwrap();
         // The first call (the presence check) fails, so nothing is copied.
         cred.set_error(keyring_core::Error::NoStorageAccess("locked".into()));
         secrets(entry, "new", &["a"]);
-        assert_eq!(entry(OLD_SERVICE, "a").unwrap().get_password().unwrap(), "one");
+        assert_eq!(
+            entry(OLD_SERVICE, "a").unwrap().get_password().unwrap(),
+            "one"
+        );
     }
 }

@@ -28,7 +28,11 @@ import { t } from './i18n'
 export type Listed = Pick<Card, 'key' | 'title' | 'favorite' | 'hidden' | 'collections'>
 export const emptyQueue: QueueView = { jobs: [], paused: false, active: null }
 /** Where one of `keys` (a game's copy keys) is in the queue: running, paused at the head, or waiting; null when not queued. */
-export interface QueueState { key: string; action: QueuedAction; state: 'active' | 'paused' | 'queued' }
+export interface QueueState {
+  key: string
+  action: QueuedAction
+  state: 'active' | 'paused' | 'queued'
+}
 export function queueState(queue: QueueView, keys: string[]): QueueState | null {
   const at = queue.jobs.findIndex((j) => keys.includes(j.key))
   if (at < 0) return null
@@ -43,7 +47,12 @@ export const library = (query: string, store: Store | null, installedOnly: boole
  * `withDlc`: an Epic or GOG install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the copy `key`.
  * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic, GOG or Amazon Move goes to.
  */
-export interface ActOptions { withDlc?: boolean; dlc?: string; keep?: Keep; dest?: string }
+export interface ActOptions {
+  withDlc?: boolean
+  dlc?: string
+  keep?: Keep
+  dest?: string
+}
 /** Resolves to a conflict when an Epic or GOG Play asks first instead of launching; null otherwise. */
 export const act = (action: Action, key: string, o: ActOptions = {}): Promise<Conflict | null> =>
   commands.act(action, key, o.withDlc ?? null, o.dlc ?? null, o.keep ?? null, o.dest ?? null)
@@ -51,15 +60,13 @@ export const act = (action: Action, key: string, o: ActOptions = {}): Promise<Co
  * The Steam copy's owned DLC (Steam logs on for it: connected account only, cached in Rust). Asked once per
  * game and kept, like the other game page answers; an empty list (none, or a failure) is null, so it's asked again.
  */
-export const steamDlc = (key: string) =>
-  remembered('steamDlc', key, () => commands.steamDlc(key).then((d) => (d.length ? d : null)))
+export const steamDlc = (key: string) => remembered('steamDlc', key, () => commands.steamDlc(key).then((d) => (d.length ? d : null)))
 /** Download size in bytes (Epic asks Legendary online, GOG asks gogdl, Steam logs on; cached); null when unknown. */
 export const downloadSize = (key: string) => remembered('size', key, () => commands.downloadSize(key))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */
 export const gameInfo = (key: string) => remembered('info', key, () => commands.gameInfo(key))
 /** `gameInfo`'s screenshots as ready-to-use URLs, downloaded on first use; failed ones are left out. */
-export const screenshots = async (key: string, urls: string[]) =>
-  (await commands.screenshots(key, urls)).flatMap((p) => url(p) ?? [])
+export const screenshots = async (key: string, urls: string[]) => (await commands.screenshots(key, urls)).flatMap((p) => url(p) ?? [])
 /** How long to beat from IGDB in seconds, null where unknown. Null: no credentials, an Epic game, or IGDB doesn't know it. */
 export const timeToBeat = (key: string) => remembered('ttb', key, () => commands.timeToBeat(key))
 

@@ -38,13 +38,25 @@ pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
         return None;
     }
     let data = &entry["data"];
-    let short = data["short_description"].as_str().map(strip_html).unwrap_or_default();
+    let short = data["short_description"]
+        .as_str()
+        .map(strip_html)
+        .unwrap_or_default();
     let description = if short.is_empty() {
-        data["about_the_game"].as_str().map(strip_html).unwrap_or_default()
+        data["about_the_game"]
+            .as_str()
+            .map(strip_html)
+            .unwrap_or_default()
     } else {
         short
     };
-    let first = |field: &str| data[field].as_array().and_then(|a| a.first()).and_then(Value::as_str).map(str::to_owned);
+    let first = |field: &str| {
+        data[field]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
     Some(GameInfo {
         description,
         genres: data["genres"]
@@ -56,7 +68,10 @@ pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
             .collect(),
         developer: first("developers"),
         publisher: first("publishers"),
-        released: data["release_date"]["date"].as_str().filter(|d| !d.is_empty()).map(str::to_owned),
+        released: data["release_date"]["date"]
+            .as_str()
+            .filter(|d| !d.is_empty())
+            .map(str::to_owned),
         screenshots: data["screenshots"]
             .as_array()
             .into_iter()
@@ -71,20 +86,41 @@ pub fn parse_steam_appdetails(json: &str, appid: &str) -> Option<GameInfo> {
 
 /// A GamesDB localized field (`{"en-US": .., "*": ..}`): English, else the default.
 fn english(v: &Value) -> Option<&str> {
-    v["en-US"].as_str().or_else(|| v["*"].as_str()).filter(|s| !s.is_empty())
+    v["en-US"]
+        .as_str()
+        .or_else(|| v["*"].as_str())
+        .filter(|s| !s.is_empty())
 }
 
 /// GOG GamesDB game object (inside an `external_releases` answer). `None` when it has nothing to show.
 pub fn parse_gamesdb_info(json: &str) -> Option<GameInfo> {
     let root: Value = serde_json::from_str(json).ok()?;
     let game = &root["game"];
-    let first = |field: &str| game[field].as_array().and_then(|a| a.first()).and_then(|p| p["name"].as_str()).map(str::to_owned);
+    let first = |field: &str| {
+        game[field]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|p| p["name"].as_str())
+            .map(str::to_owned)
+    };
     let parsed = GameInfo {
-        description: english(&game["summary"]).map(strip_html).unwrap_or_default(),
-        genres: game["genres"].as_array().into_iter().flatten().filter_map(|g| english(&g["name"])).map(str::to_owned).collect(),
+        description: english(&game["summary"])
+            .map(strip_html)
+            .unwrap_or_default(),
+        genres: game["genres"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|g| english(&g["name"]))
+            .map(str::to_owned)
+            .collect(),
         developer: first("developers"),
         publisher: first("publishers"),
-        released: game["first_release_date"].as_str().and_then(|d| d.split('T').next()).filter(|d| !d.is_empty()).map(str::to_owned),
+        released: game["first_release_date"]
+            .as_str()
+            .and_then(|d| d.split('T').next())
+            .filter(|d| !d.is_empty())
+            .map(str::to_owned),
         // An empty formatter is the original image; the art cache stores it at any size.
         screenshots: game["screenshots"]
             .as_array()
@@ -102,12 +138,24 @@ pub fn parse_gamesdb_info(json: &str) -> Option<GameInfo> {
 /// `base` with each of its empty fields taken from `extra`.
 pub fn fill_missing(base: GameInfo, extra: GameInfo) -> GameInfo {
     GameInfo {
-        description: if base.description.is_empty() { extra.description } else { base.description },
-        genres: if base.genres.is_empty() { extra.genres } else { base.genres },
+        description: if base.description.is_empty() {
+            extra.description
+        } else {
+            base.description
+        },
+        genres: if base.genres.is_empty() {
+            extra.genres
+        } else {
+            base.genres
+        },
         developer: base.developer.or(extra.developer),
         publisher: base.publisher.or(extra.publisher),
         released: base.released.or(extra.released),
-        screenshots: if base.screenshots.is_empty() { extra.screenshots } else { base.screenshots },
+        screenshots: if base.screenshots.is_empty() {
+            extra.screenshots
+        } else {
+            base.screenshots
+        },
         has_dlc: base.has_dlc,
     }
 }
@@ -124,7 +172,13 @@ pub fn gamesdb_cached_or_fetch(
     now_secs: i64,
     fetch: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    let cached = |age| conn.and_then(|c| db::cached_info(c, key, DETAILS_GAMESDB, age, now_secs).ok().flatten());
+    let cached = |age| {
+        conn.and_then(|c| {
+            db::cached_info(c, key, DETAILS_GAMESDB, age, now_secs)
+                .ok()
+                .flatten()
+        })
+    };
     if let Some(json) = cached(GAMESDB_FOUND_SECS)
         && (json != "null" || cached(GAMESDB_MISS_SECS).is_some())
     {
@@ -144,10 +198,17 @@ pub fn parse_epic_info(info: &Value) -> Option<GameInfo> {
     if !info.is_object() {
         return None;
     }
-    let text = |field: &str| info[field].as_str().map(strip_html).filter(|s| !s.is_empty());
+    let text = |field: &str| {
+        info[field]
+            .as_str()
+            .map(strip_html)
+            .filter(|s| !s.is_empty())
+    };
     let title = text("title");
     // Most entries repeat the title as their description; that is no description.
-    let description = text("description").filter(|d| Some(d) != title.as_ref()).unwrap_or_default();
+    let description = text("description")
+        .filter(|d| Some(d) != title.as_ref())
+        .unwrap_or_default();
     // `creationDate` is when the catalog entry was made, not a release date, so it isn't used.
     let released = info["releaseInfo"]
         .as_array()
@@ -164,7 +225,8 @@ pub fn parse_epic_info(info: &Value) -> Option<GameInfo> {
         screenshots: Vec::new(),
         has_dlc: None,
     };
-    let empty = parsed.description.is_empty() && parsed.developer.is_none() && parsed.released.is_none();
+    let empty =
+        parsed.description.is_empty() && parsed.developer.is_none() && parsed.released.is_none();
     (!empty).then_some(parsed)
 }
 
@@ -176,13 +238,20 @@ pub fn epic_details(list: &Value) -> Vec<(String, String)> {
         .flatten()
         .filter_map(|g| {
             let key = ProviderKind::Epic.key(g["app_name"].as_str()?);
-            Some((key, serde_json::to_string(&parse_epic_info(&g["metadata"])).ok()?))
+            Some((
+                key,
+                serde_json::to_string(&parse_epic_info(&g["metadata"])).ok()?,
+            ))
         })
         .collect()
 }
 
 /// Caches every `(key, details json)` in one transaction.
-pub fn remember_all(conn: &Connection, all: &[(String, String)], now_secs: i64) -> Result<(), Error> {
+pub fn remember_all(
+    conn: &Connection,
+    all: &[(String, String)],
+    now_secs: i64,
+) -> Result<(), Error> {
     let tx = conn.unchecked_transaction()?;
     for (key, json) in all {
         db::put_info(&tx, key, DETAILS, json, now_secs)?;
@@ -200,7 +269,8 @@ pub fn strip_html(s: &str) -> String {
         out.push_str(&rest[..open]);
         let after = &rest[open + 1..];
         // Only `<name`, `</name` and `<!` start a tag; "2 < 3" is text.
-        let starts_tag = after.starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!');
+        let starts_tag =
+            after.starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!');
         let Some(close) = after.find('>').filter(|_| starts_tag) else {
             out.push('<');
             rest = after;
@@ -213,7 +283,13 @@ pub fn strip_html(s: &str) -> String {
             .take_while(|c| c.is_ascii_alphanumeric())
             .collect::<String>()
             .to_ascii_lowercase();
-        if name == "br" || (closing && matches!(name.as_str(), "p" | "li" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6")) {
+        if name == "br"
+            || (closing
+                && matches!(
+                    name.as_str(),
+                    "p" | "li" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+                ))
+        {
             out.push('\n');
         }
         rest = &after[close + 1..];
@@ -227,7 +303,12 @@ pub fn strip_html(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&amp;", "&");
-    decoded.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n")
+    decoded
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Cached JSON for `(key, kind)` when fresh, else a fetch whose result is cached.
@@ -240,7 +321,11 @@ pub fn cached_or_fetch(
     now_secs: i64,
     fetch: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    if let Some(cached) = conn.and_then(|c| db::cached_info(c, key, kind, max_age_secs, now_secs).ok().flatten()) {
+    if let Some(cached) = conn.and_then(|c| {
+        db::cached_info(c, key, kind, max_age_secs, now_secs)
+            .ok()
+            .flatten()
+    }) {
         return Some(cached);
     }
     let json = fetch()?;
@@ -257,7 +342,8 @@ mod tests {
     use super::*;
 
     fn steam_fixture() -> String {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/steam/appdetails-447040.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/steam/appdetails-447040.json");
         std::fs::read_to_string(path).unwrap()
     }
 
@@ -281,12 +367,18 @@ mod tests {
         // Its `dlc` array lists 30 app ids.
         assert_eq!(info.has_dlc, Some(true));
         let no_dlc = r#"{"1":{"success":true,"data":{"short_description":"x"}}}"#;
-        assert_eq!(parse_steam_appdetails(no_dlc, "1").unwrap().has_dlc, Some(false));
+        assert_eq!(
+            parse_steam_appdetails(no_dlc, "1").unwrap().has_dlc,
+            Some(false)
+        );
     }
 
     #[test]
     fn steam_failure_is_none() {
-        assert_eq!(parse_steam_appdetails(r#"{"447040":{"success":false}}"#, "447040"), None);
+        assert_eq!(
+            parse_steam_appdetails(r#"{"447040":{"success":false}}"#, "447040"),
+            None
+        );
         assert_eq!(parse_steam_appdetails("not json", "447040"), None);
         assert_eq!(parse_steam_appdetails(&steam_fixture(), "1"), None);
     }
@@ -300,14 +392,18 @@ mod tests {
     }
 
     fn epic_fixture() -> Value {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legendary/list-entry.json");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legendary/list-entry.json");
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
     #[test]
     fn parses_epic_catalog_item() {
         let info = parse_epic_info(&epic_fixture()).unwrap();
-        assert!(info.description.starts_with("A deep, interactive adventure about love and loss"));
+        assert!(
+            info.description
+                .starts_with("A deep, interactive adventure about love and loss")
+        );
         assert_eq!(info.developer.as_deref(), Some("505 Games"));
         assert_eq!(info.released.as_deref(), Some("2019-06-26"));
         // The catalog's keyImages are box art only.
@@ -345,24 +441,40 @@ mod tests {
         assert_eq!(all.len(), 2);
         remember_all(&conn, &all, 1_000).unwrap();
 
-        let shown = db::cached_info(&conn, "epic-Pumpkin", "details", 100, 1_050).unwrap().unwrap();
+        let shown = db::cached_info(&conn, "epic-Pumpkin", "details", 100, 1_050)
+            .unwrap()
+            .unwrap();
         let info: Option<GameInfo> = serde_json::from_str(&shown).unwrap();
         assert_eq!(info.unwrap().developer.as_deref(), Some("505 Games"));
         // Nothing to show is remembered as null, so the next visit doesn't run `legendary list` again.
-        assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_050).unwrap().as_deref(), Some("null"));
-        let again = cached_or_fetch(Some(&conn), "epic-Fortnite", DETAILS, 100, 1_050, || panic!("must not fetch"));
+        assert_eq!(
+            db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_050)
+                .unwrap()
+                .as_deref(),
+            Some("null")
+        );
+        let again = cached_or_fetch(Some(&conn), "epic-Fortnite", DETAILS, 100, 1_050, || {
+            panic!("must not fetch")
+        });
         assert_eq!(again.as_deref(), Some("null"));
         // The 7-day lifetime still applies.
-        assert_eq!(db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_200).unwrap(), None);
+        assert_eq!(
+            db::cached_info(&conn, "epic-Fortnite", "details", 100, 1_200).unwrap(),
+            None
+        );
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn gamesdb_info_reads_summary_genres_and_screenshots() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gamesdb/pumpkin.json");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gamesdb/pumpkin.json");
         let info = parse_gamesdb_info(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert!(info.description.starts_with("A deep, interactive adventure about love and loss"));
+        assert!(
+            info.description
+                .starts_with("A deep, interactive adventure about love and loss")
+        );
         assert_eq!(info.genres, vec!["Role-playing (RPG)", "Adventure"]);
         assert_eq!(info.developer.as_deref(), Some("Ovosonico"));
         assert_eq!(info.publisher.as_deref(), Some("505 Games"));
@@ -378,7 +490,11 @@ mod tests {
 
     #[test]
     fn fill_missing_keeps_base_and_fills_gaps() {
-        let base = GameInfo { description: "mine".into(), developer: Some("Me".into()), ..GameInfo::default() };
+        let base = GameInfo {
+            description: "mine".into(),
+            developer: Some("Me".into()),
+            ..GameInfo::default()
+        };
         let extra = GameInfo {
             description: "theirs".into(),
             genres: vec!["RPG".into()],
@@ -403,7 +519,8 @@ mod tests {
         let day = 24 * 60 * 60;
         gamesdb_cached_or_fetch(Some(&conn), "epic-A", 0, || Some("{}".into()));
         gamesdb_cached_or_fetch(Some(&conn), "epic-B", 0, || Some("null".into()));
-        let again = |key, at| gamesdb_cached_or_fetch(Some(&conn), key, at, || Some("new".into())).unwrap();
+        let again =
+            |key, at| gamesdb_cached_or_fetch(Some(&conn), key, at, || Some("new".into())).unwrap();
         assert_eq!(again("epic-A", 20 * day), "{}");
         assert_eq!(again("epic-B", 6 * day), "null");
         assert_eq!(again("epic-B", 8 * day), "new");
@@ -415,7 +532,10 @@ mod tests {
     #[test]
     fn strips_html_to_plain_text() {
         assert_eq!(strip_html("<p>A &amp; B</p><br>C"), "A & B\nC");
-        assert_eq!(strip_html("1 &lt; 2 &quot;x&quot; it&#39;s&nbsp;ok"), "1 < 2 \"x\" it's ok");
+        assert_eq!(
+            strip_html("1 &lt; 2 &quot;x&quot; it&#39;s&nbsp;ok"),
+            "1 < 2 \"x\" it's ok"
+        );
         assert_eq!(strip_html("a<br/>\n\n<br />b"), "a\nb");
         assert_eq!(strip_html("&amp;lt;"), "&lt;");
         assert_eq!(strip_html("2 < 3 and <b>x</b>"), "2 < 3 and x");
@@ -425,14 +545,30 @@ mod tests {
     #[test]
     fn failed_fetch_is_not_cached() {
         let (conn, dir) = temp_db("info-failed");
-        assert_eq!(cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || None), None);
-        assert_eq!(db::cached_info(&conn, "steam-1", DETAILS, 100, 1_000).unwrap(), None);
+        assert_eq!(
+            cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || None),
+            None
+        );
+        assert_eq!(
+            db::cached_info(&conn, "steam-1", DETAILS, 100, 1_000).unwrap(),
+            None
+        );
         // A successful one is.
-        let got = cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || Some("{}".into()));
+        let got = cached_or_fetch(Some(&conn), "steam-1", DETAILS, 100, 1_000, || {
+            Some("{}".into())
+        });
         assert_eq!(got.as_deref(), Some("{}"));
-        assert_eq!(db::cached_info(&conn, "steam-1", DETAILS, 100, 1_000).unwrap().as_deref(), Some("{}"));
+        assert_eq!(
+            db::cached_info(&conn, "steam-1", DETAILS, 100, 1_000)
+                .unwrap()
+                .as_deref(),
+            Some("{}")
+        );
         // Without a database it still answers, it just can't remember.
-        assert_eq!(cached_or_fetch(None, "steam-1", DETAILS, 100, 1_000, || Some("x".into())).as_deref(), Some("x"));
+        assert_eq!(
+            cached_or_fetch(None, "steam-1", DETAILS, 100, 1_000, || Some("x".into())).as_deref(),
+            Some("x")
+        );
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -441,15 +577,31 @@ mod tests {
     fn fresh_cache_is_used_without_fetching_and_kinds_stay_apart() {
         let (conn, dir) = temp_db("info-cached");
         db::put_info(&conn, "epic-A", DETAILS, "old", 1_000).unwrap();
-        let got = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_050, || panic!("must not fetch"));
+        let got = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_050, || {
+            panic!("must not fetch")
+        });
         assert_eq!(got.as_deref(), Some("old"));
         // Another kind for the same game is its own entry (the download size).
-        let size = cached_or_fetch(Some(&conn), "epic-A", "size", 100, 1_050, || Some("42".into()));
+        let size = cached_or_fetch(Some(&conn), "epic-A", "size", 100, 1_050, || {
+            Some("42".into())
+        });
         assert_eq!(size.as_deref(), Some("42"));
-        assert_eq!(db::cached_info(&conn, "epic-A", "size", 100, 1_050).unwrap().as_deref(), Some("42"));
-        assert_eq!(db::cached_info(&conn, "epic-A", DETAILS, 100, 1_050).unwrap().as_deref(), Some("old"));
+        assert_eq!(
+            db::cached_info(&conn, "epic-A", "size", 100, 1_050)
+                .unwrap()
+                .as_deref(),
+            Some("42")
+        );
+        assert_eq!(
+            db::cached_info(&conn, "epic-A", DETAILS, 100, 1_050)
+                .unwrap()
+                .as_deref(),
+            Some("old")
+        );
         // Too old: fetched again.
-        let fresh = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_200, || Some("new".into()));
+        let fresh = cached_or_fetch(Some(&conn), "epic-A", DETAILS, 100, 1_200, || {
+            Some("new".into())
+        });
         assert_eq!(fresh.as_deref(), Some("new"));
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();

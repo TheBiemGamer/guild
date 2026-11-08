@@ -59,7 +59,10 @@ fn login_code(url: &Url) -> Option<String> {
     if url.host_str() != Some(CODE_HOST) {
         return None;
     }
-    url.query_pairs().find(|(k, _)| k == "code").map(|(_, v)| v.into_owned()).filter(|c| !c.is_empty())
+    url.query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.into_owned())
+        .filter(|c| !c.is_empty())
 }
 
 #[cfg(test)]
@@ -69,9 +72,18 @@ mod tests {
     #[test]
     fn takes_code_only_from_the_dead_host() {
         let url = |s: &str| Url::parse(s).unwrap();
-        assert_eq!(login_code(&url("https://launcher.invalid/?code=abc%2B123")), Some("abc+123".into()));
+        assert_eq!(
+            login_code(&url("https://launcher.invalid/?code=abc%2B123")),
+            Some("abc+123".into())
+        );
         assert_eq!(login_code(&url("https://launcher.invalid/?code=")), None);
-        assert_eq!(login_code(&url("https://www.epicgames.com/id/login?code=abc")), None);
-        assert_eq!(login_code(&url("https://launcher.invalid.evil.com/?code=abc")), None);
+        assert_eq!(
+            login_code(&url("https://www.epicgames.com/id/login?code=abc")),
+            None
+        );
+        assert_eq!(
+            login_code(&url("https://launcher.invalid.evil.com/?code=abc")),
+            None
+        );
     }
 }

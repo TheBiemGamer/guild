@@ -62,8 +62,7 @@ export function lastPlayedLabel(at: number, now = Date.now() / 1000): string {
   if (days === 0) return t('lastPlayed.today')
   if (days === 1) return t('lastPlayed.yesterday')
   if (days < 30) return t('lastPlayed.days', { n: days })
-  const months =
-    (today.getFullYear() - then.getFullYear()) * 12 + today.getMonth() - then.getMonth() - (today.getDate() < then.getDate() ? 1 : 0)
+  const months = (today.getFullYear() - then.getFullYear()) * 12 + today.getMonth() - then.getMonth() - (today.getDate() < then.getDate() ? 1 : 0)
   if (months < 12) return t('lastPlayed.months', { n: Math.max(1, months) })
   return t('lastPlayed.years', { n: Math.floor(months / 12) })
 }

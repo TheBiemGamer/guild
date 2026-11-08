@@ -108,7 +108,8 @@ pub fn open(path: &Path) -> Result<Connection, Error> {
 }
 
 fn user_version(conn: &Connection) -> rusqlite::Result<usize> {
-    conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).map(|v| v as usize)
+    conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+        .map(|v| v as usize)
 }
 
 /// Runs each step above `user_version`, each in its own transaction. Two connections opening at once
@@ -152,21 +153,32 @@ pub fn file_in(dir: &Path) -> PathBuf {
         old.clone()
     };
     // SQLite would apply a stray journal of `library.sqlite` to the adopted file.
-    if let Some(stray) = SIDECARS.iter().map(|s| sidecar(&new, s)).find(|p| p.exists()) {
+    if let Some(stray) = SIDECARS
+        .iter()
+        .map(|s| sidecar(&new, s))
+        .find(|p| p.exists())
+    {
         return keep_old(&format!("{} is in the way", stray.display()));
     }
     if new.exists() {
         // A `library.sqlite` from before settings existed only ever held a game cache. It is set aside, not deleted.
         let aside = dir.join("library-v1.sqlite");
         if aside.exists() {
-            return keep_old(&format!("{} is an old cache and {} exists", new.display(), aside.display()));
+            return keep_old(&format!(
+                "{} is an old cache and {} exists",
+                new.display(),
+                aside.display()
+            ));
         }
         if let Err(e) = std::fs::rename(&new, &aside) {
             return keep_old(&e);
         }
     }
     let adopted = rename_with_sidecars(&old, &new).or_else(|e| {
-        tracing::warn!("database: renaming {}: {e}; copying it instead", old.display());
+        tracing::warn!(
+            "database: renaming {}: {e}; copying it instead",
+            old.display()
+        );
         copy(&old, &new)
     });
     match adopted {
@@ -180,9 +192,14 @@ pub fn file_in(dir: &Path) -> PathBuf {
 /// A file without a `settings` table: the game cache of the first builds, never anyone's data.
 fn is_leftover(path: &Path) -> bool {
     let settings_tables = |conn: Connection| -> rusqlite::Result<i64> {
-        conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'settings'", [], |r| r.get(0))
+        conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'settings'",
+            [],
+            |r| r.get(0),
+        )
     };
-    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).and_then(settings_tables) == Ok(0)
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).and_then(settings_tables)
+        == Ok(0)
 }
 
 /// Renames `old` and its sidecars to `new`, the main file last so it never arrives without them.
@@ -233,7 +250,10 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
             return Ok(None);
         };
         let image = |r: &Row, i| -> rusqlite::Result<Image> {
-            Ok(Image { path: r.get::<_, Option<String>>(i)?.map(PathBuf::from), url: r.get(i + 1)? })
+            Ok(Image {
+                path: r.get::<_, Option<String>>(i)?.map(PathBuf::from),
+                url: r.get(i + 1)?,
+            })
         };
         Ok(Some(Game {
             provider,
@@ -242,17 +262,28 @@ pub fn load(conn: &Connection) -> Result<Vec<Game>, Error> {
             installed: r.get(3)?,
             install_dir: r.get::<_, Option<String>>(4)?.map(PathBuf::from),
             playtime_minutes: r.get::<_, Option<i64>>(5)?.map(|m| m as u64),
-            last_played: r.get::<_, Option<i64>>(6)?.map(|s| UNIX_EPOCH + Duration::from_secs(s as u64)),
+            last_played: r
+                .get::<_, Option<i64>>(6)?
+                .map(|s| UNIX_EPOCH + Duration::from_secs(s as u64)),
             size_bytes: r.get::<_, Option<i64>>(13)?.map(|b| b as u64),
-            art: Art { cover: image(r, 7)?, header: image(r, 9)?, hero: image(r, 11)? },
+            art: Art {
+                cover: image(r, 7)?,
+                header: image(r, 9)?,
+                hero: image(r, 11)?,
+            },
             // A list that doesn't parse is a cache miss: the next Epic scan fills it again.
-            dlc: r.get::<_, Option<String>>(14)?.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default(),
+            dlc: r
+                .get::<_, Option<String>>(14)?
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default(),
             update_available: r.get(15)?,
             cloud_saves: r.get(16)?,
         }))
     })?;
     // Rows from an unknown provider (e.g. written by a newer build) are skipped.
-    Ok(rows.filter_map(Result::transpose).collect::<Result<_, _>>()?)
+    Ok(rows
+        .filter_map(Result::transpose)
+        .collect::<Result<_, _>>()?)
 }
 
 /// Records that `key` was launched at `at_secs`, keeping the latest time seen.
@@ -273,7 +304,12 @@ pub fn launches(conn: &Connection) -> Result<HashMap<String, i64>, Error> {
 }
 
 /// Records a play session of the copy `key` timed here: started at `started_secs`, `seconds` long.
-pub fn add_session(conn: &Connection, key: &str, started_secs: i64, seconds: i64) -> Result<(), Error> {
+pub fn add_session(
+    conn: &Connection,
+    key: &str,
+    started_secs: i64,
+    seconds: i64,
+) -> Result<(), Error> {
     conn.execute(
         "INSERT INTO playtime (key, started, seconds) VALUES (?1, ?2, ?3)",
         params![key, started_secs, seconds.max(0)],
@@ -289,7 +325,11 @@ pub fn own_totals(conn: &Connection) -> Result<HashMap<String, i64>, Error> {
 }
 
 pub fn setting(conn: &Connection, name: &str) -> Result<Option<String>, Error> {
-    Ok(conn.query_row("SELECT value FROM settings WHERE name = ?1", [name], |r| r.get(0)).optional()?)
+    Ok(conn
+        .query_row("SELECT value FROM settings WHERE name = ?1", [name], |r| {
+            r.get(0)
+        })
+        .optional()?)
 }
 
 /// Stores `value` under `name`, or removes the setting when `value` is `None`.
@@ -308,19 +348,31 @@ pub fn set_setting(conn: &Connection, name: &str, value: Option<&str>) -> Result
 /// The owner's choice `name` for the game copy `key`, such as `cloud_saves`.
 pub fn pref(conn: &Connection, key: &str, name: &str) -> Result<Option<String>, Error> {
     Ok(conn
-        .query_row("SELECT value FROM game_prefs WHERE key = ?1 AND name = ?2", [key, name], |r| r.get(0))
+        .query_row(
+            "SELECT value FROM game_prefs WHERE key = ?1 AND name = ?2",
+            [key, name],
+            |r| r.get(0),
+        )
         .optional()?)
 }
 
 /// Stores a per-game choice, or removes it when `value` is `None`.
-pub fn set_pref(conn: &Connection, key: &str, name: &str, value: Option<&str>) -> Result<(), Error> {
+pub fn set_pref(
+    conn: &Connection,
+    key: &str,
+    name: &str,
+    value: Option<&str>,
+) -> Result<(), Error> {
     match value {
         Some(value) => conn.execute(
             "INSERT INTO game_prefs (key, name, value) VALUES (?1, ?2, ?3)
              ON CONFLICT(key, name) DO UPDATE SET value = excluded.value",
             params![key, name, value],
         )?,
-        None => conn.execute("DELETE FROM game_prefs WHERE key = ?1 AND name = ?2", [key, name])?,
+        None => conn.execute(
+            "DELETE FROM game_prefs WHERE key = ?1 AND name = ?2",
+            [key, name],
+        )?,
     };
     Ok(())
 }
@@ -333,11 +385,19 @@ pub const HIDDEN: &str = "hidden";
 pub fn lists(conn: &Connection) -> Result<Lists, Error> {
     let mut lists = Lists::default();
     let mut stmt = conn.prepare("SELECT key, name FROM game_prefs WHERE name IN (?1, ?2)")?;
-    for row in stmt.query_map([FAVORITE, HIDDEN], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+    for row in stmt.query_map([FAVORITE, HIDDEN], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })? {
         let (key, name) = row?;
-        if name == FAVORITE { &mut lists.favorite } else { &mut lists.hidden }.insert(key);
+        if name == FAVORITE {
+            &mut lists.favorite
+        } else {
+            &mut lists.hidden
+        }
+        .insert(key);
     }
-    let mut stmt = conn.prepare("SELECT key, collection_id FROM collection_games ORDER BY collection_id")?;
+    let mut stmt =
+        conn.prepare("SELECT key, collection_id FROM collection_games ORDER BY collection_id")?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
         let (key, id) = row?;
         lists.collections.entry(key).or_default().push(id);
@@ -347,7 +407,8 @@ pub fn lists(conn: &Connection) -> Result<Lists, Error> {
 
 /// Every collection as `(id, name)`, by name.
 pub fn collections(conn: &Connection) -> Result<Vec<(i64, String)>, Error> {
-    let mut stmt = conn.prepare("SELECT id, name FROM collections ORDER BY name COLLATE NOCASE, id")?;
+    let mut stmt =
+        conn.prepare("SELECT id, name FROM collections ORDER BY name COLLATE NOCASE, id")?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -359,27 +420,44 @@ pub fn create_collection(conn: &Connection, name: &str) -> Result<i64, Error> {
 }
 
 pub fn rename_collection(conn: &Connection, id: i64, name: &str) -> Result<(), Error> {
-    conn.execute("UPDATE collections SET name = ?2 WHERE id = ?1", params![id, name])?;
+    conn.execute(
+        "UPDATE collections SET name = ?2 WHERE id = ?1",
+        params![id, name],
+    )?;
     Ok(())
 }
 
 /// Deletes the collection and its members; the games themselves stay.
 pub fn delete_collection(conn: &mut Connection, id: i64) -> Result<(), Error> {
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM collection_games WHERE collection_id = ?1", [id])?;
+    tx.execute(
+        "DELETE FROM collection_games WHERE collection_id = ?1",
+        [id],
+    )?;
     tx.execute("DELETE FROM collections WHERE id = ?1", [id])?;
     tx.commit()?;
     Ok(())
 }
 
 /// Adds the copy keys to the collection, or takes them out.
-pub fn set_in_collection(conn: &mut Connection, id: i64, keys: &[String], on: bool) -> Result<(), Error> {
+pub fn set_in_collection(
+    conn: &mut Connection,
+    id: i64,
+    keys: &[String],
+    on: bool,
+) -> Result<(), Error> {
     let tx = conn.transaction()?;
     for key in keys {
         if on {
-            tx.execute("INSERT OR IGNORE INTO collection_games (collection_id, key) VALUES (?1, ?2)", params![id, key])?;
+            tx.execute(
+                "INSERT OR IGNORE INTO collection_games (collection_id, key) VALUES (?1, ?2)",
+                params![id, key],
+            )?;
         } else {
-            tx.execute("DELETE FROM collection_games WHERE collection_id = ?1 AND key = ?2", params![id, key])?;
+            tx.execute(
+                "DELETE FROM collection_games WHERE collection_id = ?1 AND key = ?2",
+                params![id, key],
+            )?;
         }
     }
     tx.commit()?;
@@ -387,18 +465,31 @@ pub fn set_in_collection(conn: &mut Connection, id: i64, keys: &[String], on: bo
 }
 
 fn custom_row(r: &Row) -> rusqlite::Result<CustomGame> {
-    Ok(CustomGame { id: r.get(0)?, name: r.get(1)?, exe: r.get(2)?, args: r.get(3)?, added: r.get(4)? })
+    Ok(CustomGame {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        exe: r.get(2)?,
+        args: r.get(3)?,
+        added: r.get(4)?,
+    })
 }
 
 /// Every game the owner added, oldest first.
 pub fn custom_games(conn: &Connection) -> Result<Vec<CustomGame>, Error> {
-    let mut stmt = conn.prepare("SELECT id, name, exe, args, added FROM custom_games ORDER BY added, id")?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, exe, args, added FROM custom_games ORDER BY added, id")?;
     let rows = stmt.query_map([], custom_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn custom_game(conn: &Connection, id: &str) -> Result<Option<CustomGame>, Error> {
-    Ok(conn.query_row("SELECT id, name, exe, args, added FROM custom_games WHERE id = ?1", [id], custom_row).optional()?)
+    Ok(conn
+        .query_row(
+            "SELECT id, name, exe, args, added FROM custom_games WHERE id = ?1",
+            [id],
+            custom_row,
+        )
+        .optional()?)
 }
 
 /// Adds the game, or updates it when its id is there; an update keeps its `added` time.
@@ -419,7 +510,12 @@ pub fn delete_custom_game(conn: &Connection, id: &str) -> Result<(), Error> {
 /// Every GOG install folder by copy key (`gog-<product_id>`). Written by the GOG install.
 pub fn gog_installs(conn: &Connection) -> Result<HashMap<String, PathBuf>, Error> {
     let mut stmt = conn.prepare("SELECT key, path FROM gog_installs")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, PathBuf::from(r.get::<_, String>(1)?))))?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            PathBuf::from(r.get::<_, String>(1)?),
+        ))
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -452,7 +548,13 @@ pub fn cached_info(
         .optional()?)
 }
 
-pub fn put_info(conn: &Connection, key: &str, kind: &str, json: &str, now_secs: i64) -> Result<(), Error> {
+pub fn put_info(
+    conn: &Connection,
+    key: &str,
+    kind: &str,
+    json: &str,
+    now_secs: i64,
+) -> Result<(), Error> {
     conn.execute(
         "INSERT INTO info (key, kind, json, fetched) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(key, kind) DO UPDATE SET json = excluded.json, fetched = excluded.fetched",
@@ -486,7 +588,9 @@ pub fn replace(conn: &mut Connection, provider: ProviderKind, games: &[Game]) ->
                 g.installed,
                 text(&g.install_dir),
                 g.playtime_minutes.map(|m| m as i64),
-                g.last_played.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64),
+                g.last_played
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64),
                 text(&a.cover.path),
                 a.cover.url,
                 text(&a.header.path),
@@ -520,8 +624,14 @@ mod tests {
             last_played: Some(UNIX_EPOCH + Duration::from_secs(1_785_680_112)),
             size_bytes: Some(27_300_000_000),
             art: Art {
-                cover: Image { path: Some("c.jpg".into()), url: Some("https://x/c.jpg".into()) },
-                hero: Image { path: None, url: Some("https://x/h.png".into()) },
+                cover: Image {
+                    path: Some("c.jpg".into()),
+                    url: Some("https://x/c.jpg".into()),
+                },
+                hero: Image {
+                    path: None,
+                    url: Some("https://x/h.png".into()),
+                },
                 ..Art::default()
             },
             dlc: Vec::new(),
@@ -553,20 +663,29 @@ mod tests {
     }
 
     fn all_settings(conn: &Connection) -> Vec<(String, String)> {
-        let mut stmt = conn.prepare("SELECT name, value FROM settings ORDER BY name").unwrap();
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+        let mut stmt = conn
+            .prepare("SELECT name, value FROM settings ORDER BY name")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
     }
 
     fn columns(conn: &Connection, table: &str) -> Vec<String> {
-        let mut stmt = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
-        stmt.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+        let mut stmt = conn
+            .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
     }
 
     #[test]
     fn round_trips_and_replaces_per_provider() {
         let mut conn = memory();
-        conn.execute("INSERT INTO games (provider, external_id, title, installed) VALUES ('future', 'x', 'X', 0)", [])
-            .unwrap();
+        conn.execute("INSERT INTO games (provider, external_id, title, installed) VALUES ('future', 'x', 'X', 0)", []).unwrap();
         let (steam, epic) = (ProviderKind::Steam, ProviderKind::Epic);
 
         replace(&mut conn, steam, &[game(steam, "1"), game(steam, "2")]).unwrap();
@@ -585,8 +704,16 @@ mod tests {
         let epic = ProviderKind::Epic;
         let mut g = game(epic, "Fallout");
         g.dlc = vec![
-            Dlc { id: "LonesomeRoad".into(), title: "Lonesome Road".into(), installed: true },
-            Dlc { id: "OldWorldBlues".into(), title: "Old World Blues".into(), installed: false },
+            Dlc {
+                id: "LonesomeRoad".into(),
+                title: "Lonesome Road".into(),
+                installed: true,
+            },
+            Dlc {
+                id: "OldWorldBlues".into(),
+                title: "Old World Blues".into(),
+                installed: false,
+            },
         ];
         g.update_available = true;
         g.cloud_saves = true;
@@ -600,7 +727,10 @@ mod tests {
     fn migrates_v3_file_keeping_settings_and_launches() {
         let dir = temp_dir("migrate");
         let path = dir.join("library.sqlite");
-        v3_file(&path, &[("igdb_client_id", "abc"), ("steam_account", "noah")]);
+        v3_file(
+            &path,
+            &[("igdb_client_id", "abc"), ("steam_account", "noah")],
+        );
         {
             let conn = Connection::open(&path).unwrap();
             record_launch(&conn, "steam-30", 1_000).unwrap();
@@ -620,11 +750,22 @@ mod tests {
 
         let conn = open(&path).unwrap();
         assert_eq!(user_version(&conn).unwrap(), STEPS.len());
-        let settings = [("igdb_client_id".into(), "abc".into()), ("steam_account".into(), "noah".into())];
+        let settings = [
+            ("igdb_client_id".into(), "abc".into()),
+            ("steam_account".into(), "noah".into()),
+        ];
         assert_eq!(all_settings(&conn), settings);
-        assert_eq!(launches(&conn).unwrap(), HashMap::from([("steam-30".to_string(), 1_000)]));
+        assert_eq!(
+            launches(&conn).unwrap(),
+            HashMap::from([("steam-30".to_string(), 1_000)])
+        );
         // The choice moved; "default" means no choice, so nothing moved for it.
-        assert_eq!(pref(&conn, "epic-Fallout", "cloud_saves").unwrap().as_deref(), Some("off"));
+        assert_eq!(
+            pref(&conn, "epic-Fallout", "cloud_saves")
+                .unwrap()
+                .as_deref(),
+            Some("off")
+        );
         assert_eq!(pref(&conn, "epic-Other", "cloud_saves").unwrap(), None);
         let kinds: Vec<String> = conn
             .prepare("SELECT kind FROM info ORDER BY kind")
@@ -640,7 +781,11 @@ mod tests {
         assert_eq!((g.title.as_str(), g.size_bytes), ("Fallout", Some(42)));
         assert_eq!(g.art.cover.url.as_deref(), Some("https://x/c.jpg"));
         assert!(g.dlc.is_empty() && !g.update_available && !g.cloud_saves);
-        assert!(!columns(&conn, "games").iter().any(|c| c.starts_with("logo")));
+        assert!(
+            !columns(&conn, "games")
+                .iter()
+                .any(|c| c.starts_with("logo"))
+        );
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -650,20 +795,32 @@ mod tests {
         let dir = temp_dir("fresh");
         let conn = open(&dir.join("sub").join("library.sqlite")).unwrap();
         assert_eq!(user_version(&conn).unwrap(), STEPS.len());
-        let journal: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        let journal: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(journal, "wal");
         let games = columns(&conn, "games");
-        assert!(["dlc", "update_available", "cloud_saves", "size_bytes"].iter().all(|c| games.iter().any(|g| g == c)));
+        assert!(
+            ["dlc", "update_available", "cloud_saves", "size_bytes"]
+                .iter()
+                .all(|c| games.iter().any(|g| g == c))
+        );
         assert!(!games.iter().any(|c| c.starts_with("logo")));
         assert_eq!(columns(&conn, "game_prefs"), ["key", "name", "value"]);
         assert_eq!(columns(&conn, "playtime"), ["key", "started", "seconds"]);
         assert_eq!(columns(&conn, "collections"), ["id", "name"]);
         assert_eq!(columns(&conn, "collection_games"), ["collection_id", "key"]);
-        assert_eq!(columns(&conn, "custom_games"), ["id", "name", "exe", "args", "added"]);
+        assert_eq!(
+            columns(&conn, "custom_games"),
+            ["id", "name", "exe", "args", "added"]
+        );
         assert_eq!(columns(&conn, "gog_installs"), ["key", "path"]);
         set_pref(&conn, "epic-A", "cloud_saves", Some("on")).unwrap();
         set_pref(&conn, "epic-A", "cloud_saves", Some("off")).unwrap();
-        assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap().as_deref(), Some("off"));
+        assert_eq!(
+            pref(&conn, "epic-A", "cloud_saves").unwrap().as_deref(),
+            Some("off")
+        );
         set_pref(&conn, "epic-A", "cloud_saves", None).unwrap();
         assert_eq!(pref(&conn, "epic-A", "cloud_saves").unwrap(), None);
         drop(conn);
@@ -683,7 +840,10 @@ mod tests {
         drop((first, second));
         let third = open(&path).unwrap();
         assert_eq!(all_settings(&third), [("a".into(), "1".into())]);
-        assert_eq!(pref(&third, "epic-A", "cloud_saves").unwrap().as_deref(), Some("on"));
+        assert_eq!(
+            pref(&third, "epic-A", "cloud_saves").unwrap().as_deref(),
+            Some("on")
+        );
         drop(third);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -703,9 +863,15 @@ mod tests {
         std::fs::write(dir.join("library-v3.sqlite-journal"), b"").unwrap();
         let path = file_in(&dir);
         assert_eq!(path, dir.join("library.sqlite"));
-        assert!(!dir.join("library-v3.sqlite").exists() && !dir.join("library-v3.sqlite-journal").exists());
+        assert!(
+            !dir.join("library-v3.sqlite").exists()
+                && !dir.join("library-v3.sqlite-journal").exists()
+        );
         assert!(dir.join("library.sqlite-journal").exists());
-        assert_eq!(settings_of(&path), [("steam_account".into(), "noah".into())]);
+        assert_eq!(
+            settings_of(&path),
+            [("steam_account".into(), "noah".into())]
+        );
         // From then on, nothing moves.
         assert_eq!(file_in(&dir), path);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -714,12 +880,20 @@ mod tests {
         let dir = temp_dir("rename-both");
         v3_file(&dir.join("library-v3.sqlite"), &[("who", "old")]);
         drop(open(&dir.join("library.sqlite")).unwrap());
-        set_setting(&open(&dir.join("library.sqlite")).unwrap(), "who", Some("new")).unwrap();
+        set_setting(
+            &open(&dir.join("library.sqlite")).unwrap(),
+            "who",
+            Some("new"),
+        )
+        .unwrap();
         let path = file_in(&dir);
         assert_eq!(path, dir.join("library.sqlite"));
         assert_eq!(settings_of(&path), [("who".into(), "new".into())]);
         let old = Connection::open(dir.join("library-v3.sqlite")).unwrap();
-        assert_eq!((all_settings(&old), user_version(&old).unwrap()), (vec![("who".into(), "old".into())], 0));
+        assert_eq!(
+            (all_settings(&old), user_version(&old).unwrap()),
+            (vec![("who".into(), "old".into())], 0)
+        );
         drop(old);
         std::fs::remove_dir_all(&dir).unwrap();
 
@@ -728,7 +902,9 @@ mod tests {
         v3_file(&dir.join("library-v3.sqlite"), &[("who", "v3")]);
         Connection::open(dir.join("library.sqlite"))
             .unwrap()
-            .execute_batch("CREATE TABLE games (provider TEXT, external_id TEXT, title TEXT, logo TEXT)")
+            .execute_batch(
+                "CREATE TABLE games (provider TEXT, external_id TEXT, title TEXT, logo TEXT)",
+            )
             .unwrap();
         let path = file_in(&dir);
         assert_eq!(path, dir.join("library.sqlite"));
@@ -749,8 +925,13 @@ mod tests {
         let path = file_in(&dir);
         assert_eq!(path, dir.join("library.sqlite"));
         assert!(old.exists());
-        assert_eq!(all_settings(&open(&path).unwrap()), [("who".into(), "v3".into())]);
-        let tmp = |e: std::io::Result<std::fs::DirEntry>| e.unwrap().path().extension() == Some("tmp".as_ref());
+        assert_eq!(
+            all_settings(&open(&path).unwrap()),
+            [("who".into(), "v3".into())]
+        );
+        let tmp = |e: std::io::Result<std::fs::DirEntry>| {
+            e.unwrap().path().extension() == Some("tmp".as_ref())
+        };
         assert!(!std::fs::read_dir(&dir).unwrap().any(tmp));
         drop(held);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -769,7 +950,10 @@ mod tests {
         }
         let conn = open(&path).unwrap();
         assert_eq!(user_version(&conn).unwrap(), STEPS.len());
-        assert_eq!(pref(&conn, "epic-A", FAVORITE).unwrap().as_deref(), Some("1"));
+        assert_eq!(
+            pref(&conn, "epic-A", FAVORITE).unwrap().as_deref(),
+            Some("1")
+        );
         assert!(collections(&conn).unwrap().is_empty());
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -792,7 +976,11 @@ mod tests {
         assert_eq!(collections(&conn).unwrap().len(), 1);
         assert!(custom_games(&conn).unwrap().is_empty());
         // `args` may be left out.
-        conn.execute("INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)", []).unwrap();
+        conn.execute(
+            "INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)",
+            [],
+        )
+        .unwrap();
         assert_eq!(custom_game(&conn, "a").unwrap().unwrap().args, "");
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -808,19 +996,36 @@ mod tests {
                 conn.execute_batch(step).unwrap();
             }
             conn.pragma_update(None, "user_version", 4).unwrap();
-            conn.execute("INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)", []).unwrap();
+            conn.execute(
+                "INSERT INTO custom_games (id, name, exe, added) VALUES ('a', 'A', 'a.exe', 5)",
+                [],
+            )
+            .unwrap();
         }
         let conn = open(&path).unwrap();
         assert_eq!(user_version(&conn).unwrap(), STEPS.len());
         assert_eq!(custom_games(&conn).unwrap().len(), 1);
         assert!(gog_installs(&conn).unwrap().is_empty());
-        conn.execute(r"INSERT INTO gog_installs (key, path) VALUES ('gog-1', 'C:\Games\A')", []).unwrap();
-        assert_eq!(gog_installs(&conn).unwrap(), HashMap::from([("gog-1".to_string(), PathBuf::from(r"C:\Games\A"))]));
+        conn.execute(
+            r"INSERT INTO gog_installs (key, path) VALUES ('gog-1', 'C:\Games\A')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            gog_installs(&conn).unwrap(),
+            HashMap::from([("gog-1".to_string(), PathBuf::from(r"C:\Games\A"))])
+        );
         set_gog_install(&conn, "gog-1", Some(Path::new(r"D:\Games\A"))).unwrap();
         set_gog_install(&conn, "gog-2", Some(Path::new(r"C:\Games\B"))).unwrap();
-        assert_eq!(gog_installs(&conn).unwrap()["gog-1"], PathBuf::from(r"D:\Games\A"));
+        assert_eq!(
+            gog_installs(&conn).unwrap()["gog-1"],
+            PathBuf::from(r"D:\Games\A")
+        );
         set_gog_install(&conn, "gog-1", None).unwrap();
-        assert_eq!(gog_installs(&conn).unwrap().into_keys().collect::<Vec<_>>(), ["gog-2"]);
+        assert_eq!(
+            gog_installs(&conn).unwrap().into_keys().collect::<Vec<_>>(),
+            ["gog-2"]
+        );
         drop(conn);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -828,15 +1033,34 @@ mod tests {
     #[test]
     fn custom_games_save_update_and_delete() {
         let conn = memory();
-        let mut g = CustomGame { id: "b".into(), name: "Hollow Knight".into(), exe: r"D:\hk.exe".into(), args: String::new(), added: 20 };
-        let first = CustomGame { id: "a".into(), name: "Zork".into(), exe: r"C:\zork.exe".into(), args: "-x".into(), added: 10 };
+        let mut g = CustomGame {
+            id: "b".into(),
+            name: "Hollow Knight".into(),
+            exe: r"D:\hk.exe".into(),
+            args: String::new(),
+            added: 20,
+        };
+        let first = CustomGame {
+            id: "a".into(),
+            name: "Zork".into(),
+            exe: r"C:\zork.exe".into(),
+            args: "-x".into(),
+            added: 10,
+        };
         save_custom_game(&conn, &g).unwrap();
         save_custom_game(&conn, &first).unwrap();
         assert_eq!(custom_games(&conn).unwrap(), [first.clone(), g.clone()]);
         // An edit keeps the time it was added.
         g.name = "Hollow Knight: Voidheart".into();
         g.args = "-windowed".into();
-        save_custom_game(&conn, &CustomGame { added: 99, ..g.clone() }).unwrap();
+        save_custom_game(
+            &conn,
+            &CustomGame {
+                added: 99,
+                ..g.clone()
+            },
+        )
+        .unwrap();
         assert_eq!(custom_game(&conn, "b").unwrap(), Some(g));
         delete_custom_game(&conn, "b").unwrap();
         assert_eq!(custom_game(&conn, "b").unwrap(), None);
@@ -860,14 +1084,23 @@ mod tests {
         assert_eq!(found.hidden, ["epic-A".to_string()].into());
         assert_eq!(found.collections["steam-1"], [backlog, coop]);
         assert_eq!(found.collections["epic-B"], [backlog]);
-        assert_eq!(collections(&conn).unwrap(), [(backlog, "Backlog".into()), (coop, "co-op".into())]);
+        assert_eq!(
+            collections(&conn).unwrap(),
+            [(backlog, "Backlog".into()), (coop, "co-op".into())]
+        );
 
         rename_collection(&conn, coop, "Alone").unwrap();
-        assert_eq!(collections(&conn).unwrap(), [(coop, "Alone".into()), (backlog, "Backlog".into())]);
+        assert_eq!(
+            collections(&conn).unwrap(),
+            [(coop, "Alone".into()), (backlog, "Backlog".into())]
+        );
         set_in_collection(&mut conn, backlog, &keys[1..], false).unwrap();
         delete_collection(&mut conn, coop).unwrap();
         assert_eq!(collections(&conn).unwrap(), [(backlog, "Backlog".into())]);
-        assert_eq!(lists(&conn).unwrap().collections, HashMap::from([("steam-1".to_string(), vec![backlog])]));
+        assert_eq!(
+            lists(&conn).unwrap().collections,
+            HashMap::from([("steam-1".to_string(), vec![backlog])])
+        );
     }
 
     #[test]
@@ -889,14 +1122,23 @@ mod tests {
         // A clock that went backwards never takes time away.
         add_session(&conn, "epic-Pumpkin", 9_500, -30).unwrap();
         let totals = own_totals(&conn).unwrap();
-        assert_eq!(totals, HashMap::from([("epic-Fortnite".to_string(), 1_845), ("epic-Pumpkin".to_string(), 600)]));
+        assert_eq!(
+            totals,
+            HashMap::from([
+                ("epic-Fortnite".to_string(), 1_845),
+                ("epic-Pumpkin".to_string(), 600)
+            ])
+        );
     }
 
     #[test]
     fn settings_set_read_and_delete() {
         let conn = memory();
         set_setting(&conn, "igdb_client_id", Some("abc")).unwrap();
-        assert_eq!(setting(&conn, "igdb_client_id").unwrap().as_deref(), Some("abc"));
+        assert_eq!(
+            setting(&conn, "igdb_client_id").unwrap().as_deref(),
+            Some("abc")
+        );
         set_setting(&conn, "igdb_client_id", None).unwrap();
         assert_eq!(setting(&conn, "igdb_client_id").unwrap(), None);
     }
@@ -905,8 +1147,16 @@ mod tests {
     fn cached_info_respects_max_age() {
         let conn = memory();
         put_info(&conn, "steam-1", "details", r#"{"a":1}"#, 100).unwrap();
-        assert_eq!(cached_info(&conn, "steam-1", "details", 50, 120).unwrap().as_deref(), Some(r#"{"a":1}"#));
-        assert_eq!(cached_info(&conn, "steam-1", "details", 50, 200).unwrap(), None);
+        assert_eq!(
+            cached_info(&conn, "steam-1", "details", 50, 120)
+                .unwrap()
+                .as_deref(),
+            Some(r#"{"a":1}"#)
+        );
+        assert_eq!(
+            cached_info(&conn, "steam-1", "details", 50, 200).unwrap(),
+            None
+        );
         assert_eq!(cached_info(&conn, "steam-1", "ttb", 50, 120).unwrap(), None);
     }
 }

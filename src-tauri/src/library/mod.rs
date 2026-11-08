@@ -42,7 +42,9 @@ impl From<&str> for Error {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, specta::Type,
+)]
 #[serde(rename = "Store")] // its TypeScript name
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
@@ -55,8 +57,13 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 5] =
-        [ProviderKind::Steam, ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Amazon, ProviderKind::Custom];
+    pub const ALL: [ProviderKind; 5] = [
+        ProviderKind::Steam,
+        ProviderKind::Epic,
+        ProviderKind::Gog,
+        ProviderKind::Amazon,
+        ProviderKind::Custom,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -196,7 +203,9 @@ pub trait Provider: Sync {
 /// explorer.exe hands it to the shell without cmd.exe parsing, so `&` in the URI is safe.
 // shortcut: explorer never reports a missing handler (Windows shows its own dialog); use ShellExecuteW if we need the error in-app.
 pub fn open_uri(uri: &str) -> Result<(), Error> {
-    std::process::Command::new("explorer.exe").arg(uri).spawn()?;
+    std::process::Command::new("explorer.exe")
+        .arg(uri)
+        .spawn()?;
     Ok(())
 }
 
@@ -221,7 +230,9 @@ pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -244,7 +255,9 @@ pub fn process_listed(filter: &str, image: &str) -> bool {
 /// tasklist CSV rows look like `"steam.exe","16176","Console","1","131.968 K"`.
 fn lists_image(tasklist_csv: &str, image: &str) -> bool {
     let wanted = format!("\"{}\"", image.to_ascii_lowercase());
-    tasklist_csv.lines().any(|row| row.to_ascii_lowercase().starts_with(&wanted))
+    tasklist_csv
+        .lines()
+        .any(|row| row.to_ascii_lowercase().starts_with(&wanted))
 }
 
 #[cfg(test)]
@@ -253,7 +266,13 @@ mod tests {
 
     #[test]
     fn open_url_refuses_non_https() {
-        for url in ["http://example.com", "steam://open/main", "file:///C:/Windows", "notepad.exe", ""] {
+        for url in [
+            "http://example.com",
+            "steam://open/main",
+            "file:///C:/Windows",
+            "notepad.exe",
+            "",
+        ] {
             assert!(open_url(url).is_err(), "{url}");
         }
     }
@@ -263,10 +282,19 @@ mod tests {
         let row = "\"Steam.exe\",\"16176\",\"Console\",\"1\",\"131.968 K\"\r\n";
         assert!(lists_image(row, "steam.exe"));
         // No match: tasklist prints an INFO line instead of a row.
-        assert!(!lists_image("INFO: No tasks are running which match the specified criteria.\r\n", "steam.exe"));
+        assert!(!lists_image(
+            "INFO: No tasks are running which match the specified criteria.\r\n",
+            "steam.exe"
+        ));
         // Pid reused by another program, or a name that only starts the same.
-        assert!(!lists_image("\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\"", "steam.exe"));
-        assert!(!lists_image("\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\"", "steam.exe"));
+        assert!(!lists_image(
+            "\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\"",
+            "steam.exe"
+        ));
+        assert!(!lists_image(
+            "\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\"",
+            "steam.exe"
+        ));
     }
 
     #[test]

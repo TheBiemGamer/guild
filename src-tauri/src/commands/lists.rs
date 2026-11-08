@@ -5,11 +5,10 @@ use std::collections::HashMap;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use super::{blocking, open_db, AppState, Res};
+use super::{AppState, Res, blocking, open_db};
 use crate::cache;
 use crate::entries;
 use crate::msg::Msg;
-
 
 #[derive(Serialize, specta::Type)]
 pub struct Collection {
@@ -40,7 +39,9 @@ async fn set_flag(app: AppHandle, key: String, name: &'static str, on: bool) -> 
     blocking(move || {
         let keys = copy_keys(&app.state::<AppState>(), &key)?;
         change(&app, |conn| {
-            keys.iter().try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1"))).map_err(Msg::from)
+            keys.iter()
+                .try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1")))
+                .map_err(Msg::from)
         })
     })
     .await
@@ -72,7 +73,14 @@ pub async fn collections(app: AppHandle) -> Res<Vec<Collection>> {
                 *counts.entry(id).or_default() += 1;
             }
         }
-        Ok(list.into_iter().map(|(id, name)| Collection { id, count: counts.get(&id).copied().unwrap_or(0), name }).collect())
+        Ok(list
+            .into_iter()
+            .map(|(id, name)| Collection {
+                id,
+                count: counts.get(&id).copied().unwrap_or(0),
+                name,
+            })
+            .collect())
     })
     .await
 }
@@ -84,7 +92,10 @@ fn check_name(name: &str, taken: &[(i64, String)], except: Option<i64>) -> Res<S
         return Err(msg!(nameTheCollection));
     }
     let lower = name.to_lowercase();
-    if taken.iter().any(|(id, n)| Some(*id) != except && n.to_lowercase() == lower) {
+    if taken
+        .iter()
+        .any(|(id, n)| Some(*id) != except && n.to_lowercase() == lower)
+    {
         return Err(msg!(collectionExists, name = name));
     }
     Ok(name.to_string())
@@ -123,7 +134,12 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_collection(app: AppHandle, id: i64) -> Res<()> {
-    blocking(move || change(&app, |conn| cache::db::delete_collection(conn, id).map_err(Msg::from))).await
+    blocking(move || {
+        change(&app, |conn| {
+            cache::db::delete_collection(conn, id).map_err(Msg::from)
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -148,7 +164,10 @@ mod tests {
     #[test]
     fn names_are_trimmed_and_unique_ignoring_case() {
         let taken = [(1, "Backlog".to_string()), (2, "Co-op".to_string())];
-        assert_eq!(check_name("  Short games ", &taken, None).unwrap(), "Short games");
+        assert_eq!(
+            check_name("  Short games ", &taken, None).unwrap(),
+            "Short games"
+        );
         assert!(check_name("   ", &taken, None).is_err());
         assert!(check_name("backlog", &taken, None).is_err());
         // Renaming a collection to its own name in another case is fine; to another's isn't.

@@ -29,7 +29,10 @@ pub struct Dirs {
 
 /// `%LOCALAPPDATA%`.
 pub fn local_app_data() -> PathBuf {
-    directories::BaseDirs::new().expect("Windows always has a home dir").data_local_dir().to_path_buf()
+    directories::BaseDirs::new()
+        .expect("Windows always has a home dir")
+        .data_local_dir()
+        .to_path_buf()
 }
 
 impl Dirs {
@@ -63,7 +66,12 @@ pub async fn resolve(image: &Image, http: &reqwest::Client, dest: PathBuf) -> Op
         return Some(dest);
     }
     let url = image.url.as_deref()?;
-    let bytes = match http.get(url).send().await.and_then(|r| r.error_for_status()) {
+    let bytes = match http
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
         Ok(response) => response.bytes().await,
         Err(e) => Err(e),
     };
@@ -164,7 +172,10 @@ mod tests {
         assert_eq!(image::image_dimensions(first).unwrap(), (THUMB_W, THUMB_H));
         // Landscape art keeps its shape instead of being stretched to 2:3.
         assert_eq!(size(thumbnail(&header, &dir, "h").unwrap()), (240, 112));
-        assert_eq!(size(thumbnail(&bare, &dir, "b").unwrap()), (THUMB_W, THUMB_H));
+        assert_eq!(
+            size(thumbnail(&bare, &dir, "b").unwrap()),
+            (THUMB_W, THUMB_H)
+        );
 
         // Source gone: second call must come from the cache.
         std::fs::remove_file(&src).unwrap();
@@ -179,15 +190,22 @@ mod tests {
     fn thumbnail_writes_average_color() {
         let dir = temp_dir("color-test");
         let src = dir.join("solid.png");
-        image::RgbImage::from_pixel(600, 900, image::Rgb([200, 40, 90])).save(&src).unwrap();
+        image::RgbImage::from_pixel(600, 900, image::Rgb([200, 40, 90]))
+            .save(&src)
+            .unwrap();
         let (path, color) = thumbnail(&src, &dir, "s").unwrap();
         assert_eq!(color.as_deref(), Some("#c8285a"));
-        assert_eq!(std::fs::read_to_string(dir.join("s.color")).unwrap(), "#c8285a");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("s.color")).unwrap(),
+            "#c8285a"
+        );
         // A thumbnail cached before colours were stored gets one from the JPEG (close, not exact).
         std::fs::remove_file(dir.join("s.color")).unwrap();
         let (again, color) = thumbnail(&src, &dir, "s").unwrap();
         assert_eq!(again, path);
-        let rgb = u32::from_str_radix(&color.unwrap()[1..], 16).unwrap().to_be_bytes();
+        let rgb = u32::from_str_radix(&color.unwrap()[1..], 16)
+            .unwrap()
+            .to_be_bytes();
         for (got, want) in rgb[1..].iter().zip([200u8, 40, 90]) {
             assert!(got.abs_diff(want) <= 4, "{got} vs {want}");
         }
@@ -203,11 +221,20 @@ mod tests {
         let cached = dir.join("cached");
         std::fs::write(&cached, b"x").unwrap();
         let http = reqwest::Client::new();
-                tauri::async_runtime::block_on(async {
-            let image = Image { path: Some(local.clone()), url: None };
-            assert_eq!(resolve(&image, &http, dir.join("unused")).await, Some(local));
+        tauri::async_runtime::block_on(async {
+            let image = Image {
+                path: Some(local.clone()),
+                url: None,
+            };
+            assert_eq!(
+                resolve(&image, &http, dir.join("unused")).await,
+                Some(local)
+            );
             // Local file deleted (e.g. Steam cleared its cache): an earlier download is used.
-            let gone = Image { path: Some(dir.join("gone.jpg")), url: None };
+            let gone = Image {
+                path: Some(dir.join("gone.jpg")),
+                url: None,
+            };
             assert_eq!(resolve(&gone, &http, cached.clone()).await, Some(cached));
             assert_eq!(resolve(&gone, &http, dir.join("nothing")).await, None);
         });
@@ -220,13 +247,19 @@ mod tests {
     fn downloads_once_and_treats_404_as_missing() {
         let dir = temp_dir("cdn-test");
         let http = reqwest::Client::new();
-                let cdn = "https://shared.steamstatic.com/store_item_assets/steam/apps";
+        let cdn = "https://shared.steamstatic.com/store_item_assets/steam/apps";
         tauri::async_runtime::block_on(async {
-            let image = Image { path: None, url: Some(format!("{cdn}/2988410/library_600x900.jpg")) };
+            let image = Image {
+                path: None,
+                url: Some(format!("{cdn}/2988410/library_600x900.jpg")),
+            };
             let cover = resolve(&image, &http, dir.join("cover")).await.unwrap();
             assert!(open_image(&cover).is_ok());
             // App 1 doesn't exist, so the CDN answers 404.
-            let missing = Image { path: None, url: Some(format!("{cdn}/1/library_600x900.jpg")) };
+            let missing = Image {
+                path: None,
+                url: Some(format!("{cdn}/1/library_600x900.jpg")),
+            };
             assert_eq!(resolve(&missing, &http, dir.join("missing")).await, None);
         });
         std::fs::remove_dir_all(&dir).unwrap();

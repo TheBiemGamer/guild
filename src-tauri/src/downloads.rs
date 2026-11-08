@@ -32,7 +32,13 @@ pub struct Job {
 
 impl Job {
     pub fn new(key: &str, action: QueuedAction) -> Self {
-        Self { key: key.into(), action, dlc: None, with_dlc: None, dest: None }
+        Self {
+            key: key.into(),
+            action,
+            dlc: None,
+            with_dlc: None,
+            dest: None,
+        }
     }
 }
 
@@ -47,7 +53,11 @@ pub struct Queue {
 impl Queue {
     /// Adds a job at the end. A job with the same key and action already queued wins; returns whether it was added.
     pub fn push(&mut self, job: Job) -> bool {
-        if self.jobs.iter().any(|j| j.key == job.key && j.action == job.action) {
+        if self
+            .jobs
+            .iter()
+            .any(|j| j.key == job.key && j.action == job.action)
+        {
             return false;
         }
         self.jobs.push(job);
@@ -78,7 +88,9 @@ impl Queue {
 
     /// Takes the first job with `key` out of the queue, the head included.
     pub fn remove(&mut self, key: &str) -> bool {
-        let Some(i) = self.position(key) else { return false };
+        let Some(i) = self.position(key) else {
+            return false;
+        };
         self.jobs.remove(i);
         true
     }
@@ -166,7 +178,11 @@ pub fn view(queue: &Queue, title: impl Fn(&str) -> Option<String>) -> QueueView 
         jobs: queue
             .jobs
             .iter()
-            .map(|j| QueuedView { key: j.key.clone(), action: j.action, title: title(&j.key).unwrap_or_default() })
+            .map(|j| QueuedView {
+                key: j.key.clone(),
+                action: j.action,
+                title: title(&j.key).unwrap_or_default(),
+            })
             .collect(),
         paused: queue.paused,
         active: queue.jobs.first().map(|j| j.key.clone()),
@@ -201,7 +217,10 @@ mod tests {
     fn a_duplicate_key_and_action_is_ignored() {
         let mut q = queue(&["epic-a"]);
         assert!(!q.push(Job::new("epic-a", Install)));
-        assert!(q.push(Job::new("epic-a", Verify)), "another action on the same game queues");
+        assert!(
+            q.push(Job::new("epic-a", Verify)),
+            "another action on the same game queues"
+        );
         assert_eq!(q.jobs.len(), 2);
     }
 
@@ -246,7 +265,10 @@ mod tests {
         q.pause();
         assert_eq!(q.next(), None, "nothing starts while paused");
         assert!(q.is_head("epic-a"));
-        assert!(q.push(Job::new("epic-c", Update)), "jobs still queue while paused");
+        assert!(
+            q.push(Job::new("epic-c", Update)),
+            "jobs still queue while paused"
+        );
         q.resume();
         assert_eq!(q.next().map(|j| j.key.as_str()), Some("epic-a"));
         assert_eq!(keys(&q), ["epic-a", "epic-b", "epic-c"]);
@@ -255,13 +277,23 @@ mod tests {
     #[test]
     fn json_round_trip() {
         let mut q = queue(&["epic-a"]);
-        q.push(Job { dlc: Some("HatDlc".into()), dest: Some(r"D:\Games".into()), ..Job::new("epic-b", Install) });
-        q.push(Job { with_dlc: Some(false), ..Job::new("epic-c", Install) });
+        q.push(Job {
+            dlc: Some("HatDlc".into()),
+            dest: Some(r"D:\Games".into()),
+            ..Job::new("epic-b", Install)
+        });
+        q.push(Job {
+            with_dlc: Some(false),
+            ..Job::new("epic-c", Install)
+        });
         q.push(Job::new("epic-d", Verify));
         q.pause();
         let json = q.to_json();
         assert_eq!(Queue::from_json(&json), Some(q));
-        assert!(json.contains(r#"{"key":"epic-d","action":"verify"}"#), "{json}");
+        assert!(
+            json.contains(r#"{"key":"epic-d","action":"verify"}"#),
+            "{json}"
+        );
         assert_eq!(Queue::from_json("junk"), None);
     }
 
@@ -286,9 +318,18 @@ mod tests {
 
     #[test]
     fn the_view_lists_titles_in_order() {
-        let v = view(&queue(&["epic-a", "epic-b"]), |k| (k == "epic-a").then(|| "Alpha".into()));
+        let v = view(&queue(&["epic-a", "epic-b"]), |k| {
+            (k == "epic-a").then(|| "Alpha".into())
+        });
         assert_eq!(v.active.as_deref(), Some("epic-a"));
-        assert_eq!(v.jobs[0], QueuedView { key: "epic-a".into(), action: Install, title: "Alpha".into() });
+        assert_eq!(
+            v.jobs[0],
+            QueuedView {
+                key: "epic-a".into(),
+                action: Install,
+                title: "Alpha".into()
+            }
+        );
         assert_eq!(v.jobs[1].title, "");
     }
 }

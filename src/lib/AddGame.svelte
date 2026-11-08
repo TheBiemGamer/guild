@@ -6,7 +6,12 @@
   import { popover } from './popover'
   import { around, t } from './i18n'
 
-  let { edit = null, onclose, onsaved, onsettings }: {
+  let {
+    edit = null,
+    onclose,
+    onsaved,
+    onsettings,
+  }: {
     /** The game being edited, as saved; null adds a new one. */
     edit?: ({ key: string } & CustomGame) | null
     /** `refocus`: put focus back where it was before the dialog opened. */
@@ -136,7 +141,10 @@
             {/if}
           {/each}
         </div>
-        <small><span title={file ?? undefined}>{file ? fileName : t('addGame.fromGrid')}</span> · <button class="link" onclick={pickFile}>{t('addGame.useFile')}</button></small>
+        <small
+          ><span title={file ?? undefined}>{file ? fileName : t('addGame.fromGrid')}</span> ·
+          <button class="link" onclick={pickFile}>{t('addGame.useFile')}</button></small
+        >
       {/if}
     </div>
 

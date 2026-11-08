@@ -14,10 +14,15 @@ const OPEN_DOWNLOADS: &str = "open-downloads";
 
 /// Shows, unminimizes and focuses the main window.
 pub fn reveal(app: &AppHandle) {
-    let Some(window) = app.get_webview_window("main") else { return };
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
     // The startup show is done; `ready` must not show it again later.
     app.state::<crate::commands::AppState>().mark_shown();
-    let shown = window.show().and_then(|()| window.unminimize()).and_then(|()| window.set_focus());
+    let shown = window
+        .show()
+        .and_then(|()| window.unminimize())
+        .and_then(|()| window.set_focus());
     if let Err(e) = shown {
         tracing::warn!("reveal window: {e}");
     }
@@ -29,7 +34,13 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         app,
         &[
             &MenuItem::with_id(app, "open", native("trayOpen"), true, None::<&str>)?,
-            &MenuItem::with_id(app, "downloads", native("trayDownloads"), true, None::<&str>)?,
+            &MenuItem::with_id(
+                app,
+                "downloads",
+                native("trayDownloads"),
+                true,
+                None::<&str>,
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", native("trayQuit"), true, None::<&str>)?,
         ],
@@ -38,8 +49,13 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 
 /// After a language change: the menu and tooltip in the new language.
 pub fn relabel(app: &AppHandle) {
-    let Some(tray) = app.tray_by_id("main") else { return };
-    if let Err(e) = menu(app).and_then(|m| tray.set_menu(Some(m))).and_then(|()| tray.set_tooltip(Some(native("appName")))) {
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
+    if let Err(e) = menu(app)
+        .and_then(|m| tray.set_menu(Some(m)))
+        .and_then(|()| tray.set_tooltip(Some(native("appName"))))
+    {
         tracing::warn!("tray labels: {e}");
     }
 }
@@ -62,7 +78,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
                 reveal(tray.app_handle());
             }
         });

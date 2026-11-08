@@ -3,10 +3,13 @@
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use steam_vent::auth::RefreshToken;
 use std::time::Duration;
+use steam_vent::auth::RefreshToken;
 
-use steam_vent::{Connection as Session, ConnectionError, ConnectionTrait, EResult, LoginError, NetworkError, ServerList};
+use steam_vent::{
+    Connection as Session, ConnectionError, ConnectionTrait, EResult, LoginError, NetworkError,
+    ServerList,
+};
 use steam_vent_proto_steam::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
 
 use crate::cache::db::{cached_info, put_info};
@@ -50,7 +53,10 @@ pub fn outcome(result: Result<Vec<OwnedGame>, OwnedError>) -> OwnedOutcome {
 }
 
 fn rejected(result: EResult) -> bool {
-    matches!(result, EResult::AccessDenied | EResult::InvalidPassword | EResult::Expired)
+    matches!(
+        result,
+        EResult::AccessDenied | EResult::InvalidPassword | EResult::Expired
+    )
 }
 
 /// Only logon errors about the token itself reject it; rate limits and server trouble are retried later.
@@ -62,7 +68,9 @@ fn from_connection(e: ConnectionError) -> OwnedError {
             | LoginError::NoToken
             | LoginError::UnavailableAccount,
         ) => OwnedError::TokenRejected,
-        ConnectionError::LoginError(LoginError::Unknown(r)) if rejected(r) => OwnedError::TokenRejected,
+        ConnectionError::LoginError(LoginError::Unknown(r)) if rejected(r) => {
+            OwnedError::TokenRejected
+        }
         e => OwnedError::Network(e.to_string()),
     }
 }
@@ -91,8 +99,12 @@ pub async fn connect(token: &str) -> Result<Session, OwnedError> {
     if token.remaining_lifetime().is_none() {
         return Err(OwnedError::TokenRejected);
     }
-    let servers = ServerList::discover().await.map_err(|e| OwnedError::Network(e.to_string()))?;
-    Session::login_with_refresh_token(&servers, &token).await.map_err(from_connection)
+    let servers = ServerList::discover()
+        .await
+        .map_err(|e| OwnedError::Network(e.to_string()))?;
+    Session::login_with_refresh_token(&servers, &token)
+        .await
+        .map_err(from_connection)
 }
 
 async fn fetch_now(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
@@ -122,9 +134,11 @@ async fn fetch_now(token: &str) -> Result<Vec<OwnedGame>, OwnedError> {
 /// The stored list and when it was fetched, at any age.
 pub fn cached(conn: &Connection) -> Option<(Vec<OwnedGame>, i64)> {
     let (json, fetched) = conn
-        .query_row("SELECT json, fetched FROM info WHERE key = ?1 AND kind = ?2", [OWNED_KEY, OWNED], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })
+        .query_row(
+            "SELECT json, fetched FROM info WHERE key = ?1 AND kind = ?2",
+            [OWNED_KEY, OWNED],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )
         .ok()?;
     Some((serde_json::from_str(&json).ok()?, fetched))
 }
@@ -139,14 +153,20 @@ pub fn remember(conn: &Connection, games: &[OwnedGame], now_secs: i64) {
 }
 
 pub fn forget(conn: &Connection) {
-    if let Err(e) = conn.execute("DELETE FROM info WHERE key = ?1 AND kind = ?2", [OWNED_KEY, OWNED]) {
+    if let Err(e) = conn.execute(
+        "DELETE FROM info WHERE key = ?1 AND kind = ?2",
+        [OWNED_KEY, OWNED],
+    ) {
         tracing::warn!("steam owned forget: {e}");
     }
 }
 
 /// Whether the stored list is still within `OWNED_MAX_AGE_SECS`.
 pub fn fresh(conn: &Connection, now_secs: i64) -> bool {
-    matches!(cached_info(conn, OWNED_KEY, OWNED, OWNED_MAX_AGE_SECS, now_secs), Ok(Some(_)))
+    matches!(
+        cached_info(conn, OWNED_KEY, OWNED, OWNED_MAX_AGE_SECS, now_secs),
+        Ok(Some(_))
+    )
 }
 
 #[cfg(test)]
@@ -154,7 +174,8 @@ mod tests {
     use super::*;
 
     fn db(name: &str) -> Connection {
-        let path = std::env::temp_dir().join(format!("launcher-owned-{name}-{}.db", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("launcher-owned-{name}-{}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
         crate::cache::db::open(&path).unwrap()
     }
@@ -163,7 +184,12 @@ mod tests {
     fn owned_round_trips_through_the_info_cache() {
         let conn = db("roundtrip");
         assert_eq!(cached(&conn), None);
-        let games = vec![OwnedGame { appid: 70, name: "Half-Life".into(), playtime_minutes: 0, last_played: Some(9) }];
+        let games = vec![OwnedGame {
+            appid: 70,
+            name: "Half-Life".into(),
+            playtime_minutes: 0,
+            last_played: Some(9),
+        }];
         remember(&conn, &games, 1_000);
         assert_eq!(cached(&conn), Some((games.clone(), 1_000)));
         assert!(fresh(&conn, 1_000 + OWNED_MAX_AGE_SECS));
@@ -174,19 +200,41 @@ mod tests {
 
     #[test]
     fn rejected_token_keeps_owned_and_flags_attention() {
-        assert!(matches!(outcome(Err(OwnedError::TokenRejected)), OwnedOutcome::KeepAndFlag));
-        assert!(matches!(outcome(Err(OwnedError::Network("x".into()))), OwnedOutcome::KeepQuiet));
+        assert!(matches!(
+            outcome(Err(OwnedError::TokenRejected)),
+            OwnedOutcome::KeepAndFlag
+        ));
+        assert!(matches!(
+            outcome(Err(OwnedError::Network("x".into()))),
+            OwnedOutcome::KeepQuiet
+        ));
         assert!(matches!(outcome(Ok(vec![])), OwnedOutcome::Store(_)));
     }
 
     #[test]
     fn only_auth_eresults_reject_the_token() {
-        for r in [EResult::AccessDenied, EResult::InvalidPassword, EResult::Expired] {
-            assert!(matches!(from_network(NetworkError::ApiError(r)), OwnedError::TokenRejected));
+        for r in [
+            EResult::AccessDenied,
+            EResult::InvalidPassword,
+            EResult::Expired,
+        ] {
+            assert!(matches!(
+                from_network(NetworkError::ApiError(r)),
+                OwnedError::TokenRejected
+            ));
         }
-        assert!(matches!(from_network(NetworkError::ApiError(EResult::Busy)), OwnedError::Network(_)));
-        assert!(matches!(from_network(NetworkError::Timeout), OwnedError::Network(_)));
-        assert!(matches!(from_connection(ConnectionError::Aborted), OwnedError::Network(_)));
+        assert!(matches!(
+            from_network(NetworkError::ApiError(EResult::Busy)),
+            OwnedError::Network(_)
+        ));
+        assert!(matches!(
+            from_network(NetworkError::Timeout),
+            OwnedError::Network(_)
+        ));
+        assert!(matches!(
+            from_connection(ConnectionError::Aborted),
+            OwnedError::Network(_)
+        ));
     }
 
     #[test]
@@ -216,7 +264,9 @@ mod tests {
 
     #[test]
     fn owned_lists_cached_without_last_played_still_parse() {
-        let old: Vec<OwnedGame> = serde_json::from_str(r#"[{"appid":70,"name":"Half-Life","playtime_minutes":3}]"#).unwrap();
+        let old: Vec<OwnedGame> =
+            serde_json::from_str(r#"[{"appid":70,"name":"Half-Life","playtime_minutes":3}]"#)
+                .unwrap();
         assert_eq!(old[0].last_played, None);
     }
 }

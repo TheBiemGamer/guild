@@ -41,9 +41,7 @@ const rest: Ids[] = [
  * Has (more than one store) is left out when the library uses fewer than two stores (`multiStore` false). */
 export function filterGroups(collections: readonly Collection[], multiStore = true): Group[] {
   const lists: Ids = { id: 'lists', filters: ['favorites', ...collections.map((c) => collectionFilter(c.id)), 'hidden'] }
-  return [status, lists, ...rest]
-    .filter((g) => multiStore || g.id !== 'has')
-    .map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
+  return [status, lists, ...rest].filter((g) => multiStore || g.id !== 'has').map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
 }
 
 /** The toolbar's store segments for the stores the library uses, null being All; none when there is only one store. */

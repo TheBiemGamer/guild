@@ -169,6 +169,7 @@ components:
 The art of the last-played game, "heavily blurred and saturated, tints the whole window. It fades to near-black lower down so content stays readable." On top of that sit translucent dark-glass chrome with thin light borders, covers as the main content, and one solid white pill for the primary action. It is a dark-only, dense, content-first desktop app (Windows 10/11, Tauri webview), not a page. Light theme is an owner non-goal.
 
 **Key Characteristics:**
+
 - One ambient tint layer behind everything, static while scrolling (drawn once into a small canvas, scaled up).
 - Dark glass chrome: translucent black fills, 1px light borders, no heavy shadows on bars.
 - Solid white pill = the primary action (Play, Install, Log in). Nothing else is that bright.
@@ -180,9 +181,11 @@ The art of the last-played game, "heavily blurred and saturated, tints the whole
 A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text at three opacities, and a single violet accent used sparingly. Colour mostly comes from the game art through the ambient layer, not from the UI.
 
 ### Primary
+
 - **Signal Violet** (`accent` #7c5cff, hover `accent-2` #a48bff): the "on" state of toggles, links in Settings, the legacy `button.primary`, the install progress bar in the game page hero and the progress fill in the Downloads popover. Never the main call to action; that is the white pill.
 
 ### Neutral
+
 - **Ink Black** (`bg` #0e0e14): window base, text on white pills, the neutral gradient floor.
 - **Night Surface** (`surface` #16161f) and **Raised Surface** (`surface-2` #1f1f2a): cover placeholder, default buttons, dropdown options. `line` (#2c2c3a) is their hover/border step.
 - **Cloud White** (`text` #eef0f6), `text-2` (white 75%), `text-3` (white 50%), **Dusk Grey** (`muted` #8d90a3): primary text, secondary text, hints and placeholders, and quiet metadata.
@@ -190,6 +193,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 - **Pill White** (`pill` #fff, hover #e4e6ee): the primary action only. The code writes these two as literals in `app.css` (`button.pill`), not as custom properties.
 
 ### Status
+
 - **Play Green** (`play` #22c55e): running state only (the "Playing" badge, the running-card ring).
 - **Amber** (`warn` #f5b942): a store needs attention (settings dot, "Not logged in").
 - **Red** (`danger` #ef4444): destructive actions and error notices. **Soft Red** (`danger-text` #fca5a5): destructive text on dark glass (Settings "Remove", the game page's Uninstall); plain `danger` is too dark for small text there.
@@ -197,6 +201,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 - Settings also uses literal, untokenised tints: success text #4ade80, error text #fecaca, icon tiles white 6%, store tiles #1b2838 (Steam), #2a2a2a (Epic), #86328a (GOG) and #232f3e (Amazon Games). Treat these as house values until tokenised.
 
 ### Named Rules
+
 **The One Bright Thing Rule.** The solid white pill is the only solid-bright element on a screen. Accent violet and green never compete with it.
 **The Tint Comes From The Art Rule.** Chromatic colour on the library comes from the ambient layer. UI chrome stays neutral.
 
@@ -207,6 +212,7 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 **Character:** The native Windows face, plain and unforced; hierarchy comes from weight, size and uppercase tracking, not from a second font.
 
 ### Hierarchy
+
 - **Display** (700, 34px, 1.1): the game page title, on the hero.
 - **Title** (700, 26px, 1.15): Continue-playing banner game name.
 - **Headline** (600, 20px): 700 for the Settings page titles (Accounts, General, Services, About); 16px/700 for the Settings panel title.
@@ -214,19 +220,20 @@ A near-black blue-violet base (`bg`, `surface`, `surface-2`, `line`), white text
 - **Label** (600, 12px, 0.08em tracking, uppercase): section labels ("Library 613", Settings group headings in `text-3`, game page tile and panel headings, "Continue playing"); 11px/600 for chips and the banner kicker. Counts use tabular numerals.
 
 ### Named Rules
+
 **The Eleven Pixel Floor Rule.** No UI text below 11px. (Observed in code, and the `.impeccable/config.json` waivers say the real UI keeps text at 11px or more; not an owner statement.)
 
 ## Layout
 
 A full-window column: toolbar, optional notices, then a content area that fills the rest. The library is a **virtualised grid** of fixed 180x270 covers with a 16px gap, columns centred in the available width, a 24px page gutter on bars and notices, and the Continue banner (180px high) plus section label scrolling with the covers as the grid header. Only rows near the viewport exist in the DOM. Because of that, card size and gap are constants in code, not fluid. The sort sets the grouping (there is no separate Group control). Grouped, the header keeps only the banner and each group starts on a new row under its own section label ("10–20 h 12", the Label style with a `text-3` count): the label row is 18px plus the 16px gap, and 24px of space sits above every label but the first. Groups and labels are rows of the same virtualised list. Empty groups are hidden; within a group the sort order applies. Filters keep each group's cards together.
 
-| Sort | Groups, in order |
-|---|---|
-| Recently played | Today · This week · This month · Earlier · Never played (local calendar days: This week is the 6 days before today, This month the 23 days before those) |
-| Most played | 500 h+ · 100–500 h · 50–100 h · 20–50 h · 10–20 h · 0–10 h · Never played |
-| Longest to beat | 100 h+ · 40–100 h · 15–40 h · 5–15 h · Under 5 h · Unknown |
-| Shortest to beat | Under 5 h · 5–15 h · 15–40 h · 40–100 h · 100 h+ · Unknown |
-| Title | none: one list under the "Library" label |
+| Sort             | Groups, in order                                                                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recently played  | Today · This week · This month · Earlier · Never played (local calendar days: This week is the 6 days before today, This month the 23 days before those) |
+| Most played      | 500 h+ · 100–500 h · 50–100 h · 20–50 h · 10–20 h · 0–10 h · Never played                                                                                |
+| Longest to beat  | 100 h+ · 40–100 h · 15–40 h · 5–15 h · Under 5 h · Unknown                                                                                               |
+| Shortest to beat | Under 5 h · 5–15 h · 15–40 h · 40–100 h · 100 h+ · Unknown                                                                                               |
+| Title            | none: one list under the "Library" label                                                                                                                 |
 
 **Favorites on top** (owner's option A): when a shown game is a favorite, the list starts with a "Favorites" group, then the rest: the sort's own groups without the favorites, or, under Title, one "All games" group. Not when Favorites is the only Lists filter (every game shown is one). **Hidden games** are left out of the library, search, the count and the Continue banner; the Hidden filter shows them. A game that is both is hidden.
 
@@ -239,12 +246,14 @@ Spacing rhythm observed: 8 / 12 / 16 / 24 px. Controls on bars are 36px high.
 Hybrid: tonal layering and translucency for chrome, soft black shadows for objects that sit over art. Depth over the ambient tint comes from glass fills plus a 1px light border, not from shadow.
 
 ### Shadow Vocabulary
+
 - **Cover rest** (`0 4px 12px rgb(0 0 0 / 0.45)`): covers at rest.
 - **Cover lift** (`0 16px 34px rgb(0 0 0 / 0.6), 0 0 0 2px rgb(255 255 255 / 0.85)`): hovered or focused cover, with a 4px rise and 1.03 scale. The white 2px ring is the hover outline the owner asked for.
 - **Banner** (`0 10px 30px rgb(0 0 0 / 0.45)`).
 - **Modal** (`0 30px 80px rgb(0 0 0 / 0.6)`) with `backdrop-filter: blur(24px)` on the Settings panel. Popovers (⋯ menu, Play with, Filters, Downloads) use the same shadow without the blur.
 
 ### Named Rules
+
 **The No Halo Rule.** Shadows are black and directional. No coloured glow halos (owner anti-goal). The only coloured ring is the green running ring on a card.
 **The Static Backdrop Rule.** Blur is applied once off-screen (canvas) or only on small non-scrolling surfaces. Do not put a live `backdrop-filter` or CSS blur on anything that scrolls. (Derived from the owner's scrolling anti-goal and the code comments in `Ambient.svelte`.)
 
@@ -257,6 +266,7 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 ## Components
 
 ### Buttons
+
 - **Primary (pill):** white fill, `bg` text, 700 weight, 999px radius, 9px 20px (small: 6px 14px, 12px). The only primary-action style.
 - **Default:** `surface-2` fill, 8px radius, 8px 16px; hover steps to `line`; press scales to 0.97.
 - **Glass:** `glass-on` fill with `glass-on-line` border, for secondary actions on glass.
@@ -264,7 +274,9 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Focus:** 2px `focus` outline, 2px offset, everywhere. Disabled is 60% opacity.
 
 ### Chips (filters, sort, downloads, settings button)
+
 36px high, `glass` fill, `glass-line` border, `text-2` text, 6px icon gap. Selected (`aria-pressed`) = `glass-on` fill, `glass-on-line` border, `text`. The settings chip carries an 8px amber dot, ringed in `bg`, only for a real problem: Steam rejected its saved login, or a store that was set up here broke. For Epic, GOG and Amazon Games that is a login that can't be reached, or a logout or missing tool while the store's games are still in the library; a store never set up (no tool, never logged in, no games), or logged out of with Log out until it is logged in again, raises no dot.
+
 - **Store selector:** one segmented control in place of separate chips: All, then the logos (18px, `aria-label` with the store name) of only the stores the library has games from, in the order Steam, Epic, GOG, Amazon Games (`Library::stores`, from the whole library, so searching or filtering never changes it). With one store or none there is no control at all. When the selected store leaves (its games are gone), the filter falls back to All. Chip height and fill (36px, `glass`, `glass-line` border, 10px radius, 2px padding), 36px segments in `text-2` (`text` when selected or hovered; an unselected hovered segment gets `glass-hover`). The selected segment sits on a `glass-on` pill (`glass-on-line` border, 8px radius) that slides to it with a 150ms ease-out transform; no transition under reduced motion (the global rule). `role="radiogroup"` ("Store"), each segment `role="radio"` with `aria-checked`; only the selected segment is in the tab order, and the arrow keys move to the next or previous store and pick it, wrapping. Installed stays a separate toggle chip right after it. Games the owner added show under All only.
 - **Active filter chip:** a filter turned on in the Filters popover also shows in the toolbar, after Installed, as a selected chip with its name (a collection's own name) and a `text-3` 11px ✕ (8px gap); clicking it clears exactly that filter (`removeChip` in `src/lib/filters.ts`).
 - **Filters chip:** a 15px sliders icon plus "Filters"; opens the Filters popover.
@@ -275,7 +287,9 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Update chip:** a text chip with a 16px up arrow in `accent-2` and "Update", shown only while a check found a newer release, left of Downloads. Opens the Update popover. The app checks quietly once the startup refresh is done, then every 6 h (never in a dev build or the benchmark); a failed check shows nothing here.
 
 ### Popovers (Filters, Downloads, Sort)
+
 `surface-2` fill, `glass-on-line` border, 12px radius, modal shadow, 44px below their chip (Filters left-aligned, Downloads right-aligned). Keyboard and pointer (`src/lib/popover.ts`): focus moves to the first control on open, Tab and Shift+Tab stay inside, Escape closes and returns focus to the chip, a click outside closes. Mouse Back/Forward are ignored while one is open, as with Settings. Ctrl K closes it and focuses the search.
+
 - **Filters:** 360px wide, 12px padding. Groups under 11px uppercase `text-3` headings (10px above, 6px below; the first 2px): Status (Not installed, Update available, Downloading), Lists (Favorites, each collection by name, Hidden; a long name ends in an ellipsis), Your playtime (Never played, Under 10 h, 10–50 h, 50 h+; unknown counts as never played), How long to beat (Under 5 h, 5–15 h, 15–40 h, 40–100 h, 100 h+, on the hours the card shows; unknown matches none) and Has (On more than one store; only while the library has games from two or more stores, and switched off when that ends). Filters in one group widen each other, groups narrow. Toggles are 30px pills, 13px, `glass` fill and `glass-line` border, on = `glass-on` / `glass-on-line` / `text`, `aria-pressed`. A footer under a `glass-line` rule (12px above, 10px padding) holds Clear (13px `text-2` text button) on the left and "Manage collections…" (the same text button, `aria-expanded`) on the right, which folds out a list under the footer (8px above, rows 2px apart, 13px): each collection's name (click to rename in a 28px field, `glass` fill, `glass-line` border, 10px radius; Enter or leaving the field saves, Escape cancels) and a 28px round ✕ in `text-3` (`aria-label` "Delete <name>"). ✕ asks in the row: "Delete <name>? Games stay in your library." then Delete (`danger-text`) and Cancel, 28px round chips (`glass-hover` fill, `glass-line` border); focus goes to Cancel. With no collections it says "No collections yet. Add games to one from a game's menu." A failed rename shows as one quiet `text-2` line under the list. Genre (once genres are cached), DLC and Cloud saves join when their data exists.
 - **Sort menu** (`ChoiceMenu.svelte`): right-aligned, min 230px wide, 6px padding, `role="menu"`. One `menuitemradio` row per option (8px 10px padding, 8px radius, `text-2`; hover `glass-hover` and `text`), the chosen row in `text` with a trailing ✓ in `text-2` (`aria-checked`). Focus opens on the chosen row; Up/Down/Home/End move; Enter, Space or a click picks and closes, returning focus to the chip.
 - **Downloads:** 380px wide, 6px padding (layout F2, chosen by the owner 2026-11-07). Every download is one two-line row, the same for every store: 16px store logo, the title (600, ellipsis) and under it the progress line in `text-2` 12px with tabular numerals, "50% · 0.7 GB · 13 s left" (`progressShort`; Epic's numbers from Legendary, GOG's from gogdl; Steam's from its appmanifest moved on by steam.exe's disk writes, capped at 99% until Steam says it is done; the time shows once known, a repair reads "Repairing 50% · …"). The row is the progress bar: an 8px-radius fill, `accent` at 18% with a 2px `accent` line along its bottom, as wide as the progress (`role="progressbar"`, width eases over 400ms linear). Rows sit 2px apart, 8px 10px padding, no headings or rules. The active job (Epic or GOG) comes first: "Installing…"/"Updating…"/"Verifying…" until Legendary or gogdl reports, then 28px round glass icon buttons, Pause (two bars) or Resume (play triangle), and Cancel (✕, `aria-label` "Cancel <title>"). While the queue is paused its fill turns white 8% with a `text-3` line and the text reads "Paused · 42%" (or "Paused"). Then any Epic Move or GOG DLC uninstall in progress and Steam's own downloads, without buttons. "Up next" (11px uppercase `text-3` heading) lists waiting jobs without a fill: title, the action ("Install", "Update", "Verify") in `text-3`, and 28px round glass ↑, ↓ (`aria-label` "Move <title> up/down"; disabled at the ends, nothing moves ahead of the active job) and ✕ (`aria-label` "Remove <title> from queue"). Pause applies to the whole queue, as in Steam: the active job stops and stays first; Resume starts it again. The queue survives a restart.
@@ -284,6 +298,7 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Update popover:** Notes for the new version, the aside "you have 0.2.0", then a footer under a `glass-line` rule (12px above, 14px margin, 8px gap, right-aligned): a glass "Later" (closes) and the white pill "Update and restart". While it downloads the pill reads "Downloading…" (`aria-disabled`) and Later is disabled. A failure shows inline above the footer in `danger-text` 13px, and the buttons work again. While a game runs the pill is disabled and a `text-3` 13px line says "Close the game to update." The installer closes the app (the tray icon is hidden first) and starts the new version.
 
 ### Cards / Containers
+
 - **Cover card:** 180x270, 10px radius. While the cover loads it shows `surface-2`, then the cover's average colour, then the image fading in over 150ms; the title shows only when there is no art. Store logo top-right; a game the owner added shows a white line gamepad in the same badge (`icons/gamepad.svg`, `custom` in `StoreIcon`). Installed = full colour; not installed = `saturate(0.5) brightness(0.75)` plus a bottom-left glass "Install" chip (owner's option C). Running = "Playing" green badge and green ring; installing = a 6px progress strip. A game waiting in the download queue shows a bottom-left glass "Queued" chip (no icon) in place of Install/Update and, on hover, the busy pill "Queued" (`aria-disabled`) and a small round glass Cancel that takes it out of the queue; the active job while the queue is paused shows a "Paused" chip in place of its strip and, on hover, "Paused" and Resume. The running active job keeps the progress strip. **Stat badge:** while sorted by Most played, Longest to beat or Shortest to beat, every card shows a bottom-left chip in the same glass as Install, in `text-2` with tabular numerals: "38 h played" (whole hours, "45 min played" under an hour), or "~25 h to beat" in the how-long-to-beat sorts. On a not-installed card it takes the Install chip's place (the dimmed cover still says not installed, and the hover keeps the Install pill). Playing, the progress strip, Queued, Paused and Update win over it; never played or unknown shows no badge (a not-installed card then keeps Install). Other sorts show no badge. It hides on hover like the other chips.
 - **Hover:** lifts, white ring, reveals title and a small Play (installed) or Install (not) pill. The overlay is absent (not transparent) when idle, to keep scrolling cheap.
 - **Favorite heart:** a 28px round button top-left (8px in; `rgb(0 0 0 / 0.5)` fill, `glass-line` border, a 14px white heart outline), shown on hover or focus-within and absent otherwise; a favorite shows it filled, always. A click toggles the favorite without opening the game (`aria-pressed`, `aria-label` "Favorite <title>"). A right-click on a card opens the game menu (see ⋯ menu) at the pointer, kept inside the window; scrolling closes it.
@@ -300,29 +315,37 @@ Borders are always thin and translucent (`glass-line`, 1px). Cover art is clippe
 - **Epic import rows (in Epic Options):** "Import an existing install" (an "Import…" Settings button opens the system folder picker; then a stacked row asks "Which game is in <folder>?" with a select of owned, not-installed Epic games, styled like the text fields, and Import / Cancel buttons) and "Sync with Epic Games Launcher" (a "Sync" button, "Syncing…" while it runs; import only, nothing is sent to EGL). Each row's last result is one quiet line under it (13px `text-2`, ellipsis, full text in the tooltip): success ("Imported <game>.", "Synced with the Epic Games Launcher.") or Legendary's error. No banners.
 
 ### Inputs / Fields
+
 36px high, 10px radius, `glass` fill, `glass-line` border, `text-3` placeholder, 2px focus outline. The search field's border brightens to `glass-on-line` on focus. It carries a `Ctrl K` hint at the right (11px, `text-2`, 5px radius, `glass-on-line` border), hidden while focused or filled; Ctrl K focuses it (not while Settings is open). Secrets (the IGDB secret, the SteamGridDB API key) are shown only as a filled read-only field with "••••••••" and "Saved" (success color, right) inside it, then Replace and Remove (owner decision); the dots give way first when space runs out.
 
 ### Navigation
+
 Top bar only, left to right (mockup v7): search, the store selector (All · the stores in use; absent with one store), Installed, active filter chips, Filters, spacer, Sort, Update (only while an update is ready), Downloads (only while something downloads), Add a game, settings. The bar sits above the content (`z-index: 5`) so its popovers hang over the grid and the game page. Settings has a left section list (active = white 10% fill) in the modal. There is no sidebar.
 
 ### Add a game dialog
+
 `src/lib/AddGame.svelte`, per the owner-approved mock `custom-game.html`. A centred panel over the Settings scrim (`rgb(8 8 12 / 0.55)`): min(520px, window − 48px) wide, 18px padding, `surface-2`, `glass-on-line` border, 16px radius, the modal shadow. Title "Add a game" ("Edit game" when editing), 16px/700. Fields, 12px apart, each under a 12px `text-2` label: Program (a read-only field with the path, which opens the picker too, and a glass "Browse…" that opens the system file picker on .exe files), Name (filled from the program's file name without its extension until the owner types one), Arguments (placeholder "Optional"; split on spaces, double quotes keep words together, never through a shell). Fields are the standard 36px glass fields. Cover: four 76x114 slots (8px radius, 8px gap, `surface` while searching or empty, 2px transparent border, `glass-on-line` on hover), filled with SteamGridDB's first four 600x900 covers for the name; the picked one has a white 2px border (`aria-pressed`). Adding, the first is picked; editing keeps the current cover until one is picked. Under them, 12px `text-3`: "From SteamGridDB · Use a file…" (the link in `accent-2`; a picked PNG or JPEG replaces the first words with its file name). The search runs at once on open, then 400 ms after the name stops changing; no spinner or status text. Without a SteamGridDB key the slots are replaced by a note (12px `text-3` on `glass`, 10px radius): "Add a SteamGridDB API key in Settings → Services to pick a cover here.", the Settings part a link that closes the dialog and opens Settings there, then a glass "Use a file…". A failure shows as one error line above the footer (the Settings error style). Footer under a `glass-line` rule (12px above, 16px gap): Cancel (glass) and the white pill "Add game" ("Save"), disabled until there is a program and a name (and, adding without a file, until the cover search answers). Keyboard as the popovers: focus starts in Program, Tab stays inside, Escape closes; a click on the scrim closes. Saved, the dialog closes and the library reloads; the new game's page does not open.
 
 ### Language
+
 - **Language row (Settings → General → Look, last):** "Language" on the left; on the right the current choice as an Options-style Settings button (quiet outline, 12px chevron that turns when open, `aria-label` "Language: System"). It opens the Sort menu's `ChoiceMenu` under it, right-aligned: System, English, Nederlands. System follows Windows' display language (Dutch picks Nederlands, anything else English); each language is named in its own language and only System is translated. A pick saves `language` and the whole UI, the tray menu and later toasts and login window titles switch at once, without a reload.
 - **Copy lives in language files:** every word the UI shows comes from `src/lib/i18n/<lang>.json` through `t(key, params)` (`src/lib/i18n.ts`): flat dotted keys (`settings.language`), `{name}` placeholders, plurals as `key_one`/`key_other` picked by an `n` param. A key missing from a language shows its English words. Backend message codes are the `msg.<code>` keys. To add a string: add the key to `en.json` (and to `nl.json` once it exists), call `t('the.key')`; text around markup (a link, a bold value) uses `around(key, name)`. Store names, game titles and product names (Steam, Epic Games, GOG, Amazon Games, Legendary, gogdl, Nile, IGDB, SteamGridDB, PCGamingWiki…) stay as they are. CHANGELOG.md release notes stay English in every language.
 - **Native text** (tray, toasts, login window titles) is in `src-tauri/src/msg.rs`, one table per language (`EN`, `NL`) with the same words as `msg.<code>`; a test checks them.
 
 ### Toggle
+
 40x22 pill switch, white 18% off, `accent` on, white knob; `role="switch"`.
 
 ### Tray and notifications
+
 - **Tray icon:** the app icon, tooltip "Guild". Left-click shows and focuses the window. Menu: Open · Downloads (shows the window and opens the Downloads popover when something is downloading) · separator · Quit.
 - **Close:** with "Keep running in the tray when closed" on (default) the window's close button hides it to the tray and downloads go on; off, it quits. Started by Windows, the window stays in the tray.
 - **Toasts:** a Windows toast titled with the game when a download finishes: "Ready to play" (install, Steam download), "Updated", "Files verified" or "Repaired". None for failures (shown in-app) or cancelled jobs.
 
 ### Game page
+
 `src/lib/Detail.svelte`, per the owner-approved mockup `game-page.html` with the owner's change (no size tile).
+
 - **Tint:** the window's ambient layer switches to this game's hero art (its cover when it has none) while the page is open, and back on leaving. Same `Ambient.svelte`, so the Ambient color setting (Settings → General) applies.
 - **Hero:** 300px, 14px radius, banner shadow; art cover-fit at 30% from the top, fading in. A gradient darkens the top (`glass`) for the back button and the bottom (`scrim`) for the text. Back button top-left: `glass-strong` with `glass-line`, 10px radius (no backdrop blur: the hero scrolls). Bottom-left: Display title, then a meta line in `text-2` (a logo per store that owns it · "Installed on <Store>" (the chosen copy's, else the first installed copy's) or "Not installed" · developer · year, `·` in `text-3`). Install progress, while it runs, is a 6px `accent` bar under the meta line, with the long progress line under it (`progressLong`): "Downloading 50% · 0.7 of 1.9 GB · 1 min left" for Steam, which knows the total, "Installing 50% · 0.7 GB downloaded · 13 s left" for Epic ("Updating …", "Repairing …"); GOG's reads like Steam's ("Installing 50% · 0.7 of 1.9 GB · …"), as gogdl reports the total; verify reads as in the Downloads popover. No speed.
 - **Actions** (bottom-right): a 44px round glass `⋯` button and the large white pill (Play, Install, disabled "Playing", or busy text; the busy pill is `aria-disabled` so it stays focusable). An Epic or GOG job in the download queue drives the busy pill: "Installing…"/"Updating…"/"Verifying…" while it runs, "Queued" while it waits, "Paused" (progress text "Paused · 42%") while the queue is paused, each with a round glass Cancel ("Cancelling…" until it stops); Paused adds Resume before Cancel. Move and Uninstall are refused while the game is in the queue. A game owned on both stores gets the **split pill** instead: one 44px white pill in two segments. The left holds the chosen store's 18px logo and a 14px chevron (`aria-haspopup="menu"`, `aria-expanded`, `aria-label="Choose launcher, now <Store>"`); a 1px divider at `bg` 18% inset 10px; the right is Play (play icon) or Install (download icon) for the chosen copy. The choice is not stored; it resets to the default copy when another game opens. A not-installed Epic or GOG copy shows "Checking size…", then "27.3 GB download", in `text-2` beside Install. Epic and GOG uninstall ask inline (text, then Uninstall in `danger-text` and Cancel, both round glass); Steam asks in its own dialog. An Epic or GOG Play that finds a cloud save conflict asks the same way before launching: "Local save is newer than the cloud save." (or "Cloud save is newer than the local save."), then Keep cloud, Keep local and Cancel (round glass); focus goes to Cancel. It never picks a save by itself. A Play from a card that hits a conflict opens the game page, which asks.
@@ -342,6 +365,7 @@ Top bar only, left to right (mockup v7): search, the store selector (All · the 
 ## Do's and Don'ts
 
 ### Do:
+
 - **Do** use the CSS custom properties in `src/app.css`; add a token before adding a raw value.
 - **Do** format labels from numbers (progress, sizes, times, group names) in `src/lib/format.ts`; Rust sends numbers, ids and timestamps. Error and status messages come from Rust as message codes, worded under `msg.<code>` in the language files (`src/lib/messages.ts` renders them). Every label goes through `t()`; no hard-coded English in components.
 - **Do** keep scrolling at the benchmark level: `LAUNCHER_BENCH` 175 fps, 0 dropped frames over 613 games at 4,000 and 15,000 px/s (spec, Anti-goals).
@@ -351,6 +375,7 @@ Top bar only, left to right (mockup v7): search, the store selector (All · the 
 - **Do** honour `prefers-reduced-motion` (already global in `app.css`).
 
 ### Don't:
+
 - **Don't** use gradient text, coloured glow halos, or neon for its own sake (owner anti-goal: generic "AI-made" decoration).
 - **Don't** flash status text or spinners on every start; Epic refresh is silent.
 - **Don't** add a light theme.
@@ -380,6 +405,7 @@ All from `docs/superpowers/specs/2026-11-05-ambient-redesign-design.md` ("What w
 ## Anti-goals
 
 From the same spec ("Anti-goals (would make this a failure even if it works)"):
+
 - "Scrolling that is less smooth than now." 175 fps, 0 dropped frames over 613 games at 4,000 and 15,000 px/s must hold. An open lead on one occasional slow frame is in `docs/perf/2026-11-06-occasional-slow-frame.md` (parked by the owner, not a blocker).
 - "Status text or spinners flashing on every start."
 - "Layout jumps when data arrives late (covers, store details, how-long-to-beat)."

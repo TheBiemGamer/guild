@@ -11,7 +11,14 @@
   import { popover } from './popover'
   import { t } from './i18n'
 
-  let { version, sub, notes, anchor, onclose, children }: {
+  let {
+    version,
+    sub,
+    notes,
+    anchor,
+    onclose,
+    children,
+  }: {
     version: string
     /** After the version, in `text-3`. */
     sub?: string
@@ -51,7 +58,9 @@
   use:popover={{ anchor, close: onclose }}
 >
   <div class="body" bind:offsetHeight={height}>
-    <div class="ver"><b>{version}</b>{#if sub}<span>{sub}</span>{/if}</div>
+    <div class="ver">
+      <b>{version}</b>{#if sub}<span>{sub}</span>{/if}
+    </div>
     {#each groups as g (g.title)}
       <h3>{g.title}</h3>
       <ul>

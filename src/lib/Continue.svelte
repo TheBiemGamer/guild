@@ -2,7 +2,12 @@
   import type { Featured } from './bindings'
   import { t } from './i18n'
 
-  let { featured, running, onplay, onopen }: {
+  let {
+    featured,
+    running,
+    onplay,
+    onopen,
+  }: {
     featured: Featured
     running: boolean
     onplay: (key: string) => void

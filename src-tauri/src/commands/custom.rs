@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use super::library::rescan;
-use super::{allow, blocking, open_db, unix_now, AppState, Res};
+use super::{AppState, Res, allow, blocking, open_db, unix_now};
 use crate::cache;
-use crate::library::custom::{self, CustomGame};
 use crate::library::Image;
+use crate::library::custom::{self, CustomGame};
 use crate::settings;
 use crate::steamgriddb;
 
@@ -26,8 +26,13 @@ pub struct CustomView {
 #[specta::specta]
 pub async fn custom_game(app: AppHandle, key: String) -> Option<CustomView> {
     blocking(move || {
-        let row = cache::db::custom_game(&open_db(&app.state::<AppState>())?, custom::id_of(&key)?).ok()??;
-        Some(CustomView { name: row.name, exe: row.exe, args: row.args })
+        let row = cache::db::custom_game(&open_db(&app.state::<AppState>())?, custom::id_of(&key)?)
+            .ok()??;
+        Some(CustomView {
+            name: row.name,
+            exe: row.exe,
+            args: row.args,
+        })
     })
     .await
 }
@@ -58,15 +63,20 @@ pub async fn save_custom_game(
     }
     custom::check_exe(&exe)?;
     let id = match &key {
-        Some(key) => custom::id_of(key).ok_or(msg!(gameNotInLibrary))?.to_string(),
+        Some(key) => custom::id_of(key)
+            .ok_or(msg!(gameNotInLibrary))?
+            .to_string(),
         None => custom::new_id(),
     };
     let bytes = match cover {
         None => None,
         Some(CoverPick::Url(url)) => Some(download(&app.state::<AppState>().http, &url).await?),
-        Some(CoverPick::File(path)) => {
-            Some(blocking(move || std::fs::read(&path).map_err(|e| msg!(cantReadCover, detail = e.to_string()))).await?)
-        }
+        Some(CoverPick::File(path)) => Some(
+            blocking(move || {
+                std::fs::read(&path).map_err(|e| msg!(cantReadCover, detail = e.to_string()))
+            })
+            .await?,
+        ),
     };
     blocking(move || {
         let state = app.state::<AppState>();
@@ -80,7 +90,13 @@ pub async fn save_custom_game(
             store_cover(&dir, bytes)?;
             forget_thumbs(&state.dirs.thumbs, &id);
         }
-        let row = CustomGame { id: id.clone(), name, exe, args: args.trim().to_string(), added: unix_now() };
+        let row = CustomGame {
+            id: id.clone(),
+            name,
+            exe,
+            args: args.trim().to_string(),
+            added: unix_now(),
+        };
         if let Err(e) = cache::db::save_custom_game(&conn, &row) {
             if existing.is_none() {
                 _ = std::fs::remove_dir_all(&dir);
@@ -107,7 +123,9 @@ pub async fn remove_custom_game(app: AppHandle, key: String) -> Res<()> {
         let conn = open_db(&state).ok_or(msg!(noDb))?;
         cache::db::delete_custom_game(&conn, id)?;
         match std::fs::remove_dir_all(state.dirs.custom.join(id)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => tracing::warn!("remove cover {key}: {e}"),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                tracing::warn!("remove cover {key}: {e}")
+            }
             _ => {}
         }
         forget_thumbs(&state.dirs.thumbs, id);
@@ -122,7 +140,12 @@ async fn download(http: &reqwest::Client, url: &str) -> Res<Vec<u8>> {
     if !url.starts_with("https://") {
         return Err(msg!(pickCoverFromList));
     }
-    let bytes = match http.get(url).send().await.and_then(|r| r.error_for_status()) {
+    let bytes = match http
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
         Ok(response) => response.bytes().await,
         Err(e) => Err(e),
     };
@@ -182,10 +205,12 @@ pub async fn grid_search(app: AppHandle, name: String) -> Option<Vec<GridCover>>
     if name.is_empty() {
         return Some(Vec::new());
     }
-    let found = steamgriddb::search(&state.http, &key, name).await.unwrap_or_else(|e| {
-        tracing::warn!("{e}");
-        Vec::new()
-    });
+    let found = steamgriddb::search(&state.http, &key, name)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("{e}");
+            Vec::new()
+        });
     drop(key);
     let dir = state.dirs.art.join("steamgriddb");
     // Downloaded side by side; awaited in order, so the covers keep SteamGridDB's.
@@ -193,8 +218,19 @@ pub async fn grid_search(app: AppHandle, name: String) -> Option<Vec<GridCover>>
         .into_iter()
         .filter_map(|c| {
             let dest = dir.join(preview_name(&c.thumb)?);
-            let (http, image) = (state.http.clone(), Image { path: None, url: Some(c.thumb) });
-            Some((c.url, tauri::async_runtime::spawn(async move { cache::resolve(&image, &http, dest).await })))
+            let (http, image) = (
+                state.http.clone(),
+                Image {
+                    path: None,
+                    url: Some(c.thumb),
+                },
+            );
+            Some((
+                c.url,
+                tauri::async_runtime::spawn(
+                    async move { cache::resolve(&image, &http, dest).await },
+                ),
+            ))
         })
         .collect();
     let mut covers = Vec::new();
@@ -211,7 +247,11 @@ pub async fn grid_search(app: AppHandle, name: String) -> Option<Vec<GridCover>>
 /// The preview's file name in the cache: the URL's last segment, file-name characters only.
 fn preview_name(url: &str) -> Option<PathBuf> {
     let name = url.rsplit('/').next()?;
-    let ok = !name.is_empty() && !name.starts_with('.') && name.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+    let ok = !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
     ok.then(|| PathBuf::from(name))
 }
 
@@ -221,8 +261,17 @@ mod tests {
 
     #[test]
     fn preview_names_are_plain_file_names() {
-        assert_eq!(preview_name("https://cdn2.steamgriddb.com/thumb/ab12_c.png"), Some(PathBuf::from("ab12_c.png")));
-        for bad in ["https://x/", "https://x/..", "https://x/a%2F..%2Fb.png", "https://x/a?b=c", r"https://x/a\b.png"] {
+        assert_eq!(
+            preview_name("https://cdn2.steamgriddb.com/thumb/ab12_c.png"),
+            Some(PathBuf::from("ab12_c.png"))
+        );
+        for bad in [
+            "https://x/",
+            "https://x/..",
+            "https://x/a%2F..%2Fb.png",
+            "https://x/a?b=c",
+            r"https://x/a\b.png",
+        ] {
             assert_eq!(preview_name(bad), None, "{bad}");
         }
     }
@@ -232,9 +281,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("launcher-cover-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut png = Vec::new();
-        image::RgbImage::new(2, 3).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        image::RgbImage::new(2, 3)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         let mut jpg = Vec::new();
-        image::RgbImage::new(2, 3).write_to(&mut std::io::Cursor::new(&mut jpg), image::ImageFormat::Jpeg).unwrap();
+        image::RgbImage::new(2, 3)
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpg),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
         store_cover(&dir, &png).unwrap();
         assert_eq!(custom::cover_file(&dir), Some(dir.join("cover.png")));
         store_cover(&dir, &jpg).unwrap();

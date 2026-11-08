@@ -17,7 +17,10 @@ use serde_json::Value;
 
 use crate::msg::Msg;
 
-use super::{Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, Provider, ProviderKind};
+use super::{
+    Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, Provider,
+    ProviderKind,
+};
 
 /// What a running install reports back.
 #[derive(Debug, Clone)]
@@ -70,7 +73,9 @@ impl Provider for Epic {
 }
 
 /// A copy's own launch options, kept in `game_prefs` as JSON. `exe` is relative to the install folder.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
+)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LaunchOptions {
     /// Extra game arguments as typed; split by `split_args`.
@@ -103,7 +108,11 @@ pub fn split_args(text: &str) -> Vec<String> {
 /// `legendary launch` arguments. Flags from `legendary launch --help` (0.21.1); its "additional arguments
 /// are passed to the game" go after them. `skip_version_check` also comes from Play without updating.
 // shortcut: a game argument that spells a Legendary flag (or its prefix, like `--off`) is taken by Legendary.
-pub fn launch_args(app_name: &str, options: &LaunchOptions, skip_version_check: bool) -> Vec<String> {
+pub fn launch_args(
+    app_name: &str,
+    options: &LaunchOptions,
+    skip_version_check: bool,
+) -> Vec<String> {
     let mut args = vec!["launch".to_string(), app_name.to_string()];
     if options.offline {
         args.push("--offline".into());
@@ -121,9 +130,14 @@ pub fn launch_args(app_name: &str, options: &LaunchOptions, skip_version_check: 
 /// `exe` (absolute, or relative to `install_dir`) as a path relative to `install_dir`, only when it is an
 /// existing file inside it.
 pub fn override_exe(install_dir: &Path, exe: &str) -> Result<String, Error> {
-    let dir = install_dir.canonicalize().map_err(|_| msg!(installFolderGone))?;
+    let dir = install_dir
+        .canonicalize()
+        .map_err(|_| msg!(installFolderGone))?;
     // Both canonical, so `..`, links and other drives can't slip past the prefix check.
-    let file = install_dir.join(exe).canonicalize().map_err(|_| msg!(exeOutsideInstallFolder))?;
+    let file = install_dir
+        .join(exe)
+        .canonicalize()
+        .map_err(|_| msg!(exeOutsideInstallFolder))?;
     match file.strip_prefix(&dir) {
         Ok(relative) if file.is_file() => Ok(relative.to_string_lossy().into_owned()),
         _ => Err(msg!(exeOutsideInstallFolder).into()),
@@ -131,9 +145,15 @@ pub fn override_exe(install_dir: &Path, exe: &str) -> Result<String, Error> {
 }
 
 /// Starts a game and waits for Legendary. `skip_version_check` starts an out-of-date game anyway.
-pub fn launch(app_name: &str, options: &LaunchOptions, skip_version_check: bool) -> Result<(), Error> {
+pub fn launch(
+    app_name: &str,
+    options: &LaunchOptions,
+    skip_version_check: bool,
+) -> Result<(), Error> {
     let mut command = Command::new(legendary_exe());
-    command.args(launch_args(app_name, options, skip_version_check)).creation_flags(CREATE_NO_WINDOW);
+    command
+        .args(launch_args(app_name, options, skip_version_check))
+        .creation_flags(CREATE_NO_WINDOW);
     run(command)
 }
 
@@ -191,7 +211,11 @@ pub(super) const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Runs `legendary sync-saves` for one installed game. Never fails: a failure is an outcome.
 pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
-    match run_with_timeout(legendary(&sync_args(app_name, sync)), SYNC_ANSWERS, SYNC_TIMEOUT) {
+    match run_with_timeout(
+        legendary(&sync_args(app_name, sync)),
+        SYNC_ANSWERS,
+        SYNC_TIMEOUT,
+    ) {
         Ok(Some((success, _, log))) => parse_sync(success, &log),
         Ok(None) => SyncOutcome::Failed(msg!(savesTimedOut)),
         Err(e) => SyncOutcome::Failed(Msg::system(e)),
@@ -206,8 +230,16 @@ pub(super) fn run_with_timeout(
     input: &[u8],
     timeout: Duration,
 ) -> std::io::Result<Option<(bool, String, String)>> {
-    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
-    child.stdin.take().expect("stdin is piped").write_all(input)?;
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(input)?;
     // Read aside, so a full pipe never stalls the process while this waits.
     let read = |mut pipe: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
@@ -221,7 +253,11 @@ pub(super) fn run_with_timeout(
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
-            return Ok(Some((status.success(), out.join().unwrap_or_default(), err.join().unwrap_or_default())));
+            return Ok(Some((
+                status.success(),
+                out.join().unwrap_or_default(),
+                err.join().unwrap_or_default(),
+            )));
         }
         if Instant::now() >= deadline {
             if let Err(e) = crate::platform::kill_tree(child.id()) {
@@ -241,7 +277,11 @@ fn parse_sync(success: bool, log: &str) -> SyncOutcome {
     if !success {
         let last = log.lines().rev().map(str::trim).find(|l| !l.is_empty());
         // `[cli] ERROR: Login failed!` -> `Login failed!`
-        let message = last.map(|l| l.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(l, |(_, m)| m));
+        let message = last.map(|l| {
+            l.split_once(": ")
+                .filter(|(head, _)| head.starts_with('['))
+                .map_or(l, |(_, m)| m)
+        });
         return SyncOutcome::Failed(message.map_or(msg!(legendaryNoReason), Msg::system));
     }
     let has = |text: &str| log.contains(text);
@@ -264,10 +304,16 @@ fn has_cloud_saves(metadata: &Value) -> bool {
 /// Installed games with their update flags. The update check is online, so when it fails
 /// (e.g. offline) the plain list still answers, with no updates marked.
 fn installed_list() -> Result<Value, Error> {
-    with_fallback(json(&["list-installed", "--check-updates", "--json"]), || json(&["list-installed", "--json"]))
+    with_fallback(
+        json(&["list-installed", "--check-updates", "--json"]),
+        || json(&["list-installed", "--json"]),
+    )
 }
 
-fn with_fallback(checked: Result<Value, Error>, plain: impl FnOnce() -> Result<Value, Error>) -> Result<Value, Error> {
+fn with_fallback(
+    checked: Result<Value, Error>,
+    plain: impl FnOnce() -> Result<Value, Error>,
+) -> Result<Value, Error> {
     checked.or_else(|e| {
         tracing::warn!("legendary list-installed --check-updates: {e}");
         plain()
@@ -286,7 +332,11 @@ pub fn install(
 ) -> Result<(), Error> {
     let mut command = legendary(&["-y", "install", app_name, "--skip-sdl"]);
     if let Some(with_dlc) = with_dlc {
-        command.arg(if with_dlc { "--with-dlcs" } else { "--skip-dlcs" });
+        command.arg(if with_dlc {
+            "--with-dlcs"
+        } else {
+            "--skip-dlcs"
+        });
     }
     if let Some(dir) = base_path {
         command.arg("--base-path").arg(dir);
@@ -296,7 +346,11 @@ pub fn install(
 
 /// Updates an installed game (Legendary's app name) like `install`: same events, same cancel.
 pub fn update(app_name: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
-    stream(legendary(&["-y", "update", app_name, "--skip-sdl"]), ProgressAction::Update, on_event)
+    stream(
+        legendary(&["-y", "update", app_name, "--skip-sdl"]),
+        ProgressAction::Update,
+        on_event,
+    )
 }
 
 // Verbs and flags below are from Legendary 0.21.1's `--help` for each command and its `cli.py`.
@@ -340,13 +394,22 @@ pub fn verify(app_name: &str, mut on_event: impl FnMut(InstallEvent)) -> Result<
     let (success, log) = run_logged(legendary(&verify_args(app_name)), &mut on_event)?;
     match parse_verify(success, &log)? {
         Verify::Ok => Ok(()),
-        Verify::Repair => stream(legendary(&repair_args(app_name)), ProgressAction::Repair, on_event),
+        Verify::Repair => stream(
+            legendary(&repair_args(app_name)),
+            ProgressAction::Repair,
+            on_event,
+        ),
     }
 }
 
 /// Moves an installed game's folder (at `from`, when known) into `dest`, with the same events as `install`.
 /// Legendary 0.21 renames the folder, so another drive is refused before it runs.
-pub fn move_to(app_name: &str, from: Option<&Path>, dest: &str, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+pub fn move_to(
+    app_name: &str,
+    from: Option<&Path>,
+    dest: &str,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), Error> {
     if from.is_some_and(|from| !same_drive(from, Path::new(dest))) {
         return Err(msg!(otherDriveMove).into());
     }
@@ -375,7 +438,11 @@ pub fn import(app_name: &str, path: &str) -> Result<(), Error> {
 }
 
 fn import_requires_existing_folder(path: &Path) -> Result<(), Msg> {
-    if path.is_dir() { Ok(()) } else { Err(msg!(notAFolder, path = path.display().to_string())) }
+    if path.is_dir() {
+        Ok(())
+    } else {
+        Err(msg!(notAFolder, path = path.display().to_string()))
+    }
 }
 
 /// Imports the games the Epic Games Launcher installed.
@@ -386,8 +453,15 @@ pub fn egl_sync() -> Result<(), Error> {
 
 /// Runs a Legendary command, reporting its pid and `verify`'s progress, and returns whether it exited 0
 /// and its log (stderr). stdin is closed, so a prompt ends the command instead of hanging it.
-fn run_logged(mut command: Command, mut on_event: impl FnMut(InstallEvent)) -> Result<(bool, String), Error> {
-    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+fn run_logged(
+    mut command: Command,
+    mut on_event: impl FnMut(InstallEvent),
+) -> Result<(bool, String), Error> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
     on_event(InstallEvent::Started(child.id()));
     let mut stderr = child.stderr.take().expect("stderr is piped");
     // Read aside, so a full pipe never stalls the process.
@@ -444,7 +518,11 @@ fn log_outcome(success: bool, log: &str, done: Option<&str>) -> Result<(), Msg> 
         Some(done) => log.lines().any(|l| l.trim_end().ends_with(done)),
         None => !log.lines().any(is_error_line),
     };
-    if success && finished { Ok(()) } else { Err(log_error(log)) }
+    if success && finished {
+        Ok(())
+    } else {
+        Err(log_error(log))
+    }
 }
 
 /// `[cli] ERROR: …` or `[cli] CRITICAL: …` (`logger.fatal`).
@@ -455,13 +533,24 @@ fn is_error_line(line: &str) -> bool {
 /// The last error in a log, else its last line, without the `[cli] ERROR: ` head.
 fn log_error(log: &str) -> Msg {
     let lines = || log.lines().rev().map(str::trim).filter(|l| !l.is_empty());
-    let Some(line) = lines().find(|l| is_error_line(l)).or_else(|| lines().next()) else {
+    let Some(line) = lines()
+        .find(|l| is_error_line(l))
+        .or_else(|| lines().next())
+    else {
         return msg!(legendaryNoReason);
     };
-    Msg::system(line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m))
+    Msg::system(
+        line.split_once(": ")
+            .filter(|(head, _)| head.starts_with('['))
+            .map_or(line, |(_, m)| m),
+    )
 }
 
-fn stream(mut command: Command, action: ProgressAction, mut on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+fn stream(
+    mut command: Command,
+    action: ProgressAction,
+    mut on_event: impl FnMut(InstallEvent),
+) -> Result<(), Error> {
     let mut child = command
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -469,7 +558,10 @@ fn stream(mut command: Command, action: ProgressAction, mut on_event: impl FnMut
     on_event(InstallEvent::Started(child.id()));
     let mut downloaded_mib = 0.0;
     let mut last_line = String::new();
-    for line in BufReader::new(child.stderr.take().expect("stderr is piped")).lines().map_while(Result::ok) {
+    for line in BufReader::new(child.stderr.take().expect("stderr is piped"))
+        .lines()
+        .map_while(Result::ok)
+    {
         if let Some(progress) = parse_progress(&line, action, &mut downloaded_mib) {
             on_event(InstallEvent::Progress(progress));
         }
@@ -478,7 +570,16 @@ fn stream(mut command: Command, action: ProgressAction, mut on_event: impl FnMut
         }
     }
     let status = child.wait()?;
-    if status.success() { Ok(()) } else { Err(msg!(legendaryInstallFailed, status = status.to_string(), detail = last_line).into()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err(msg!(
+            legendaryInstallFailed,
+            status = status.to_string(),
+            detail = last_line
+        )
+        .into())
+    }
 }
 
 /// Uninstalls a game or a DLC (Legendary's app name).
@@ -490,7 +591,11 @@ pub fn uninstall(app_name: &str) -> Result<(), Error> {
 /// `= Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:00`
 /// ` - Downloaded: 123.45 MiB, Written: 234.56 MiB`
 /// The Downloaded line follows the Progress line, so the progress carries the previous second's total.
-fn parse_progress(line: &str, action: ProgressAction, downloaded_mib: &mut f64) -> Option<Progress> {
+fn parse_progress(
+    line: &str,
+    action: ProgressAction,
+    downloaded_mib: &mut f64,
+) -> Option<Progress> {
     if let Some((_, rest)) = line.split_once(" - Downloaded: ") {
         if let Some(mib) = rest.split_whitespace().next().and_then(|n| n.parse().ok()) {
             *downloaded_mib = mib;
@@ -500,7 +605,9 @@ fn parse_progress(line: &str, action: ProgressAction, downloaded_mib: &mut f64) 
     let (_, rest) = line.split_once("= Progress: ")?;
     let percent: f32 = rest.split('%').next()?.trim().parse().ok()?;
     let secs_left = rest.split_once("ETA: ").and_then(|(_, eta)| {
-        eta.trim().split(':').try_fold(0u64, |secs, part| Some(secs * 60 + part.parse::<u64>().ok()?))
+        eta.trim().split(':').try_fold(0u64, |secs, part| {
+            Some(secs * 60 + part.parse::<u64>().ok()?)
+        })
     });
     Some(Progress {
         fraction: (percent / 100.0).clamp(0.0, 1.0),
@@ -553,9 +660,7 @@ pub fn login_state() -> Login {
     match json(&["status", "--json"]) {
         Ok(status) if status["account"] == "<not logged in>" => Login::LoggedOut,
         Ok(_) => Login::LoggedIn,
-        Err(Error::Io(e)) if e.kind() == ErrorKind::NotFound => {
-            Login::NoLegendary
-        }
+        Err(Error::Io(e)) if e.kind() == ErrorKind::NotFound => Login::NoLegendary,
         // `status` refreshes the session online and exits 1 when that fails.
         // shortcut: an expired session also lands here; it needs `legendary auth --delete` before "Log in" shows.
         Err(e) => {
@@ -589,7 +694,11 @@ fn legendary(args: &[&str]) -> Command {
 
 fn run(mut command: Command) -> Result<(), Error> {
     let output = command.output()?;
-    if output.status.success() { Ok(()) } else { Err(failure(&output).into()) }
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failure(&output).into())
+    }
 }
 
 fn json(args: &[&str]) -> Result<Value, Error> {
@@ -612,7 +721,11 @@ fn failure(output: &std::process::Output) -> Msg {
 
 /// Whether an Epic catalog item (a `list --json` entry) has `path` among its `metadata.categories`.
 fn has_category(item: &Value, path: &str) -> bool {
-    item["metadata"]["categories"].as_array().into_iter().flatten().any(|c| c["path"] == path)
+    item["metadata"]["categories"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|c| c["path"] == path)
 }
 
 /// Games, as opposed to Unreal Engine assets, engines, DLC, apps, servers and hidden content.
@@ -625,8 +738,12 @@ fn is_game(item: &Value) -> bool {
 /// installed, so nothing installed disappears. A DLC (any item whose `mainGameItem` names another
 /// item's catalog id) goes under that base game when the base is listed; otherwise the rules above apply to it.
 fn games(owned: &Value, installed: &Value) -> Vec<Game> {
-    let mut installed: HashMap<&str, &Value> =
-        installed.as_array().into_iter().flatten().filter_map(|g| Some((g["app_name"].as_str()?, g))).collect();
+    let mut installed: HashMap<&str, &Value> = installed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|g| Some((g["app_name"].as_str()?, g)))
+        .collect();
     // `list --json` nests DLC in its base game's `dlcs`; flattened, the catalog id finds the base either way.
     let items: Vec<&Value> = owned
         .as_array()
@@ -637,7 +754,12 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
     // Bases that will be listed: games and installed items.
     let bases: HashSet<&str> = items
         .iter()
-        .filter(|g| is_game(g) || g["app_name"].as_str().is_some_and(|n| installed.contains_key(n)))
+        .filter(|g| {
+            is_game(g)
+                || g["app_name"]
+                    .as_str()
+                    .is_some_and(|n| installed.contains_key(n))
+        })
         .filter_map(|g| g["metadata"]["id"].as_str())
         .collect();
     // Some DLC (ARK's maps) are listed as games; naming another listed item as its base is what makes a DLC.
@@ -647,8 +769,10 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
             .filter(|id| bases.contains(id) && g["metadata"]["id"].as_str() != Some(id))
     }
     // A DLC of a DLC (an add-on for an ARK map) goes under the root game, so the chain never hides itself.
-    let parents: HashMap<&str, &str> =
-        items.iter().filter_map(|g| Some((g["metadata"]["id"].as_str()?, base_of(g, &bases)?))).collect();
+    let parents: HashMap<&str, &str> = items
+        .iter()
+        .filter_map(|g| Some((g["metadata"]["id"].as_str()?, base_of(g, &bases)?)))
+        .collect();
     let mut dlc: HashMap<&str, Vec<Dlc>> = HashMap::new();
     let items: Vec<&Value> = items
         .into_iter()
@@ -664,7 +788,11 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
                 }
             }
             let title = g["app_title"].as_str().unwrap_or(name).to_owned();
-            dlc.entry(base).or_default().push(Dlc { id: name.to_owned(), title, installed: installed.remove(name).is_some() });
+            dlc.entry(base).or_default().push(Dlc {
+                id: name.to_owned(),
+                title,
+                installed: installed.remove(name).is_some(),
+            });
             false
         })
         .collect();
@@ -676,16 +804,27 @@ fn games(owned: &Value, installed: &Value) -> Vec<Game> {
             if local.is_none() && !is_game(g) {
                 return None;
             }
-            let title = g["app_title"].as_str().or(local.and_then(|l| l["title"].as_str())).unwrap_or(name);
+            let title = g["app_title"]
+                .as_str()
+                .or(local.and_then(|l| l["title"].as_str()))
+                .unwrap_or(name);
             let mut game = game(name, title, local, art(&g["metadata"]));
             game.cloud_saves = has_cloud_saves(&g["metadata"]);
-            game.dlc = g["metadata"]["id"].as_str().and_then(|id| dlc.remove(id)).unwrap_or_default();
+            game.dlc = g["metadata"]["id"]
+                .as_str()
+                .and_then(|id| dlc.remove(id))
+                .unwrap_or_default();
             game.dlc.sort_by(|a, b| a.title.cmp(&b.title));
             Some(game)
         })
         .collect();
     games.extend(installed.into_iter().map(|(name, local)| {
-        game(name, local["title"].as_str().unwrap_or(name), Some(local), Art::default())
+        game(
+            name,
+            local["title"].as_str().unwrap_or(name),
+            Some(local),
+            Art::default(),
+        )
     }));
     games
 }
@@ -696,7 +835,9 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
         external_id: name.to_owned(),
         title: title.to_owned(),
         installed: installed.is_some(),
-        install_dir: installed.and_then(|l| l["install_path"].as_str()).map(PathBuf::from),
+        install_dir: installed
+            .and_then(|l| l["install_path"].as_str())
+            .map(PathBuf::from),
         // Legendary tracks neither: playtime comes from `epic_playtime`, last played from launches here.
         playtime_minutes: None,
         last_played: None,
@@ -712,7 +853,9 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
 /// that differs from `version`. // shortcut: both spellings are read because no real capture with an update exists yet.
 fn has_update(local: &Value) -> bool {
     local["update_available"].as_bool().unwrap_or_else(|| {
-        local["remote_version"].as_str().is_some_and(|remote| local["version"].as_str().is_some_and(|v| v != remote))
+        local["remote_version"]
+            .as_str()
+            .is_some_and(|remote| local["version"].as_str().is_some_and(|v| v != remote))
     })
 }
 
@@ -740,24 +883,42 @@ mod tests {
     use super::*;
 
     fn opts(args: &str) -> LaunchOptions {
-        LaunchOptions { args: args.into(), ..LaunchOptions::default() }
+        LaunchOptions {
+            args: args.into(),
+            ..LaunchOptions::default()
+        }
     }
 
     #[test]
     fn split_args_groups_quotes_and_skips_spaces() {
         assert!(split_args("").is_empty());
         assert!(split_args("   ").is_empty());
-        assert_eq!(split_args("  -windowed   -w 1280 "), ["-windowed", "-w", "1280"]);
-        assert_eq!(split_args(r#"-name "Big Boss" x"#), ["-name", "Big Boss", "x"]);
-        assert_eq!(split_args(r#"--path="C:\My Games\x" %APPDATA% & del"#), [r"--path=C:\My Games\x", "%APPDATA%", "&", "del"]);
+        assert_eq!(
+            split_args("  -windowed   -w 1280 "),
+            ["-windowed", "-w", "1280"]
+        );
+        assert_eq!(
+            split_args(r#"-name "Big Boss" x"#),
+            ["-name", "Big Boss", "x"]
+        );
+        assert_eq!(
+            split_args(r#"--path="C:\My Games\x" %APPDATA% & del"#),
+            [r"--path=C:\My Games\x", "%APPDATA%", "&", "del"]
+        );
         assert_eq!(split_args(r#"a "" b"#), ["a", "", "b"]);
         assert_eq!(split_args(r#""unclosed quote"#), ["unclosed quote"]);
     }
 
     #[test]
     fn launch_args_from_options() {
-        assert_eq!(launch_args("Fn", &LaunchOptions::default(), false), ["launch", "Fn"]);
-        assert_eq!(launch_args("Fn", &LaunchOptions::default(), true), ["launch", "Fn", "--skip-version-check"]);
+        assert_eq!(
+            launch_args("Fn", &LaunchOptions::default(), false),
+            ["launch", "Fn"]
+        );
+        assert_eq!(
+            launch_args("Fn", &LaunchOptions::default(), true),
+            ["launch", "Fn", "--skip-version-check"]
+        );
         let all = LaunchOptions {
             args: r#"-windowed "-name=Big Boss""#.into(),
             offline: true,
@@ -766,10 +927,28 @@ mod tests {
         };
         assert_eq!(
             launch_args("Fn", &all, false),
-            ["launch", "Fn", "--offline", "--skip-version-check", "--override-exe", r"bin\game.exe", "-windowed", "-name=Big Boss"]
+            [
+                "launch",
+                "Fn",
+                "--offline",
+                "--skip-version-check",
+                "--override-exe",
+                r"bin\game.exe",
+                "-windowed",
+                "-name=Big Boss"
+            ]
         );
-        assert_eq!(launch_args("Fn", &all, true).iter().filter(|a| *a == "--skip-version-check").count(), 1);
-        assert_eq!(launch_args("Fn", &opts("-dx11"), false), ["launch", "Fn", "-dx11"]);
+        assert_eq!(
+            launch_args("Fn", &all, true)
+                .iter()
+                .filter(|a| *a == "--skip-version-check")
+                .count(),
+            1
+        );
+        assert_eq!(
+            launch_args("Fn", &opts("-dx11"), false),
+            ["launch", "Fn", "-dx11"]
+        );
     }
 
     #[test]
@@ -779,10 +958,19 @@ mod tests {
         std::fs::create_dir_all(game.join("bin")).unwrap();
         std::fs::write(game.join("bin").join("game.exe"), b"").unwrap();
         std::fs::write(root.join("outside.exe"), b"").unwrap();
-        assert_eq!(override_exe(&game, r"bin\game.exe").unwrap(), r"bin\game.exe");
-        assert_eq!(override_exe(&game, "bin/game.exe").unwrap(), r"bin\game.exe");
+        assert_eq!(
+            override_exe(&game, r"bin\game.exe").unwrap(),
+            r"bin\game.exe"
+        );
+        assert_eq!(
+            override_exe(&game, "bin/game.exe").unwrap(),
+            r"bin\game.exe"
+        );
         let absolute = game.join("bin").join("game.exe");
-        assert_eq!(override_exe(&game, &absolute.to_string_lossy()).unwrap(), r"bin\game.exe");
+        assert_eq!(
+            override_exe(&game, &absolute.to_string_lossy()).unwrap(),
+            r"bin\game.exe"
+        );
         assert!(override_exe(&game, r"..\outside.exe").is_err());
         assert!(override_exe(&game, r"bin\..\..\outside.exe").is_err());
         assert!(override_exe(&game, &root.join("outside.exe").to_string_lossy()).is_err());
@@ -795,7 +983,9 @@ mod tests {
     }
 
     fn fixture(name: &str) -> Value {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legendary").join(name);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/legendary")
+            .join(name);
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
@@ -826,7 +1016,8 @@ mod tests {
         // Fortnite: the store's version differs. Imported: no remote version, so no update.
         assert!(all[0].update_available);
         assert!(!all[2].update_available);
-        let flagged = serde_json::json!([{ "app_name": "A", "version": "1", "update_available": true }]);
+        let flagged =
+            serde_json::json!([{ "app_name": "A", "version": "1", "update_available": true }]);
         assert!(games(&Value::Null, &flagged)[0].update_available);
         let same = serde_json::json!([{ "app_name": "A", "version": "1", "remote_version": "1" }]);
         assert!(!games(&Value::Null, &same)[0].update_available);
@@ -837,14 +1028,23 @@ mod tests {
     #[test]
     fn failed_update_check_falls_back_to_the_plain_list() {
         let plain = || Ok(serde_json::json!([{ "app_name": "A" }]));
-        assert_eq!(with_fallback(Err("offline".into()), plain).unwrap(), serde_json::json!([{ "app_name": "A" }]));
-        assert_eq!(with_fallback(Ok(Value::Null), || Err("unused".into())).unwrap(), Value::Null);
+        assert_eq!(
+            with_fallback(Err("offline".into()), plain).unwrap(),
+            serde_json::json!([{ "app_name": "A" }])
+        );
+        assert_eq!(
+            with_fallback(Ok(Value::Null), || Err("unused".into())).unwrap(),
+            Value::Null
+        );
         assert!(with_fallback(Err("a".into()), || Err("b".into())).is_err());
     }
 
     #[test]
     fn list_keeps_only_games() {
-        let ids: Vec<_> = games(&categories(), &Value::Null).into_iter().map(|g| g.external_id).collect();
+        let ids: Vec<_> = games(&categories(), &Value::Null)
+            .into_iter()
+            .map(|g| g.external_id)
+            .collect();
         assert_eq!(ids, [NEW_VEGAS]);
     }
 
@@ -852,7 +1052,10 @@ mod tests {
     fn installed_non_game_is_kept() {
         let installed = serde_json::json!([{ "app_name": SPOTIFY, "title": "Spotify", "install_path": r"C:\Spotify" }]);
         let all = games(&categories(), &installed);
-        let spotify = all.iter().find(|g| g.external_id == SPOTIFY).expect("installed app stays");
+        let spotify = all
+            .iter()
+            .find(|g| g.external_id == SPOTIFY)
+            .expect("installed app stays");
         assert!(spotify.installed);
         assert_eq!(spotify.title, "Spotify Music and Podcasts");
         assert_eq!(all.len(), 2);
@@ -861,12 +1064,19 @@ mod tests {
     const LONESOME_ROAD: &str = "4fa3d8d9b2cb4714a19a38d1a598be8f";
 
     fn lonesome_road(installed: bool) -> Dlc {
-        Dlc { id: LONESOME_ROAD.into(), title: "Fallout New Vegas®: Lonesome Road™".into(), installed }
+        Dlc {
+            id: LONESOME_ROAD.into(),
+            title: "Fallout New Vegas®: Lonesome Road™".into(),
+            installed,
+        }
     }
 
     #[test]
     fn addon_attaches_to_its_base_game() {
-        assert_eq!(games(&categories(), &Value::Null)[0].dlc, [lonesome_road(false)]);
+        assert_eq!(
+            games(&categories(), &Value::Null)[0].dlc,
+            [lonesome_road(false)]
+        );
 
         // Installed, it shows as installed under its game, not as a game of its own.
         let installed = serde_json::json!([{ "app_name": LONESOME_ROAD, "title": "Lonesome Road", "is_dlc": true }]);
@@ -885,11 +1095,18 @@ mod tests {
     fn dlc_without_base_in_library_is_hidden() {
         const SAND_PATCH: &str = "0e07b42c0ffe4cfdb2095568f461f38f";
         let all = games(&categories(), &Value::Null);
-        assert!(all.iter().all(|g| g.external_id != SAND_PATCH && g.dlc.iter().all(|d| d.id != SAND_PATCH)));
+        assert!(
+            all.iter()
+                .all(|g| g.external_id != SAND_PATCH && g.dlc.iter().all(|d| d.id != SAND_PATCH))
+        );
 
         // Installed, it stays as its own entry: nothing installed disappears.
         let installed = serde_json::json!([{ "app_name": SAND_PATCH, "title": "Sand Patch Grade", "is_dlc": true }]);
-        assert!(games(&categories(), &installed).iter().any(|g| g.external_id == SAND_PATCH));
+        assert!(
+            games(&categories(), &installed)
+                .iter()
+                .any(|g| g.external_id == SAND_PATCH)
+        );
     }
 
     #[test]
@@ -904,7 +1121,14 @@ mod tests {
         ]);
         let all = games(&list, &Value::Null);
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].dlc, [Dlc { id: "ArkRagnarok".into(), title: "ARK Ragnarok".into(), installed: false }]);
+        assert_eq!(
+            all[0].dlc,
+            [Dlc {
+                id: "ArkRagnarok".into(),
+                title: "ARK Ragnarok".into(),
+                installed: false
+            }]
+        );
     }
 
     #[test]
@@ -924,8 +1148,16 @@ mod tests {
         assert_eq!(
             all[0].dlc,
             [
-                Dlc { id: "ArkRagnarok".into(), title: "ARK Ragnarok".into(), installed: false },
-                Dlc { id: "RagnarokExtra".into(), title: "Ragnarok Extra".into(), installed: true },
+                Dlc {
+                    id: "ArkRagnarok".into(),
+                    title: "ARK Ragnarok".into(),
+                    installed: false
+                },
+                Dlc {
+                    id: "RagnarokExtra".into(),
+                    title: "Ragnarok Extra".into(),
+                    installed: true
+                },
             ]
         );
     }
@@ -940,11 +1172,18 @@ mod tests {
                           "mainGameItem": { "id": "b55fccb269ad47928804c681b16b8e93" } }
         }));
         let all = games(&list, &Value::Null);
-        assert!(all.iter().all(|g| g.external_id != "SpotifyDlc" && g.dlc.iter().all(|d| d.id != "SpotifyDlc")));
+        assert!(
+            all.iter().all(
+                |g| g.external_id != "SpotifyDlc" && g.dlc.iter().all(|d| d.id != "SpotifyDlc")
+            )
+        );
 
         let installed = serde_json::json!([{ "app_name": "SpotifyDlc", "title": "Spotify Extra", "is_dlc": true }]);
         let all = games(&list, &installed);
-        let dlc = all.iter().find(|g| g.external_id == "SpotifyDlc").expect("installed DLC stays");
+        let dlc = all
+            .iter()
+            .find(|g| g.external_id == "SpotifyDlc")
+            .expect("installed DLC stays");
         assert!(dlc.installed);
     }
 
@@ -962,10 +1201,22 @@ mod tests {
 
     #[test]
     fn sync_args_before_and_after_launch() {
-        assert_eq!(sync_args("Goo", SaveSync::Download), ["sync-saves", "Goo", "--skip-upload"]);
-        assert_eq!(sync_args("Goo", SaveSync::Upload), ["sync-saves", "Goo", "--skip-download"]);
-        assert_eq!(sync_args("Goo", SaveSync::KeepCloud), ["sync-saves", "Goo", "--skip-upload", "--force-download"]);
-        assert_eq!(sync_args("Goo", SaveSync::KeepLocal), ["sync-saves", "Goo", "--skip-download", "--force-upload"]);
+        assert_eq!(
+            sync_args("Goo", SaveSync::Download),
+            ["sync-saves", "Goo", "--skip-upload"]
+        );
+        assert_eq!(
+            sync_args("Goo", SaveSync::Upload),
+            ["sync-saves", "Goo", "--skip-download"]
+        );
+        assert_eq!(
+            sync_args("Goo", SaveSync::KeepCloud),
+            ["sync-saves", "Goo", "--skip-upload", "--force-download"]
+        );
+        assert_eq!(
+            sync_args("Goo", SaveSync::KeepLocal),
+            ["sync-saves", "Goo", "--skip-download", "--force-upload"]
+        );
         assert_eq!(sync_args("Goo", SaveSync::Both), ["sync-saves", "Goo"]);
         // No `-y`: Legendary 0.21 skips a game whose save folder isn't set yet under it. Empty lines on stdin
         // take each prompt's default (yes) instead, and skip a folder Legendary can't work out.
@@ -976,29 +1227,61 @@ mod tests {
     fn sync_run_gives_up_after_its_timeout() {
         let cmd = |script: &str| {
             let mut command = Command::new("cmd");
-            command.args(["/C", script]).creation_flags(CREATE_NO_WINDOW);
+            command
+                .args(["/C", script])
+                .creation_flags(CREATE_NO_WINDOW);
             command
         };
         let started = Instant::now();
-        let stalled = run_with_timeout(cmd("ping -n 30 127.0.0.1 >nul"), b"\n", Duration::from_millis(300)).unwrap();
+        let stalled = run_with_timeout(
+            cmd("ping -n 30 127.0.0.1 >nul"),
+            b"\n",
+            Duration::from_millis(300),
+        )
+        .unwrap();
         assert_eq!(stalled, None);
         assert!(started.elapsed() < Duration::from_secs(10));
-        let done = run_with_timeout(cmd("echo out& echo hi 1>&2"), b"\n", Duration::from_secs(10)).unwrap().unwrap();
+        let done = run_with_timeout(
+            cmd("echo out& echo hi 1>&2"),
+            b"\n",
+            Duration::from_secs(10),
+        )
+        .unwrap()
+        .unwrap();
         assert!(done.0);
         assert_eq!((done.1.trim(), done.2.trim()), ("out", "hi"));
     }
 
     #[test]
     fn sync_output_decides_the_outcome() {
-        let log = |lines: &[&str]| lines.iter().map(|l| format!("[cli] INFO: {l}")).collect::<Vec<_>>().join("\n");
+        let log = |lines: &[&str]| {
+            lines
+                .iter()
+                .map(|l| format!("[cli] INFO: {l}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         // Legendary ends the cloud line with a colon and the local one without.
         let newer = |which: &str, cloud: &str, local: &str, last: &str| {
-            let head = if which == "Cloud" { r#"Cloud save for "Goo" is newer:"# } else { r#"Local save for "Goo" is newer"# };
-            log(&[head, &format!("- Cloud save date: {cloud}"), &format!("- Local save date: {local}"), last])
+            let head = if which == "Cloud" {
+                r#"Cloud save for "Goo" is newer:"#
+            } else {
+                r#"Local save for "Goo" is newer"#
+            };
+            log(&[
+                head,
+                &format!("- Cloud save date: {cloud}"),
+                &format!("- Local save date: {local}"),
+                last,
+            ])
         };
         let (old, new) = ("2026-11-01 10:00:00", "2026-11-02 10:00:00");
         let cases = [
-            ("up to date", true, log(&["Got 1 remote save game(s)", r#"Checking "Goo" (Goo)"#, r#"Save game for "Goo" is up to date, skipping..."#])),
+            (
+                "up to date",
+                true,
+                log(&["Got 1 remote save game(s)", r#"Checking "Goo" (Goo)"#, r#"Save game for "Goo" is up to date, skipping..."#]),
+            ),
             ("no saves anywhere", true, log(&["No cloud or local savegame found."])),
             ("downloaded", true, newer("Cloud", new, old, "Downloading remote savegame...")),
             ("uploaded", true, newer("Local", old, new, "Uploading local savegame...")),
@@ -1014,26 +1297,62 @@ mod tests {
             // A save folder with variables Legendary can't fill in: the empty answer skips the game.
             ("no save folder", true, log(&[r#"Computed save path: "{AppData}/Goo""#, "Empty input, skipping..."])),
         ];
-        let outcomes: Vec<_> = cases.iter().map(|(name, ok, out)| format!("{name}: {:?}", parse_sync(*ok, out))).collect();
+        let outcomes: Vec<_> = cases
+            .iter()
+            .map(|(name, ok, out)| format!("{name}: {:?}", parse_sync(*ok, out)))
+            .collect();
         insta::assert_debug_snapshot!(outcomes);
     }
 
     #[test]
     fn parses_legendary_progress_lines() {
         let mut mib = 0.0;
-        let progress = "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05";
+        let progress =
+            "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:05";
         let install = ProgressAction::Install;
         let first = parse_progress(progress, install, &mut mib).unwrap();
         assert!((first.fraction - 0.1234).abs() < 1e-6);
-        assert_eq!((first.action, first.done_bytes, first.total_bytes, first.secs_left), (install, Some(0), None, Some(65)));
+        assert_eq!(
+            (
+                first.action,
+                first.done_bytes,
+                first.total_bytes,
+                first.secs_left
+            ),
+            (install, Some(0), None, Some(65))
+        );
 
-        assert_eq!(parse_progress("[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB", install, &mut mib), None);
+        assert_eq!(
+            parse_progress(
+                "[DLManager] INFO:  - Downloaded: 2048.00 MiB, Written: 3000.00 MiB",
+                install,
+                &mut mib
+            ),
+            None
+        );
         assert_eq!(mib, 2048.0);
-        assert_eq!(parse_progress(progress, install, &mut mib).unwrap().done_bytes, Some(2 << 30));
-        assert_eq!(parse_progress(progress, ProgressAction::Repair, &mut mib).unwrap().action, ProgressAction::Repair);
+        assert_eq!(
+            parse_progress(progress, install, &mut mib)
+                .unwrap()
+                .done_bytes,
+            Some(2 << 30)
+        );
+        assert_eq!(
+            parse_progress(progress, ProgressAction::Repair, &mut mib)
+                .unwrap()
+                .action,
+            ProgressAction::Repair
+        );
 
         // Other log lines and broken numbers are ignored.
-        assert_eq!(parse_progress("[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)", install, &mut mib), None);
+        assert_eq!(
+            parse_progress(
+                "[DLManager] INFO:  + Download	- 10.00 MiB/s (raw)",
+                install,
+                &mut mib
+            ),
+            None
+        );
         assert_eq!(parse_progress("= Progress: abc%", install, &mut mib), None);
     }
 
@@ -1044,21 +1363,44 @@ mod tests {
         assert_eq!(repair_args("Goo"), ["-y", "repair", "Goo", "--skip-sdl"]);
         // Never `--skip-move`: that only rewrites Legendary's record and leaves the files behind.
         assert_eq!(move_args("Goo", r"D:\Games"), ["move", "Goo", r"D:\Games"]);
-        assert_eq!(import_args("Goo", r"D:\Games\Goo"), ["import", "--with-dlcs", "Goo", r"D:\Games\Goo"]);
+        assert_eq!(
+            import_args("Goo", r"D:\Games\Goo"),
+            ["import", "--with-dlcs", "Goo", r"D:\Games\Goo"]
+        );
         // Import only: nothing is exported to the Epic Games Launcher, and automatic sync isn't switched on.
-        assert_eq!(egl_sync_args(), ["-y", "egl-sync", "--import-only", "--one-shot"]);
+        assert_eq!(
+            egl_sync_args(),
+            ["-y", "egl-sync", "--import-only", "--one-shot"]
+        );
     }
 
     #[test]
     fn moves_stay_on_the_same_drive() {
-        assert!(same_drive(Path::new(r"C:\Games\Goo"), Path::new(r"c:\Other")));
-        assert!(same_drive(Path::new(r"C:\Games\Goo"), Path::new(r"\\?\C:\Other")));
-        assert!(!same_drive(Path::new(r"C:\Games\Goo"), Path::new(r"D:\Games")));
-        assert!(same_drive(Path::new(r"\\nas\games\Goo"), Path::new(r"\\NAS\Games\Other")));
-        assert!(!same_drive(Path::new(r"\\nas\games\Goo"), Path::new(r"C:\Games")));
+        assert!(same_drive(
+            Path::new(r"C:\Games\Goo"),
+            Path::new(r"c:\Other")
+        ));
+        assert!(same_drive(
+            Path::new(r"C:\Games\Goo"),
+            Path::new(r"\\?\C:\Other")
+        ));
+        assert!(!same_drive(
+            Path::new(r"C:\Games\Goo"),
+            Path::new(r"D:\Games")
+        ));
+        assert!(same_drive(
+            Path::new(r"\\nas\games\Goo"),
+            Path::new(r"\\NAS\Games\Other")
+        ));
+        assert!(!same_drive(
+            Path::new(r"\\nas\games\Goo"),
+            Path::new(r"C:\Games")
+        ));
         // Refused before Legendary runs, so no process starts.
         let mut started = false;
-        let refused = move_to("Goo", Some(Path::new(r"C:\Games\Goo")), r"D:\Games", |_| started = true);
+        let refused = move_to("Goo", Some(Path::new(r"C:\Games\Goo")), r"D:\Games", |_| {
+            started = true
+        });
         assert_eq!(Msg::from(refused.unwrap_err()), msg!(otherDriveMove));
         assert!(!started);
     }
@@ -1067,7 +1409,9 @@ mod tests {
     fn import_requires_existing_folder() {
         let dir = std::env::temp_dir();
         assert!(super::import_requires_existing_folder(&dir).is_ok());
-        assert!(super::import_requires_existing_folder(&dir.join("launcher-no-such-folder")).is_err());
+        assert!(
+            super::import_requires_existing_folder(&dir.join("launcher-no-such-folder")).is_err()
+        );
         let file = dir.join(format!("launcher-import-{}.txt", std::process::id()));
         std::fs::write(&file, "x").unwrap();
         assert!(super::import_requires_existing_folder(&file).is_err());
@@ -1086,7 +1430,12 @@ mod tests {
         assert_eq!(parse_verify(true, broken), Ok(Verify::Repair));
         let gone = "[cli] INFO: Loading installed manifest for \"Goo\"\n\
                     [cli] ERROR: Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.\n";
-        assert_eq!(parse_verify(true, gone), Err(Msg::system("Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available.")));
+        assert_eq!(
+            parse_verify(true, gone),
+            Err(Msg::system(
+                "Install path \"C:\\Goo\" does not exist, make sure all necessary mounts are available."
+            ))
+        );
         assert_eq!(parse_verify(false, ""), Err(msg!(legendaryNoReason)));
     }
 
@@ -1097,31 +1446,61 @@ mod tests {
         assert_eq!(log_outcome(true, moved, Some("Finished.")), Ok(()));
         let other_drive = "[cli] INFO: Moving \"Goo\" from \"C:/Games\" to \"D:\\Games\"\n\
                            [cli] ERROR: Moving to a different drive is not supported.\n";
-        assert_eq!(log_outcome(true, other_drive, Some("Finished.")), Err(Msg::system("Moving to a different drive is not supported.")));
+        assert_eq!(
+            log_outcome(true, other_drive, Some("Finished.")),
+            Err(Msg::system("Moving to a different drive is not supported."))
+        );
         // A DLC that fails to import doesn't undo the game's import.
         let imported = "[cli] ERROR: No files belonging to DLC \"Hat\" (Hat) found in the specified location.\n\
                         [cli] INFO: Game \"Goo\" has been imported.\n";
-        assert_eq!(log_outcome(true, imported, Some("has been imported.")), Ok(()));
+        assert_eq!(
+            log_outcome(true, imported, Some("has been imported.")),
+            Ok(())
+        );
         let wrong = "[cli] CRITICAL: Did not find game \"Goo\" on account.\n";
-        assert_eq!(log_outcome(true, wrong, Some("has been imported.")), Err(Msg::system("Did not find game \"Goo\" on account.")));
+        assert_eq!(
+            log_outcome(true, wrong, Some("has been imported.")),
+            Err(Msg::system("Did not find game \"Goo\" on account."))
+        );
         // egl-sync has no closing line: any error fails it.
-        assert_eq!(log_outcome(true, "[cli] INFO: Reading EGL game manifests...\n", None), Ok(()));
+        assert_eq!(
+            log_outcome(true, "[cli] INFO: Reading EGL game manifests...\n", None),
+            Ok(())
+        );
         let no_meta = "[cli] ERROR: Legendary is missing game metadata, please login.\n";
-        assert_eq!(log_outcome(true, no_meta, None), Err(Msg::system("Legendary is missing game metadata, please login.")));
+        assert_eq!(
+            log_outcome(true, no_meta, None),
+            Err(Msg::system(
+                "Legendary is missing game metadata, please login."
+            ))
+        );
         // A prompt that read the closed stdin crashes with a traceback.
-        assert_eq!(log_outcome(false, "Traceback...\nEOFError: EOF when reading a line\n", None), Err(Msg::system("EOFError: EOF when reading a line")));
+        assert_eq!(
+            log_outcome(
+                false,
+                "Traceback...\nEOFError: EOF when reading a line\n",
+                None
+            ),
+            Err(Msg::system("EOFError: EOF when reading a line"))
+        );
     }
 
     #[test]
     fn download_size_from_info_reads_the_fixture() {
         // Captured from `legendary info <AppName> --json` (A Short Hike); the size is `manifest.download_size`.
-        assert_eq!(download_size_from_info(&fixture("info.json")), Some(224_976_506));
+        assert_eq!(
+            download_size_from_info(&fixture("info.json")),
+            Some(224_976_506)
+        );
     }
 
     #[test]
     fn download_size_from_info_handles_missing_fields() {
         assert_eq!(download_size_from_info(&serde_json::json!({})), None);
-        assert_eq!(download_size_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })), None);
+        assert_eq!(
+            download_size_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })),
+            None
+        );
     }
 
     #[test]
@@ -1137,9 +1516,17 @@ mod tests {
         let output = std::process::Output {
             status: std::process::ExitStatus::from_raw(1),
             stdout: Vec::new(),
-            stderr: b"[cli] INFO: Logging in...\n[cli] ERROR: Login failed, cannot continue!\n\n".to_vec(),
+            stderr: b"[cli] INFO: Logging in...\n[cli] ERROR: Login failed, cannot continue!\n\n"
+                .to_vec(),
         };
-        assert_eq!(failure(&output), msg!(legendaryFailed, status = "exit code: 1", detail = "[cli] ERROR: Login failed, cannot continue!"));
+        assert_eq!(
+            failure(&output),
+            msg!(
+                legendaryFailed,
+                status = "exit code: 1",
+                detail = "[cli] ERROR: Login failed, cannot continue!"
+            )
+        );
     }
 
     #[test]
@@ -1159,7 +1546,10 @@ mod tests {
             "[DLManager] INFO: = Progress: 100.00% (456/456), Running for 00:01:15, ETA: 00:00:00",
         ];
         let mut mib = 0.0;
-        let download: Vec<_> = lines.iter().map(|l| (*l, parse_progress(l, ProgressAction::Install, &mut mib))).collect();
+        let download: Vec<_> = lines
+            .iter()
+            .map(|l| (*l, parse_progress(l, ProgressAction::Install, &mut mib)))
+            .collect();
         let verify: Vec<_> = [
             "Checking for importable games...",
             "\nVerification progress: 12/345 (3.5%) [10.0 MiB/s]\t\r",

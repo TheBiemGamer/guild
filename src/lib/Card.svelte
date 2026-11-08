@@ -5,7 +5,21 @@
   import type { Card, Cover, Progress } from './bindings'
   import { t } from './i18n'
 
-  let { game, index, stat = null, running, progress, queued, onopen, onplay, oninstall, oncancel, onresume, onfavorite, onmenu }: {
+  let {
+    game,
+    index,
+    stat = null,
+    running,
+    progress,
+    queued,
+    onopen,
+    onplay,
+    oninstall,
+    oncancel,
+    onresume,
+    onfavorite,
+    onmenu,
+  }: {
     game: Card
     /** Place in the grid; covers are asked in this order. */
     index: number
@@ -53,7 +67,10 @@
     art = undefined
     loaded = false
     // A card recycled for another game must not show the old game's cover.
-    cover(key, untrack(() => index)).then((c) => {
+    cover(
+      key,
+      untrack(() => index),
+    ).then((c) => {
       if (game.key === key) art = c
     })
   })
@@ -178,17 +195,23 @@
     border-radius: var(--radius);
     background: var(--surface);
     box-shadow: 0 4px 12px rgb(0 0 0 / 0.45);
-    transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+    transition:
+      transform 160ms ease-out,
+      box-shadow 160ms ease-out;
   }
 
   .card:hover,
   .card:focus-within {
     transform: translateY(-4px) scale(1.03);
-    box-shadow: 0 16px 34px rgb(0 0 0 / 0.6), 0 0 0 2px rgb(255 255 255 / 0.85);
+    box-shadow:
+      0 16px 34px rgb(0 0 0 / 0.6),
+      0 0 0 2px rgb(255 255 255 / 0.85);
   }
 
   .card.running {
-    box-shadow: 0 4px 12px rgb(0 0 0 / 0.45), 0 0 0 2px var(--play);
+    box-shadow:
+      0 4px 12px rgb(0 0 0 / 0.45),
+      0 0 0 2px var(--play);
   }
 
   .open {

@@ -39,14 +39,7 @@
   let { provider, size = 16 }: { provider: Store; size?: number } = $props()
 </script>
 
-<svg
-  class="store-icon"
-  viewBox="0 0 24 24"
-  width={size}
-  height={size}
-  role="img"
-  aria-label={storeNames[provider]}
->
+<svg class="store-icon" viewBox="0 0 24 24" width={size} height={size} role="img" aria-label={storeNames[provider]}>
   <!-- The gamepad is a line glyph; the store logos are filled. -->
   {#if provider === 'custom'}
     <path d={paths.custom} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />

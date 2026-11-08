@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use jiff::{tz::TimeZone, Timestamp};
+use jiff::{Timestamp, tz::TimeZone};
 use tracing::Level;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
@@ -37,9 +37,16 @@ impl Log {
     }
 
     fn open_file(dir: &Path) -> io::Result<Self> {
-        let file = OpenOptions::new().create(true).append(true).open(dir.join("launcher.log"))?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("launcher.log"))?;
         let len = file.metadata()?.len();
-        Ok(Self { dir: dir.to_path_buf(), file, len })
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            file,
+            len,
+        })
     }
 
     fn append(&mut self, line: &[u8]) -> io::Result<()> {
@@ -60,7 +67,11 @@ impl Log {
 
 /// launcher.N.log, or launcher.log for 0.
 fn name(dir: &Path, n: usize) -> PathBuf {
-    dir.join(if n == 0 { "launcher.log".into() } else { format!("launcher.{n}.log") })
+    dir.join(if n == 0 {
+        "launcher.log".into()
+    } else {
+        format!("launcher.{n}.log")
+    })
 }
 
 /// Shifts every file up one number and drops the oldest. Missing files are skipped.
@@ -110,7 +121,10 @@ pub fn init(dir: &Path) {
     let writer = (|| LogFile).and(io::stderr);
     #[cfg(not(debug_assertions))]
     let writer = || LogFile;
-    let layer = tracing_subscriber::fmt::layer().with_timer(LocalTime).with_target(false).with_writer(writer);
+    let layer = tracing_subscriber::fmt::layer()
+        .with_timer(LocalTime)
+        .with_target(false)
+        .with_writer(writer);
     let _ = tracing_subscriber::registry()
         .with(layer.with_filter(Targets::new().with_target("launcher", Level::INFO)))
         .try_init();
@@ -153,7 +167,10 @@ mod tests {
     #[test]
     fn rolls_an_oversized_file_at_open_and_on_write() {
         let dir = temp_dir("roll");
-        File::create(name(&dir, 0)).unwrap().set_len(MAX_BYTES + 1).unwrap();
+        File::create(name(&dir, 0))
+            .unwrap()
+            .set_len(MAX_BYTES + 1)
+            .unwrap();
         let mut log = Log::open(&dir).unwrap();
         assert_eq!(log.len, 0);
         assert_eq!(fs::metadata(name(&dir, 1)).unwrap().len(), MAX_BYTES + 1);
@@ -174,8 +191,14 @@ mod tests {
     fn timestamps_are_local_clock_time() {
         let tz = TimeZone::get("Europe/Amsterdam").unwrap();
         // 2024-02-29 23:05:09 UTC, the last hour of a leap day: already March 1st in winter time (+1).
-        assert_eq!(stamp(Timestamp::from_second(1_709_247_909).unwrap(), tz.clone()), "2024-03-01 00:05:09");
+        assert_eq!(
+            stamp(Timestamp::from_second(1_709_247_909).unwrap(), tz.clone()),
+            "2024-03-01 00:05:09"
+        );
         // 2024-07-01 12:00:00 UTC in summer time (+2).
-        assert_eq!(stamp(Timestamp::from_second(1_719_835_200).unwrap(), tz), "2024-07-01 14:00:00");
+        assert_eq!(
+            stamp(Timestamp::from_second(1_719_835_200).unwrap(), tz),
+            "2024-07-01 14:00:00"
+        );
     }
 }

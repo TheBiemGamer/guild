@@ -4,7 +4,10 @@
   import { commands, type LoginStep } from './bindings'
   import { t } from './i18n'
 
-  let { onclose, onconnected }: {
+  let {
+    onclose,
+    onconnected,
+  }: {
     onclose: () => void
     /** Steam approved the login; the app re-reads settings and the library. */
     onconnected: () => void
@@ -164,14 +167,7 @@
         {:else}
           <form onsubmit={signIn}>
             <label for="steam-account">{t('steam.account')}</label>
-            <input
-              id="steam-account"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              bind:this={accountInput}
-              bind:value={account}
-            />
+            <input id="steam-account" type="text" autocomplete="off" spellcheck="false" bind:this={accountInput} bind:value={account} />
             <label for="steam-password">{t('steam.password')}</label>
             <input id="steam-password" type="password" autocomplete="off" bind:value={password} />
             <button class="pill" disabled={phase === 'busy' || !account.trim() || !password}>

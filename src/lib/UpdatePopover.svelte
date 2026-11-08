@@ -3,7 +3,16 @@
   import NotesPopover from './NotesPopover.svelte'
   import { t } from './i18n'
 
-  let { update, current, running, installing, error, anchor, onclose, oninstall }: {
+  let {
+    update,
+    current,
+    running,
+    installing,
+    error,
+    anchor,
+    onclose,
+    oninstall,
+  }: {
     update: UpdateInfo
     /** The installed version. */
     current: string

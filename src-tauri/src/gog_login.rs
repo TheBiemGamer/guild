@@ -41,7 +41,10 @@ fn login_code(url: &Url) -> Option<String> {
     if url.host_str() != Some("embed.gog.com") || url.path() != "/on_login_success" {
         return None;
     }
-    url.query_pairs().find(|(k, _)| k == "code").map(|(_, v)| v.into_owned()).filter(|c| !c.is_empty())
+    url.query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.into_owned())
+        .filter(|c| !c.is_empty())
 }
 
 #[cfg(test)]
@@ -52,14 +55,35 @@ mod tests {
     fn takes_code_only_from_the_success_page() {
         let url = |s: &str| Url::parse(s).unwrap();
         assert_eq!(
-            login_code(&url("https://embed.gog.com/on_login_success?origin=client&code=abc%2B123")),
+            login_code(&url(
+                "https://embed.gog.com/on_login_success?origin=client&code=abc%2B123"
+            )),
             Some("abc+123".into())
         );
-        assert_eq!(login_code(&url("https://embed.gog.com/on_login_success?origin=client&code=")), None);
-        assert_eq!(login_code(&url("https://embed.gog.com/on_login_success?origin=client")), None);
-        assert_eq!(login_code(&url("https://embed.gog.com.evil.com/on_login_success?code=abc")), None);
-        assert_eq!(login_code(&url("https://embed.gog.com/elsewhere?code=abc")), None);
-        assert_eq!(login_code(&url("https://embed.gog.com/on_login_success/x?code=abc")), None);
+        assert_eq!(
+            login_code(&url(
+                "https://embed.gog.com/on_login_success?origin=client&code="
+            )),
+            None
+        );
+        assert_eq!(
+            login_code(&url("https://embed.gog.com/on_login_success?origin=client")),
+            None
+        );
+        assert_eq!(
+            login_code(&url(
+                "https://embed.gog.com.evil.com/on_login_success?code=abc"
+            )),
+            None
+        );
+        assert_eq!(
+            login_code(&url("https://embed.gog.com/elsewhere?code=abc")),
+            None
+        );
+        assert_eq!(
+            login_code(&url("https://embed.gog.com/on_login_success/x?code=abc")),
+            None
+        );
         assert_eq!(login_code(&url("https://auth.gog.com/auth?code=abc")), None);
     }
 }

@@ -53,8 +53,14 @@ pub fn parse_download_size(appinfo_vdf: &str) -> Option<u64> {
 /// connection when done.
 pub async fn fetch_appinfo(token: &str, appid: u32) -> Result<String, String> {
     tokio::time::timeout(TIMEOUT, async {
-        let session = steam_owned::connect(token).await.map_err(|e| format!("{e:?}"))?;
-        let (_, vdf) = appinfo(&session, vec![appid]).await?.into_iter().next().ok_or("no app info")?;
+        let session = steam_owned::connect(token)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        let (_, vdf) = appinfo(&session, vec![appid])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or("no app info")?;
         Ok(vdf)
     })
     .await
@@ -66,9 +72,14 @@ pub async fn fetch_appinfo(token: &str, appid: u32) -> Result<String, String> {
 /// account owns it (`Store.GetUserGameInterestState`, `CHECKS_AT_ONCE` at a time). One logon, dropped when done.
 pub async fn fetch_owned_dlc(token: &str, appid: u32) -> Result<Vec<(u32, String)>, String> {
     tokio::time::timeout(TIMEOUT, async {
-        let session = steam_owned::connect(token).await.map_err(|e| format!("{e:?}"))?;
+        let session = steam_owned::connect(token)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
         let base = appinfo(&session, vec![appid]).await?;
-        let ids = base.first().map(|(_, vdf)| steam::dlc_ids(vdf)).unwrap_or_default();
+        let ids = base
+            .first()
+            .map(|(_, vdf)| steam::dlc_ids(vdf))
+            .unwrap_or_default();
         let (mut owned, mut answered) = (Vec::new(), 0);
         for batch in ids.chunks(CHECKS_AT_ONCE) {
             let checks: Vec<_> = batch
@@ -99,7 +110,10 @@ pub async fn fetch_owned_dlc(token: &str, appid: u32) -> Result<Vec<(u32, String
             .into_iter()
             .filter_map(|(id, vdf)| Some((id, steam::app_name(&vdf)?)))
             .collect();
-        Ok(owned.into_iter().filter_map(|id| Some((id, names.get(&id)?.clone()))).collect())
+        Ok(owned
+            .into_iter()
+            .filter_map(|id| Some((id, names.get(&id)?.clone())))
+            .collect())
     })
     .await
     .unwrap_or_else(|_| Err("timed out".into()))
@@ -111,7 +125,10 @@ const CHECKS_AT_ONCE: usize = 4;
 /// Whether the account owns `appid`, asked twice at most; `None` when Steam didn't answer.
 async fn owns(session: &Session, appid: u32) -> Option<bool> {
     for _ in 0..2 {
-        let request = CStore_GetUserGameInterestState_Request { appid: Some(appid), ..Default::default() };
+        let request = CStore_GetUserGameInterestState_Request {
+            appid: Some(appid),
+            ..Default::default()
+        };
         if let Ok(state) = session.service_method(request).await {
             return Some(state.owned());
         }
@@ -124,18 +141,31 @@ async fn appinfo(session: &Session, appids: Vec<u32>) -> Result<Vec<(u32, String
     let request = CMsgClientPICSProductInfoRequest {
         apps: appids
             .into_iter()
-            .map(|appid| AppInfo { appid: Some(appid), only_public_obsolete: Some(true), ..Default::default() })
+            .map(|appid| AppInfo {
+                appid: Some(appid),
+                only_public_obsolete: Some(true),
+                ..Default::default()
+            })
             .collect(),
         meta_data_only: Some(false),
         single_response: Some(true),
         ..Default::default()
     };
-    let response: CMsgClientPICSProductInfoResponse = session.job(request).await.map_err(|e| e.to_string())?;
+    let response: CMsgClientPICSProductInfoResponse =
+        session.job(request).await.map_err(|e| e.to_string())?;
     // Each buffer is text VDF with a trailing NUL.
     Ok(response
         .apps
         .iter()
-        .filter_map(|a| Some((a.appid(), String::from_utf8_lossy(a.buffer.as_deref()?).trim().trim_matches('\0').to_owned())))
+        .filter_map(|a| {
+            Some((
+                a.appid(),
+                String::from_utf8_lossy(a.buffer.as_deref()?)
+                    .trim()
+                    .trim_matches('\0')
+                    .to_owned(),
+            ))
+        })
         .collect())
 }
 

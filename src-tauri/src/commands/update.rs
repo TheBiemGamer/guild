@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
-use super::{blocking, AppState, Res};
+use super::{AppState, Res, blocking};
 use crate::library::ProviderKind;
 
 #[derive(Serialize, specta::Type)]
@@ -22,12 +22,21 @@ pub struct UpdateInfo {
 #[specta::specta]
 pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Option<UpdateInfo>> {
     let mut pending = state.update.lock().await;
-    let checked = async { app.updater_builder().timeout(Duration::from_secs(30)).build()?.check().await };
+    let checked = async {
+        app.updater_builder()
+            .timeout(Duration::from_secs(30))
+            .build()?
+            .check()
+            .await
+    };
     let update = checked.await.map_err(|e: tauri_plugin_updater::Error| {
         tracing::warn!("update check: {e}");
         msg!(cantCheckUpdates)
     })?;
-    let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone().unwrap_or_default() });
+    let info = update.as_ref().map(|u| UpdateInfo {
+        version: u.version.clone(),
+        notes: u.body.clone().unwrap_or_default(),
+    });
     *pending = update;
     Ok(info)
 }
@@ -81,7 +90,8 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Res<(
 async fn game_running(app: &AppHandle) -> bool {
     let app = app.clone();
     blocking(move || {
-        ProviderKind::Steam.provider().running_game().is_some() || app.state::<AppState>().lock().watch.is_some()
+        ProviderKind::Steam.provider().running_game().is_some()
+            || app.state::<AppState>().lock().watch.is_some()
     })
     .await
 }

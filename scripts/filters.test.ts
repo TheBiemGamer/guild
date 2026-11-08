@@ -15,8 +15,16 @@ test('removing a chip clears exactly that filter', () => {
   const on: Filter[] = ['notInstalled', 'update', 'bothStores']
   for (const chip of filterChips(on)) {
     const left = removeChip(on, chip)
-    assert.deepEqual(left, on.filter((f) => f !== chip.filter))
-    assert.deepEqual(filterChips(left).map((c) => c.filter), filterChips(on).map((c) => c.filter).filter((f) => f !== chip.filter))
+    assert.deepEqual(
+      left,
+      on.filter((f) => f !== chip.filter),
+    )
+    assert.deepEqual(
+      filterChips(left).map((c) => c.filter),
+      filterChips(on)
+        .map((c) => c.filter)
+        .filter((f) => f !== chip.filter),
+    )
   }
 })
 
@@ -82,7 +90,10 @@ test('the new groups widen inside and narrow across', () => {
   assert.ok(matches(played(30, 3), ['neverPlayed', 'under10h'], {}))
   assert.ok(!matches(played(30, 3), ['under10h', 'ttb5to15h'], {}))
   assert.ok(matches(played(30, 3), ['under10h', 'ttb5to15h', 'ttbUnder5h'], {}))
-  assert.deepEqual(filterChips(['ttb100hPlus', 'neverPlayed', 'bothStores']).map((c) => c.label), ['Never played', '100 h+', 'On more than one store'])
+  assert.deepEqual(
+    filterChips(['ttb100hPlus', 'neverPlayed', 'bothStores']).map((c) => c.label),
+    ['Never played', '100 h+', 'On more than one store'],
+  )
 })
 
 const collections = [
@@ -94,12 +105,18 @@ test('Lists come after Status: Favorites, each collection, then Hidden', () => {
   const lists = filterGroups(collections)[1]
   assert.deepEqual(lists, { label: 'Lists', filters: ['favorites', 'collection-3', 'collection-7', 'hidden'] })
   assert.deepEqual(filterGroups([])[1].filters, ['favorites', 'hidden'])
-  assert.deepEqual(filterGroups([]).map((g) => g.label), ['Status', 'Lists', 'Your playtime', 'How long to beat', 'Has'])
+  assert.deepEqual(
+    filterGroups([]).map((g) => g.label),
+    ['Status', 'Lists', 'Your playtime', 'How long to beat', 'Has'],
+  )
 })
 
 test('list chips are named after the list and come after Status', () => {
   const on: Filter[] = ['bothStores', 'hidden', collectionFilter(7), 'notInstalled', 'favorites']
-  assert.deepEqual(filterChips(on, collections).map((c) => c.label), ['Not installed', 'Favorites', 'Co-op', 'Hidden', 'On more than one store'])
+  assert.deepEqual(
+    filterChips(on, collections).map((c) => c.label),
+    ['Not installed', 'Favorites', 'Co-op', 'Hidden', 'On more than one store'],
+  )
   const left = removeChip(on, filterChips(on, collections)[2])
   assert.deepEqual(left, ['bothStores', 'hidden', 'notInstalled', 'favorites'])
   assert.ok(isList('collection-7') && isList('hidden') && !isList('update'))

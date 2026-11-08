@@ -6,7 +6,16 @@
   import { t } from './i18n'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
-  let { copies, chosen, running, busy, onchoose, onplay, oninstall, onupdate }: {
+  let {
+    copies,
+    chosen,
+    running,
+    busy,
+    onchoose,
+    onplay,
+    oninstall,
+    onupdate,
+  }: {
     copies: CopyView[]
     /** The copy key Play and Install act on. */
     chosen: string
@@ -37,7 +46,8 @@
     }
   })
 
-  const downloadText = (key: string) => (key in sizes ? (sizes[key] !== null ? t('install.download', { size: sizeLabel(sizes[key]) }) : '') : t('install.checking'))
+  const downloadText = (key: string) =>
+    key in sizes ? (sizes[key] !== null ? t('install.download', { size: sizeLabel(sizes[key]) }) : '') : t('install.checking')
 
   function sub(c: CopyView): string {
     if (c.installed) return c.sizeBytes !== null ? t('play.installedSize', { size: sizeLabel(c.sizeBytes) }) : t('play.installed')

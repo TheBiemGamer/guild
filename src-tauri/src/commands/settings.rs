@@ -1,13 +1,15 @@
 //! The settings page and the Epic, GOG and Amazon login actions.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use steam_vent::auth::{
-    AuthConfirmationHandler, ClientInfo, ConfirmationAction, ConfirmationMethod, ConfirmationMethodClass,
-    GuardDataStore, GuardTokenType, NullGuardDataStore, SteamGuardToken,
+    AuthConfirmationHandler, ClientInfo, ConfirmationAction, ConfirmationMethod,
+    ConfirmationMethodClass, GuardDataStore, GuardTokenType, NullGuardDataStore, SteamGuardToken,
 };
-use steam_vent::{Connection as Session, ConnectionError, EResult, LoginError, NetworkError, ServerList};
+use steam_vent::{
+    Connection as Session, ConnectionError, EResult, LoginError, NetworkError, ServerList,
+};
 use tokio::sync::mpsc;
 
 use serde::Serialize;
@@ -16,14 +18,14 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use super::library::{fill_twins, refresh_owned, rescan};
-use super::{blocking, AppState, Res};
+use super::{AppState, Res, blocking};
 use crate::amazon_login;
 use crate::cache;
 use crate::epic_login;
 use crate::gog_login;
+use crate::library::ProviderKind;
 use crate::library::epic::{self, Login};
 use crate::library::{amazon, gog};
-use crate::library::ProviderKind;
 use crate::msg::Msg;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
@@ -125,7 +127,8 @@ pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
 /// Remembers a deliberate Log out, so the Settings dot stays down (`settings::signed_out`); the next scan that finds
 /// the store logged in forgets it.
 fn note_signed_out(app: &AppHandle, store: &str) {
-    let saved = super::open_db(&app.state::<AppState>()).map(|c| settings::set_signed_out(&c, store, true));
+    let saved =
+        super::open_db(&app.state::<AppState>()).map(|c| settings::set_signed_out(&c, store, true));
     if let Some(Err(e)) = saved {
         tracing::warn!("{store} signed out: {e}");
     }
@@ -145,7 +148,10 @@ fn importable(state: &AppState, provider: ProviderKind) -> Vec<Importable> {
         .games
         .iter()
         .filter(|g| g.provider == provider && !g.installed)
-        .map(|g| Importable { key: g.key(), title: g.title.clone() })
+        .map(|g| Importable {
+            key: g.key(),
+            title: g.title.clone(),
+        })
         .collect();
     games.sort_by_key(|g| g.title.to_lowercase());
     games
@@ -177,7 +183,12 @@ pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()>
         .ok_or(msg!(cantImport))?;
     blocking(move || {
         let conn = cache::db::open(&app.state::<AppState>().dirs.db).ok();
-        let result = amazon::import(conn.as_ref(), &game.external_id, std::path::Path::new(&path)).map_err(Msg::from);
+        let result = amazon::import(
+            conn.as_ref(),
+            &game.external_id,
+            std::path::Path::new(&path),
+        )
+        .map_err(Msg::from);
         rescan(&app, true);
         result
     })
@@ -222,7 +233,10 @@ pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
         let state = app.state::<AppState>();
         let id = gog::import(std::path::Path::new(&path))?;
         let key = ProviderKind::Gog.key(&id);
-        let title = state.game(&key).map(|g| g.title).ok_or(msg!(notInGogLibrary))?;
+        let title = state
+            .game(&key)
+            .map(|g| g.title)
+            .ok_or(msg!(notInGogLibrary))?;
         let conn = cache::db::open(&state.dirs.db)?;
         gog::record_install(&conn, &id, std::path::Path::new(&path))?;
         rescan(&app, true);
@@ -321,15 +335,29 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         let conn = cache::db::open(&state.dirs.db)?;
         let saved = settings::load(&conn);
         let epic = state.lock().epic_login;
-        let epic_account = if epic == Some(Login::LoggedIn) { crate::epic_playtime::account_name() } else { None };
+        let epic_account = if epic == Some(Login::LoggedIn) {
+            crate::epic_playtime::account_name()
+        } else {
+            None
+        };
         let gog = state.lock().gog_login;
-        let gog_account = if gog == Some(gog::Login::LoggedIn) { gog::account_name(&conn) } else { None };
+        let gog_account = if gog == Some(gog::Login::LoggedIn) {
+            gog::account_name(&conn)
+        } else {
+            None
+        };
         let amazon = state.lock().amazon_login;
-        let amazon_account = if amazon == Some(amazon::Login::LoggedIn) { amazon::account_name() } else { None };
+        let amazon_account = if amazon == Some(amazon::Login::LoggedIn) {
+            amazon::account_name()
+        } else {
+            None
+        };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
         let steam = steamlocate::SteamDir::locate().is_ok();
         let steam_library = SteamLibrary {
-            account: cache::db::setting(&conn, settings::STEAM_ACCOUNT).ok().flatten(),
+            account: cache::db::setting(&conn, settings::STEAM_ACCOUNT)
+                .ok()
+                .flatten(),
             attention: state.lock().steam_attention,
         };
         Ok(SettingsView {
@@ -339,13 +367,19 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             steam_library,
             epic,
             epic_account,
-            epic_install_dir: saved.epic_install_dir.map(|p| p.to_string_lossy().into_owned()),
+            epic_install_dir: saved
+                .epic_install_dir
+                .map(|p| p.to_string_lossy().into_owned()),
             gog,
             gog_account,
-            gog_install_dir: saved.gog_install_dir.map(|p| p.to_string_lossy().into_owned()),
+            gog_install_dir: saved
+                .gog_install_dir
+                .map(|p| p.to_string_lossy().into_owned()),
             amazon,
             amazon_account,
-            amazon_install_dir: saved.amazon_install_dir.map(|p| p.to_string_lossy().into_owned()),
+            amazon_install_dir: saved
+                .amazon_install_dir
+                .map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
             igdb_secret_set: settings::secret().is_some(),
             steamgriddb_key_set: settings::grid_key().is_some(),
@@ -386,14 +420,22 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
         if name == settings::START_WITH_WINDOWS {
             settings::validate(&name, value.as_deref())?;
             let autostart = app.autolaunch();
-            let done = if value.as_deref() == Some("true") { autostart.enable() } else { autostart.disable() };
+            let done = if value.as_deref() == Some("true") {
+                autostart.enable()
+            } else {
+                autostart.disable()
+            };
             return done.map_err(|e| msg!(cantChangeStartup, detail = e.to_string()));
         }
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db)?;
         settings::update(&conn, &name, value.as_deref())?;
         if name == settings::IGDB_CLIENT_ID {
-            state.igdb.lock().expect("token cache lock poisoned").reset();
+            state
+                .igdb
+                .lock()
+                .expect("token cache lock poisoned")
+                .reset();
         }
         if name == settings::LANGUAGE {
             crate::msg::set_language(&settings::load(&conn).language);
@@ -412,7 +454,11 @@ pub async fn set_igdb_secret(app: AppHandle, value: Option<String>) -> Res<()> {
         let value = value.as_deref().map(str::trim).filter(|v| !v.is_empty());
         settings::set_secret(value)?;
         // A new secret deserves a fresh token request, even right after a failed one.
-        app.state::<AppState>().igdb.lock().expect("token cache lock poisoned").reset();
+        app.state::<AppState>()
+            .igdb
+            .lock()
+            .expect("token cache lock poisoned")
+            .reset();
         Ok(())
     })
     .await
@@ -422,14 +468,18 @@ pub async fn set_igdb_secret(app: AppHandle, value: Option<String>) -> Res<()> {
 #[tauri::command]
 #[specta::specta]
 pub async fn set_steamgriddb_key(value: Option<String>) -> Res<()> {
-    blocking(move || settings::set_grid_key(value.as_deref().map(str::trim).filter(|v| !v.is_empty()))).await
+    blocking(move || {
+        settings::set_grid_key(value.as_deref().map(str::trim).filter(|v| !v.is_empty()))
+    })
+    .await
 }
 
 /// SteamGridDB's API key page, where the owner gets a free key.
 #[tauri::command]
 #[specta::specta]
 pub fn open_steamgriddb() -> Res<()> {
-    crate::library::open_url("https://www.steamgriddb.com/profile/preferences/api").map_err(Msg::from)
+    crate::library::open_url("https://www.steamgriddb.com/profile/preferences/api")
+        .map_err(Msg::from)
 }
 
 /// Deletes downloaded art and thumbnails; they come back on demand. The database stays.
@@ -442,7 +492,13 @@ pub async fn clear_cache(app: AppHandle) -> Res<()> {
             match std::fs::remove_dir_all(dir) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(msg!(cantClearFolder, path = dir.display().to_string(), detail = e.to_string())),
+                Err(e) => {
+                    return Err(msg!(
+                        cantClearFolder,
+                        path = dir.display().to_string(),
+                        detail = e.to_string()
+                    ));
+                }
             }
         }
         Ok(())
@@ -470,7 +526,11 @@ pub fn open_igdb() -> Res<()> {
 pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
     let dir = &state.dirs.logs;
     std::fs::create_dir_all(dir).map_err(Msg::system)?;
-    std::process::Command::new("explorer.exe").arg(dir).spawn().map(drop).map_err(Msg::system)
+    std::process::Command::new("explorer.exe")
+        .arg(dir)
+        .spawn()
+        .map(drop)
+        .map_err(Msg::system)
 }
 
 /// Opens a new GitHub bug report with the app and Windows versions filled in.
@@ -493,11 +553,17 @@ pub fn report_problem(app: AppHandle) -> Res<()> {
 #[serde(tag = "step", rename_all = "camelCase")]
 pub enum ConnectStep {
     Waiting,
-    Rotated { svg: String },
+    Rotated {
+        svg: String,
+    },
     Scanned,
-    Connected { account: String },
+    Connected {
+        account: String,
+    },
     /// The login was approved but couldn't be saved; the dialog stops here.
-    Failed { message: Msg },
+    Failed {
+        message: Msg,
+    },
 }
 
 /// Starts a QR login, replacing any running one, and returns the code as an SVG.
@@ -530,8 +596,14 @@ pub async fn steam_connect_poll(app: AppHandle) -> Res<ConnectStep> {
         PollStep::Waiting => return Ok(ConnectStep::Waiting),
         PollStep::Scanned => return Ok(ConnectStep::Scanned),
         PollStep::Rotated => {
-            let url = slot.as_ref().ok_or(msg!(notConnecting))?.challenge_url.clone();
-            return Ok(ConnectStep::Rotated { svg: steam_login::qr_svg(&url)? });
+            let url = slot
+                .as_ref()
+                .ok_or(msg!(notConnecting))?
+                .challenge_url
+                .clone();
+            return Ok(ConnectStep::Rotated {
+                svg: steam_login::qr_svg(&url)?,
+            });
         }
         PollStep::Done(approved) => approved,
     };
@@ -626,20 +698,34 @@ pub async fn steam_disconnect(app: AppHandle) -> Res<()> {
 #[serde(tag = "step", rename_all = "camelCase")]
 pub enum LoginStep {
     /// Approve the login: in the Steam app, or (`email`) with the link Steam emailed.
-    Approve { email: bool },
+    Approve {
+        email: bool,
+    },
     /// Type the Steam Guard code sent by `kind`: "email" or "app".
-    Code { kind: String },
-    Connected { account: String },
-    Failed { message: Msg },
+    Code {
+        kind: String,
+    },
+    Connected {
+        account: String,
+    },
+    Failed {
+        message: Msg,
+    },
 }
 
 /// Logs in with account name and password. Returns the first step: Approve, Code, or the end.
 #[tauri::command]
 #[specta::specta]
-pub async fn steam_password_login(app: AppHandle, account: String, password: String) -> Res<LoginStep> {
+pub async fn steam_password_login(
+    app: AppHandle,
+    account: String,
+    password: String,
+) -> Res<LoginStep> {
     let account = account.trim().to_owned();
     if account.is_empty() || password.is_empty() {
-        return Ok(LoginStep::Failed { message: msg!(typeAccountAndPassword) });
+        return Ok(LoginStep::Failed {
+            message: msg!(typeAccountAndPassword),
+        });
     }
     let state = app.state::<AppState>();
     // Read, not bumped: the QR code in the same window keeps working.
@@ -652,8 +738,13 @@ pub async fn steam_password_login(app: AppHandle, account: String, password: Str
     let task_app = app.clone();
     // steam-vent's confirmation future isn't Send, so the login runs on its own thread.
     tauri::async_runtime::spawn_blocking(move || {
-        let handler = UiConfirmation { steps: steps.clone(), codes };
-        let step = tauri::async_runtime::block_on(password_login(&task_app, generation, &account, &password, handler));
+        let handler = UiConfirmation {
+            steps: steps.clone(),
+            codes,
+        };
+        let step = tauri::async_runtime::block_on(password_login(
+            &task_app, generation, &account, &password, handler,
+        ));
         _ = steps.send(step);
     });
     next_step(&app).await
@@ -666,7 +757,9 @@ pub async fn steam_password_code(app: AppHandle, code: String) -> Res<LoginStep>
     let state = app.state::<AppState>();
     let sent = {
         let codes = state.steam_pw_codes.lock().expect("codes lock poisoned");
-        codes.as_ref().is_some_and(|tx| tx.send(code.trim().to_owned()).is_ok())
+        codes
+            .as_ref()
+            .is_some_and(|tx| tx.send(code.trim().to_owned()).is_ok())
     };
     if !sent {
         return Err(msg!(notLoggingIn));
@@ -692,7 +785,12 @@ pub fn steam_login_cancel(app: AppHandle) {
 async fn next_step(app: &AppHandle) -> Res<LoginStep> {
     let state = app.state::<AppState>();
     let mut steps = state.steam_pw_steps.lock().await;
-    steps.as_mut().ok_or(msg!(notLoggingIn))?.recv().await.ok_or_else(|| msg!(notLoggingIn))
+    steps
+        .as_mut()
+        .ok_or(msg!(notLoggingIn))?
+        .recv()
+        .await
+        .ok_or_else(|| msg!(notLoggingIn))
 }
 
 /// Bumps the generation, then drops the code sender so a waiting confirmation aborts.
@@ -706,18 +804,33 @@ fn guard_store() -> impl GuardDataStore {
     NullGuardDataStore
 }
 
-async fn password_login(app: &AppHandle, generation: u64, account: &str, password: &str, handler: UiConfirmation) -> LoginStep {
+async fn password_login(
+    app: &AppHandle,
+    generation: u64,
+    account: &str,
+    password: &str,
+    handler: UiConfirmation,
+) -> LoginStep {
     let login = async {
-        let servers = ServerList::discover().await.map_err(|_| msg!(cantReachSteam))?;
+        let servers = ServerList::discover()
+            .await
+            .map_err(|_| msg!(cantReachSteam))?;
         let client = ClientInfo::new("Guild".into());
-        Session::login(&servers, account, password, guard_store(), handler, &client).await.map_err(|e| login_message(&e))
+        Session::login(&servers, account, password, guard_store(), handler, &client)
+            .await
+            .map_err(|e| login_message(&e))
     };
     let connection = match login.await {
         Ok(c) => c,
         Err(message) => return LoginStep::Failed { message },
     };
-    if !should_save(generation, app.state::<AppState>().steam_gen.load(Ordering::SeqCst)) {
-        return LoginStep::Failed { message: msg!(notLoggingIn) };
+    if !should_save(
+        generation,
+        app.state::<AppState>().steam_gen.load(Ordering::SeqCst),
+    ) {
+        return LoginStep::Failed {
+            message: msg!(notLoggingIn),
+        };
     }
     let approved = steam_login::Approved {
         account: account.to_owned(),
@@ -728,17 +841,21 @@ async fn password_login(app: &AppHandle, generation: u64, account: &str, passwor
         return LoginStep::Failed { message };
     }
     refresh_owned(app.clone(), true);
-    LoginStep::Connected { account: account.to_owned() }
+    LoginStep::Connected {
+        account: account.to_owned(),
+    }
 }
 
 /// Steam's answer as a short message. Never includes what the user typed.
 fn login_message(e: &ConnectionError) -> Msg {
     use ConnectionError::{LoginError as Login, Network};
     match e {
-        Login(LoginError::InvalidCredentials) | Network(NetworkError::ApiError(EResult::InvalidPassword)) => {
+        Login(LoginError::InvalidCredentials)
+        | Network(NetworkError::ApiError(EResult::InvalidPassword)) => {
             msg!(wrongPassword)
         }
-        Login(LoginError::RateLimited) | Network(NetworkError::ApiError(EResult::RateLimitExceeded)) => {
+        Login(LoginError::RateLimited)
+        | Network(NetworkError::ApiError(EResult::RateLimitExceeded)) => {
             msg!(tooManyTries)
         }
         Network(NetworkError::ApiError(EResult::TwoFactorCodeMismatch)) => msg!(codeDidntWork),
@@ -759,20 +876,30 @@ impl AuthConfirmationHandler for UiConfirmation {
         allowed: &[ConfirmationMethod],
     ) -> Box<dyn Future<Output = Option<ConfirmationAction>> + 'a> {
         let code = allowed.iter().find_map(ConfirmationMethod::token_type);
-        let approve = allowed.iter().any(|m| m.class() == ConfirmationMethodClass::Confirmation);
+        let approve = allowed
+            .iter()
+            .any(|m| m.class() == ConfirmationMethodClass::Confirmation);
         // The app wins when Steam offers both.
-        let by_email = approve && !allowed.iter().any(|m| m.confirmation_type() == "device confirmation");
+        let by_email = approve
+            && !allowed
+                .iter()
+                .any(|m| m.confirmation_type() == "device confirmation");
         let step = match &code {
             // Steam finishes on its own once approved in the app; a code still works meanwhile.
             _ if approve => LoginStep::Approve { email: by_email },
-            Some(GuardTokenType::Email) => LoginStep::Code { kind: "email".into() },
+            Some(GuardTokenType::Email) => LoginStep::Code {
+                kind: "email".into(),
+            },
             Some(_) => LoginStep::Code { kind: "app".into() },
             None => return Box::new(std::future::ready(None)),
         };
         _ = self.steps.send(step);
         Box::new(async move {
             match (self.codes.recv().await, code) {
-                (Some(c), Some(kind)) => Some(ConfirmationAction::GuardToken(SteamGuardToken::new(c), kind)),
+                (Some(c), Some(kind)) => Some(ConfirmationAction::GuardToken(
+                    SteamGuardToken::new(c),
+                    kind,
+                )),
                 _ => Some(ConfirmationAction::Abort),
             }
         })
@@ -802,7 +929,10 @@ mod tests {
     #[test]
     fn connect_step_serializes_with_a_step_tag() {
         assert_eq!(
-            serde_json::to_string(&ConnectStep::Connected { account: "a".into() }).unwrap(),
+            serde_json::to_string(&ConnectStep::Connected {
+                account: "a".into()
+            })
+            .unwrap(),
             r#"{"step":"connected","account":"a"}"#
         );
     }
@@ -810,9 +940,22 @@ mod tests {
     #[test]
     fn login_step_serializes_with_a_step_tag() {
         let json = |s: &LoginStep| serde_json::to_string(s).unwrap();
-        assert_eq!(json(&LoginStep::Approve { email: true }), r#"{"step":"approve","email":true}"#);
-        assert_eq!(json(&LoginStep::Code { kind: "email".into() }), r#"{"step":"code","kind":"email"}"#);
-        assert_eq!(json(&LoginStep::Connected { account: "a".into() }), r#"{"step":"connected","account":"a"}"#);
+        assert_eq!(
+            json(&LoginStep::Approve { email: true }),
+            r#"{"step":"approve","email":true}"#
+        );
+        assert_eq!(
+            json(&LoginStep::Code {
+                kind: "email".into()
+            }),
+            r#"{"step":"code","kind":"email"}"#
+        );
+        assert_eq!(
+            json(&LoginStep::Connected {
+                account: "a".into()
+            }),
+            r#"{"step":"connected","account":"a"}"#
+        );
     }
 
     #[test]
@@ -833,7 +976,10 @@ mod tests {
         use steam_vent::auth::GuardDataStore;
         let mut store = guard_store();
         tauri::async_runtime::block_on(async {
-            store.store("someone", "machine-token".into()).await.unwrap();
+            store
+                .store("someone", "machine-token".into())
+                .await
+                .unwrap();
             assert_eq!(store.load("someone").await.unwrap(), None);
         });
     }
@@ -842,10 +988,19 @@ mod tests {
     fn steam_errors_map_to_short_messages() {
         use steam_vent::{EResult, LoginError, NetworkError};
         let msg = |e: ConnectionError| login_message(&e);
-        assert_eq!(msg(LoginError::InvalidCredentials.into()), msg!(wrongPassword));
-        assert_eq!(msg(NetworkError::ApiError(EResult::InvalidPassword).into()), msg!(wrongPassword));
+        assert_eq!(
+            msg(LoginError::InvalidCredentials.into()),
+            msg!(wrongPassword)
+        );
+        assert_eq!(
+            msg(NetworkError::ApiError(EResult::InvalidPassword).into()),
+            msg!(wrongPassword)
+        );
         assert_eq!(msg(LoginError::RateLimited.into()), msg!(tooManyTries));
-        assert_eq!(msg(NetworkError::ApiError(EResult::TwoFactorCodeMismatch).into()), msg!(codeDidntWork));
+        assert_eq!(
+            msg(NetworkError::ApiError(EResult::TwoFactorCodeMismatch).into()),
+            msg!(codeDidntWork)
+        );
     }
 
     #[test]
@@ -855,7 +1010,10 @@ mod tests {
             language: "system".into(),
             ui_language: "en",
             steam: true,
-            steam_library: SteamLibrary { account: Some("test-account".into()), attention: false },
+            steam_library: SteamLibrary {
+                account: Some("test-account".into()),
+                attention: false,
+            },
             epic: Some(Login::LoggedIn),
             epic_account: Some("Test".into()),
             epic_install_dir: Some(r"D:\Games\Epic".into()),

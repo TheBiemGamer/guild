@@ -57,7 +57,9 @@ button {
   padding: 8px 16px;
   background: var(--surface-2);
   cursor: pointer;
-  transition: background 120ms, transform 120ms;
+  transition:
+    background 120ms,
+    transform 120ms;
 }
 
 button:hover:not(:disabled) {

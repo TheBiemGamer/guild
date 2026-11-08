@@ -77,7 +77,10 @@ impl Creds {
     fn parse(v: &Value, now: f64) -> Option<Self> {
         let user_id = id_text(&v["user_id"])?;
         Some(Self {
-            access_token: v["access_token"].as_str().filter(|t| !t.is_empty())?.to_owned(),
+            access_token: v["access_token"]
+                .as_str()
+                .filter(|t| !t.is_empty())?
+                .to_owned(),
             user_id,
             expires_at: v["loginTime"].as_f64().unwrap_or(now) + v["expires_in"].as_f64()?,
         })
@@ -138,11 +141,18 @@ fn auth() -> Auth {
             return Auth::Unreachable;
         }
     };
-    let auth = classify(output.status.success(), &output.stdout, &String::from_utf8_lossy(&output.stderr), now);
+    let auth = classify(
+        output.status.success(),
+        &output.stdout,
+        &String::from_utf8_lossy(&output.stderr),
+        now,
+    );
     match &auth {
         Auth::In(creds) => *cached = Some(creds.clone()),
         // stdout and stderr stay unread here: stdout carries the tokens.
-        Auth::Unreachable => tracing::warn!("gogdl auth: couldn't refresh the login ({})", output.status),
+        Auth::Unreachable => {
+            tracing::warn!("gogdl auth: couldn't refresh the login ({})", output.status)
+        }
         Auth::Out => tracing::warn!("gogdl auth: the login expired"),
     }
     auth
@@ -165,7 +175,9 @@ fn classify(success: bool, stdout: &[u8], stderr: &str, now: f64) -> Auth {
 
 /// `auth.json` has the main login. Parsed into ignored values, so no token is held.
 fn has_login(file: &Path) -> bool {
-    let read = std::fs::read(file).ok().and_then(|b| serde_json::from_slice::<HashMap<String, IgnoredAny>>(&b).ok());
+    let read = std::fs::read(file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<HashMap<String, IgnoredAny>>(&b).ok());
     read.is_some_and(|logins| logins.contains_key(CLIENT_ID))
 }
 
@@ -175,7 +187,9 @@ pub fn log_in(code: &str) -> Result<(), Error> {
     let mut cached = lock_auth();
     std::fs::create_dir_all(dir())?;
     let output = gogdl(["auth", "--code", code]).output()?;
-    let answer = serde_json::from_slice::<Value>(&output.stdout).ok().filter(|v| v["error"] != true);
+    let answer = serde_json::from_slice::<Value>(&output.stdout)
+        .ok()
+        .filter(|v| v["error"] != true);
     match answer.and_then(|v| Creds::parse(&v, now_secs())) {
         Some(creds) => {
             *cached = Some(creds);
@@ -190,7 +204,9 @@ pub fn log_out() -> Result<(), Error> {
     let mut cached = lock_auth();
     *cached = None;
     match std::fs::remove_file(auth_file()) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(msg!(cantLogOutGog, detail = e.to_string()).into()),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(msg!(cantLogOutGog, detail = e.to_string()).into())
+        }
         _ => Ok(()),
     }
 }
@@ -222,7 +238,9 @@ fn gogdl(args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Command {
 }
 
 fn now_secs() -> f64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 /// GOG writes ids as strings or numbers.
@@ -247,7 +265,11 @@ impl Provider for Gog {
     }
 
     fn launch(&self, game: &Game) -> Result<(), Error> {
-        let dir = game.install_dir.as_deref().filter(|_| game.installed).ok_or(msg!(notInstalled))?;
+        let dir = game
+            .install_dir
+            .as_deref()
+            .filter(|_| game.installed)
+            .ok_or(msg!(notInstalled))?;
         launch(&game.external_id, dir, &LaunchOptions::default()).map(drop)
     }
 
@@ -276,10 +298,21 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
     let installs = db::gog_installs(&conn)?;
     let installed: Vec<u64> = installs
         .iter()
-        .filter_map(|(key, dir)| key.strip_prefix("gog-")?.parse().ok().filter(|&id| has_info(dir, id)))
+        .filter_map(|(key, dir)| {
+            key.strip_prefix("gog-")?
+                .parse()
+                .ok()
+                .filter(|&id| has_info(dir, id))
+        })
         .collect();
     let (owned, products, latest, saves) = tauri::async_runtime::block_on(async {
-        let owned = owned_ids(&get_json(http.get(OWNED_URL).header(reqwest::header::AUTHORIZATION, creds.bearer())).await?);
+        let owned = owned_ids(
+            &get_json(
+                http.get(OWNED_URL)
+                    .header(reqwest::header::AUTHORIZATION, creds.bearer()),
+            )
+            .await?,
+        );
         if let Err(e) = remember_account(http, &conn, creds, now).await {
             tracing::warn!("gog account: {e}");
         }
@@ -287,7 +320,9 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
         let mut missing = Vec::new();
         for &id in &owned {
             match db::cached_info(&conn, &key(id), PRODUCT, PRODUCT_MAX_AGE_SECS, now)? {
-                Some(json) => _ = products.insert(id, serde_json::from_str(&json).unwrap_or(Value::Null)),
+                Some(json) => {
+                    _ = products.insert(id, serde_json::from_str(&json).unwrap_or(Value::Null))
+                }
                 None => missing.push(id),
             }
         }
@@ -296,9 +331,14 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
                 tokio::time::sleep(BATCH_GAP).await;
             }
             let ids: Vec<String> = batch.iter().map(u64::to_string).collect();
-            let answer = get_json(http.get(format!("{PRODUCTS_URL}?ids={}", ids.join(",")))).await?;
-            let mut found: HashMap<u64, Value> =
-                answer.as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_u64()?, trim(p)))).collect();
+            let answer =
+                get_json(http.get(format!("{PRODUCTS_URL}?ids={}", ids.join(",")))).await?;
+            let mut found: HashMap<u64, Value> = answer
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|p| Some((p["id"].as_u64()?, trim(p))))
+                .collect();
             // An id GOG doesn't answer for is remembered as `null`, so it isn't asked every scan.
             // shortcut: such a game (gone from the catalog) stays out of the library until its entry expires.
             for &id in batch {
@@ -321,31 +361,46 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
 
 /// The newest public build of each installed game (GOG's builds list needs no login), cached 6 h and asked one game
 /// at a time. A failure is logged and leaves that game without an update mark.
-async fn latest_builds(http: &reqwest::Client, conn: &Connection, ids: &[u64], now: i64) -> HashMap<u64, String> {
+async fn latest_builds(
+    http: &reqwest::Client,
+    conn: &Connection,
+    ids: &[u64],
+    now: i64,
+) -> HashMap<u64, String> {
     let mut latest = HashMap::new();
     let mut asked = false;
     for &id in ids {
-        let json = match db::cached_info(conn, &key(id), LATEST_BUILD, LATEST_BUILD_MAX_AGE_SECS, now).ok().flatten() {
-            Some(json) => json,
-            None => {
-                if std::mem::replace(&mut asked, true) {
-                    tokio::time::sleep(BATCH_GAP).await;
-                }
-                match get_json(http.get(format!("{BUILDS_URL}/{id}/os/windows/builds?generation=2"))).await {
-                    Ok(body) => {
-                        let json = default_build(&body).map_or(Value::Null, Value::String).to_string();
-                        if let Err(e) = db::put_info(conn, &key(id), LATEST_BUILD, &json, now) {
-                            tracing::warn!("gog builds cache: {e}");
+        let json =
+            match db::cached_info(conn, &key(id), LATEST_BUILD, LATEST_BUILD_MAX_AGE_SECS, now)
+                .ok()
+                .flatten()
+            {
+                Some(json) => json,
+                None => {
+                    if std::mem::replace(&mut asked, true) {
+                        tokio::time::sleep(BATCH_GAP).await;
+                    }
+                    match get_json(
+                        http.get(format!("{BUILDS_URL}/{id}/os/windows/builds?generation=2")),
+                    )
+                    .await
+                    {
+                        Ok(body) => {
+                            let json = default_build(&body)
+                                .map_or(Value::Null, Value::String)
+                                .to_string();
+                            if let Err(e) = db::put_info(conn, &key(id), LATEST_BUILD, &json, now) {
+                                tracing::warn!("gog builds cache: {e}");
+                            }
+                            json
                         }
-                        json
-                    }
-                    Err(e) => {
-                        tracing::warn!("gog builds {id}: {e}");
-                        continue;
+                        Err(e) => {
+                            tracing::warn!("gog builds {id}: {e}");
+                            continue;
+                        }
                     }
                 }
-            }
-        };
+            };
         if let Ok(Value::String(build)) = serde_json::from_str(&json) {
             latest.insert(id, build);
         }
@@ -355,7 +410,11 @@ async fn latest_builds(http: &reqwest::Client, conn: &Connection, ids: &[u64], n
 
 /// The build a plain update installs: the first one on no branch.
 fn default_build(builds: &Value) -> Option<String> {
-    builds["items"].as_array()?.iter().find(|b| b["branch"].is_null()).and_then(|b| id_text(&b["build_id"]))
+    builds["items"]
+        .as_array()?
+        .iter()
+        .find(|b| b["branch"].is_null())
+        .and_then(|b| id_text(&b["build_id"]))
 }
 
 async fn get_json(request: reqwest::RequestBuilder) -> Result<Value, Error> {
@@ -369,7 +428,12 @@ fn key(id: u64) -> String {
 
 /// `{"owned": [ids]}`, sorted and without repeats.
 fn owned_ids(body: &Value) -> Vec<u64> {
-    let mut ids: Vec<u64> = body["owned"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+    let mut ids: Vec<u64> = body["owned"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_u64)
+        .collect();
     ids.sort_unstable();
     ids.dedup();
     ids
@@ -377,8 +441,12 @@ fn owned_ids(body: &Value) -> Vec<u64> {
 
 /// What the library keeps of a product: its DLC as plain ids (`dlcs` is `[]` without any, else `{products}`).
 fn trim(p: &Value) -> Value {
-    let dlcs: Vec<u64> =
-        p["dlcs"]["products"].as_array().into_iter().flatten().filter_map(|d| d["id"].as_u64()).collect();
+    let dlcs: Vec<u64> = p["dlcs"]["products"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|d| d["id"].as_u64())
+        .collect();
     json!({
         "title": p["title"],
         "game_type": p["game_type"],
@@ -399,7 +467,13 @@ fn games(
     covers: &HashMap<String, String>,
 ) -> Vec<Game> {
     let owned_set: HashSet<u64> = owned.iter().copied().collect();
-    let title = |p: &Value| p["title"].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+    let title = |p: &Value| {
+        p["title"]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
     owned
         .iter()
         .filter_map(|&id| {
@@ -409,7 +483,10 @@ fn games(
             // GOG's image URLs are protocol-relative.
             let image = |field: &str| Image {
                 path: None,
-                url: p["images"][field].as_str().and_then(|u| u.strip_prefix("//")).map(|u| format!("https://{u}")),
+                url: p["images"][field]
+                    .as_str()
+                    .and_then(|u| u.strip_prefix("//"))
+                    .map(|u| format!("https://{u}")),
             };
             let mut dlc: Vec<Dlc> = p["dlcs"]
                 .as_array()
@@ -419,7 +496,10 @@ fn games(
                 .filter(|d| owned_set.contains(d))
                 .map(|d| Dlc {
                     id: d.to_string(),
-                    title: products.get(&d).and_then(title).unwrap_or_else(|| d.to_string()),
+                    title: products
+                        .get(&d)
+                        .and_then(title)
+                        .unwrap_or_else(|| d.to_string()),
                     installed: dir.is_some_and(|dir| has_info(dir, d)),
                 })
                 .collect();
@@ -436,7 +516,10 @@ fn games(
                 last_played: None,
                 size_bytes: None,
                 art: Art {
-                    cover: Image { path: None, url: covers.get(&key).cloned() },
+                    cover: Image {
+                        path: None,
+                        url: covers.get(&key).cloned(),
+                    },
                     header: image("logo"),
                     hero: image("background"),
                 },
@@ -451,14 +534,32 @@ fn games(
 }
 
 /// Caches the account's name (`users.gog.com`) unless the cached one is this account's and recent.
-async fn remember_account(http: &reqwest::Client, conn: &rusqlite::Connection, creds: &Creds, now: i64) -> Result<(), Error> {
+async fn remember_account(
+    http: &reqwest::Client,
+    conn: &rusqlite::Connection,
+    creds: &Creds,
+    now: i64,
+) -> Result<(), Error> {
     let cached = db::cached_info(conn, "gog", ACCOUNT, ACCOUNT_MAX_AGE_SECS, now)?;
-    if cached.and_then(|json| serde_json::from_str::<Value>(&json).ok()).is_some_and(|a| a["user_id"] == creds.user_id.as_str()) {
+    if cached
+        .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+        .is_some_and(|a| a["user_id"] == creds.user_id.as_str())
+    {
         return Ok(());
     }
-    let user = get_json(http.get(format!("{USERS_URL}/{}", creds.user_id)).header(reqwest::header::AUTHORIZATION, creds.bearer())).await?;
+    let user = get_json(
+        http.get(format!("{USERS_URL}/{}", creds.user_id))
+            .header(reqwest::header::AUTHORIZATION, creds.bearer()),
+    )
+    .await?;
     let name = user["username"].as_str().ok_or("no username")?;
-    db::put_info(conn, "gog", ACCOUNT, &json!({ "user_id": creds.user_id, "username": name }).to_string(), now)?;
+    db::put_info(
+        conn,
+        "gog",
+        ACCOUNT,
+        &json!({ "user_id": creds.user_id, "username": name }).to_string(),
+        now,
+    )?;
     Ok(())
 }
 
@@ -468,7 +569,9 @@ pub fn account_name(conn: &rusqlite::Connection) -> Option<String> {
     let user_id = AUTH.try_lock().ok()?.as_ref()?.user_id.clone();
     let json = db::cached_info(conn, "gog", ACCOUNT, i64::MAX / 2, 0).ok()??;
     let account: Value = serde_json::from_str(&json).ok()?;
-    (account["user_id"] == user_id.as_str()).then(|| account["username"].as_str().map(str::to_owned)).flatten()
+    (account["user_id"] == user_id.as_str())
+        .then(|| account["username"].as_str().map(str::to_owned))
+        .flatten()
 }
 
 // Installing and managing games. Commands and flags are from gogdl 1.4.0's `args.py`; the lines read from its log
@@ -517,7 +620,10 @@ fn read_json(path: &Path) -> Option<Value> {
 
 /// The first line of stdout that is a JSON object: gogdl prints its answers on one line.
 fn json_line(stdout: &[u8]) -> Option<Value> {
-    String::from_utf8_lossy(stdout).lines().find(|l| l.starts_with('{')).and_then(|l| serde_json::from_str(l).ok())
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .find(|l| l.starts_with('{'))
+        .and_then(|l| serde_json::from_str(l).ok())
 }
 
 /// A job needs a fresh login: gogdl would otherwise refresh an expired one itself, racing the scan's refresh.
@@ -532,14 +638,27 @@ fn ensure_login() -> Result<(), Error> {
 
 /// `en-US` when the game has it, else the first of its languages in order.
 fn pick_lang(info: &Value) -> String {
-    let mut langs: Vec<&str> = info["languages"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let mut langs: Vec<&str> = info["languages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
     langs.sort_unstable();
-    if langs.contains(&DEFAULT_LANG) { DEFAULT_LANG } else { langs.first().copied().unwrap_or(DEFAULT_LANG) }.to_owned()
+    if langs.contains(&DEFAULT_LANG) {
+        DEFAULT_LANG
+    } else {
+        langs.first().copied().unwrap_or(DEFAULT_LANG)
+    }
+    .to_owned()
 }
 
 /// `download_size` of a `size` map: the files every language shares plus `lang`'s.
 fn size_of(size: &Value, lang: &str) -> Option<u64> {
-    match (size["*"]["download_size"].as_u64(), size[lang]["download_size"].as_u64()) {
+    match (
+        size["*"]["download_size"].as_u64(),
+        size[lang]["download_size"].as_u64(),
+    ) {
         (None, None) => None,
         (all, own) => Some(all.unwrap_or(0) + own.unwrap_or(0)),
     }
@@ -561,22 +680,38 @@ pub fn download_size(info: &Value, dlcs: &[String]) -> Option<u64> {
 /// `gogdl info` for a game, from the cache while under a week old. `None` when gogdl couldn't tell (logged).
 pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
     let key = ProviderKind::Gog.key(id);
-    let json = crate::info::cached_or_fetch(conn, &key, INSTALL_INFO, INSTALL_INFO_MAX_AGE_SECS, now_secs() as i64, || {
-        // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
-        _ = login();
-        let output = gogdl(["info", id, "--os", "windows"]).output().inspect_err(|e| tracing::warn!("gogdl info {id}: {e}")).ok()?;
-        let info = json_line(&output.stdout).filter(|v| v["size"].is_object());
-        if info.is_none() {
-            tracing::warn!("gogdl info {id}: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
-        }
-        Some(info?.to_string())
-    })?;
+    let json = crate::info::cached_or_fetch(
+        conn,
+        &key,
+        INSTALL_INFO,
+        INSTALL_INFO_MAX_AGE_SECS,
+        now_secs() as i64,
+        || {
+            // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
+            _ = login();
+            let output = gogdl(["info", id, "--os", "windows"])
+                .output()
+                .inspect_err(|e| tracing::warn!("gogdl info {id}: {e}"))
+                .ok()?;
+            let info = json_line(&output.stdout).filter(|v| v["size"].is_object());
+            if info.is_none() {
+                tracing::warn!(
+                    "gogdl info {id}: {} {}",
+                    output.status,
+                    last_error(&String::from_utf8_lossy(&output.stderr))
+                );
+            }
+            Some(info?.to_string())
+        },
+    )?;
     serde_json::from_str(&json).ok()
 }
 
 /// The build in an install folder: `buildId` of its `goggame-<id>.info`, else of its `goggame-<id>.id`.
 fn installed_build(dir: &Path, id: &str) -> Option<String> {
-    let build = |ext: &str| read_json(&dir.join(format!("goggame-{id}.{ext}"))).and_then(|v| id_text(&v["buildId"]));
+    let build = |ext: &str| {
+        read_json(&dir.join(format!("goggame-{id}.{ext}"))).and_then(|v| id_text(&v["buildId"]))
+    };
     build("info").or_else(|| build("id"))
 }
 
@@ -594,23 +729,47 @@ fn local(dir: &Path, id: &str) -> Local {
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.file_name().to_str().is_some_and(|n| n.starts_with("goggame-") && n.ends_with(".info")))
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("goggame-") && n.ends_with(".info"))
+        })
         .filter_map(|e| read_json(&e.path()))
         .filter(|v| id_text(&v["rootGameId"]).as_deref() == Some(id))
         .filter_map(|v| id_text(&v["gameId"]).filter(|game| game != id))
         .collect();
     dlcs.sort_unstable();
-    Local { lang: root["languages"][0].as_str().unwrap_or(DEFAULT_LANG).to_owned(), dlcs }
+    Local {
+        lang: root["languages"][0]
+            .as_str()
+            .unwrap_or(DEFAULT_LANG)
+            .to_owned(),
+        dlcs,
+    }
 }
 
 /// gogdl's `download`, `update` or `repair` arguments. `download` puts the game in a folder named after it inside
 /// `path`; `update` and `repair` take the game's own folder.
 fn job_args(verb: &str, id: &str, path: &Path, lang: &str, dlcs: &Dlcs) -> Vec<OsString> {
-    let mut args: Vec<OsString> = vec![verb.into(), id.into(), "--platform".into(), "windows".into(), "--path".into()];
-    args.extend([path.into(), "--support".into(), support(id).into(), "--lang".into(), lang.into()]);
+    let mut args: Vec<OsString> = vec![
+        verb.into(),
+        id.into(),
+        "--platform".into(),
+        "windows".into(),
+        "--path".into(),
+    ];
+    args.extend([
+        path.into(),
+        "--support".into(),
+        support(id).into(),
+        "--lang".into(),
+        lang.into(),
+    ]);
     match dlcs {
         Dlcs::All => args.push("--with-dlcs".into()),
-        Dlcs::Only(ids) if !ids.is_empty() => args.extend(["--with-dlcs".into(), "--dlcs".into(), ids.join(",").into()]),
+        Dlcs::Only(ids) if !ids.is_empty() => {
+            args.extend(["--with-dlcs".into(), "--dlcs".into(), ids.join(",").into()])
+        }
         Dlcs::Only(_) => args.push("--skip-dlcs".into()),
     }
     args
@@ -625,9 +784,15 @@ pub(crate) fn parse_progress(line: &str, action: ProgressAction) -> Option<Progr
     let (done, total) = words.next()?.trim_end_matches(',').split_once('/')?;
     let (done, total): (u64, u64) = (done.parse().ok()?, total.parse().ok()?);
     let secs_left = rest.split_once("ETA: ").and_then(|(_, eta)| {
-        eta.trim().split(':').try_fold(0u64, |secs, part| Some(secs * 60 + part.parse::<u64>().ok()?))
+        eta.trim().split(':').try_fold(0u64, |secs, part| {
+            Some(secs * 60 + part.parse::<u64>().ok()?)
+        })
     });
-    let fraction = if total > 0 { done as f32 / total as f32 } else { percent / 100.0 };
+    let fraction = if total > 0 {
+        done as f32 / total as f32
+    } else {
+        percent / 100.0
+    };
     Some(Progress {
         fraction: fraction.clamp(0.0, 1.0),
         action,
@@ -652,7 +817,12 @@ pub(crate) enum Fed {
 
 /// Hands each line to `on_line` until the sender is gone. Once armed (from the start, or by the first line
 /// `on_line` says was progress), `stall` without progress ends it early.
-pub(crate) fn feed(lines: &Receiver<String>, stall: Duration, mut armed: bool, mut on_line: impl FnMut(&str) -> bool) -> Fed {
+pub(crate) fn feed(
+    lines: &Receiver<String>,
+    stall: Duration,
+    mut armed: bool,
+    mut on_line: impl FnMut(&str) -> bool,
+) -> Fed {
     let mut last = Instant::now();
     loop {
         let line = if armed {
@@ -685,8 +855,15 @@ struct Run {
 /// Runs a gogdl job, reporting its pid and progress. A `Verify` job is a `repair`: it hashes the files without
 /// progress, then reports `Repair` progress once it found bad files. A job silent for `STALL` once progress is
 /// expected (from the start, for a download) is killed.
-fn run(args: Vec<OsString>, mut action: ProgressAction, mut on_event: impl FnMut(InstallEvent)) -> Result<Run, Error> {
-    let mut child = gogdl(args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+fn run(
+    args: Vec<OsString>,
+    mut action: ProgressAction,
+    mut on_event: impl FnMut(InstallEvent),
+) -> Result<Run, Error> {
+    let mut child = gogdl(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
     let pid = child.id();
     on_event(InstallEvent::Started(pid));
     let mut stdout = child.stdout.take().expect("stdout is piped");
@@ -722,7 +899,9 @@ fn run(args: Vec<OsString>, mut action: ProgressAction, mut on_event: impl FnMut
         }
         let progress = parse_progress(line, action);
         let found = progress.is_some();
-        progress.into_iter().for_each(|p| on_event(InstallEvent::Progress(p)));
+        progress
+            .into_iter()
+            .for_each(|p| on_event(InstallEvent::Progress(p)));
         found
     });
     if fed == Fed::Stalled {
@@ -734,7 +913,11 @@ fn run(args: Vec<OsString>, mut action: ProgressAction, mut on_event: impl FnMut
         return Err(msg!(gogStalled).into());
     }
     let status = child.wait()?;
-    Ok(Run { success: status.success(), stdout: out.join().unwrap_or_default(), log })
+    Ok(Run {
+        success: status.success(),
+        stdout: out.join().unwrap_or_default(),
+        log,
+    })
 }
 
 /// Whether a job worked. gogdl exits 0 after some failures, so it also needs no `CRITICAL:` line and the game's
@@ -746,7 +929,12 @@ fn outcome(run: &Run, done: bool) -> Result<(), Error> {
     if run.log.contains("doesn't support content system api") {
         // Also what an invalid login looks like.
         let unreachable = run.log.contains("Failed to refresh credentials");
-        return Err(if unreachable { msg!(cantReachGog) } else { msg!(gogNotOffered) }.into());
+        return Err(if unreachable {
+            msg!(cantReachGog)
+        } else {
+            msg!(gogNotOffered)
+        }
+        .into());
     }
     if run.log.contains("No manifest stored locally") {
         return Err(msg!(gogNoManifest).into());
@@ -764,7 +952,11 @@ fn last_error(log: &str) -> Msg {
     let Some(line) = lines().find(is_error).or_else(|| lines().next()) else {
         return msg!(gogdlNoReason);
     };
-    Msg::system(line.split_once(": ").filter(|(head, _)| head.starts_with('[')).map_or(line, |(_, m)| m))
+    Msg::system(
+        line.split_once(": ")
+            .filter(|(head, _)| head.starts_with('['))
+            .map_or(line, |(_, m)| m),
+    )
 }
 
 /// Downloads a game into a folder named after it inside `base`, with its owned DLC or none. Returns that folder.
@@ -777,10 +969,21 @@ pub fn install(
 ) -> Result<PathBuf, Error> {
     ensure_login()?;
     let info = install_info(conn, id).ok_or(msg!(cantReachGog))?;
-    let folder = info["folder_name"].as_str().filter(|f| !f.is_empty()).ok_or(msg!(gogNoFolderName))?;
+    let folder = info["folder_name"]
+        .as_str()
+        .filter(|f| !f.is_empty())
+        .ok_or(msg!(gogNoFolderName))?;
     std::fs::create_dir_all(base)?;
-    let dlcs = if with_dlc { Dlcs::All } else { Dlcs::Only(Vec::new()) };
-    let run = run(job_args("download", id, base, &pick_lang(&info), &dlcs), ProgressAction::Install, on_event)?;
+    let dlcs = if with_dlc {
+        Dlcs::All
+    } else {
+        Dlcs::Only(Vec::new())
+    };
+    let run = run(
+        job_args("download", id, base, &pick_lang(&info), &dlcs),
+        ProgressAction::Install,
+        on_event,
+    )?;
     let dir = base.join(folder);
     outcome(&run, has_info(&dir, id))?;
     Ok(dir)
@@ -797,7 +1000,11 @@ fn update_to(
     on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
     ensure_login()?;
-    let run = run(job_args("update", id, dir, lang, &Dlcs::Only(dlcs)), action, on_event)?;
+    let run = run(
+        job_args("update", id, dir, lang, &Dlcs::Only(dlcs)),
+        action,
+        on_event,
+    )?;
     outcome(&run, has_info(dir, id))
 }
 
@@ -808,13 +1015,23 @@ pub fn update(id: &str, dir: &Path, on_event: impl FnMut(InstallEvent)) -> Resul
 }
 
 /// Adds or removes (`add`) one DLC of an installed game.
-pub fn change_dlc(id: &str, dir: &Path, dlc: &str, add: bool, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
+pub fn change_dlc(
+    id: &str,
+    dir: &Path,
+    dlc: &str,
+    add: bool,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), Error> {
     let Local { lang, mut dlcs } = local(dir, id);
     dlcs.retain(|d| d != dlc);
     if add {
         dlcs.push(dlc.to_owned());
     }
-    let action = if add { ProgressAction::Install } else { ProgressAction::Update };
+    let action = if add {
+        ProgressAction::Install
+    } else {
+        ProgressAction::Update
+    };
     update_to(id, dir, &lang, dlcs, action, on_event)
 }
 
@@ -825,7 +1042,11 @@ pub fn verify(id: &str, dir: &Path, on_event: impl FnMut(InstallEvent)) -> Resul
     }
     ensure_login()?;
     let Local { lang, dlcs } = local(dir, id);
-    let run = run(job_args("repair", id, dir, &lang, &Dlcs::Only(dlcs)), ProgressAction::Verify, on_event)?;
+    let run = run(
+        job_args("repair", id, dir, &lang, &Dlcs::Only(dlcs)),
+        ProgressAction::Verify,
+        on_event,
+    )?;
     outcome(&run, has_info(dir, id))
 }
 
@@ -864,7 +1085,11 @@ pub fn import(path: &Path) -> Result<String, Error> {
     match json_line(&output.stdout).and_then(|v| id_text(&v["appName"])) {
         Some(id) => Ok(id),
         None => {
-            tracing::warn!("gogdl import: {} {}", output.status, last_error(&String::from_utf8_lossy(&output.stderr)));
+            tracing::warn!(
+                "gogdl import: {} {}",
+                output.status,
+                last_error(&String::from_utf8_lossy(&output.stderr))
+            );
             Err(msg!(noGogGameIn, path = path.display().to_string()).into())
         }
     }
@@ -902,14 +1127,25 @@ struct Task {
 // shortcut: a primary `launcher` task (Prison Architect's `Launcher/dowser.exe`) is what gets watched although it hands
 // over to the game, so the session is timed only while it runs, like an Epic bootstrapper's.
 fn play_task(info: &Value) -> Option<Task> {
-    let task = info["playTasks"].as_array()?.iter().find(|t| t["isPrimary"] == true && t["type"] == "FileTask")?;
+    let task = info["playTasks"]
+        .as_array()?
+        .iter()
+        .find(|t| t["isPrimary"] == true && t["type"] == "FileTask")?;
     let text = |field: &str| task[field].as_str().unwrap_or_default().to_owned();
-    Some(Task { path: text("path"), working_dir: text("workingDir"), arguments: text("arguments") }).filter(|t| !t.path.is_empty())
+    Some(Task {
+        path: text("path"),
+        working_dir: text("workingDir"),
+        arguments: text("arguments"),
+    })
+    .filter(|t| !t.path.is_empty())
 }
 
 /// `relative` inside `dir`, whichever slashes it uses.
 pub(crate) fn inside(dir: &Path, relative: &str) -> PathBuf {
-    relative.split(['/', '\\']).filter(|p| !p.is_empty()).fold(dir.to_path_buf(), |path, part| path.join(part))
+    relative
+        .split(['/', '\\'])
+        .filter(|p| !p.is_empty())
+        .fold(dir.to_path_buf(), |path, part| path.join(part))
 }
 
 /// What Play runs: the task's program in its working folder with its arguments, then the owner's extra arguments.
@@ -921,7 +1157,11 @@ fn launch_command(dir: &Path, task: &Task, options: &LaunchOptions) -> Command {
             let cwd = exe.parent().unwrap_or(dir).to_path_buf();
             (exe, cwd, Vec::new())
         }
-        None => (inside(dir, &task.path), inside(dir, &task.working_dir), split_args(&task.arguments)),
+        None => (
+            inside(dir, &task.path),
+            inside(dir, &task.working_dir),
+            split_args(&task.arguments),
+        ),
     };
     args.extend(split_args(&options.args));
     let mut command = Command::new(exe);
@@ -931,7 +1171,8 @@ fn launch_command(dir: &Path, task: &Task, options: &LaunchOptions) -> Command {
 
 /// Starts an installed game without waiting for it. Returns its program's file name, to watch its process.
 pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, Error> {
-    let info = read_json(&dir.join(format!("goggame-{id}.info"))).ok_or(msg!(gameFilesMissingVerify))?;
+    let info =
+        read_json(&dir.join(format!("goggame-{id}.info"))).ok_or(msg!(gameFilesMissingVerify))?;
     let task = play_task(&info).ok_or(msg!(gogNoPlayTask))?;
     let mut command = launch_command(dir, &task, options);
     let exe = PathBuf::from(command.get_program());
@@ -939,7 +1180,10 @@ pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, E
         return Err(msg!(gameProgramMissing, path = exe.display().to_string()).into());
     }
     command.spawn()?;
-    Ok(exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+    Ok(exe
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
 // Playtime: GOG's own figure per game. Sessions timed here are added on top (`epic_playtime`) and never posted to GOG,
@@ -955,7 +1199,10 @@ pub const PLAYTIME_GAP: Duration = Duration::from_secs(1);
 
 /// The game has no recent playtime answer.
 pub fn playtime_due(conn: &Connection, key: &str, now: i64) -> bool {
-    db::cached_info(conn, key, PLAYTIME, PLAYTIME_MAX_AGE_SECS, now).ok().flatten().is_none()
+    db::cached_info(conn, key, PLAYTIME, PLAYTIME_MAX_AGE_SECS, now)
+        .ok()
+        .flatten()
+        .is_none()
 }
 
 // shortcut: UNVERIFIED field, from Heroic's GOG playtime code, not a captured response.
@@ -965,13 +1212,24 @@ fn parse_playtime(body: &Value) -> Option<u64> {
 
 /// GOG's minutes for a game, `None` when GOG answered without them (an error status or another shape). `Err` only
 /// when GOG can't be reached.
-pub async fn fetch_playtime(http: &reqwest::Client, creds: &Creds, id: &str) -> Result<Option<u64>, Error> {
+pub async fn fetch_playtime(
+    http: &reqwest::Client,
+    creds: &Creds,
+    id: &str,
+) -> Result<Option<u64>, Error> {
     let url = format!("{GAMEPLAY_URL}/{id}/users/{}/sessions", creds.user_id);
-    let response = http.get(url).header(reqwest::header::AUTHORIZATION, creds.bearer()).send().await?;
+    let response = http
+        .get(url)
+        .header(reqwest::header::AUTHORIZATION, creds.bearer())
+        .send()
+        .await?;
     if !response.status().is_success() {
         return Ok(None);
     }
-    Ok(serde_json::from_str(&response.text().await?).ok().as_ref().and_then(parse_playtime))
+    Ok(serde_json::from_str(&response.text().await?)
+        .ok()
+        .as_ref()
+        .and_then(parse_playtime))
 }
 
 // Cloud saves, through gogdl's `save-sync`, one run per save location.
@@ -999,14 +1257,21 @@ async fn with_cloud_saves(
     let mut found = HashSet::new();
     let mut asked = false;
     for &id in ids {
-        let json = match db::cached_info(conn, &key(id), SAVES, SAVES_MAX_AGE_SECS, now).ok().flatten() {
+        let json = match db::cached_info(conn, &key(id), SAVES, SAVES_MAX_AGE_SECS, now)
+            .ok()
+            .flatten()
+        {
             Some(json) => json,
             None => {
-                let Some(client) = installs.get(&key(id)).and_then(|dir| client_id(dir, id)) else { continue };
+                let Some(client) = installs.get(&key(id)).and_then(|dir| client_id(dir, id)) else {
+                    continue;
+                };
                 if std::mem::replace(&mut asked, true) {
                     tokio::time::sleep(BATCH_GAP).await;
                 }
-                match get_json(http.get(format!("{SAVES_URL}/{client}?component_version=2.0.45"))).await {
+                match get_json(http.get(format!("{SAVES_URL}/{client}?component_version=2.0.45")))
+                    .await
+                {
                     Ok(config) => {
                         let json = save_locations(&config).to_string();
                         if let Err(e) = db::put_info(conn, &key(id), SAVES, &json, now) {
@@ -1044,12 +1309,19 @@ fn resolve(location: &str, install: &Path) -> Option<PathBuf> {
     while let Some(start) = rest.find("<?") {
         let end = start + rest[start..].find("?>")?;
         path.push_str(&rest[..start]);
-        path.push_str(&crate::platform::gog_folder(&rest[start + 2..end], install)?.to_string_lossy());
+        path.push_str(
+            &crate::platform::gog_folder(&rest[start + 2..end], install)?.to_string_lossy(),
+        );
         rest = &rest[end + 2..];
     }
     path.push_str(rest);
     // The remote config doubles its backslashes.
-    Some(PathBuf::from(path.split(['/', '\\']).filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\\")))
+    Some(PathBuf::from(
+        path.split(['/', '\\'])
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join("\\"),
+    ))
 }
 
 /// Each save location's name and folder. No locations means Galaxy's default folder for the game's client id. A
@@ -1059,7 +1331,10 @@ fn save_folders(locations: &Value, client: &str, install: &Path) -> Vec<(String,
         "name": "__default",
         "location": format!("<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/{client}/Storage/Shared/Files"),
     })];
-    let list = locations.as_array().filter(|l| !l.is_empty()).map_or(&default[..], Vec::as_slice);
+    let list = locations
+        .as_array()
+        .filter(|l| !l.is_empty())
+        .map_or(&default[..], Vec::as_slice);
     list.iter()
         .filter_map(|l| {
             let (name, location) = (l["name"].as_str()?, l["location"].as_str()?);
@@ -1074,7 +1349,13 @@ fn save_folders(locations: &Value, client: &str, install: &Path) -> Vec<(String,
 
 /// gogdl's `save-sync` arguments for one location. `ts` is when that location last synced, `0` for never.
 fn sync_args(folder: &Path, id: &str, name: &str, ts: &str, sync: SaveSync) -> Vec<OsString> {
-    let mut args: Vec<OsString> = vec!["save-sync".into(), folder.into(), id.into(), "--os".into(), "windows".into()];
+    let mut args: Vec<OsString> = vec![
+        "save-sync".into(),
+        folder.into(),
+        id.into(),
+        "--os".into(),
+        "windows".into(),
+    ];
     args.extend(["--ts".into(), ts.into(), "--name".into(), name.into()]);
     let flag = match sync {
         SaveSync::Download => Some("--skip-upload"),
@@ -1111,13 +1392,19 @@ fn first_to_report(outcomes: Vec<SyncOutcome>) -> SyncOutcome {
         SyncOutcome::Failed(_) => 3,
         SyncOutcome::Synced => 4,
     };
-    outcomes.into_iter().min_by_key(rank).unwrap_or(SyncOutcome::Synced)
+    outcomes
+        .into_iter()
+        .min_by_key(rank)
+        .unwrap_or(SyncOutcome::Synced)
 }
 
 /// When each save location of the game `key` last synced, as gogdl printed it.
 fn save_stamps(conn: &Connection, key: &str) -> HashMap<String, String> {
-    let json = db::cached_info(conn, key, SAVE_TS, i64::MAX / 2, 0).ok().flatten();
-    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+    let json = db::cached_info(conn, key, SAVE_TS, i64::MAX / 2, 0)
+        .ok()
+        .flatten();
+    json.and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default()
 }
 
 fn store_save_stamps(conn: &Connection, key: &str, stamps: &HashMap<String, String>) {
@@ -1129,7 +1416,12 @@ fn store_save_stamps(conn: &Connection, key: &str, stamps: &HashMap<String, Stri
 
 /// Keeps the timestamp gogdl printed (stdout, a float) as the location's last sync, only when it synced: after a
 /// refusal or a conflict the old one keeps the difference to ask about.
-fn keep_stamp(stamps: &mut HashMap<String, String>, name: &str, outcome: &SyncOutcome, stdout: &str) {
+fn keep_stamp(
+    stamps: &mut HashMap<String, String>,
+    name: &str,
+    outcome: &SyncOutcome,
+    stdout: &str,
+) {
     let stamp = stdout.trim();
     if *outcome == SyncOutcome::Synced && stamp.parse::<f64>().is_ok() {
         stamps.insert(name.to_owned(), stamp.to_owned());
@@ -1140,9 +1432,17 @@ fn keep_stamp(stamps: &mut HashMap<String, String>, name: &str, outcome: &SyncOu
 /// Never fails: a failure is an outcome.
 pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSync) -> SyncOutcome {
     let key = ProviderKind::Gog.key(id);
-    let Some(client) = client_id(dir, id) else { return SyncOutcome::Failed(msg!(gameFilesMissing)) };
-    let cached = conn.and_then(|c| db::cached_info(c, &key, SAVES, i64::MAX / 2, 0).ok().flatten());
-    let locations = cached.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or(Value::Null);
+    let Some(client) = client_id(dir, id) else {
+        return SyncOutcome::Failed(msg!(gameFilesMissing));
+    };
+    let cached = conn.and_then(|c| {
+        db::cached_info(c, &key, SAVES, i64::MAX / 2, 0)
+            .ok()
+            .flatten()
+    });
+    let locations = cached
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or(Value::Null);
     let folders = save_folders(&locations, &client, dir);
     if folders.is_empty() {
         return SyncOutcome::Failed(msg!(noSaveFolder));
@@ -1182,13 +1482,20 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> Value {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gog").join(name);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/gog")
+            .join(name);
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
     /// Every product in the fixture, trimmed as the cache keeps it.
     fn products(name: &str) -> HashMap<u64, Value> {
-        fixture(name).as_array().unwrap().iter().map(|p| (p["id"].as_u64().unwrap(), trim(p))).collect()
+        fixture(name)
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p["id"].as_u64().unwrap(), trim(p)))
+            .collect()
     }
 
     const FAKE: &str = r#"{"access_token":"test-access-token","expires_in":3600,"refresh_token":"test-refresh-token","user_id":"0","session_id":"s","loginTime":1000.5}"#;
@@ -1205,24 +1512,50 @@ mod tests {
     fn auth_output_is_classified() {
         let refresh_failed = "[AUTH] ERROR: Failed to refresh credentials\n";
         assert_eq!(state(classify(true, FAKE.as_bytes(), "", 1000.0)), "in");
-        assert_eq!(state(classify(true, b"null\n", refresh_failed, 1000.0)), "unreachable");
+        assert_eq!(
+            state(classify(true, b"null\n", refresh_failed, 1000.0)),
+            "unreachable"
+        );
         assert_eq!(state(classify(true, b"null\n", "", 1000.0)), "out");
-        assert_eq!(state(classify(true, br#"{"error": true}"#, "", 1000.0)), "unreachable");
-        assert_eq!(state(classify(true, b"", "Traceback ...", 1000.0)), "unreachable");
-        assert_eq!(state(classify(false, FAKE.as_bytes(), "", 1000.0)), "unreachable");
+        assert_eq!(
+            state(classify(true, br#"{"error": true}"#, "", 1000.0)),
+            "unreachable"
+        );
+        assert_eq!(
+            state(classify(true, b"", "Traceback ...", 1000.0)),
+            "unreachable"
+        );
+        assert_eq!(
+            state(classify(false, FAKE.as_bytes(), "", 1000.0)),
+            "unreachable"
+        );
         // Credentials without a token aren't a login.
-        assert_eq!(state(classify(true, br#"{"user_id":"0","expires_in":3600}"#, "", 1000.0)), "unreachable");
+        assert_eq!(
+            state(classify(
+                true,
+                br#"{"user_id":"0","expires_in":3600}"#,
+                "",
+                1000.0
+            )),
+            "unreachable"
+        );
     }
 
     #[test]
     fn creds_expire_a_minute_early() {
-        let Auth::In(creds) = classify(true, FAKE.as_bytes(), "", 0.0) else { panic!("not logged in") };
+        let Auth::In(creds) = classify(true, FAKE.as_bytes(), "", 0.0) else {
+            panic!("not logged in")
+        };
         assert_eq!(creds.user_id, "0");
         assert_eq!(creds.bearer(), "Bearer test-access-token");
         assert!(creds.fresh(1000.5 + 3600.0 - 61.0));
         assert!(!creds.fresh(1000.5 + 3600.0 - 59.0));
         // `auth --code` may print no `loginTime`: the token counts from now.
-        let numeric = Creds::parse(&json!({"access_token": "t", "user_id": 7, "expires_in": 10}), 50.0).unwrap();
+        let numeric = Creds::parse(
+            &json!({"access_token": "t", "user_id": 7, "expires_in": 10}),
+            50.0,
+        )
+        .unwrap();
         assert_eq!((numeric.user_id.as_str(), numeric.expires_at), ("7", 60.0));
     }
 
@@ -1244,14 +1577,22 @@ mod tests {
     #[test]
     fn gogdl_flags_go_before_the_subcommand() {
         let command = gogdl(["auth", "--code", "abc"]);
-        let args: Vec<String> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<String> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args[0], "--auth-config-path");
         assert!(args[1].ends_with("auth.json"));
         assert_eq!(&args[2..], ["auth", "--code", "abc"]);
         assert!(!args.iter().any(|a| a == "-d" || a == "--debug"));
         let envs: HashMap<String, String> = command
             .get_envs()
-            .filter_map(|(k, v)| Some((k.to_string_lossy().into_owned(), v?.to_string_lossy().into_owned())))
+            .filter_map(|(k, v)| {
+                Some((
+                    k.to_string_lossy().into_owned(),
+                    v?.to_string_lossy().into_owned(),
+                ))
+            })
             .collect();
         assert_eq!(envs["PYTHONUTF8"], "1");
         assert_eq!(Path::new(&envs["GOGDL_CONFIG_PATH"]), dir());
@@ -1267,20 +1608,53 @@ mod tests {
     fn games_keep_only_owned_games() {
         let products = products("products.json");
         // Last Day of June (a game), The Witcher 3 Complete Edition (a pack), The Witcher 3 (a game).
-        insta::assert_debug_snapshot!(games(&[1207664663, 1425609977, 1495134320], &products, &HashMap::new(), &HashMap::new(), &HashMap::new()));
+        insta::assert_debug_snapshot!(games(
+            &[1207664663, 1425609977, 1495134320],
+            &products,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new()
+        ));
         // Not owned: not listed, even with a cached product.
-        assert!(games(&[1], &products, &HashMap::new(), &HashMap::new(), &HashMap::new()).is_empty());
+        assert!(
+            games(
+                &[1],
+                &products,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new()
+            )
+            .is_empty()
+        );
         // An id GOG didn't answer for (`null`) is left out.
-        assert!(games(&[9], &HashMap::from([(9, Value::Null)]), &HashMap::new(), &HashMap::new(), &HashMap::new()).is_empty());
+        assert!(
+            games(
+                &[9],
+                &HashMap::from([(9, Value::Null)]),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new()
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn owned_dlc_go_under_their_game() {
         let mut products = products("products2.json");
         // Cyberpunk 2077 owns two of its DLC; one of them has a cached product with a title.
-        products.insert(1445725644, json!({"title": " Phantom Liberty ", "game_type": "dlc", "images": {}, "dlcs": []}));
+        products.insert(
+            1445725644,
+            json!({"title": " Phantom Liberty ", "game_type": "dlc", "images": {}, "dlcs": []}),
+        );
         let owned = [1423049311, 1445725644, 2116847748];
-        let all = games(&owned, &products, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let all = games(
+            &owned,
+            &products,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         assert_eq!(all.len(), 1, "a DLC is no game of its own");
         let titles: Vec<&str> = all[0].dlc.iter().map(|d| d.title.as_str()).collect();
         assert_eq!(titles, ["2116847748", "Phantom Liberty"]);
@@ -1289,14 +1663,27 @@ mod tests {
 
     #[test]
     fn installed_needs_the_record_and_the_info_file() {
-        let dir = std::env::temp_dir().join(format!("launcher-gog-installed-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("launcher-gog-installed-{}", std::process::id()));
         _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut products = products("products2.json");
-        products.insert(1445725644, json!({"title": "Phantom Liberty", "game_type": "dlc", "images": {}, "dlcs": []}));
+        products.insert(
+            1445725644,
+            json!({"title": "Phantom Liberty", "game_type": "dlc", "images": {}, "dlcs": []}),
+        );
         let owned = [1423049311, 1445725644];
         let installs = HashMap::from([("gog-1423049311".to_string(), dir.clone())]);
-        let list = || games(&owned, &products, &installs, &HashMap::new(), &HashMap::new()).remove(0);
+        let list = || {
+            games(
+                &owned,
+                &products,
+                &installs,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .remove(0)
+        };
         // A record whose folder lacks the info file (deleted by hand) isn't installed.
         assert!(!list().installed);
         std::fs::write(dir.join("goggame-1423049311.info"), "{}").unwrap();
@@ -1307,15 +1694,36 @@ mod tests {
         std::fs::write(dir.join("goggame-1445725644.info"), "{}").unwrap();
         assert!(list().dlc[0].installed);
         // The info file alone, without a record, installs nothing.
-        assert!(!games(&owned, &products, &HashMap::new(), &HashMap::new(), &HashMap::new())[0].installed);
+        assert!(
+            !games(
+                &owned,
+                &products,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new()
+            )[0]
+            .installed
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn gamesdb_cover_is_the_portrait_art() {
-        let covers = HashMap::from([("gog-1425609977".to_string(), "https://images.gog.com/c.jpg".to_string())]);
-        let all = games(&[1425609977], &products("products.json"), &HashMap::new(), &HashMap::new(), &covers);
-        assert_eq!(all[0].art.cover.url.as_deref(), Some("https://images.gog.com/c.jpg"));
+        let covers = HashMap::from([(
+            "gog-1425609977".to_string(),
+            "https://images.gog.com/c.jpg".to_string(),
+        )]);
+        let all = games(
+            &[1425609977],
+            &products("products.json"),
+            &HashMap::new(),
+            &HashMap::new(),
+            &covers,
+        );
+        assert_eq!(
+            all[0].art.cover.url.as_deref(),
+            Some("https://images.gog.com/c.jpg")
+        );
     }
 
     #[test]
@@ -1339,28 +1747,78 @@ mod tests {
     }
 
     fn strings(args: &[OsString]) -> Vec<String> {
-        args.iter().map(|a| a.to_string_lossy().into_owned()).collect()
+        args.iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
     }
 
     #[test]
     fn job_arguments_name_the_folder_language_and_dlc() {
         let support = support("1425609977").to_string_lossy().into_owned();
-        let args = strings(&job_args("download", "1425609977", Path::new(r"C:\Games"), "en-US", &Dlcs::All));
+        let args = strings(&job_args(
+            "download",
+            "1425609977",
+            Path::new(r"C:\Games"),
+            "en-US",
+            &Dlcs::All,
+        ));
         assert_eq!(
             args,
-            ["download", "1425609977", "--platform", "windows", "--path", r"C:\Games", "--support", &support, "--lang", "en-US", "--with-dlcs"]
+            [
+                "download",
+                "1425609977",
+                "--platform",
+                "windows",
+                "--path",
+                r"C:\Games",
+                "--support",
+                &support,
+                "--lang",
+                "en-US",
+                "--with-dlcs"
+            ]
         );
         assert!(support.ends_with(r"gog\support\1425609977"), "{support}");
-        let none = strings(&job_args("download", "1", Path::new(r"C:\Games"), "de-DE", &Dlcs::Only(vec![])));
+        let none = strings(&job_args(
+            "download",
+            "1",
+            Path::new(r"C:\Games"),
+            "de-DE",
+            &Dlcs::Only(vec![]),
+        ));
         assert_eq!(none[8..], ["--lang", "de-DE", "--skip-dlcs"]);
-        let update = strings(&job_args("update", "1", Path::new(r"C:\Games\A"), "en-US", &Dlcs::Only(vec!["2".into(), "3".into()])));
-        assert_eq!((update[0].as_str(), update[5].as_str()), ("update", r"C:\Games\A"));
+        let update = strings(&job_args(
+            "update",
+            "1",
+            Path::new(r"C:\Games\A"),
+            "en-US",
+            &Dlcs::Only(vec!["2".into(), "3".into()]),
+        ));
+        assert_eq!(
+            (update[0].as_str(), update[5].as_str()),
+            ("update", r"C:\Games\A")
+        );
         assert_eq!(update[10..], ["--with-dlcs", "--dlcs", "2,3"]);
         // No DLC left: skip them, so an update deletes the last one's files.
-        let repair = strings(&job_args("repair", "1", Path::new(r"C:\Games\A"), "en-US", &Dlcs::Only(vec![])));
-        assert_eq!((repair[0].as_str(), repair[10].as_str(), repair.len()), ("repair", "--skip-dlcs", 11));
+        let repair = strings(&job_args(
+            "repair",
+            "1",
+            Path::new(r"C:\Games\A"),
+            "en-US",
+            &Dlcs::Only(vec![]),
+        ));
+        assert_eq!(
+            (repair[0].as_str(), repair[10].as_str(), repair.len()),
+            ("repair", "--skip-dlcs", 11)
+        );
         // Never debug mode: it logs the arguments.
-        let command = gogdl(job_args("download", "1", Path::new(r"C:\Games"), "en-US", &Dlcs::All));
+        let command = gogdl(job_args(
+            "download",
+            "1",
+            Path::new(r"C:\Games"),
+            "en-US",
+            &Dlcs::All,
+        ));
         assert!(!command.get_args().any(|a| a == "-d" || a == "--debug"));
     }
 
@@ -1368,15 +1826,34 @@ mod tests {
     fn progress_lines_carry_bytes_and_time_left() {
         let line = "[PROGRESS] INFO: = Progress: 12.34 123456/1000000, Running for: 00:00:10, ETA: 01:02:03";
         let p = parse_progress(line, ProgressAction::Install).unwrap();
-        assert_eq!((p.done_bytes, p.total_bytes, p.secs_left), (Some(123456), Some(1000000), Some(3723)));
+        assert_eq!(
+            (p.done_bytes, p.total_bytes, p.secs_left),
+            (Some(123456), Some(1000000), Some(3723))
+        );
         assert!((p.fraction - 0.123456).abs() < 1e-6);
         assert_eq!(p.action, ProgressAction::Install);
         // No total yet: the percent stands in.
-        let early = parse_progress("[PROGRESS] INFO: = Progress: 50.00 0/0, Running for: 00:00:01, ETA: 00:00:00", ProgressAction::Update).unwrap();
+        let early = parse_progress(
+            "[PROGRESS] INFO: = Progress: 50.00 0/0, Running for: 00:00:01, ETA: 00:00:00",
+            ProgressAction::Update,
+        )
+        .unwrap();
         assert_eq!(early.fraction, 0.5);
-        assert_eq!(parse_progress("[PROGRESS] INFO: = Downloaded: 1.18 MiB, Written: 2.00 MiB", ProgressAction::Install), None);
+        assert_eq!(
+            parse_progress(
+                "[PROGRESS] INFO: = Downloaded: 1.18 MiB, Written: 2.00 MiB",
+                ProgressAction::Install
+            ),
+            None
+        );
         // Legendary's line has a `%`; it isn't gogdl's.
-        assert_eq!(parse_progress("[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:00", ProgressAction::Install), None);
+        assert_eq!(
+            parse_progress(
+                "[DLManager] INFO: = Progress: 12.34% (123/456), Running for 00:00:10, ETA: 00:01:00",
+                ProgressAction::Install
+            ),
+            None
+        );
         assert!(repairing("[V2] INFO: Found 3 broken files, repairing..."));
         assert!(!repairing("[V2] INFO: All files look good"));
     }
@@ -1391,14 +1868,26 @@ mod tests {
         }
         drop(tx);
         let mut seen = Vec::new();
-        assert_eq!(feed(&rx, Duration::from_secs(5), true, |l| { seen.push(l.to_string()); progress(l) }), Fed::Ended);
+        assert_eq!(
+            feed(&rx, Duration::from_secs(5), true, |l| {
+                seen.push(l.to_string());
+                progress(l)
+            }),
+            Fed::Ended
+        );
         assert_eq!(seen, ["log", "= 1", "= 2"]);
         // Armed from the start and silent: stalled.
         let (tx, rx) = mpsc::channel::<String>();
-        assert_eq!(feed(&rx, Duration::from_millis(30), true, progress), Fed::Stalled);
+        assert_eq!(
+            feed(&rx, Duration::from_millis(30), true, progress),
+            Fed::Stalled
+        );
         // Log lines that aren't progress don't keep it alive.
         tx.send("log".into()).unwrap();
-        assert_eq!(feed(&rx, Duration::from_millis(30), true, progress), Fed::Stalled);
+        assert_eq!(
+            feed(&rx, Duration::from_millis(30), true, progress),
+            Fed::Stalled
+        );
         // Not armed (a repair hashing files): it waits, until progress arms it.
         let (tx, rx) = mpsc::channel::<String>();
         let sender = std::thread::spawn(move || {
@@ -1412,12 +1901,20 @@ mod tests {
             lines += 1;
             progress(l)
         });
-        assert_eq!((fed, lines), (Fed::Stalled, 1), "waited out the silence before the first progress");
+        assert_eq!(
+            (fed, lines),
+            (Fed::Stalled, 1),
+            "waited out the silence before the first progress"
+        );
         sender.join().unwrap();
     }
 
     fn ran(success: bool, stdout: &str, log: &str) -> Run {
-        Run { success, stdout: stdout.into(), log: log.into() }
+        Run {
+            success,
+            stdout: stdout.into(),
+            log: log.into(),
+        }
     }
 
     fn said(result: Result<(), Error>) -> String {
@@ -1426,24 +1923,61 @@ mod tests {
 
     #[test]
     fn success_needs_exit_zero_no_critical_line_and_the_info_file() {
-        assert_eq!(said(outcome(&ran(true, "", "[PROGRESS] INFO: = Progress: 100.00 1/1\n"), true)), "ok");
-        assert_eq!(said(outcome(&ran(true, "", "[V2] INFO: All files look good\n"), true)), "ok");
-        // Exits 0 with nothing done.
-        assert_eq!(said(outcome(&ran(true, "", "[TASK_EXEC] CRITICAL: Task writer failed\n"), true)), "Task writer failed");
-        assert_eq!(said(outcome(&ran(true, "", "[V2] INFO: done\n"), false)), "done");
         assert_eq!(
-            said(outcome(&ran(false, "", "[V2] INFO: start\n[DOWNLOAD] ERROR: Connection reset\nTraceback (most recent call last):\n"), true)),
+            said(outcome(
+                &ran(true, "", "[PROGRESS] INFO: = Progress: 100.00 1/1\n"),
+                true
+            )),
+            "ok"
+        );
+        assert_eq!(
+            said(outcome(
+                &ran(true, "", "[V2] INFO: All files look good\n"),
+                true
+            )),
+            "ok"
+        );
+        // Exits 0 with nothing done.
+        assert_eq!(
+            said(outcome(
+                &ran(true, "", "[TASK_EXEC] CRITICAL: Task writer failed\n"),
+                true
+            )),
+            "Task writer failed"
+        );
+        assert_eq!(
+            said(outcome(&ran(true, "", "[V2] INFO: done\n"), false)),
+            "done"
+        );
+        assert_eq!(
+            said(outcome(
+                &ran(
+                    false,
+                    "",
+                    "[V2] INFO: start\n[DOWNLOAD] ERROR: Connection reset\nTraceback (most recent call last):\n"
+                ),
+                true
+            )),
             "Connection reset"
         );
         assert_eq!(said(outcome(&ran(false, "", ""), false)), "gogdlNoReason");
         let full = "Download size: 1.00 GiB\nUnable to proceed, Not enough disk space\n";
         assert_eq!(said(outcome(&ran(false, full, ""), false)), "noDiskSpace");
         let unsupported = "[GENERIC DOWNLOAD_MANAGER] ERROR: Game doesn't support content system api, unable to proceed\n";
-        assert_eq!(said(outcome(&ran(true, "", unsupported), false)), "gogNotOffered");
+        assert_eq!(
+            said(outcome(&ran(true, "", unsupported), false)),
+            "gogNotOffered"
+        );
         let offline = format!("[AUTH] ERROR: Failed to refresh credentials\n{unsupported}");
-        assert_eq!(said(outcome(&ran(true, "", &offline), false)), "cantReachGog");
+        assert_eq!(
+            said(outcome(&ran(true, "", &offline), false)),
+            "cantReachGog"
+        );
         let imported = "Traceback (most recent call last):\nException: No manifest stored locally, unable to verify\n";
-        assert_eq!(said(outcome(&ran(false, "", imported), true)), "gogNoManifest");
+        assert_eq!(
+            said(outcome(&ran(false, "", imported), true)),
+            "gogNoManifest"
+        );
     }
 
     #[test]
@@ -1456,21 +1990,36 @@ mod tests {
             {"title": "Owned", "id": "7", "size": {"*": {"download_size": 5}, "en-US": {"download_size": 10}}},
             {"title": "Not owned", "id": 8, "size": {"*": {"download_size": 1000}}},
         ]);
-        assert_eq!(download_size(&with_dlc, &["7".into()]), Some(310 + 1694805181 + 15));
-        assert_eq!(download_size(&with_dlc, &["7".into(), "8".into()]), Some(310 + 1694805181 + 1015));
+        assert_eq!(
+            download_size(&with_dlc, &["7".into()]),
+            Some(310 + 1694805181 + 15)
+        );
+        assert_eq!(
+            download_size(&with_dlc, &["7".into(), "8".into()]),
+            Some(310 + 1694805181 + 1015)
+        );
         assert_eq!(download_size(&json!({"languages": ["en-US"]}), &[]), None);
     }
 
     #[test]
     fn language_is_english_else_the_first_in_order() {
-        assert_eq!(pick_lang(&json!({"languages": ["fr-FR", "en-US", "de-DE"]})), "en-US");
-        assert_eq!(pick_lang(&json!({"languages": ["fr-FR", "de-DE"]})), "de-DE");
+        assert_eq!(
+            pick_lang(&json!({"languages": ["fr-FR", "en-US", "de-DE"]})),
+            "en-US"
+        );
+        assert_eq!(
+            pick_lang(&json!({"languages": ["fr-FR", "de-DE"]})),
+            "de-DE"
+        );
         assert_eq!(pick_lang(&json!({})), "en-US");
     }
 
     #[test]
     fn the_default_build_is_the_first_on_no_branch() {
-        assert_eq!(default_build(&fixture("builds.json")).as_deref(), Some("51019539443704905"));
+        assert_eq!(
+            default_build(&fixture("builds.json")).as_deref(),
+            Some("51019539443704905")
+        );
         let branches = json!({"items": [{"build_id": "2", "branch": "beta"}, {"build_id": 1, "branch": null}]});
         assert_eq!(default_build(&branches).as_deref(), Some("1"));
         assert_eq!(default_build(&json!({"items": []})), None);
@@ -1488,23 +2037,46 @@ mod tests {
                 {"category": "document", "isPrimary": false, "link": "https://www.gog.com/forum", "name": "Forum", "type": "URLTask"}
             ]}"#;
         // Written with a byte order mark, as some GOG files are.
-        std::fs::write(dir.join("goggame-1441974651.info"), [b"\xEF\xBB\xBF".as_slice(), game.as_bytes()].concat()).unwrap();
+        std::fs::write(
+            dir.join("goggame-1441974651.info"),
+            [b"\xEF\xBB\xBF".as_slice(), game.as_bytes()].concat(),
+        )
+        .unwrap();
         let dlc = r#"{"gameId": "1716751705", "rootGameId": "1441974651", "name": "Aficionado"}"#;
         std::fs::write(dir.join("goggame-1716751705.info"), dlc).unwrap();
-        std::fs::write(dir.join("goggame-9.info"), r#"{"gameId": "9", "rootGameId": "9"}"#).unwrap();
+        std::fs::write(
+            dir.join("goggame-9.info"),
+            r#"{"gameId": "9", "rootGameId": "9"}"#,
+        )
+        .unwrap();
     }
 
     #[test]
     fn the_install_folder_tells_language_build_and_dlc() {
         let dir = temp("local");
         prison_architect(&dir);
-        assert_eq!(local(&dir, "1441974651"), Local { lang: "en-US".into(), dlcs: vec!["1716751705".into()] });
-        assert_eq!(installed_build(&dir, "1441974651").as_deref(), Some("55136646198962890"));
+        assert_eq!(
+            local(&dir, "1441974651"),
+            Local {
+                lang: "en-US".into(),
+                dlcs: vec!["1716751705".into()]
+            }
+        );
+        assert_eq!(
+            installed_build(&dir, "1441974651").as_deref(),
+            Some("55136646198962890")
+        );
         // Without a buildId in the info file, the `.id` file has it; with neither, no build.
         std::fs::write(dir.join("goggame-1716751705.id"), r#"{"buildId": "77"}"#).unwrap();
         assert_eq!(installed_build(&dir, "1716751705").as_deref(), Some("77"));
         assert_eq!(installed_build(&dir, "9"), None);
-        assert_eq!(local(&temp("empty"), "1"), Local { lang: "en-US".into(), dlcs: vec![] });
+        assert_eq!(
+            local(&temp("empty"), "1"),
+            Local {
+                lang: "en-US".into(),
+                dlcs: vec![]
+            }
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1513,7 +2085,10 @@ mod tests {
         let dir = temp("update");
         prison_architect(&dir);
         let owned = [1441974651];
-        let products = HashMap::from([(1441974651, json!({"title": "Prison Architect", "game_type": "game", "images": {}, "dlcs": []}))]);
+        let products = HashMap::from([(
+            1441974651,
+            json!({"title": "Prison Architect", "game_type": "game", "images": {}, "dlcs": []}),
+        )]);
         let installs = HashMap::from([("gog-1441974651".to_string(), dir.clone())]);
         let update = |latest: &[(u64, &str)]| {
             let latest = latest.iter().map(|&(id, b)| (id, b.to_string())).collect();
@@ -1524,7 +2099,13 @@ mod tests {
         // Builds unknown (offline, or never asked): no update.
         assert!(!update(&[]));
         // Not installed: never an update.
-        let missing = games(&owned, &products, &HashMap::new(), &HashMap::from([(1441974651, "99".into())]), &HashMap::new());
+        let missing = games(
+            &owned,
+            &products,
+            &HashMap::new(),
+            &HashMap::from([(1441974651, "99".into())]),
+            &HashMap::new(),
+        );
         assert!(!missing[0].update_available);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1541,17 +2122,36 @@ mod tests {
         let (root, conn) = test_db("uninstall");
         let dir = root.join("Game");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("goggame-0.info"), r#"{"gameId": "0", "rootGameId": "0"}"#).unwrap();
+        std::fs::write(
+            dir.join("goggame-0.info"),
+            r#"{"gameId": "0", "rootGameId": "0"}"#,
+        )
+        .unwrap();
         record_install(&conn, "0", &dir).unwrap();
-        store_save_stamps(&conn, "gog-0", &HashMap::from([("saves".to_string(), "1.5".to_string()), ("__default".to_string(), "2".to_string())]));
+        store_save_stamps(
+            &conn,
+            "gog-0",
+            &HashMap::from([
+                ("saves".to_string(), "1.5".to_string()),
+                ("__default".to_string(), "2".to_string()),
+            ]),
+        );
         assert_eq!(save_stamps(&conn, "gog-0").len(), 2);
         // Another game's folder (a wrong record) is refused and kept.
-        assert!(uninstall(&conn, "1", &dir).unwrap_err().to_string().contains("folderNotThisGame"));
+        assert!(
+            uninstall(&conn, "1", &dir)
+                .unwrap_err()
+                .to_string()
+                .contains("folderNotThisGame")
+        );
         assert!(dir.is_dir());
         uninstall(&conn, "0", &dir).unwrap();
         assert!(!dir.exists());
         assert!(db::gog_installs(&conn).unwrap().is_empty());
-        assert_eq!(db::cached_info(&conn, "gog-0", SAVE_TS, i64::MAX / 2, 0).unwrap(), None);
+        assert_eq!(
+            db::cached_info(&conn, "gog-0", SAVE_TS, i64::MAX / 2, 0).unwrap(),
+            None
+        );
         assert!(save_stamps(&conn, "gog-0").is_empty());
         drop(conn);
         std::fs::remove_dir_all(&root).unwrap();
@@ -1571,9 +2171,23 @@ mod tests {
         assert_eq!(db::gog_installs(&conn).unwrap()["gog-1441974651"], to);
         // Something there already, or another drive: refused before anything moves.
         std::fs::create_dir_all(root.join("c").join("Prison Architect")).unwrap();
-        assert!(move_to(&conn, "1441974651", &to, &root.join("c")).unwrap_err().to_string().contains("alreadyExists"));
-        let drive = if to.to_string_lossy().starts_with('Z') { r"Y:\Games" } else { r"Z:\Games" };
-        assert!(move_to(&conn, "1441974651", &to, Path::new(drive)).unwrap_err().to_string().contains("otherDriveMove"));
+        assert!(
+            move_to(&conn, "1441974651", &to, &root.join("c"))
+                .unwrap_err()
+                .to_string()
+                .contains("alreadyExists")
+        );
+        let drive = if to.to_string_lossy().starts_with('Z') {
+            r"Y:\Games"
+        } else {
+            r"Z:\Games"
+        };
+        assert!(
+            move_to(&conn, "1441974651", &to, Path::new(drive))
+                .unwrap_err()
+                .to_string()
+                .contains("otherDriveMove")
+        );
         assert!(to.is_dir());
         drop(conn);
         std::fs::remove_dir_all(&root).unwrap();
@@ -1586,7 +2200,14 @@ mod tests {
         let info = read_json(&dir.join("goggame-1441974651.info")).unwrap();
         // The launcher task is primary, so it runs (and is watched), not the hidden game task.
         let task = play_task(&info).unwrap();
-        assert_eq!(task, Task { path: "Launcher/dowser.exe".into(), working_dir: String::new(), arguments: String::new() });
+        assert_eq!(
+            task,
+            Task {
+                path: "Launcher/dowser.exe".into(),
+                working_dir: String::new(),
+                arguments: String::new()
+            }
+        );
         let command = launch_command(Path::new(r"C:\Games\PA"), &task, &LaunchOptions::default());
         assert_eq!(command.get_program(), r"C:\Games\PA\Launcher\dowser.exe");
         assert_eq!(command.get_current_dir(), Some(Path::new(r"C:\Games\PA")));
@@ -1596,24 +2217,46 @@ mod tests {
             {"isPrimary": true, "type": "FileTask", "path": "bin\\game.exe", "workingDir": "bin", "arguments": "-lang en \"-name x\""},
         ]});
         let task = play_task(&plain).unwrap();
-        let options = LaunchOptions { args: "-windowed".into(), ..LaunchOptions::default() };
+        let options = LaunchOptions {
+            args: "-windowed".into(),
+            ..LaunchOptions::default()
+        };
         let command = launch_command(Path::new(r"D:\G"), &task, &options);
         assert_eq!(command.get_program(), r"D:\G\bin\game.exe");
         assert_eq!(command.get_current_dir(), Some(Path::new(r"D:\G\bin")));
-        let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args, ["-lang", "en", "-name x", "-windowed"]);
         // An alternative executable runs in its own folder, with only the extra arguments.
-        let alt = LaunchOptions { exe: Some(r"tools\editor.exe".into()), ..options };
+        let alt = LaunchOptions {
+            exe: Some(r"tools\editor.exe".into()),
+            ..options
+        };
         let command = launch_command(Path::new(r"D:\G"), &task, &alt);
         assert_eq!(command.get_program(), r"D:\G\tools\editor.exe");
         assert_eq!(command.get_current_dir(), Some(Path::new(r"D:\G\tools")));
         assert_eq!(command.get_args().count(), 1);
         // No primary task, or a primary web page: nothing to start.
-        assert_eq!(play_task(&json!({"playTasks": [{"type": "FileTask", "path": "a.exe"}]})), None);
-        assert_eq!(play_task(&json!({"playTasks": [{"isPrimary": true, "type": "URLTask", "link": "https://gog.com"}]})), None);
+        assert_eq!(
+            play_task(&json!({"playTasks": [{"type": "FileTask", "path": "a.exe"}]})),
+            None
+        );
+        assert_eq!(
+            play_task(
+                &json!({"playTasks": [{"isPrimary": true, "type": "URLTask", "link": "https://gog.com"}]})
+            ),
+            None
+        );
         assert_eq!(play_task(&json!({})), None);
         // The program missing from the folder: refused before anything starts.
-        assert!(launch("1441974651", &dir, &LaunchOptions::default()).unwrap_err().to_string().contains("gameProgramMissing"));
+        assert!(
+            launch("1441974651", &dir, &LaunchOptions::default())
+                .unwrap_err()
+                .to_string()
+                .contains("gameProgramMissing")
+        );
         assert!(launch("1", &dir, &LaunchOptions::default()).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1625,32 +2268,71 @@ mod tests {
         let locations = save_locations(&fixture("remote-config-1425609977.json"));
         let folders = save_folders(&locations, "1", install);
         // The remote config doubles its backslashes; the folder has single ones.
-        assert_eq!(folders, [("saves".to_string(), PathBuf::from(format!(r"{low}\Ovosonico\Last Day of June")))]);
-        assert_eq!(resolve("<?INSTALL?>/saves", install), Some(PathBuf::from(r"C:\Games\June\saves")));
+        assert_eq!(
+            folders,
+            [(
+                "saves".to_string(),
+                PathBuf::from(format!(r"{low}\Ovosonico\Last Day of June"))
+            )]
+        );
+        assert_eq!(
+            resolve("<?INSTALL?>/saves", install),
+            Some(PathBuf::from(r"C:\Games\June\saves"))
+        );
         let local = std::env::var("LOCALAPPDATA").unwrap();
-        assert_eq!(resolve("<?APPLICATION_DATA_LOCAL?>", install), Some(PathBuf::from(&local)));
+        assert_eq!(
+            resolve("<?APPLICATION_DATA_LOCAL?>", install),
+            Some(PathBuf::from(&local))
+        );
         // An unknown variable, or one left open, leaves that location out.
         assert_eq!(resolve("<?STEAM_CLOUD?>/x", install), None);
         assert_eq!(resolve("<?INSTALL", install), None);
         let mixed = json!([{"name": "a", "location": "<?NOPE?>\\x"}, {"name": "b", "location": "<?INSTALL?>\\b"}]);
-        assert_eq!(save_folders(&mixed, "1", install), [("b".to_string(), PathBuf::from(r"C:\Games\June\b"))]);
+        assert_eq!(
+            save_folders(&mixed, "1", install),
+            [("b".to_string(), PathBuf::from(r"C:\Games\June\b"))]
+        );
         // No locations: Galaxy's default folder for the client id.
         assert_eq!(
             save_folders(&json!([]), "5", install),
-            [("__default".to_string(), PathBuf::from(format!(r"{local}\GOG.com\Galaxy\Applications\5\Storage\Shared\Files")))]
+            [(
+                "__default".to_string(),
+                PathBuf::from(format!(
+                    r"{local}\GOG.com\Galaxy\Applications\5\Storage\Shared\Files"
+                ))
+            )]
         );
         // Cloud saves off: no locations at all.
-        let off = json!({"content": {"Windows": {"cloudStorage": {"enabled": false, "locations": []}}}});
+        let off =
+            json!({"content": {"Windows": {"cloudStorage": {"enabled": false, "locations": []}}}});
         assert_eq!(save_locations(&off), Value::Null);
         assert_eq!(save_locations(&json!({})), Value::Null);
     }
 
     #[test]
     fn save_sync_arguments_follow_the_direction() {
-        let args = |sync| strings(&sync_args(Path::new(r"C:\S"), "7", "saves", "1730000000.5", sync));
+        let args = |sync| {
+            strings(&sync_args(
+                Path::new(r"C:\S"),
+                "7",
+                "saves",
+                "1730000000.5",
+                sync,
+            ))
+        };
         assert_eq!(
             args(SaveSync::Both),
-            ["save-sync", r"C:\S", "7", "--os", "windows", "--ts", "1730000000.5", "--name", "saves"]
+            [
+                "save-sync",
+                r"C:\S",
+                "7",
+                "--os",
+                "windows",
+                "--ts",
+                "1730000000.5",
+                "--name",
+                "saves"
+            ]
         );
         assert_eq!(args(SaveSync::Download)[9..], ["--skip-upload"]);
         assert_eq!(args(SaveSync::Upload)[9..], ["--skip-download"]);
@@ -1661,15 +2343,48 @@ mod tests {
     #[test]
     fn save_sync_log_decides_the_outcome() {
         use SyncOutcome::*;
-        assert_eq!(sync_outcome(true, "[SAVES] INFO: Uploading 2 files\n"), Synced);
-        assert_eq!(sync_outcome(true, "[SAVES] WARNING: Refused to download files, newer files locally\n"), LocalNewer);
-        assert_eq!(sync_outcome(true, "[SAVES] WARNING: Refused to upload files, newer files in the cloud\n"), CloudNewer);
-        assert_eq!(sync_outcome(true, "[SAVES] WARNING: Files in conflict force downloading or uploading of files\n"), Conflict);
-        assert_eq!(sync_outcome(false, "[SAVES] ERROR: Failed to get credentials\nTraceback\n"), Failed(Msg::system("Failed to get credentials")));
+        assert_eq!(
+            sync_outcome(true, "[SAVES] INFO: Uploading 2 files\n"),
+            Synced
+        );
+        assert_eq!(
+            sync_outcome(
+                true,
+                "[SAVES] WARNING: Refused to download files, newer files locally\n"
+            ),
+            LocalNewer
+        );
+        assert_eq!(
+            sync_outcome(
+                true,
+                "[SAVES] WARNING: Refused to upload files, newer files in the cloud\n"
+            ),
+            CloudNewer
+        );
+        assert_eq!(
+            sync_outcome(
+                true,
+                "[SAVES] WARNING: Files in conflict force downloading or uploading of files\n"
+            ),
+            Conflict
+        );
+        assert_eq!(
+            sync_outcome(
+                false,
+                "[SAVES] ERROR: Failed to get credentials\nTraceback\n"
+            ),
+            Failed(Msg::system("Failed to get credentials"))
+        );
         // A question wins over a failure, a failure over a sync.
-        assert_eq!(first_to_report(vec![Synced, Failed(Msg::system("x")), CloudNewer]), CloudNewer);
+        assert_eq!(
+            first_to_report(vec![Synced, Failed(Msg::system("x")), CloudNewer]),
+            CloudNewer
+        );
         assert_eq!(first_to_report(vec![LocalNewer, Conflict]), Conflict);
-        assert_eq!(first_to_report(vec![Synced, Failed(Msg::system("x"))]), Failed(Msg::system("x")));
+        assert_eq!(
+            first_to_report(vec![Synced, Failed(Msg::system("x"))]),
+            Failed(Msg::system("x"))
+        );
         assert_eq!(first_to_report(vec![]), Synced);
     }
 
@@ -1678,13 +2393,24 @@ mod tests {
         let mut stamps = HashMap::from([("saves".to_string(), "100.5".to_string())]);
         keep_stamp(&mut stamps, "saves", &SyncOutcome::Conflict, "200.0");
         keep_stamp(&mut stamps, "saves", &SyncOutcome::LocalNewer, "200.0\n");
-        keep_stamp(&mut stamps, "saves", &SyncOutcome::Failed(Msg::system("x")), "200.0");
+        keep_stamp(
+            &mut stamps,
+            "saves",
+            &SyncOutcome::Failed(Msg::system("x")),
+            "200.0",
+        );
         assert_eq!(stamps["saves"], "100.5");
         // gogdl may print no newline; junk isn't a timestamp.
         keep_stamp(&mut stamps, "saves", &SyncOutcome::Synced, "Traceback");
         keep_stamp(&mut stamps, "other", &SyncOutcome::Synced, "300.25");
         keep_stamp(&mut stamps, "saves", &SyncOutcome::Synced, "200.0\r\n");
-        assert_eq!(stamps, HashMap::from([("saves".to_string(), "200.0".to_string()), ("other".to_string(), "300.25".to_string())]));
+        assert_eq!(
+            stamps,
+            HashMap::from([
+                ("saves".to_string(), "200.0".to_string()),
+                ("other".to_string(), "300.25".to_string())
+            ])
+        );
     }
 
     #[test]
@@ -1704,7 +2430,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("launcher-gogdl-{}", std::process::id()));
         let exe = root.join("gogdl").join("gogdl.exe");
         let http = reqwest::Client::new();
-        tauri::async_runtime::block_on(crate::tools::install_to(&http, &tools::GOGDL, &root)).unwrap();
+        tauri::async_runtime::block_on(crate::tools::install_to(&http, &tools::GOGDL, &root))
+            .unwrap();
         let data = root.join("data");
         std::fs::create_dir_all(&data).unwrap();
         let mut command = Command::new(&exe);
@@ -1716,8 +2443,15 @@ mod tests {
             .env("PYTHONUTF8", "1");
         let output = crate::platform::no_window(&mut command).output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        println!("exit {}\nstdout: {stdout}\nstderr: {}", output.status, String::from_utf8_lossy(&output.stderr));
-        let line = stdout.lines().find(|l| l.starts_with('{')).expect("a JSON line");
+        println!(
+            "exit {}\nstdout: {stdout}\nstderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let line = stdout
+            .lines()
+            .find(|l| l.starts_with('{'))
+            .expect("a JSON line");
         let info: Value = serde_json::from_str(line).unwrap();
         assert!(info["size"]["en-US"]["download_size"].is_u64());
         assert_eq!(info["folder_name"], "Last Day of June");
@@ -1734,7 +2468,10 @@ mod tests {
             "[V2] INFO: Found 3 broken files, repairing...",
             "[PROGRESS] INFO: = Progress: 100.00 1000000/1000000, Running for: 00:01:00, ETA: 00:00:00",
         ];
-        let parsed: Vec<_> = lines.iter().map(|l| (*l, parse_progress(l, ProgressAction::Install))).collect();
+        let parsed: Vec<_> = lines
+            .iter()
+            .map(|l| (*l, parse_progress(l, ProgressAction::Install)))
+            .collect();
         insta::assert_yaml_snapshot!(parsed);
     }
 

@@ -47,7 +47,8 @@ pub struct AppState {
     /// Steam Guard codes for the password login in progress; dropping the sender cancels it.
     steam_pw_codes: Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
     /// What the password login asks next.
-    steam_pw_steps: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<settings::LoginStep>>>,
+    steam_pw_steps:
+        tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<settings::LoginStep>>>,
     /// The update found by the last check. Held across a check, so checks never stack.
     update: tokio::sync::Mutex<Option<tauri_plugin_updater::Update>>,
 }
@@ -135,7 +136,10 @@ impl AppState {
                 .timeout(Duration::from_secs(15))
                 .build()
                 .expect("default TLS backend is available"),
-            shared: Mutex::new(Shared { status: vec![msg!(loadingLibrary)], ..Shared::default() }),
+            shared: Mutex::new(Shared {
+                status: vec![msg!(loadingLibrary)],
+                ..Shared::default()
+            }),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
             steam_size: tokio::sync::Mutex::new(()),
             igdb: Mutex::new(igdb::TokenCache::default()),
@@ -180,11 +184,18 @@ type Res<T> = Result<T, crate::msg::Msg>;
 
 /// The download queue as the UI shows it, with titles.
 fn queue_view(s: &Shared) -> crate::downloads::QueueView {
-    crate::downloads::view(&s.queue, |key| s.games.iter().find(|g| g.key() == key).map(|g| g.title.clone()))
+    crate::downloads::view(&s.queue, |key| {
+        s.games
+            .iter()
+            .find(|g| g.key() == key)
+            .map(|g| g.title.clone())
+    })
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-    tauri::async_runtime::spawn_blocking(f).await.expect("blocking task panicked")
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .expect("blocking task panicked")
 }
 
 /// Lets the webview load exactly this file through the asset protocol.
@@ -195,7 +206,9 @@ fn allow(app: &AppHandle, path: PathBuf) -> Option<String> {
 
 /// Seconds since the Unix epoch, as the database stores times; 0 if the clock is before 1970.
 fn unix_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// Puts native text (tray, toasts, login windows) in the Language setting's language.
@@ -213,7 +226,9 @@ pub fn close_to_tray(app: &AppHandle) -> bool {
 /// A Windows toast that a download finished, unless the owner turned them off.
 fn notify_done(app: &AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
-    if !open_db(&app.state::<AppState>()).is_none_or(|conn| crate::settings::load(&conn).notify_downloads) {
+    if !open_db(&app.state::<AppState>())
+        .is_none_or(|conn| crate::settings::load(&conn).notify_downloads)
+    {
         return;
     }
     if let Err(e) = app.notification().builder().title(title).body(body).show() {
@@ -222,5 +237,7 @@ fn notify_done(app: &AppHandle, title: &str, body: &str) {
 }
 
 fn open_db(state: &AppState) -> Option<rusqlite::Connection> {
-    cache::db::open(&state.dirs.db).inspect_err(|e| tracing::error!("settings db: {e}")).ok()
+    cache::db::open(&state.dirs.db)
+        .inspect_err(|e| tracing::error!("settings db: {e}"))
+        .ok()
 }

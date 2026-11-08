@@ -7,11 +7,11 @@ Status: open lead, parked by the owner on 2026-11-06 (not a blocker).
 After the ambient redesign (commits `873681c`, `f05ca91`), the `LAUNCHER_BENCH` autoscroll over the
 real 613-game library sometimes shows **one** frame slower than 1.5× the median:
 
-| Run | 4000 px/s | 15000 px/s |
-|---|---|---|
-| Image logos (`f05ca91`), 3 + 4 runs | 0, 0, 1 | 0, 1, 0, 0 |
-| Inline SVG logos (`873681c`), final run | 0 | 1 |
-| Logos removed (exploratory) | 0 × 6 | 0 × 6 |
+| Run                                     | 4000 px/s | 15000 px/s |
+| --------------------------------------- | --------- | ---------- |
+| Image logos (`f05ca91`), 3 + 4 runs     | 0, 0, 1   | 0, 1, 0, 0 |
+| Inline SVG logos (`873681c`), final run | 0         | 1          |
+| Logos removed (exploratory)             | 0 × 6     | 0 × 6      |
 
 Each slow frame is a single missed vsync at 180 Hz (about 11.4 ms against a 5.7 ms median),
 which isn't visible in normal use. The pre-redesign build had 0 in 10 of 10 runs, but those ran

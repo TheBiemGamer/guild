@@ -41,7 +41,11 @@ const nlFile = join(import.meta.dirname, '..', 'src', 'lib', 'i18n', 'nl.json')
 test('the native Dutch table matches nl.json', { skip: !existsSync(nlFile) }, () => {
   const nl: Record<string, string> = JSON.parse(readFileSync(nlFile, 'utf8'))
   const rows = nativeRows('NL')
-  assert.deepEqual(rows.map((r) => r[0]), nativeRows('EN').map((r) => r[0]), 'every native code has Dutch text')
+  assert.deepEqual(
+    rows.map((r) => r[0]),
+    nativeRows('EN').map((r) => r[0]),
+    'every native code has Dutch text',
+  )
   for (const [code, text] of rows) assert.equal(nl[`msg.${code}`], text, code)
 })
 

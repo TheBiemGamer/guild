@@ -31,7 +31,10 @@ macro_rules! msg {
 
 impl Msg {
     pub fn new(code: &str) -> Self {
-        Self { code: code.into(), params: BTreeMap::new() }
+        Self {
+            code: code.into(),
+            params: BTreeMap::new(),
+        }
     }
 
     pub fn with(mut self, key: &str, value: impl Into<Param>) -> Self {
@@ -144,12 +147,16 @@ pub fn is_language(value: &str) -> bool {
 /// (`system`, like "nl") when there are words for it, else English.
 pub fn resolve(setting: &str, system: &str) -> &'static str {
     let wanted = if setting == "system" { system } else { setting };
-    LANGUAGES.iter().find(|(code, _)| *code == wanted).map_or("en", |(code, _)| code)
+    LANGUAGES
+        .iter()
+        .find(|(code, _)| *code == wanted)
+        .map_or("en", |(code, _)| code)
 }
 
 /// Follows the Language setting; the tray needs relabelling after (`tray::relabel`).
 pub fn set_language(setting: &str) {
-    *LANGUAGE.write().unwrap_or_else(|e| e.into_inner()) = resolve(setting, crate::platform::ui_language());
+    *LANGUAGE.write().unwrap_or_else(|e| e.into_inner()) =
+        resolve(setting, crate::platform::ui_language());
 }
 
 /// The language the UI and native text are in ("en", "nl").
@@ -158,8 +165,16 @@ pub fn language() -> &'static str {
 }
 
 fn text(language: &str, code: &str) -> &'static str {
-    let find = |table: &[(&str, &'static str)]| table.iter().find(|(c, _)| *c == code).map(|(_, text)| *text);
-    let table = LANGUAGES.iter().find(|(l, _)| *l == language).map_or(EN, |(_, table)| table);
+    let find = |table: &[(&str, &'static str)]| {
+        table
+            .iter()
+            .find(|(c, _)| *c == code)
+            .map(|(_, text)| *text)
+    };
+    let table = LANGUAGES
+        .iter()
+        .find(|(l, _)| *l == language)
+        .map_or(EN, |(_, table)| table);
     find(table).or_else(|| find(EN)).unwrap_or("")
 }
 
@@ -179,8 +194,14 @@ mod tests {
             serde_json::to_string(&m).unwrap(),
             r#"{"code":"storeError","params":{"reason":{"code":"closeGameFirst","params":{}},"store":"GOG"}}"#
         );
-        assert_eq!(serde_json::from_str::<Msg>(&serde_json::to_string(&m).unwrap()).unwrap(), m);
-        assert_eq!(serde_json::to_string(&msg!(noGamesFound)).unwrap(), r#"{"code":"noGamesFound","params":{}}"#);
+        assert_eq!(
+            serde_json::from_str::<Msg>(&serde_json::to_string(&m).unwrap()).unwrap(),
+            m
+        );
+        assert_eq!(
+            serde_json::to_string(&msg!(noGamesFound)).unwrap(),
+            r#"{"code":"noGamesFound","params":{}}"#
+        );
     }
 
     #[test]
@@ -194,7 +215,10 @@ mod tests {
     #[test]
     fn logs_read_plainly() {
         assert_eq!(Msg::system("access denied").to_string(), "access denied");
-        assert_eq!(msg!(storeError, store = "GOG", reason = msg!(gogStalled)).to_string(), "storeError reason=(gogStalled) store=GOG");
+        assert_eq!(
+            msg!(storeError, store = "GOG", reason = msg!(gogStalled)).to_string(),
+            "storeError reason=(gogStalled) store=GOG"
+        );
     }
 
     #[test]
@@ -209,7 +233,13 @@ mod tests {
         assert_eq!(resolve("system", "en"), "en");
         assert_eq!(resolve("nl", "en"), "nl");
         assert_eq!(resolve("en", "nl"), "en");
-        assert!(is_language("system") && is_language("en") && is_language("nl") && !is_language("fr") && !is_language(""));
+        assert!(
+            is_language("system")
+                && is_language("en")
+                && is_language("nl")
+                && !is_language("fr")
+                && !is_language("")
+        );
     }
 
     #[test]

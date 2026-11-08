@@ -36,39 +36,66 @@ struct Grid {
 
 /// The best match's game id from `search/autocomplete`; `None` when nothing matched.
 pub fn parse_game_id(json: &str) -> Result<Option<u64>, String> {
-    let answer: Answer<Found> = serde_json::from_str(json).map_err(|e| format!("steamgriddb search: {e}"))?;
+    let answer: Answer<Found> =
+        serde_json::from_str(json).map_err(|e| format!("steamgriddb search: {e}"))?;
     Ok(answer.data.first().map(|g| g.id))
 }
 
 /// The first `MAX_COVERS` covers from `grids/game/<id>`, https only.
 pub fn parse_covers(json: &str) -> Result<Vec<Cover>, String> {
-    let answer: Answer<Grid> = serde_json::from_str(json).map_err(|e| format!("steamgriddb grids: {e}"))?;
+    let answer: Answer<Grid> =
+        serde_json::from_str(json).map_err(|e| format!("steamgriddb grids: {e}"))?;
     Ok(answer
         .data
         .into_iter()
         .filter(|g| g.url.starts_with("https://") && g.thumb.starts_with("https://"))
         .take(MAX_COVERS)
-        .map(|g| Cover { url: g.url, thumb: g.thumb })
+        .map(|g| Cover {
+            url: g.url,
+            thumb: g.thumb,
+        })
         .collect())
 }
 
 /// Portrait covers (600x900, PNG or JPEG, not animated: the image decoder reads only those) for the game
 /// SteamGridDB matches first for `name`.
 pub async fn search(http: &reqwest::Client, key: &str, name: &str) -> Result<Vec<Cover>, String> {
-    let found = get(http, key, &format!("{API}/search/autocomplete/{}", percent_encode(name))).await?;
-    let Some(id) = parse_game_id(&found)? else { return Ok(Vec::new()) };
-    let grids = get(http, key, &format!("{API}/grids/game/{id}?dimensions=600x900&mimes=image/png,image/jpeg&types=static")).await?;
+    let found = get(
+        http,
+        key,
+        &format!("{API}/search/autocomplete/{}", percent_encode(name)),
+    )
+    .await?;
+    let Some(id) = parse_game_id(&found)? else {
+        return Ok(Vec::new());
+    };
+    let grids = get(
+        http,
+        key,
+        &format!(
+            "{API}/grids/game/{id}?dimensions=600x900&mimes=image/png,image/jpeg&types=static"
+        ),
+    )
+    .await?;
     parse_covers(&grids)
 }
 
 async fn get(http: &reqwest::Client, key: &str, url: &str) -> Result<String, String> {
     // Errors are reduced to their kind or status; reqwest's never carry the header, but stay short anyway.
-    let response = http.get(url).bearer_auth(key).send().await.map_err(|_| "steamgriddb: unreachable")?;
+    let response = http
+        .get(url)
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|_| "steamgriddb: unreachable")?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("steamgriddb: HTTP {}", status.as_u16()));
     }
-    response.text().await.map_err(|_| "steamgriddb: unreachable".into())
+    response
+        .text()
+        .await
+        .map_err(|_| "steamgriddb: unreachable".into())
 }
 
 #[cfg(test)]
@@ -107,10 +134,20 @@ mod tests {
         assert_eq!(covers.len(), MAX_COVERS);
         assert_eq!(
             covers[0],
-            Cover { url: "https://cdn2.steamgriddb.com/grid/a.png".into(), thumb: "https://cdn2.steamgriddb.com/thumb/a.png".into() }
+            Cover {
+                url: "https://cdn2.steamgriddb.com/grid/a.png".into(),
+                thumb: "https://cdn2.steamgriddb.com/thumb/a.png".into()
+            }
         );
-        let ids: Vec<_> = covers.iter().map(|c| c.url.rsplit('/').next().unwrap()).collect();
+        let ids: Vec<_> = covers
+            .iter()
+            .map(|c| c.url.rsplit('/').next().unwrap())
+            .collect();
         assert_eq!(ids, ["a.png", "b.jpg", "d.png", "e.png"]);
-        assert!(parse_covers(r#"{"success":true,"data":[]}"#).unwrap().is_empty());
+        assert!(
+            parse_covers(r#"{"success":true,"data":[]}"#)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

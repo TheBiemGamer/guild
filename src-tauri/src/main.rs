@@ -40,16 +40,26 @@ fn main() {
     let moved = migrate::folder(&cache::local_app_data());
     tauri::Builder::default()
         // First, so a second launch exits before the others set anything up.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::reveal(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::reveal(app)
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::Builder::new().arg(tray::MINIMIZED).build())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg(tray::MINIMIZED)
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .manage(commands::AppState::new())
         .on_window_event(tray::on_window_event)
         .setup(move |app| {
             log::init(&cache::Dirs::new().logs);
-            tracing::info!("Guild {} started on {}", app.package_info().version, platform::windows_version());
+            tracing::info!(
+                "Guild {} started on {}",
+                app.package_info().version,
+                platform::windows_version()
+            );
             if let Some(moved) = moved {
                 tracing::info!("app folder: {moved}");
             }
@@ -165,11 +175,15 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
 fn export_bindings(bindings: &tauri_specta::Builder<tauri::Wry>) -> bool {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/lib/bindings.ts");
     let fresh = std::env::temp_dir().join(format!("launcher-bindings-{}.ts", std::process::id()));
-    bindings.export(specta_typescript::Typescript::default(), &fresh).expect("the TypeScript bindings could not be generated");
+    bindings
+        .export(specta_typescript::Typescript::default(), &fresh)
+        .expect("the TypeScript bindings could not be generated");
     let new = std::fs::read_to_string(&fresh).expect("the generated bindings could not be read");
     let _ = std::fs::remove_file(&fresh);
     // Git may check the file out with CRLF.
-    let old = std::fs::read_to_string(path).unwrap_or_default().replace("\r\n", "\n");
+    let old = std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     let changed = old != new;
     if changed {
         std::fs::write(path, new).expect("src/lib/bindings.ts could not be written");
@@ -182,6 +196,9 @@ mod tests {
     /// `cargo test bindings` regenerates them.
     #[test]
     fn bindings_are_current() {
-        assert!(!super::export_bindings(&super::bindings()), "src/lib/bindings.ts was stale and is now regenerated; commit it");
+        assert!(
+            !super::export_bindings(&super::bindings()),
+            "src/lib/bindings.ts was stale and is now regenerated; commit it"
+        );
     }
 }

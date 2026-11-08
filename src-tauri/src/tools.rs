@@ -63,7 +63,6 @@ pub const ALL: [&Tool; 3] = [&LEGENDARY, &GOGDL, &NILE];
 /// The whole download, not each read: a 17 MB file on a slow line takes minutes.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
-
 pub fn find(name: &str) -> Option<&'static Tool> {
     ALL.into_iter().find(|t| t.name == name)
 }
@@ -90,8 +89,15 @@ impl Tool {
 
     fn locate(&self, root: &Path, local_data: Option<&Path>) -> PathBuf {
         let managed = self.managed(root);
-        let local = self.local.zip(local_data).map(|(dir, base)| base.join(dir).join(self.exe));
-        [Some(managed), local].into_iter().flatten().find(|p| p.exists()).unwrap_or_else(|| PathBuf::from(self.name))
+        let local = self
+            .local
+            .zip(local_data)
+            .map(|(dir, base)| base.join(dir).join(self.exe));
+        [Some(managed), local]
+            .into_iter()
+            .flatten()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| PathBuf::from(self.name))
     }
 }
 
@@ -106,7 +112,9 @@ pub fn version(tool: &'static Tool) -> Option<String> {
         .entry(tool.name)
         .or_insert_with(|| {
             let mut command = Command::new(tool.exe());
-            let output = crate::platform::no_window(command.arg("--version")).output().ok()?;
+            let output = crate::platform::no_window(command.arg("--version"))
+                .output()
+                .ok()?;
             parse_version(&String::from_utf8_lossy(&output.stdout))
         })
         .clone()
@@ -114,8 +122,14 @@ pub fn version(tool: &'static Tool) -> Option<String> {
 
 /// `legendary version "0.21.1", codename "Lowlife"`, `1.4.0` (gogdl), `1.2.0 Robert Speedwagon` (Nile).
 fn parse_version(text: &str) -> Option<String> {
-    let version = if text.contains('"') { text.split('"').nth(1)? } else { text.split_whitespace().next()? };
-    version.starts_with(|c: char| c.is_ascii_digit()).then(|| version.to_owned())
+    let version = if text.contains('"') {
+        text.split('"').nth(1)?
+    } else {
+        text.split_whitespace().next()?
+    };
+    version
+        .starts_with(|c: char| c.is_ascii_digit())
+        .then(|| version.to_owned())
 }
 
 #[derive(Serialize, specta::Type)]
@@ -158,13 +172,19 @@ impl Installing {
     fn start(name: &'static str) -> Option<Self> {
         let mut busy = INSTALLING.lock().unwrap_or_else(|e| e.into_inner());
         // Lazily: a guard built and dropped here would deadlock on this lock and free the running install.
-        busy.get_or_insert_default().insert(name).then(|| Self(name))
+        busy.get_or_insert_default()
+            .insert(name)
+            .then(|| Self(name))
     }
 }
 
 impl Drop for Installing {
     fn drop(&mut self) {
-        if let Some(busy) = INSTALLING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        if let Some(busy) = INSTALLING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+        {
             busy.remove(self.0);
         }
     }
@@ -172,8 +192,13 @@ impl Drop for Installing {
 
 /// Downloads the pinned build next to its final place, checks its hash, then renames it into place.
 /// `on_percent` hears each new whole percent when the size is known.
-pub async fn install(http: &reqwest::Client, tool: &'static Tool, on_percent: impl FnMut(u8)) -> Result<(), Msg> {
-    let _installing = Installing::start(tool.name).ok_or_else(|| msg!(toolAlreadyInstalling, tool = tool.title))?;
+pub async fn install(
+    http: &reqwest::Client,
+    tool: &'static Tool,
+    on_percent: impl FnMut(u8),
+) -> Result<(), Msg> {
+    let _installing = Installing::start(tool.name)
+        .ok_or_else(|| msg!(toolAlreadyInstalling, tool = tool.title))?;
     let dest = tool.managed(root());
     let part = dest.with_extension("exe.part");
     let digest = match download(http, tool, &part, on_percent).await {
@@ -184,8 +209,13 @@ pub async fn install(http: &reqwest::Client, tool: &'static Tool, on_percent: im
             return Err(msg!(cantDownloadTool, tool = tool.title));
         }
     };
-    place(&part, &dest, &digest, tool.sha256).inspect_err(|e| tracing::warn!("install {}: {e}", tool.name))?;
-    VERSIONS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_default().remove(tool.name);
+    place(&part, &dest, &digest, tool.sha256)
+        .inspect_err(|e| tracing::warn!("install {}: {e}", tool.name))?;
+    VERSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_default()
+        .remove(tool.name);
     tracing::info!("installed {} {}", tool.name, tool.version);
     Ok(())
 }
@@ -197,7 +227,12 @@ async fn download(
     part: &Path,
     mut on_percent: impl FnMut(u8),
 ) -> Result<String, crate::library::Error> {
-    let mut response = http.get(tool.url).timeout(DOWNLOAD_TIMEOUT).send().await?.error_for_status()?;
+    let mut response = http
+        .get(tool.url)
+        .timeout(DOWNLOAD_TIMEOUT)
+        .send()
+        .await?
+        .error_for_status()?;
     let total = response.content_length().filter(|&n| n > 0);
     fs::create_dir_all(part.parent().expect("a tool path has a folder"))?;
     let mut file = File::create(part)?;
@@ -222,7 +257,10 @@ async fn download(
 /// `install` into another tools folder, for tests that must not touch the owner's.
 #[cfg(test)]
 pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Result<(), Msg> {
-    let (part, dest) = (tool.managed(root).with_extension("exe.part"), tool.managed(root));
+    let (part, dest) = (
+        tool.managed(root).with_extension("exe.part"),
+        tool.managed(root),
+    );
     let digest = download(http, tool, &part, |_| {}).await?;
     place(&part, &dest, &digest, tool.sha256)
 }
@@ -250,7 +288,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("launcher-tools-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("launcher-tools-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -259,14 +298,23 @@ mod tests {
     #[test]
     fn hashes_as_lowercase_hex() {
         // SHA-256 of "abc", from FIPS 180-2.
-        assert_eq!(hex(&Sha256::digest(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            hex(&Sha256::digest(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
     fn pinned_hashes_are_lowercase_sha256_hex() {
         for tool in ALL {
             assert_eq!(tool.sha256.len(), 64, "{}", tool.name);
-            assert!(tool.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "{}", tool.name);
+            assert!(
+                tool.sha256
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "{}",
+                tool.name
+            );
             assert!(tool.url.contains(tool.version), "{}", tool.name);
         }
     }
@@ -291,7 +339,10 @@ mod tests {
         fs::write(&part, "tampered").unwrap();
         fs::write(&dest, "old").unwrap();
         let digest = hex(&Sha256::digest(b"tampered"));
-        assert_eq!(place(&part, &dest, &digest, LEGENDARY.sha256), Err(msg!(downloadMismatch)));
+        assert_eq!(
+            place(&part, &dest, &digest, LEGENDARY.sha256),
+            Err(msg!(downloadMismatch))
+        );
         assert!(!part.exists());
         assert_eq!(fs::read_to_string(&dest).unwrap(), "old");
         fs::remove_dir_all(&dir).unwrap();
@@ -301,10 +352,16 @@ mod tests {
     fn lookup_prefers_ours_then_local_app_data_then_path() {
         let dir = temp_dir("lookup");
         let (root, local) = (dir.join("tools"), dir.join("local"));
-        assert_eq!(LEGENDARY.locate(&root, Some(&local)), PathBuf::from("legendary"));
+        assert_eq!(
+            LEGENDARY.locate(&root, Some(&local)),
+            PathBuf::from("legendary")
+        );
         assert_eq!(GOGDL.locate(&root, Some(&local)), PathBuf::from("gogdl"));
 
-        let owners = local.join("Programs").join("legendary").join("legendary.exe");
+        let owners = local
+            .join("Programs")
+            .join("legendary")
+            .join("legendary.exe");
         fs::create_dir_all(owners.parent().unwrap()).unwrap();
         fs::write(&owners, "").unwrap();
         assert_eq!(LEGENDARY.locate(&root, Some(&local)), owners);
@@ -319,9 +376,15 @@ mod tests {
 
     #[test]
     fn parses_each_tools_version_line() {
-        assert_eq!(parse_version("legendary version \"0.21.1\", codename \"Lowlife\"\n").as_deref(), Some("0.21.1"));
+        assert_eq!(
+            parse_version("legendary version \"0.21.1\", codename \"Lowlife\"\n").as_deref(),
+            Some("0.21.1")
+        );
         assert_eq!(parse_version("1.4.0\r\n").as_deref(), Some("1.4.0"));
-        assert_eq!(parse_version("1.2.0 Robert Speedwagon\n").as_deref(), Some("1.2.0"));
+        assert_eq!(
+            parse_version("1.2.0 Robert Speedwagon\n").as_deref(),
+            Some("1.2.0")
+        );
         assert_eq!(parse_version("something else"), None);
         assert_eq!(parse_version("legendary version \"\""), None);
         assert_eq!(parse_version(""), None);
@@ -350,7 +413,10 @@ mod tests {
                 let dest = tool.managed(&dir);
                 place(&part, &dest, &digest, tool.sha256).unwrap();
                 let output = Command::new(&dest).arg("--version").output().unwrap();
-                assert_eq!(parse_version(&String::from_utf8_lossy(&output.stdout)).as_deref(), Some(tool.version));
+                assert_eq!(
+                    parse_version(&String::from_utf8_lossy(&output.stdout)).as_deref(),
+                    Some(tool.version)
+                );
             }
         });
         fs::remove_dir_all(&dir).unwrap();
@@ -358,7 +424,14 @@ mod tests {
 
     #[test]
     fn tool_view_payload_snapshot() {
-        let view = ToolView { name: LEGENDARY.name, installed: true, version: Some("0.0.1".into()), managed: true, pinned: LEGENDARY.version, update: true };
+        let view = ToolView {
+            name: LEGENDARY.name,
+            installed: true,
+            version: Some("0.0.1".into()),
+            managed: true,
+            pinned: LEGENDARY.version,
+            update: true,
+        };
         // The pinned version moves with every tool bump.
         insta::assert_json_snapshot!(view, { ".pinned" => "[version]" });
     }

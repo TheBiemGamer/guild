@@ -10,11 +10,7 @@
   }
 
   /** The mouse's Back (3) and Forward (4) buttons: the next open page and the page Forward would reopen, or null for no step. */
-  export function navStep(
-    button: number,
-    open: string | null,
-    last: string | null,
-  ): { open: string | null; last: string | null } | null {
+  export function navStep(button: number, open: string | null, last: string | null): { open: string | null; last: string | null } | null {
     if (button === 3 && open !== null) return { open: null, last: open }
     if (button === 4 && open === null && last !== null) return { open: last, last }
     return null
@@ -24,7 +20,23 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import * as api from './lib/api'
-  import { commands, type Action, type Card, type Collection, type Conflict, type CustomGame, type Featured, type Library, type Progress, type QueueView, type Section, type SettingsView, type Sort, type Store, type UpdateInfo } from './lib/bindings'
+  import {
+    commands,
+    type Action,
+    type Card,
+    type Collection,
+    type Conflict,
+    type CustomGame,
+    type Featured,
+    type Library,
+    type Progress,
+    type QueueView,
+    type Section,
+    type SettingsView,
+    type Sort,
+    type Store,
+    type UpdateInfo,
+  } from './lib/bindings'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import Continue from './lib/Continue.svelte'
@@ -48,7 +60,21 @@
   let popoverOpen = $state(false)
   let collections = $state<Collection[]>([])
 
-  let lib = $state<Library>({ games: [], groups: [], total: 0, status: [], epic: null, epicAttention: false, steamAttention: false, epicNotice: false, gog: null, gogAttention: false, amazon: null, amazonAttention: false, stores: [] })
+  let lib = $state<Library>({
+    games: [],
+    groups: [],
+    total: 0,
+    status: [],
+    epic: null,
+    epicAttention: false,
+    steamAttention: false,
+    epicNotice: false,
+    gog: null,
+    gogAttention: false,
+    amazon: null,
+    amazonAttention: false,
+    stores: [],
+  })
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
@@ -121,12 +147,7 @@
   /** Library, the last-played game and the collections together, so the banner and the tint arrive with the grid.
    * An open Settings is re-read too: scans, logins and tool installs change what its account cards say. */
   async function reload(withSettings = settingsOpen) {
-    const [, f, c] = await Promise.all([
-      load(),
-      api.featured(),
-      commands.collections().catch(() => collections),
-      withSettings && loadSettings(),
-    ])
+    const [, f, c] = await Promise.all([load(), api.featured(), commands.collections().catch(() => collections), withSettings && loadSettings()])
     featured = f
     collections = c
     // A collection that went away takes its filter along.
@@ -515,85 +536,80 @@
   {#if confirming}
     <!-- A fresh popup per game, so a late size never lands on another game. -->
     {#key confirming.game.key}
-    <InstallPopup
-      game={confirming.game}
-      anchor={confirming.anchor}
-      folder={confirming.game.key.startsWith('gog-')
-        ? settings?.gogInstallDir
-        : confirming.game.key.startsWith('amazon-')
-          ? settings?.amazonInstallDir
-          : settings?.epicInstallDir}
-      oncancel={() => (confirming = null)}
-      onconfirm={(withDlc) => {
-        const { go } = confirming!
-        confirming = null
-        go(withDlc)
-      }}
-    />
+      <InstallPopup
+        game={confirming.game}
+        anchor={confirming.anchor}
+        folder={confirming.game.key.startsWith('gog-')
+          ? settings?.gogInstallDir
+          : confirming.game.key.startsWith('amazon-')
+            ? settings?.amazonInstallDir
+            : settings?.epicInstallDir}
+        oncancel={() => (confirming = null)}
+        onconfirm={(withDlc) => {
+          const { go } = confirming!
+          confirming = null
+          go(withDlc)
+        }}
+      />
     {/key}
   {/if}
 
   <div class="content">
     <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
     <div class="library" class:away={open !== null}>
-    {#if shown.length > 0}
-      <Grid
-        games={shown}
-        sections={view.sections}
-        {stat}
-        resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
-        {running}
-        {progress}
-        {queue}
-        onopen={openGame}
-        onplay={(key) => act('play', key)}
-        oninstall={install}
-        oncancel={cancelDownload}
-        onresume={resumeDownloads}
-        onfavorite={setFavorite}
-        onmenu={openCardMenu}
-        benchSpeed={ready ? benchSpeed : null}
-        {headerHeight}
-      >
-        {#snippet header()}
-          {#if showContinue && featured}
-            <div style="height: {BANNER_H}px; margin-bottom: 24px">
-              <Continue
-                {featured}
-                running={running !== null && featured.copyKeys.includes(running)}
-                onplay={(key) => act('play', key)}
-                onopen={openGame}
-              />
-            </div>
-          {/if}
-          {#if !view.sections}
-            <h2 class="label">
-              {query || store || installedOnly || filters.length ? t('app.results') : t('app.library')}
-              <span>{shown.length}</span>
-            </h2>
-          {/if}
-        {/snippet}
-      </Grid>
-    {:else if epicEmpty && lib.epic === 'noLegendary'}
-      <div class="empty">
-        <p>{t('app.noLegendary')}</p>
-        <small>{t('app.noLegendaryHint')}</small>
-      </div>
-    {:else if epicEmpty && lib.epic === 'loggedOut'}
-      <div class="empty">
-        <p>{t('app.epicLoggedOutEmpty')}</p>
-        <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
-      </div>
-    {:else if epicEmpty && lib.epic === 'unreachable'}
-      <div class="empty">
-        <p>{t('app.epicUnreachable')}</p>
-        <small>{t('app.epicUnreachableHint')}</small>
-      </div>
-    {:else if started}
-      <div class="empty">
-        <p>{lib.total > 0 ? t('app.noMatch') : lib.status.map(api.message).join('\n')}</p>
-      </div>
-    {/if}
+      {#if shown.length > 0}
+        <Grid
+          games={shown}
+          sections={view.sections}
+          {stat}
+          resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
+          {running}
+          {progress}
+          {queue}
+          onopen={openGame}
+          onplay={(key) => act('play', key)}
+          oninstall={install}
+          oncancel={cancelDownload}
+          onresume={resumeDownloads}
+          onfavorite={setFavorite}
+          onmenu={openCardMenu}
+          benchSpeed={ready ? benchSpeed : null}
+          {headerHeight}
+        >
+          {#snippet header()}
+            {#if showContinue && featured}
+              <div style="height: {BANNER_H}px; margin-bottom: 24px">
+                <Continue {featured} running={running !== null && featured.copyKeys.includes(running)} onplay={(key) => act('play', key)} onopen={openGame} />
+              </div>
+            {/if}
+            {#if !view.sections}
+              <h2 class="label">
+                {query || store || installedOnly || filters.length ? t('app.results') : t('app.library')}
+                <span>{shown.length}</span>
+              </h2>
+            {/if}
+          {/snippet}
+        </Grid>
+      {:else if epicEmpty && lib.epic === 'noLegendary'}
+        <div class="empty">
+          <p>{t('app.noLegendary')}</p>
+          <small>{t('app.noLegendaryHint')}</small>
+        </div>
+      {:else if epicEmpty && lib.epic === 'loggedOut'}
+        <div class="empty">
+          <p>{t('app.epicLoggedOutEmpty')}</p>
+          <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
+        </div>
+      {:else if epicEmpty && lib.epic === 'unreachable'}
+        <div class="empty">
+          <p>{t('app.epicUnreachable')}</p>
+          <small>{t('app.epicUnreachableHint')}</small>
+        </div>
+      {:else if started}
+        <div class="empty">
+          <p>{lib.total > 0 ? t('app.noMatch') : lib.status.map(api.message).join('\n')}</p>
+        </div>
+      {/if}
     </div>
     {#if open}
       <Detail

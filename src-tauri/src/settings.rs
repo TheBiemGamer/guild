@@ -66,15 +66,20 @@ pub fn load(conn: &Connection) -> Settings {
         gog_install_dir: get(GOG_INSTALL_DIR).map(PathBuf::from),
         amazon_install_dir: get(AMAZON_INSTALL_DIR).map(PathBuf::from),
         igdb_client_id: get(IGDB_CLIENT_ID),
-        sort: get(LIBRARY_SORT).and_then(|v| Sort::parse(&v)).unwrap_or(Sort::Title),
-        language: get(LANGUAGE).filter(|v| crate::msg::is_language(v)).unwrap_or_else(|| "system".into()),
+        sort: get(LIBRARY_SORT)
+            .and_then(|v| Sort::parse(&v))
+            .unwrap_or(Sort::Title),
+        language: get(LANGUAGE)
+            .filter(|v| crate::msg::is_language(v))
+            .unwrap_or_else(|| "system".into()),
     }
 }
 
 /// Whether `name` may be set to `value` (`None` resets it). The secret has its own command.
 pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
     match name {
-        SHOW_BANNER | AMBIENT | CLOUD_SAVES | GOG_CLOUD_SAVES | CLOSE_TO_TRAY | NOTIFY_DOWNLOADS | START_WITH_WINDOWS => match value {
+        SHOW_BANNER | AMBIENT | CLOUD_SAVES | GOG_CLOUD_SAVES | CLOSE_TO_TRAY
+        | NOTIFY_DOWNLOADS | START_WITH_WINDOWS => match value {
             None | Some("true" | "false") => Ok(()),
             Some(_) => Err(msg!(settingNotBool, name = name)),
         },
@@ -83,9 +88,13 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
             _ => Ok(()),
         },
         IGDB_CLIENT_ID => Ok(()),
-        LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => Err(msg!(unknownSort, value = format!("{value:?}"))),
+        LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => {
+            Err(msg!(unknownSort, value = format!("{value:?}")))
+        }
         LIBRARY_SORT => Ok(()),
-        LANGUAGE if value.is_some_and(|v| !crate::msg::is_language(v)) => Err(msg!(unknownLanguage, value = format!("{value:?}"))),
+        LANGUAGE if value.is_some_and(|v| !crate::msg::is_language(v)) => {
+            Err(msg!(unknownLanguage, value = format!("{value:?}")))
+        }
         LANGUAGE => Ok(()),
         "igdb_secret" => Err(msg!(igdbSecretOwnCommand)),
         _ => Err(msg!(unknownSetting, name = name)),
@@ -104,7 +113,10 @@ pub fn update(conn: &Connection, name: &str, value: Option<&str>) -> Result<(), 
 pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
     let parse = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|n| n.parse().ok()).collect() };
     let now = parse(current)?;
-    let seen = db::setting(conn, SEEN_VERSION).ok().flatten().and_then(|v| parse(&v));
+    let seen = db::setting(conn, SEEN_VERSION)
+        .ok()
+        .flatten()
+        .and_then(|v| parse(&v));
     if seen.as_ref().is_some_and(|seen| *seen >= now) {
         return None;
     }
@@ -118,7 +130,10 @@ pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
 /// Whether the owner logged out of `store` ("epic", "gog", "amazon") with Log out, so its Settings dot stays down
 /// until it is logged in again. Internal: not in `validate`.
 pub fn signed_out(conn: &Connection, store: &str) -> bool {
-    db::setting(conn, &format!("signed_out_{store}")).ok().flatten().is_some()
+    db::setting(conn, &format!("signed_out_{store}"))
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 pub fn set_signed_out(conn: &Connection, store: &str, on: bool) -> Result<(), Msg> {
@@ -164,7 +179,11 @@ pub fn set_steam_token(value: Option<&str>) -> Result<(), Msg> {
 pub fn move_secrets() {
     // `entry` registers Credential Manager as the default store first.
     if entry(SECRET_USER).is_ok() {
-        crate::migrate::secrets(keyring_core::Entry::new, SERVICE, &[SECRET_USER, GRID_KEY_USER, STEAM_TOKEN_USER]);
+        crate::migrate::secrets(
+            keyring_core::Entry::new,
+            SERVICE,
+            &[SECRET_USER, GRID_KEY_USER, STEAM_TOKEN_USER],
+        );
     }
 }
 
@@ -175,8 +194,11 @@ fn entry(user: &str) -> Result<keyring_core::Entry, Msg> {
         keyring_core::set_default_store(store);
         Ok(())
     });
-    STORE.clone().map_err(|e| msg!(credentialManager, detail = e))?;
-    keyring_core::Entry::new(SERVICE, user).map_err(|e| msg!(credentialManager, detail = e.to_string()))
+    STORE
+        .clone()
+        .map_err(|e| msg!(credentialManager, detail = e))?;
+    keyring_core::Entry::new(SERVICE, user)
+        .map_err(|e| msg!(credentialManager, detail = e.to_string()))
 }
 
 fn read(user: &str) -> Option<String> {
@@ -209,7 +231,10 @@ mod tests {
     fn memory() -> Connection {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("launcher-settings-test-{}-{n}.sqlite", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "launcher-settings-test-{}-{n}.sqlite",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&path);
         db::open(&path).unwrap()
     }
@@ -217,8 +242,23 @@ mod tests {
     #[test]
     fn defaults_have_every_switch_on() {
         let s = load(&memory());
-        assert!(s.show_banner && s.ambient && s.cloud_saves && s.gog_cloud_saves && s.close_to_tray && s.notify_downloads);
-        assert_eq!((s.epic_install_dir, s.gog_install_dir, s.amazon_install_dir, s.igdb_client_id), (None, None, None, None));
+        assert!(
+            s.show_banner
+                && s.ambient
+                && s.cloud_saves
+                && s.gog_cloud_saves
+                && s.close_to_tray
+                && s.notify_downloads
+        );
+        assert_eq!(
+            (
+                s.epic_install_dir,
+                s.gog_install_dir,
+                s.amazon_install_dir,
+                s.igdb_client_id
+            ),
+            (None, None, None, None)
+        );
         assert_eq!(s.sort, Sort::Title);
         assert_eq!(s.language, "system");
     }
@@ -259,12 +299,24 @@ mod tests {
         update(&conn, GOG_CLOUD_SAVES, Some("false")).unwrap();
         update(&conn, CLOSE_TO_TRAY, Some("false")).unwrap();
         update(&conn, NOTIFY_DOWNLOADS, Some("false")).unwrap();
-        update(&conn, EPIC_INSTALL_DIR, Some(&format!("  {}  ", dir.display()))).unwrap();
+        update(
+            &conn,
+            EPIC_INSTALL_DIR,
+            Some(&format!("  {}  ", dir.display())),
+        )
+        .unwrap();
         update(&conn, GOG_INSTALL_DIR, Some(&dir.display().to_string())).unwrap();
         update(&conn, AMAZON_INSTALL_DIR, Some(&dir.display().to_string())).unwrap();
         update(&conn, IGDB_CLIENT_ID, Some(" abc ")).unwrap();
         let s = load(&conn);
-        assert!(!s.show_banner && s.ambient && !s.cloud_saves && !s.gog_cloud_saves && !s.close_to_tray && !s.notify_downloads);
+        assert!(
+            !s.show_banner
+                && s.ambient
+                && !s.cloud_saves
+                && !s.gog_cloud_saves
+                && !s.close_to_tray
+                && !s.notify_downloads
+        );
         assert_eq!(s.epic_install_dir, Some(dir.clone()));
         assert_eq!(s.gog_install_dir, Some(dir.clone()));
         assert_eq!(s.amazon_install_dir, Some(dir));
@@ -315,7 +367,10 @@ mod tests {
         assert_eq!(take_updated(&conn, "0.10.0"), None);
         // An older dev build says nothing and keeps the installed version.
         assert_eq!(take_updated(&conn, "0.3.0"), None);
-        assert_eq!(db::setting(&conn, SEEN_VERSION).unwrap().as_deref(), Some("0.10.0"));
+        assert_eq!(
+            db::setting(&conn, SEEN_VERSION).unwrap().as_deref(),
+            Some("0.10.0")
+        );
         assert!(validate(SEEN_VERSION, Some("9.9.9")).is_err());
     }
 

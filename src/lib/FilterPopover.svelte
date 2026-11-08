@@ -6,7 +6,14 @@
   import { popover } from './popover'
   import { t } from './i18n'
 
-  let { filters = $bindable(), collections, multiStore, anchor, onclose, onchanged }: {
+  let {
+    filters = $bindable(),
+    collections,
+    multiStore,
+    anchor,
+    onclose,
+    onchanged,
+  }: {
     filters: Filter[]
     collections: Collection[]
     /** The library uses more than one store: the Has group shows. */

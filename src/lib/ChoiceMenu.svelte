@@ -1,7 +1,13 @@
 <script lang="ts" generics="T extends string">
   import { popover } from './popover'
 
-  let { value = $bindable(), options, label, anchor, onclose }: {
+  let {
+    value = $bindable(),
+    options,
+    label,
+    anchor,
+    onclose,
+  }: {
     value: T
     options: { value: T; label: string }[]
     /** The menu's accessible name, like "Sort by". */
@@ -28,11 +34,17 @@
     const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]'))
     const at = items.indexOf(document.activeElement as HTMLElement)
     const next =
-      e.key === 'ArrowDown' ? (at + 1) % items.length
-      : e.key === 'ArrowUp' ? (at <= 0 ? items.length - 1 : at - 1)
-      : e.key === 'Home' ? 0
-      : e.key === 'End' ? items.length - 1
-      : null
+      e.key === 'ArrowDown'
+        ? (at + 1) % items.length
+        : e.key === 'ArrowUp'
+          ? at <= 0
+            ? items.length - 1
+            : at - 1
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? items.length - 1
+              : null
     if (next === null) return
     e.preventDefault()
     items[next].focus()
