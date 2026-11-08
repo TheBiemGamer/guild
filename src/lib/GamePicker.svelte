@@ -27,12 +27,18 @@
   /** Typing drops the pick, so Import waits for a choice; an emptied field brings back the first game. */
   function typed(e: Event) {
     text = query = (e.currentTarget as HTMLInputElement).value
-    value = query.trim() === '' ? games[0].key : ''
+    value = query.trim() === '' ? (games[0]?.key ?? '') : ''
   }
 
-  function settle() {
+  function settle(key: string) {
     query = ''
-    if (value !== '') text = titleOf(value)
+    text = titleOf(key)
+  }
+
+  /** Closing with nothing picked puts the first game back, as an emptied field does, so field and list agree. */
+  function closed() {
+    if (value === '') value = games[0]?.key ?? ''
+    settle(value)
   }
 </script>
 
@@ -44,11 +50,14 @@
   inputValue={text}
   allowDeselect={false}
   onValueChange={settle}
-  onOpenChange={(o) => o || settle()}
+  onOpenChange={(o) => o || closed()}
 >
-  <Combobox.Input {id} autocomplete="off" oninput={typed} onclick={() => (open = true)}>
-    {#snippet child({ props })}<input {...props} />{/snippet}
-  </Combobox.Input>
+  <div class="box">
+    <Combobox.Input {id} autocomplete="off" oninput={typed} onclick={() => (open = true)}>
+      {#snippet child({ props })}<input {...props} />{/snippet}
+    </Combobox.Input>
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+  </div>
   <Combobox.Portal>
     <Combobox.Content sideOffset={6} onInteractOutside={keepOnBackForward}>
       {#snippet child({ props, wrapperProps })}
@@ -75,11 +84,33 @@
 
 <style>
   /* The Settings field look; Settings' own styles don't reach into this component. */
+  .box {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Not a control: a click lands on the field underneath, which opens the list. */
+  svg {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    translate: 0 -50%;
+    pointer-events: none;
+    fill: none;
+    stroke: var(--text-3);
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   input {
     flex: 1;
     min-width: 0;
+    padding-right: 34px;
     height: 36px;
-    padding: 0 12px;
+    padding-left: 12px;
     border-radius: 10px;
     border: 1px solid var(--glass-line);
     background: var(--glass);
