@@ -4,6 +4,7 @@
   import type { CopyView } from './bindings'
   import { sizeLabel } from './format'
   import { t } from './i18n'
+  import Check from './Check.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
   let {
@@ -152,7 +153,7 @@
           <button role="menuitemradio" aria-checked={c.key === copy.key} tabindex="-1" onclick={() => choose(c.key)}>
             <StoreIcon provider={c.provider} size={18} />
             <span class="txt"><span>{storeNames[c.provider]}</span><small>{sub(c)}</small></span>
-            <svg class="check stroke" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>
+            {#if c.key === copy.key}<Check />{/if}
           </button>
         {/each}
       </div>
@@ -243,7 +244,7 @@
     border-radius: 12px;
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+    box-shadow: var(--shadow-modal);
   }
 
   .label {
@@ -287,14 +288,6 @@
   small {
     font-size: 12px;
     color: var(--text-2);
-  }
-
-  .check {
-    visibility: hidden;
-  }
-
-  [aria-checked='true'] .check {
-    visibility: visible;
   }
 
   svg {
