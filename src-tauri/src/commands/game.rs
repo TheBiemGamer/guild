@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use super::library::rescan;
-use super::{AppState, Res, Shared, Watch, allow, blocking, open_db, queue_view, unix_now};
+use super::{
+    AppState, Process, Res, Shared, Watch, allow, blocking, open_db, queue_view, unix_now,
+};
 use crate::cache;
 use crate::downloads::{DOWNLOAD_QUEUE, Job, Queue, QueueView, QueuedAction};
 use crate::entries::{self, Entry};
@@ -301,6 +303,22 @@ fn act_blocking(
     let state = app.state::<AppState>();
     let key = game.key();
     let store = game.provider.provider();
+    let play = matches!(action, Action::Play | Action::PlayOutdated);
+    if play
+        && game.provider != ProviderKind::Steam
+        && replaces_upload(state.lock().watch.as_ref(), &key)
+    {
+        return Err(msg!(closeGameFirst));
+    }
+    if action == Action::Uninstall {
+        let steam = ProviderKind::Steam
+            .provider()
+            .running_game()
+            .map(|id| ProviderKind::Steam.key(&id));
+        if card_running(&state.lock(), &key, steam.as_deref()) {
+            return Err(msg!(closeGameFirst));
+        }
+    }
     if game.provider == ProviderKind::Steam {
         if action == Action::Install {
             state.lock().tracked.insert(key.clone());
@@ -364,12 +382,12 @@ fn act_blocking(
         let options = checked_launch_options(open_db(&state).as_ref(), game)?;
         let dir = installed_dir(game)
             .ok_or_else(|| store_error(ProviderKind::Gog, msg!(notInstalled)))?;
-        let exe = gog::launch(&game.external_id, dir, &options)
+        let child = gog::launch(&game.external_id, dir, &options)
             .map_err(|e| store_error(ProviderKind::Gog, e))?;
         record_play(&state, &key);
         state.lock().watch = Some(Watch {
             key,
-            exe,
+            process: Process::Ours(child),
             since: Instant::now(),
             seen: false,
             upload,
@@ -416,7 +434,7 @@ fn act_blocking(
                 };
                 state.lock().watch = exe.map(|exe| Watch {
                     key: key.clone(),
-                    exe,
+                    process: Process::Named(exe),
                     since: Instant::now(),
                     seen: false,
                     upload,
@@ -449,6 +467,22 @@ fn act_blocking(
     result
         .map(|()| None)
         .map_err(|e| store_error(ProviderKind::Epic, e))
+}
+
+/// Whether a Play would replace the watch of another game whose saves still go up once it exits. One game is watched
+/// at a time, and a replaced watch never uploads.
+fn replaces_upload(watch: Option<&Watch>, key: &str) -> bool {
+    watch.is_some_and(|w| w.key != key && w.upload.is_some())
+}
+
+/// Whether a copy of the card `key` belongs to runs: Steam's running game (`steam`, its key) or the watched one.
+fn card_running(s: &Shared, key: &str, steam: Option<&str>) -> bool {
+    let watched = s.watch.as_ref().map(|w| w.key.as_str());
+    let runs = |k: &str| Some(k) == steam || Some(k) == watched;
+    match crate::entries::find(&s.entries, &s.games, key) {
+        Some(e) => e.copies.iter().any(|&i| runs(&s.games[i].key())),
+        None => runs(key),
+    }
 }
 
 /// `{store}: {reason}`, like "GOG: Close the game first."
@@ -518,11 +552,11 @@ fn act_amazon(
     match action {
         Action::Play | Action::PlayOutdated => {
             let options = checked_launch_options(open_db(state).as_ref(), game)?;
-            let exe = amazon::launch(&game.external_id, dir, &options)?;
+            let child = amazon::launch(&game.external_id, dir, &options)?;
             record_play(state, &key);
             state.lock().watch = Some(Watch {
                 key,
-                exe,
+                process: Process::Ours(child),
                 since: Instant::now(),
                 seen: false,
                 upload: None,
@@ -548,11 +582,11 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
             let row =
                 cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
-            crate::library::custom::launch(&row).map(|exe| {
+            crate::library::custom::launch(&row).map(|child| {
                 record_play(state, &key);
                 state.lock().watch = Some(Watch {
                     key,
-                    exe,
+                    process: Process::Ours(child),
                     since: Instant::now(),
                     seen: false,
                     upload: None,
@@ -1962,6 +1996,54 @@ mod tests {
             })
             .paused
         );
+    }
+
+    fn watch(key: &str, upload: Option<SaveSync>) -> Watch {
+        Watch {
+            key: key.into(),
+            process: Process::Named("game.exe".into()),
+            since: Instant::now(),
+            seen: false,
+            upload,
+        }
+    }
+
+    #[test]
+    fn play_never_drops_another_games_save_upload() {
+        let uploading = watch("gog-1", Some(SaveSync::Upload));
+        assert!(replaces_upload(Some(&uploading), "epic-2"));
+        assert!(!replaces_upload(Some(&uploading), "gog-1"));
+        assert!(!replaces_upload(Some(&watch("custom-a", None)), "epic-2"));
+        assert!(!replaces_upload(None, "epic-2"));
+    }
+
+    #[test]
+    fn uninstall_waits_while_any_copy_of_the_card_runs() {
+        let steam = Game {
+            external_id: "620".into(),
+            ..game("Portal 2", true, None, None)
+        };
+        let epic = Game {
+            provider: ProviderKind::Epic,
+            external_id: "x".into(),
+            ..game("Portal 2", true, None, None)
+        };
+        let other = Game {
+            external_id: "70".into(),
+            ..game("Half-Life", true, None, None)
+        };
+        let mut s = Shared {
+            games: vec![other, steam, epic],
+            twin_lists: HashMap::from([("epic-x".to_string(), vec![620])]),
+            ..Shared::default()
+        };
+        super::super::regroup(&mut s);
+        assert!(card_running(&s, "epic-x", Some("steam-620")));
+        assert!(!card_running(&s, "steam-70", Some("steam-620")));
+        assert!(!card_running(&s, "epic-x", None));
+        s.watch = Some(watch("epic-x", None));
+        assert!(card_running(&s, "steam-620", None));
+        assert!(!card_running(&s, "steam-70", None));
     }
 
     #[test]

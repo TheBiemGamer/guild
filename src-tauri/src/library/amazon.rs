@@ -1200,8 +1200,8 @@ fn check_sdk(cfg: &Path) {
     }
 }
 
-/// Starts an installed game without waiting for it. Returns its program's file name, to watch its process.
-pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, Error> {
+/// Starts an installed game without waiting for it. Returns its process, to watch.
+pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::process::Child, Error> {
     let fuel = read_fuel(dir)
         .as_ref()
         .and_then(fuel_main)
@@ -1219,11 +1219,7 @@ pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, E
         entitlement(&library, id),
         current_user(&cfg).as_ref(),
     ));
-    command.spawn()?;
-    Ok(exe
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default())
+    Ok(command.spawn()?)
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use super::{AppState, Res, Shared, allow, blocking, open_db, regroup};
+use super::{AppState, Process, Res, Shared, allow, blocking, open_db, regroup};
 use crate::bench;
 use crate::cache;
 use crate::entries::{self, Entry};
@@ -1111,13 +1111,16 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         .provider()
         .running_game()
         .map(|id| ProviderKind::Steam.key(&id));
-    let watch = state
-        .lock()
-        .watch
-        .as_ref()
-        .map(|w| (w.key.clone(), w.exe.clone(), w.since));
-    let watched = watch.and_then(|(key, exe, since)| {
-        if epic::is_running(&exe) {
+    // Our own process answers at once; an Epic game's name is looked up after the lock is let go.
+    let watch = state.lock().watch.as_mut().map(|w| {
+        let running = match &mut w.process {
+            Process::Ours(child) => Ok(matches!(child.try_wait(), Ok(None))),
+            Process::Named(exe) => Err(exe.clone()),
+        };
+        (w.key.clone(), running, w.since)
+    });
+    let watched = watch.and_then(|(key, running, since)| {
+        if running.unwrap_or_else(|exe| epic::is_running(&exe)) {
             if let Some(w) = state.lock().watch.as_mut().filter(|w| w.since == since) {
                 w.seen = true;
             }

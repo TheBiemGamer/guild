@@ -489,7 +489,7 @@
   {#if copy!.installDir}
     <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => commands.openFolder(copy!.key)))}>{t('detail.openInstallFolder')}</button>
   {/if}
-  {#if copy!.installed && !custom}
+  {#if copy!.installed && !custom && !running}
     <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>{t('detail.uninstall')}</button>
   {/if}
 {/snippet}

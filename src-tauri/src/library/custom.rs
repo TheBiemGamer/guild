@@ -150,14 +150,10 @@ fn command(c: &CustomGame) -> Command {
     command
 }
 
-/// Starts the program and returns its file name, to watch its process. Doesn't wait for it.
-pub fn launch(c: &CustomGame) -> Result<String, Error> {
+/// Starts the program and returns its process, to watch. Doesn't wait for it.
+pub fn launch(c: &CustomGame) -> Result<std::process::Child, Error> {
     check_exe(&c.exe).map_err(|_| missing(&c.name))?;
-    command(c).spawn()?;
-    Ok(Path::new(&c.exe)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default())
+    Ok(command(c).spawn()?)
 }
 
 #[cfg(test)]

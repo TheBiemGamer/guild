@@ -1168,8 +1168,8 @@ fn launch_command(dir: &Path, task: &Task, options: &LaunchOptions) -> Command {
     command
 }
 
-/// Starts an installed game without waiting for it. Returns its program's file name, to watch its process.
-pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, Error> {
+/// Starts an installed game without waiting for it. Returns its process, to watch.
+pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::process::Child, Error> {
     let info =
         read_json(&dir.join(format!("goggame-{id}.info"))).ok_or(msg!(gameFilesMissingVerify))?;
     let task = play_task(&info).ok_or(msg!(gogNoPlayTask))?;
@@ -1178,11 +1178,7 @@ pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<String, E
     if !exe.is_file() {
         return Err(msg!(gameProgramMissing, path = exe.display().to_string()).into());
     }
-    command.spawn()?;
-    Ok(exe
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default())
+    Ok(command.spawn()?)
 }
 
 // Playtime: GOG's own figure per game. Sessions timed here are added on top (`epic_playtime`) and never posted to GOG,

@@ -120,12 +120,20 @@ struct Shared {
 /// An Epic, GOG or added game launched from here, watched through its process to time the session.
 struct Watch {
     key: String,
-    exe: String,
+    process: Process,
     since: Instant,
     /// Its process was seen running, so its end times a play session.
     seen: bool,
     /// How its cloud saves are uploaded once it exits; `None` doesn't sync (always for an added game).
     upload: Option<crate::library::epic::SaveSync>,
+}
+
+/// How a watch tells its game still runs.
+enum Process {
+    /// A GOG, Amazon or added game started here: its own process, so no other program of that name counts.
+    Ours(std::process::Child),
+    /// An Epic game, which Legendary starts and leaves: only its program's file name is known.
+    Named(String),
 }
 
 impl AppState {
