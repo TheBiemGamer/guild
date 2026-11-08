@@ -306,7 +306,6 @@
   const protonChoices = $derived([{ value: '', label: t('detail.default') }, ...protons.map((p) => ({ value: p, label: p }))])
   const protonLabel = $derived(protonChoices.find((c) => c.value === (launch?.proton ?? ''))?.label ?? t('detail.default'))
   let protonOpen = $state(false)
-  let protonChip = $state<HTMLButtonElement>()
 
   /** Saves a change to the launch options; true when it was stored. */
   async function setLaunch(change: Partial<LaunchOptions>) {
@@ -823,26 +822,16 @@
                 <div class="row">
                   <div class="what">{t('settings.proton')}<small>{t('detail.protonHint')}</small></div>
                   <div class="choice">
-                    <button
-                      class="chip"
-                      bind:this={protonChip}
-                      aria-haspopup="menu"
-                      aria-expanded={protonOpen}
-                      aria-label={t('settings.protonNow', { name: protonLabel })}
-                      onclick={() => (protonOpen = !protonOpen)}>{protonLabel}</button
+                    <ChoiceMenu
+                      bind:value={() => launch?.proton ?? '', (v) => setLaunch({ proton: v || null })}
+                      options={protonChoices}
+                      label={t('settings.proton')}
+                      bind:open={protonOpen}
                     >
-                    {#if protonOpen}
-                      <ChoiceMenu
-                        bind:value={() => launch?.proton ?? '', (v) => setLaunch({ proton: v || null })}
-                        options={protonChoices}
-                        label={t('settings.proton')}
-                        anchor={protonChip}
-                        onclose={(refocus) => {
-                          protonOpen = false
-                          if (refocus) protonChip?.focus()
-                        }}
-                      />
-                    {/if}
+                      {#snippet trigger({ props })}
+                        <button {...props} class="chip" aria-label={t('settings.protonNow', { name: protonLabel })}>{protonLabel}</button>
+                      {/snippet}
+                    </ChoiceMenu>
                   </div>
                 </div>
               {/if}

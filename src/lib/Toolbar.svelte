@@ -104,7 +104,6 @@
   let search = $state<HTMLInputElement>()
   let filtersChip = $state<HTMLButtonElement>()
   let downloadsChip = $state<HTMLButtonElement>()
-  let sortChip = $state<HTMLButtonElement>()
   let updateChip = $state<HTMLButtonElement>()
   $effect(() => {
     popoverOpen = open !== null
@@ -128,7 +127,7 @@
   })
 
   function close(refocus: boolean) {
-    const chip = { filters: filtersChip, downloads: downloadsChip, sort: sortChip, update: updateChip }[open ?? 'filters']
+    const chip = { filters: filtersChip, downloads: downloadsChip, sort: undefined, update: updateChip }[open ?? 'filters']
     open = null
     if (refocus) chip?.focus()
   }
@@ -218,20 +217,19 @@
   <span class="spacer"></span>
 
   <div class="dd">
-    <button
-      class="chip"
-      bind:this={sortChip}
-      aria-haspopup="menu"
-      aria-expanded={open === 'sort'}
-      aria-label={t('toolbar.sort', { sort: sortName ?? '' })}
-      onclick={() => (open = open === 'sort' ? null : 'sort')}
+    <ChoiceMenu
+      bind:value={sort}
+      options={sorts}
+      label={t('toolbar.sortBy')}
+      bind:open={() => open === 'sort', (v) => (open = v ? 'sort' : open === 'sort' ? null : open)}
     >
-      {sortName}
-      <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-    </button>
-    {#if open === 'sort'}
-      <ChoiceMenu bind:value={sort} options={sorts} label={t('toolbar.sortBy')} anchor={sortChip} onclose={close} />
-    {/if}
+      {#snippet trigger({ props })}
+        <button {...props} class="chip" aria-label={t('toolbar.sort', { sort: sortName ?? '' })}>
+          {sortName}
+          <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+        </button>
+      {/snippet}
+    </ChoiceMenu>
   </div>
 
   {#if update}

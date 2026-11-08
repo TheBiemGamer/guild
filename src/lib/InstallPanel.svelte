@@ -35,7 +35,6 @@
   let el: HTMLDivElement
   let installButton: HTMLButtonElement
   let changeButton = $state<HTMLButtonElement>()
-  let languageButton = $state<HTMLButtonElement>()
   let height = $state(0)
   /** undefined until the first answer; kept while a new language or build is asked. */
   let plan = $state<InstallPlan | null | undefined>(undefined)
@@ -103,14 +102,15 @@
     }
   })
 
+  // The language menu is portalled outside the panel and closes on its own first.
   function onkeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') oncancel()
+    if (e.key === 'Escape' && !languagesOpen) oncancel()
   }
 
   // A click outside closes it. Clicks on the cover or the Install pill are left to them (they toggle it).
   function onpointerdown(e: PointerEvent) {
     const target = e.target as Node
-    if (el.contains(target) || opener?.contains(target)) return
+    if (languagesOpen || el.contains(target) || opener?.contains(target)) return
     const inside = !!anchor && e.clientX >= anchor.left && e.clientX <= anchor.right && e.clientY >= anchor.top && e.clientY <= anchor.bottom
     if (!inside) oncancel()
   }
@@ -266,28 +266,25 @@
   {#if plan?.languages.length}
     <div class="label">{t('install.language')}</div>
     <div class="group menu-wrap">
-      <button class="row choice" bind:this={languageButton} aria-haspopup="menu" aria-expanded={languagesOpen} onclick={() => (languagesOpen = !languagesOpen)}>
-        <span class="grow">{language ? languageName(language) : ''}</span>
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-      </button>
-      {#if languagesOpen && language}
-        <ChoiceMenu
-          bind:value={
-            () => language!,
-            (v) => {
-              language = v
-              ask()
-            }
+      <ChoiceMenu
+        bind:value={
+          () => language ?? '',
+          (v) => {
+            language = v
+            ask()
           }
-          options={plan.languages.map((l) => ({ value: l, label: languageName(l) }))}
-          label={t('install.language')}
-          anchor={languageButton}
-          onclose={(refocus) => {
-            languagesOpen = false
-            if (refocus) languageButton?.focus()
-          }}
-        />
-      {/if}
+        }
+        options={plan.languages.map((l) => ({ value: l, label: languageName(l) }))}
+        label={t('install.language')}
+        bind:open={languagesOpen}
+      >
+        {#snippet trigger({ props })}
+          <button {...props} class="row choice">
+            <span class="grow">{language ? languageName(language) : ''}</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        {/snippet}
+      </ChoiceMenu>
     </div>
   {/if}
 

@@ -1,72 +1,68 @@
 <script lang="ts" generics="T extends string">
-  import { popover } from './popover'
+  import { DropdownMenu } from 'bits-ui'
+  import type { Snippet } from 'svelte'
   import Check from './Check.svelte'
+  import { keepOnBackForward } from './outside'
 
   let {
     value = $bindable(),
     options,
     label,
-    anchor,
-    onclose,
+    open = $bindable(),
+    trigger,
   }: {
     value: T
     options: { value: T; label: string }[]
     /** The menu's accessible name, like "Sort by". */
     label: string
-    /** The chip that opened it: clicks on it toggle instead of closing from outside. */
-    anchor: HTMLElement | undefined
-    onclose: (refocus: boolean) => void
+    open: boolean
+    /** The caller's chip: spread `props` on it. */
+    trigger: Snippet<[{ props: Record<string, unknown> }]>
   } = $props()
 
-  let menu: HTMLDivElement
+  let content = $state<HTMLElement | null>(null)
 
-  /** Runs after `popover`, which focuses the first item: a menu opens on the chosen one. */
-  function focusChosen(node: HTMLElement) {
-    node.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
-  }
-
-  function pick(v: T) {
-    value = v
-    onclose(true)
-  }
-
-  /** Arrows, Home and End move between the options. */
-  function onkeydown(e: KeyboardEvent) {
-    const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]'))
-    const at = items.indexOf(document.activeElement as HTMLElement)
-    const next =
-      e.key === 'ArrowDown'
-        ? (at + 1) % items.length
-        : e.key === 'ArrowUp'
-          ? at <= 0
-            ? items.length - 1
-            : at - 1
-          : e.key === 'Home'
-            ? 0
-            : e.key === 'End'
-              ? items.length - 1
-              : null
-    if (next === null) return
+  /** A menu opens on the chosen item, whether by mouse or keyboard. */
+  function focusChosen(e: Event) {
+    const chosen = content?.querySelector<HTMLElement>('[aria-checked="true"]')
+    if (!chosen) return
     e.preventDefault()
-    items[next].focus()
+    chosen.focus()
   }
 </script>
 
-<div class="pop" role="menu" aria-label={label} tabindex="-1" bind:this={menu} {onkeydown} use:popover={{ anchor, close: onclose }} use:focusChosen>
-  {#each options as o (o.value)}
-    <button class="o" role="menuitemradio" aria-checked={o.value === value} onclick={() => pick(o.value)}>
-      {o.label}
-      {#if o.value === value}<Check />{/if}
-    </button>
-  {/each}
-</div>
+<DropdownMenu.Root bind:open>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      {@render trigger({ props })}
+    {/snippet}
+  </DropdownMenu.Trigger>
+  <DropdownMenu.Portal>
+    <DropdownMenu.Content bind:ref={content} align="end" sideOffset={8} aria-label={label} onInteractOutside={keepOnBackForward} onOpenAutoFocus={focusChosen}>
+      {#snippet child({ props, wrapperProps })}
+        <div {...wrapperProps}>
+          <div {...props} class="pop">
+            <DropdownMenu.RadioGroup bind:value>
+              {#each options as o (o.value)}
+                <DropdownMenu.RadioItem value={o.value}>
+                  {#snippet child({ props, checked })}
+                    <button {...props} class="o">
+                      {o.label}
+                      {#if checked}<Check />{/if}
+                    </button>
+                  {/snippet}
+                </DropdownMenu.RadioItem>
+              {/each}
+            </DropdownMenu.RadioGroup>
+          </div>
+        </div>
+      {/snippet}
+    </DropdownMenu.Content>
+  </DropdownMenu.Portal>
+</DropdownMenu.Root>
 
 <style>
   .pop {
-    position: absolute;
-    z-index: 6;
-    top: 44px;
-    right: 0;
     min-width: 230px;
     padding: 6px;
     border-radius: 12px;

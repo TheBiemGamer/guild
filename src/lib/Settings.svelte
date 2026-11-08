@@ -251,7 +251,6 @@
   ])
   const languageName = $derived(languages.find((l) => l.value === view.language)?.label ?? '')
   let languageOpen = $state(false)
-  let languageButton = $state<HTMLButtonElement>()
   /** The hints' words around their links. */
   const igdbHint = $derived(around('settings.igdbHint', 'link'))
   const gridHint = $derived(around('settings.gridHint', 'link'))
@@ -597,7 +596,7 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose()
+    if (e.key === 'Escape' && !e.defaultPrevented) onclose()
   }
 
   onMount(() => {
@@ -987,30 +986,19 @@
             {@render tile('globe')}
             <div class="what">{t('settings.language')}</div>
             <div class="choice">
-              <button
-                class="btn opt"
-                class:open={languageOpen}
-                bind:this={languageButton}
-                aria-haspopup="menu"
-                aria-expanded={languageOpen}
-                aria-label={t('settings.languageNow', { name: languageName })}
-                onclick={() => (languageOpen = !languageOpen)}
+              <ChoiceMenu
+                bind:value={() => view.language, (v) => change(() => commands.updateSetting('language', v))}
+                options={languages}
+                label={t('settings.language')}
+                bind:open={languageOpen}
               >
-                {languageName}
-                {@render chevron()}
-              </button>
-              {#if languageOpen}
-                <ChoiceMenu
-                  bind:value={() => view.language, (v) => change(() => commands.updateSetting('language', v))}
-                  options={languages}
-                  label={t('settings.language')}
-                  anchor={languageButton}
-                  onclose={(refocus) => {
-                    languageOpen = false
-                    if (refocus) languageButton?.focus()
-                  }}
-                />
-              {/if}
+                {#snippet trigger({ props })}
+                  <button {...props} class="btn opt" class:open={languageOpen} aria-label={t('settings.languageNow', { name: languageName })}>
+                    {languageName}
+                    {@render chevron()}
+                  </button>
+                {/snippet}
+              </ChoiceMenu>
             </div>
           </div>
         </div>
