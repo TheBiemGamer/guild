@@ -21,8 +21,8 @@ use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
 use super::tool::{
-    InstallEvent, LaunchOptions, SaveSync, SyncOutcome, last_error, read_json, run_with_timeout,
-    same_drive, split_args,
+    InstallEvent, LaunchOptions, SaveSync, StoreLogin, SyncOutcome, last_error, read_json,
+    run_with_timeout, same_drive, split_args,
 };
 use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
@@ -53,18 +53,6 @@ const LATEST_BUILD_MAX_AGE_SECS: i64 = 6 * 60 * 60;
 /// `api.gog.com/products` answers at most 50 ids per request.
 const BATCH: usize = 50;
 const BATCH_GAP: Duration = Duration::from_millis(500);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
-#[serde(rename = "GogLogin")] // its TypeScript name
-#[serde(rename_all = "camelCase")]
-pub enum Login {
-    /// `gogdl.exe` is in none of the places `tools::GOGDL.exe()` looks.
-    NoGogdl,
-    LoggedOut,
-    LoggedIn,
-    /// gogdl couldn't refresh the login, e.g. offline: keep the last known games.
-    Unreachable,
-}
 
 /// The main login's access token, in memory only. No `Debug`, so it can't reach a log by accident.
 #[derive(Clone)]
@@ -116,14 +104,14 @@ fn lock_auth() -> std::sync::MutexGuard<'static, Option<Creds>> {
 
 /// The login state, and the access token when logged in. Runs gogdl (which refreshes an expired token)
 /// only when the token in memory is missing or about to run out.
-pub fn login() -> (Login, Option<Creds>) {
+pub fn login() -> (StoreLogin, Option<Creds>) {
     if tools::version(&tools::GOGDL).is_none() {
-        return (Login::NoGogdl, None);
+        return (StoreLogin::NoTool, None);
     }
     match auth() {
-        Auth::In(creds) => (Login::LoggedIn, Some(creds)),
-        Auth::Out => (Login::LoggedOut, None),
-        Auth::Unreachable => (Login::Unreachable, None),
+        Auth::In(creds) => (StoreLogin::LoggedIn, Some(creds)),
+        Auth::Out => (StoreLogin::LoggedOut, None),
+        Auth::Unreachable => (StoreLogin::Unreachable, None),
     }
 }
 
@@ -582,10 +570,10 @@ fn json_line(stdout: &[u8]) -> Option<Value> {
 /// A job needs a fresh login: gogdl would otherwise refresh an expired one itself, racing the scan's refresh.
 fn ensure_login() -> Result<(), Error> {
     match login().0 {
-        Login::LoggedIn => Ok(()),
-        Login::NoGogdl => Err(msg!(installGogdlFirst).into()),
-        Login::LoggedOut => Err(msg!(logInGogFirst).into()),
-        Login::Unreachable => Err(msg!(cantReachGog).into()),
+        StoreLogin::LoggedIn => Ok(()),
+        StoreLogin::NoTool => Err(msg!(installGogdlFirst).into()),
+        StoreLogin::LoggedOut => Err(msg!(logInGogFirst).into()),
+        StoreLogin::Unreachable => Err(msg!(cantReachGog).into()),
     }
 }
 

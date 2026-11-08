@@ -445,7 +445,7 @@
         return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
       case 'unreachable':
         return { name: null, problem: t('settings.epicUnreachable'), fix: t('settings.reconnect'), logout: false }
-      case 'noLegendary':
+      case 'noTool':
         return legendaryError
           ? { name: null, problem: legendaryError, fix: null, logout: false }
           : { name: t('settings.needLegendary'), problem: null, fix: null, logout: false }
@@ -463,7 +463,7 @@
         return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
       case 'unreachable':
         return { name: null, problem: t('settings.gogUnreachable'), fix: t('settings.reconnect'), logout: false }
-      case 'noGogdl':
+      case 'noTool':
         return gogdlError
           ? { name: null, problem: gogdlError, fix: null, logout: false }
           : { name: t('settings.needGogdl'), problem: null, fix: null, logout: false }
@@ -481,7 +481,7 @@
         return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
       case 'unreachable':
         return { name: null, problem: t('settings.amazonUnreachable'), fix: t('settings.reconnect'), logout: false }
-      case 'noNile':
+      case 'noTool':
         return nileError
           ? { name: null, problem: nileError, fix: null, logout: false }
           : { name: t('settings.needNile'), problem: null, fix: null, logout: false }
@@ -609,7 +609,7 @@
           <div class="r">
             <div class="logo epic"><StoreIcon provider="epic" size={17} /></div>
             {@render who('Epic Games', epic)}
-            {#if view.epic !== 'noLegendary'}
+            {#if view.epic !== 'noTool'}
               <button
                 class="btn opt"
                 class:open={epicOptions}
@@ -621,7 +621,7 @@
                 {@render chevron()}
               </button>
             {/if}
-            {#if view.epic === 'noLegendary'}
+            {#if view.epic === 'noTool'}
               <button class="btn" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
                 {legendaryJob ? jobLabel('install', legendaryJob) : t('settings.installTool', { tool: 'Legendary' })}
               </button>
@@ -633,7 +633,7 @@
               <button class="btn danger" disabled={busy} onclick={logOut}>{t('settings.logOut')}</button>
             {/if}
           </div>
-          {#if epicOptions && view.epic !== 'noLegendary'}
+          {#if epicOptions && view.epic !== 'noTool'}
             <div class="opts" id="epic-options">
               <div class="row">
                 <label for="epic-folder">{t('settings.installFolder')}</label>
@@ -709,13 +709,13 @@
           <div class="r">
             <div class="logo gog"><StoreIcon provider="gog" size={17} /></div>
             {@render who('GOG', gog)}
-            {#if view.gog !== 'noGogdl'}
+            {#if view.gog !== 'noTool'}
               <button class="btn opt" class:open={gogOptions} aria-expanded={gogOptions} aria-controls="gog-options" onclick={() => (gogOptions = !gogOptions)}>
                 {t('settings.options')}
                 {@render chevron()}
               </button>
             {/if}
-            {#if view.gog === 'noGogdl'}
+            {#if view.gog === 'noTool'}
               <button class="btn" disabled={gogdlJob !== null} aria-live="polite" onclick={installGogdl}>
                 {gogdlJob ? jobLabel('install', gogdlJob) : t('settings.installTool', { tool: 'gogdl' })}
               </button>
@@ -727,7 +727,7 @@
               <button class="btn danger" disabled={busy} onclick={gogLogOut}>{t('settings.logOut')}</button>
             {/if}
           </div>
-          {#if gogOptions && view.gog !== 'noGogdl'}
+          {#if gogOptions && view.gog !== 'noTool'}
             <div class="opts" id="gog-options">
               <div class="row">
                 <label for="gog-folder">{t('settings.installFolder')}</label>
@@ -784,7 +784,7 @@
           <div class="r">
             <div class="logo amazon"><StoreIcon provider="amazon" size={17} /></div>
             {@render who('Amazon Games', amazon)}
-            {#if view.amazon !== 'noNile'}
+            {#if view.amazon !== 'noTool'}
               <button
                 class="btn opt"
                 class:open={amazonOptions}
@@ -796,7 +796,7 @@
                 {@render chevron()}
               </button>
             {/if}
-            {#if view.amazon === 'noNile'}
+            {#if view.amazon === 'noTool'}
               <button class="btn" disabled={nileJob !== null} aria-live="polite" onclick={installNile}>
                 {nileJob ? jobLabel('install', nileJob) : t('settings.installTool', { tool: 'Nile' })}
               </button>
@@ -808,7 +808,7 @@
               <button class="btn danger" disabled={busy} onclick={amazonLogOut}>{t('settings.logOut')}</button>
             {/if}
           </div>
-          {#if amazonOptions && view.amazon !== 'noNile'}
+          {#if amazonOptions && view.amazon !== 'noTool'}
             <div class="opts" id="amazon-options">
               <div class="row">
                 <label for="amazon-folder">{t('settings.installFolder')}</label>

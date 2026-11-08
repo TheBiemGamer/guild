@@ -11,6 +11,18 @@ use serde_json::Value;
 use super::Progress;
 use crate::msg::Msg;
 
+/// An Epic, GOG or Amazon login as its tool (Legendary, gogdl, Nile) reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum StoreLogin {
+    /// The tool's exe is in none of the places `tools::Tool::exe` looks.
+    NoTool,
+    LoggedOut,
+    LoggedIn,
+    /// The tool couldn't confirm the login, e.g. offline: keep the last known games.
+    Unreachable,
+}
+
 /// What a running install reports back.
 #[derive(Debug, Clone)]
 pub enum InstallEvent {

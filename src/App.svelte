@@ -615,7 +615,7 @@
             {/if}
           {/snippet}
         </Grid>
-      {:else if epicEmpty && lib.epic === 'noLegendary'}
+      {:else if epicEmpty && lib.epic === 'noTool'}
         <div class="empty">
           <p>{t('app.noLegendary')}</p>
           <small>{t('app.noLegendaryHint')}</small>

@@ -13,8 +13,9 @@ use crate::bench;
 use crate::cache;
 use crate::entries::{self, Entry};
 use crate::epic_playtime;
-use crate::library::epic::{self, Login};
+use crate::library::epic;
 use crate::library::steam::{self, owned_games, with_owned};
+use crate::library::tool::StoreLogin;
 use crate::library::{Game, Progress, ProviderKind};
 use crate::library::{amazon, gog};
 use crate::msg::Msg;
@@ -88,16 +89,16 @@ pub struct Library {
     total: usize,
     /// Shown when nothing is listed: one line each.
     status: Vec<Msg>,
-    epic: Option<Login>,
+    epic: Option<StoreLogin>,
     /// Epic was set up here and broke (`attention`).
     epic_attention: bool,
     /// Steam rejected the saved login: the settings button carries a dot too.
     steam_attention: bool,
     epic_notice: bool,
-    gog: Option<gog::Login>,
+    gog: Option<StoreLogin>,
     /// The same for GOG.
     gog_attention: bool,
-    amazon: Option<amazon::Login>,
+    amazon: Option<StoreLogin>,
     /// The same for Amazon.
     amazon_attention: bool,
     /// The stores the whole library has a game from, in toolbar order; games the owner added don't count.
@@ -148,9 +149,7 @@ pub fn library(
     }
     let (games, groups) = sections(&s.games, &s.entries, &s.ttb, &s.lists, shown, groups);
     let [epic_attention, gog_attention, amazon_attention] = attentions(
-        s.epic_login,
-        s.gog_login,
-        s.amazon_login,
+        [s.epic_login, s.gog_login, s.amazon_login],
         &s.games,
         s.signed_out,
     );
@@ -190,41 +189,19 @@ fn attention(logged_in: bool, unreachable: bool, has_games: bool, signed_out: bo
     !signed_out && !logged_in && (unreachable || has_games)
 }
 
-/// `attention` for Epic, GOG and Amazon; an unknown state (no online scan yet) raises nothing.
-fn attentions(
-    epic: Option<Login>,
-    gog: Option<gog::Login>,
-    amazon: Option<amazon::Login>,
-    games: &[Game],
-    [epic_out, gog_out, amazon_out]: [bool; 3],
-) -> [bool; 3] {
-    let has = |p: ProviderKind| games.iter().any(|g| g.provider == p);
-    [
-        epic.is_some_and(|l| {
+/// `attention` for Epic, GOG and Amazon, in that order; an unknown state (no online scan yet) raises nothing.
+fn attentions(logins: [Option<StoreLogin>; 3], games: &[Game], signed_out: [bool; 3]) -> [bool; 3] {
+    let stores = [ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Amazon];
+    std::array::from_fn(|i| {
+        logins[i].is_some_and(|l| {
             attention(
-                l == Login::LoggedIn,
-                l == Login::Unreachable,
-                has(ProviderKind::Epic),
-                epic_out,
+                l == StoreLogin::LoggedIn,
+                l == StoreLogin::Unreachable,
+                games.iter().any(|g| g.provider == stores[i]),
+                signed_out[i],
             )
-        }),
-        gog.is_some_and(|l| {
-            attention(
-                l == gog::Login::LoggedIn,
-                l == gog::Login::Unreachable,
-                has(ProviderKind::Gog),
-                gog_out,
-            )
-        }),
-        amazon.is_some_and(|l| {
-            attention(
-                l == amazon::Login::LoggedIn,
-                l == amazon::Login::Unreachable,
-                has(ProviderKind::Amazon),
-                amazon_out,
-            )
-        }),
-    ]
+        })
+    })
 }
 
 /// The cards in group order, and the groups over them; without groups (Title), in `shown` order.
@@ -419,7 +396,7 @@ fn refresh_epic_playtime(app: AppHandle) {
         let state = app.state::<AppState>();
         {
             let mut s = state.lock();
-            if s.playtime_running || s.epic_login != Some(Login::LoggedIn) {
+            if s.playtime_running || s.epic_login != Some(StoreLogin::LoggedIn) {
                 return;
             }
             s.playtime_running = true;
@@ -446,7 +423,7 @@ pub(super) fn refresh_gog_playtime(app: AppHandle, only: Option<String>) {
         let opened = only.is_some();
         let keys: Vec<String> = {
             let mut s = state.lock();
-            if s.gog_playtime_running || s.gog_login != Some(gog::Login::LoggedIn) {
+            if s.gog_playtime_running || s.gog_login != Some(StoreLogin::LoggedIn) {
                 return;
             }
             s.gog_playtime_running = true;
@@ -743,9 +720,9 @@ fn rescan_now(app: &AppHandle, online: bool) -> bool {
         signed_out(
             &state,
             [
-                e == Login::LoggedIn,
-                g == gog::Login::LoggedIn,
-                a == amazon::Login::LoggedIn,
+                e == StoreLogin::LoggedIn,
+                g == StoreLogin::LoggedIn,
+                a == StoreLogin::LoggedIn,
             ],
         )
     });
@@ -827,7 +804,7 @@ fn scan(
     owned: Option<&[Game]>,
     dirs: &cache::Dirs,
     http: &reqwest::Client,
-) -> (ScanResults, Option<(Login, gog::Login, amazon::Login)>) {
+) -> (ScanResults, Option<(StoreLogin, StoreLogin, StoreLogin)>) {
     let steam = steam::list_games()
         .map_err(Msg::from)
         .map(|installed| match owned {
@@ -864,15 +841,15 @@ const AMAZON_QUIET: &str = "Amazon unavailable";
 
 /// Only a logged-in Epic is listed. Any other state is an `Err`, so `merge` keeps the cached Epic games.
 fn epic_result(
-    login: Login,
+    login: StoreLogin,
     list: impl FnOnce() -> Result<Vec<Game>, Msg>,
 ) -> Result<Vec<Game>, Msg> {
     let quiet = |why: &str| Err(Msg::system(format!("{EPIC_QUIET}: {why}")));
     match login {
-        Login::LoggedIn => list(),
-        Login::LoggedOut => quiet("not logged in"),
-        Login::NoLegendary => quiet("Legendary isn't installed"),
-        Login::Unreachable => quiet("Legendary couldn't reach Epic"),
+        StoreLogin::LoggedIn => list(),
+        StoreLogin::LoggedOut => quiet("not logged in"),
+        StoreLogin::NoTool => quiet("Legendary isn't installed"),
+        StoreLogin::Unreachable => quiet("Legendary couldn't reach Epic"),
     }
 }
 
@@ -880,20 +857,20 @@ fn epic_result(
 const EPIC_QUIET: &str = "Epic unavailable";
 
 /// True only when Epic went from logged in to logged out between two scans.
-fn logged_out_since_last_run(previous: Option<&str>, now: Login) -> bool {
-    previous == Some("loggedIn") && now == Login::LoggedOut
+fn logged_out_since_last_run(previous: Option<&str>, now: StoreLogin) -> bool {
+    previous == Some("loggedIn") && now == StoreLogin::LoggedOut
 }
 
 const EPIC_LAST_LOGIN: &str = "epic_last_login";
 
 /// Compares with the state stored by the last scan, raises the notice on a fresh logout and stores the new state.
 /// `Unreachable` says nothing about the login, so it leaves the stored state alone.
-fn note_epic_login(state: &AppState, s: &mut Shared, login: Login) {
+fn note_epic_login(state: &AppState, s: &mut Shared, login: StoreLogin) {
     let name = match login {
-        Login::LoggedIn => "loggedIn",
-        Login::LoggedOut => "loggedOut",
-        Login::NoLegendary => "noLegendary",
-        Login::Unreachable => return,
+        StoreLogin::LoggedIn => "loggedIn",
+        StoreLogin::LoggedOut => "loggedOut",
+        StoreLogin::NoTool => "noLegendary",
+        StoreLogin::Unreachable => return,
     };
     let stored = cache::db::open(&state.dirs.db).and_then(|c| {
         let previous = cache::db::setting(&c, EPIC_LAST_LOGIN)?;
@@ -907,8 +884,8 @@ fn note_epic_login(state: &AppState, s: &mut Shared, login: Login) {
 }
 
 /// Whether the "logged out of Epic" notice shows after a scan found `login`. Logging back in clears it.
-fn epic_notice(showing: bool, previous: Option<&str>, login: Login) -> bool {
-    login != Login::LoggedIn && (showing || logged_out_since_last_run(previous, login))
+fn epic_notice(showing: bool, previous: Option<&str>, login: StoreLogin) -> bool {
+    login != StoreLogin::LoggedIn && (showing || logged_out_since_last_run(previous, login))
 }
 
 struct Merged {
@@ -1364,11 +1341,17 @@ mod tests {
 
     #[test]
     fn epic_result_keeps_cache_when_not_logged_in() {
-        for login in [Login::LoggedOut, Login::NoLegendary, Login::Unreachable] {
+        for login in [
+            StoreLogin::LoggedOut,
+            StoreLogin::NoTool,
+            StoreLogin::Unreachable,
+        ] {
             assert!(epic_result(login, || panic!("must not list")).is_err());
         }
         assert_eq!(
-            epic_result(Login::LoggedIn, || Ok(vec![])).unwrap().len(),
+            epic_result(StoreLogin::LoggedIn, || Ok(vec![]))
+                .unwrap()
+                .len(),
             0
         );
     }
@@ -1377,7 +1360,11 @@ mod tests {
     fn quiet_epic_states_add_no_status_error() {
         let mut epic_game = game("Fortnite", true, None, None);
         epic_game.provider = ProviderKind::Epic;
-        for login in [Login::LoggedOut, Login::NoLegendary, Login::Unreachable] {
+        for login in [
+            StoreLogin::LoggedOut,
+            StoreLogin::NoTool,
+            StoreLogin::Unreachable,
+        ] {
             let results = vec![(
                 ProviderKind::Epic,
                 epic_result(login, || panic!("must not list")),
@@ -1422,109 +1409,44 @@ mod tests {
         ];
         // Never set up: no tool, or never logged in, with no games cached.
         assert_eq!(
-            attentions(
-                Some(Login::NoLegendary),
-                Some(gog::Login::NoGogdl),
-                Some(amazon::Login::NoNile),
-                &none,
-                [false; 3]
-            ),
+            attentions([Some(StoreLogin::NoTool); 3], &none, [false; 3]),
             [false; 3]
         );
         assert_eq!(
-            attentions(
-                Some(Login::LoggedOut),
-                Some(gog::Login::LoggedOut),
-                Some(amazon::Login::LoggedOut),
-                &none,
-                [false; 3]
-            ),
+            attentions([Some(StoreLogin::LoggedOut); 3], &none, [false; 3]),
             [false; 3]
         );
         // Used before (games cached), then logged out or the tool went missing.
         assert_eq!(
-            attentions(
-                Some(Login::LoggedOut),
-                Some(gog::Login::LoggedOut),
-                Some(amazon::Login::LoggedOut),
-                &all,
-                [false; 3]
-            ),
+            attentions([Some(StoreLogin::LoggedOut); 3], &all, [false; 3]),
             [true; 3]
         );
         assert_eq!(
-            attentions(
-                Some(Login::NoLegendary),
-                Some(gog::Login::NoGogdl),
-                Some(amazon::Login::NoNile),
-                &all,
-                [false; 3]
-            ),
+            attentions([Some(StoreLogin::NoTool); 3], &all, [false; 3]),
             [true; 3]
         );
         // A login that can't be checked is always a problem.
-        let unreachable = (
-            Some(Login::Unreachable),
-            Some(gog::Login::Unreachable),
-            Some(amazon::Login::Unreachable),
-        );
-        assert_eq!(
-            attentions(
-                unreachable.0,
-                unreachable.1,
-                unreachable.2,
-                &none,
-                [false; 3]
-            ),
-            [true; 3]
-        );
+        let unreachable = [Some(StoreLogin::Unreachable); 3];
+        assert_eq!(attentions(unreachable, &none, [false; 3]), [true; 3]);
         // Logged in, or not known yet: no dot.
         assert_eq!(
-            attentions(
-                Some(Login::LoggedIn),
-                Some(gog::Login::LoggedIn),
-                Some(amazon::Login::LoggedIn),
-                &all,
-                [false; 3]
-            ),
+            attentions([Some(StoreLogin::LoggedIn); 3], &all, [false; 3]),
             [false; 3]
         );
-        assert_eq!(attentions(None, None, None, &all, [false; 3]), [false; 3]);
+        assert_eq!(attentions([None; 3], &all, [false; 3]), [false; 3]);
         // Each store counts only its own games.
         let gog_only = [copy(ProviderKind::Gog)];
         assert_eq!(
-            attentions(
-                Some(Login::LoggedOut),
-                Some(gog::Login::LoggedOut),
-                Some(amazon::Login::LoggedOut),
-                &gog_only,
-                [false; 3]
-            ),
+            attentions([Some(StoreLogin::LoggedOut); 3], &gog_only, [false; 3]),
             [false, true, false]
         );
         // Logged out on purpose: no dot, cached games or not, and an unreachable store isn't expected to answer.
-        let logged_out = (
-            Some(Login::LoggedOut),
-            Some(gog::Login::LoggedOut),
-            Some(amazon::Login::LoggedOut),
-        );
-        assert_eq!(
-            attentions(logged_out.0, logged_out.1, logged_out.2, &all, [true; 3]),
-            [false; 3]
-        );
-        assert_eq!(
-            attentions(unreachable.0, unreachable.1, unreachable.2, &all, [true; 3]),
-            [false; 3]
-        );
+        let logged_out = [Some(StoreLogin::LoggedOut); 3];
+        assert_eq!(attentions(logged_out, &all, [true; 3]), [false; 3]);
+        assert_eq!(attentions(unreachable, &all, [true; 3]), [false; 3]);
         // Only the store logged out of on purpose stays quiet.
         assert_eq!(
-            attentions(
-                logged_out.0,
-                logged_out.1,
-                logged_out.2,
-                &all,
-                [false, true, false]
-            ),
+            attentions(logged_out, &all, [false, true, false]),
             [true, false, true]
         );
     }
@@ -1572,28 +1494,28 @@ mod tests {
     fn logged_out_notice_only_on_change() {
         assert!(logged_out_since_last_run(
             Some("loggedIn"),
-            Login::LoggedOut
+            StoreLogin::LoggedOut
         ));
         assert!(!logged_out_since_last_run(
             Some("loggedOut"),
-            Login::LoggedOut
+            StoreLogin::LoggedOut
         ));
-        assert!(!logged_out_since_last_run(None, Login::LoggedOut));
+        assert!(!logged_out_since_last_run(None, StoreLogin::LoggedOut));
         assert!(!logged_out_since_last_run(
             Some("loggedIn"),
-            Login::Unreachable
+            StoreLogin::Unreachable
         ));
     }
 
     #[test]
     fn logging_back_in_clears_the_notice() {
-        assert!(epic_notice(false, Some("loggedIn"), Login::LoggedOut));
+        assert!(epic_notice(false, Some("loggedIn"), StoreLogin::LoggedOut));
         assert!(
-            epic_notice(true, Some("loggedOut"), Login::LoggedOut),
+            epic_notice(true, Some("loggedOut"), StoreLogin::LoggedOut),
             "stays until dismissed"
         );
-        assert!(!epic_notice(true, Some("loggedOut"), Login::LoggedIn));
-        assert!(!epic_notice(true, Some("loggedIn"), Login::LoggedIn));
+        assert!(!epic_notice(true, Some("loggedOut"), StoreLogin::LoggedIn));
+        assert!(!epic_notice(true, Some("loggedIn"), StoreLogin::LoggedIn));
     }
 
     #[test]
@@ -1699,11 +1621,11 @@ mod tests {
             groups,
             total: entries.len(),
             status: vec![msg!(storeError, store = "GOG", reason = msg!(cantReachGog))],
-            epic: Some(Login::LoggedIn),
+            epic: Some(StoreLogin::LoggedIn),
             epic_attention: false,
             steam_attention: false,
             epic_notice: false,
-            gog: Some(gog::Login::Unreachable),
+            gog: Some(StoreLogin::Unreachable),
             gog_attention: true,
             amazon: None,
             amazon_attention: false,

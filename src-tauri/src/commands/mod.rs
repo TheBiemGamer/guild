@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 use crate::cache::{self, Dirs};
 use crate::entries::{self, Entry};
 use crate::igdb;
-use crate::library::epic::Login;
+use crate::library::tool::StoreLogin;
 use crate::library::{Game, Progress, unix_now};
 
 /// Covers fetched and shrunk at once. A cold fast scroll asks for hundreds; each decode holds ~8 MB.
@@ -63,9 +63,9 @@ struct Shared {
     entries: Vec<Entry>,
     /// Shown when nothing is listed.
     status: Vec<crate::msg::Msg>,
-    epic_login: Option<Login>,
-    gog_login: Option<crate::library::gog::Login>,
-    amazon_login: Option<crate::library::amazon::Login>,
+    epic_login: Option<StoreLogin>,
+    gog_login: Option<StoreLogin>,
+    amazon_login: Option<StoreLogin>,
     /// Epic, GOG and Amazon logged out on purpose (`settings::signed_out`), read with the logins.
     signed_out: [bool; 3],
     /// Epic logged out since the last run; shown once until dismissed.

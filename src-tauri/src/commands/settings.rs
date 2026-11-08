@@ -24,7 +24,8 @@ use crate::cache;
 use crate::epic_login;
 use crate::gog_login;
 use crate::library::ProviderKind;
-use crate::library::epic::{self, Login};
+use crate::library::epic;
+use crate::library::tool::StoreLogin;
 use crate::library::{amazon, gog};
 use crate::msg::Msg;
 use crate::settings;
@@ -304,15 +305,15 @@ pub struct SettingsView {
     /// Whether Steam is installed on this PC.
     steam: bool,
     steam_library: SteamLibrary,
-    epic: Option<Login>,
+    epic: Option<StoreLogin>,
     /// The logged-in Epic account's display name, when Legendary's session file has one.
     epic_account: Option<String>,
     epic_install_dir: Option<String>,
-    gog: Option<gog::Login>,
+    gog: Option<StoreLogin>,
     /// The logged-in GOG account's name, once a GOG scan has fetched it.
     gog_account: Option<String>,
     gog_install_dir: Option<String>,
-    amazon: Option<amazon::Login>,
+    amazon: Option<StoreLogin>,
     /// The logged-in Amazon account's first name, from Nile's file.
     amazon_account: Option<String>,
     amazon_install_dir: Option<String>,
@@ -342,19 +343,19 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         let conn = cache::db::open(&state.dirs.db)?;
         let saved = settings::load(&conn);
         let epic = state.lock().epic_login;
-        let epic_account = if epic == Some(Login::LoggedIn) {
+        let epic_account = if epic == Some(StoreLogin::LoggedIn) {
             crate::epic_playtime::account_name()
         } else {
             None
         };
         let gog = state.lock().gog_login;
-        let gog_account = if gog == Some(gog::Login::LoggedIn) {
+        let gog_account = if gog == Some(StoreLogin::LoggedIn) {
             gog::account_name(&conn)
         } else {
             None
         };
         let amazon = state.lock().amazon_login;
-        let amazon_account = if amazon == Some(amazon::Login::LoggedIn) {
+        let amazon_account = if amazon == Some(StoreLogin::LoggedIn) {
             amazon::account_name()
         } else {
             None
@@ -855,13 +856,13 @@ async fn password_login(
 
 /// Steam's answer as a short message. Never includes what the user typed.
 fn login_message(e: &ConnectionError) -> Msg {
-    use ConnectionError::{LoginError as Login, Network};
+    use ConnectionError::{LoginError as StoreLogin, Network};
     match e {
-        Login(LoginError::InvalidCredentials)
+        StoreLogin(LoginError::InvalidCredentials)
         | Network(NetworkError::ApiError(EResult::InvalidPassword)) => {
             msg!(wrongPassword)
         }
-        Login(LoginError::RateLimited)
+        StoreLogin(LoginError::RateLimited)
         | Network(NetworkError::ApiError(EResult::RateLimitExceeded)) => {
             msg!(tooManyTries)
         }
@@ -1021,10 +1022,10 @@ mod tests {
                 account: Some("test-account".into()),
                 attention: false,
             },
-            epic: Some(Login::LoggedIn),
+            epic: Some(StoreLogin::LoggedIn),
             epic_account: Some("Test".into()),
             epic_install_dir: Some(r"D:\Games\Epic".into()),
-            gog: Some(gog::Login::LoggedOut),
+            gog: Some(StoreLogin::LoggedOut),
             gog_account: None,
             gog_install_dir: None,
             amazon: None,

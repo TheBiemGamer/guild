@@ -18,24 +18,13 @@ use serde_json::Value;
 use crate::msg::Msg;
 
 use super::tool::{
-    InstallEvent, LaunchOptions, SaveSync, SyncOutcome, is_error_line, last_error,
+    InstallEvent, LaunchOptions, SaveSync, StoreLogin, SyncOutcome, is_error_line, last_error,
     run_with_timeout, same_drive, split_args,
 };
 
 use super::{
     Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum Login {
-    /// `legendary.exe` is in none of the places `tools::LEGENDARY.exe()` looks.
-    NoLegendary,
-    LoggedOut,
-    LoggedIn,
-    /// Legendary ran but couldn't confirm the login, e.g. offline: keep the last known games.
-    Unreachable,
-}
 
 pub fn list_games() -> Result<Vec<Game>, Error> {
     Ok(games(&json(&["list", "--json"])?, &installed_list()?))
@@ -473,16 +462,16 @@ pub fn is_running(exe: &str) -> bool {
     super::process_listed(&format!("IMAGENAME eq {exe}"), exe)
 }
 
-pub fn login_state() -> Login {
+pub fn login_state() -> StoreLogin {
     match json(&["status", "--json"]) {
-        Ok(status) if status["account"] == "<not logged in>" => Login::LoggedOut,
-        Ok(_) => Login::LoggedIn,
-        Err(Error::Io(e)) if e.kind() == ErrorKind::NotFound => Login::NoLegendary,
+        Ok(status) if status["account"] == "<not logged in>" => StoreLogin::LoggedOut,
+        Ok(_) => StoreLogin::LoggedIn,
+        Err(Error::Io(e)) if e.kind() == ErrorKind::NotFound => StoreLogin::NoTool,
         // `status` refreshes the session online and exits 1 when that fails.
         // shortcut: an expired session also lands here; it needs `legendary auth --delete` before "Log in" shows.
         Err(e) => {
             tracing::warn!("legendary status: {e}");
-            Login::Unreachable
+            StoreLogin::Unreachable
         }
     }
 }

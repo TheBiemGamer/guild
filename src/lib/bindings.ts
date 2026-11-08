@@ -238,12 +238,6 @@ export type Action = "play" |
 /**  Epic and GOG move the folder to `dest`; Steam opens its storage manager. */
 "move";
 
-export type AmazonLogin = 
-/**  `nile.exe` is in none of the places `tools::NILE.exe()` looks. */
-"noNile" | "loggedOut" | "loggedIn" | 
-/**  The last `library sync` failed for another reason than the login, e.g. offline: keep the last known games. */
-"unreachable";
-
 export type Card = {
 	key: string,
 	/**  The copy key Play and Install use (`entries::default_copy`). */
@@ -374,12 +368,6 @@ export type GameInfo = {
 	hasDlc?: boolean | null,
 };
 
-export type GogLogin = 
-/**  `gogdl.exe` is in none of the places `tools::GOGDL.exe()` looks. */
-"noGogdl" | "loggedOut" | "loggedIn" | 
-/**  gogdl couldn't refresh the login, e.g. offline: keep the last known games. */
-"unreachable";
-
 export type GridCover = {
 	/**  The full image, passed back to `save_custom_game`. */
 	url: string,
@@ -414,16 +402,16 @@ export type Library = {
 	total: number,
 	/**  Shown when nothing is listed: one line each. */
 	status: Msg[],
-	epic: Login | null,
+	epic: StoreLogin | null,
 	/**  Epic was set up here and broke (`attention`). */
 	epicAttention: boolean,
 	/**  Steam rejected the saved login: the settings button carries a dot too. */
 	steamAttention: boolean,
 	epicNotice: boolean,
-	gog: GogLogin | null,
+	gog: StoreLogin | null,
 	/**  The same for GOG. */
 	gogAttention: boolean,
-	amazon: AmazonLogin | null,
+	amazon: StoreLogin | null,
 	/**  The same for Amazon. */
 	amazonAttention: boolean,
 	/**  The stores the whole library has a game from, in toolbar order; games the owner added don't count. */
@@ -431,12 +419,6 @@ export type Library = {
 };
 
 export type LinkKind = "steamStore" | "epicStore" | "pcGamingWiki" | "steamDb" | "protonDb";
-
-export type Login = 
-/**  `legendary.exe` is in none of the places `tools::LEGENDARY.exe()` looks. */
-"noLegendary" | "loggedOut" | "loggedIn" | 
-/**  Legendary ran but couldn't confirm the login, e.g. offline: keep the last known games. */
-"unreachable";
 
 /**  One answer to the password login. Never carries the password, the code or the token. */
 export type LoginStep = 
@@ -526,15 +508,15 @@ export type SettingsView = {
 	/**  Whether Steam is installed on this PC. */
 	steam: boolean,
 	steamLibrary: SteamLibrary,
-	epic: Login | null,
+	epic: StoreLogin | null,
 	/**  The logged-in Epic account's display name, when Legendary's session file has one. */
 	epicAccount: string | null,
 	epicInstallDir: string | null,
-	gog: GogLogin | null,
+	gog: StoreLogin | null,
 	/**  The logged-in GOG account's name, once a GOG scan has fetched it. */
 	gogAccount: string | null,
 	gogInstallDir: string | null,
-	amazon: AmazonLogin | null,
+	amazon: StoreLogin | null,
 	/**  The logged-in Amazon account's first name, from Nile's file. */
 	amazonAccount: string | null,
 	amazonInstallDir: string | null,
@@ -578,6 +560,13 @@ export type SteamLibrary = {
 export type Store = "steam" | "epic" | "gog" | "amazon" | 
 /**  A program the owner added (`custom_games`); never merged with a store copy. */
 "custom";
+
+/**  An Epic, GOG or Amazon login as its tool (Legendary, gogdl, Nile) reports it. */
+export type StoreLogin = 
+/**  The tool's exe is in none of the places `tools::Tool::exe` looks. */
+"noTool" | "loggedOut" | "loggedIn" | 
+/**  The tool couldn't confirm the login, e.g. offline: keep the last known games. */
+"unreachable";
 
 /**  Seconds; `None` when unknown. */
 export type TimeToBeat = {

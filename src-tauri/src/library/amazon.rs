@@ -21,31 +21,19 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::gog::{Fed, feed, inside, parse_progress};
-use super::tool::{InstallEvent, LaunchOptions, read_json, same_drive, split_args};
+use super::tool::{InstallEvent, LaunchOptions, StoreLogin, read_json, same_drive, split_args};
 use super::{Art, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::info::{self, GameInfo};
 use crate::msg::Msg;
 use crate::tools;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
-#[serde(rename = "AmazonLogin")] // its TypeScript name
-#[serde(rename_all = "camelCase")]
-pub enum Login {
-    /// `nile.exe` is in none of the places `tools::NILE.exe()` looks.
-    NoNile,
-    LoggedOut,
-    LoggedIn,
-    /// The last `library sync` failed for another reason than the login, e.g. offline: keep the last known games.
-    Unreachable,
-}
-
 /// Held by every nile run but `--version`, so only one runs at a time. A scan only tries it.
 static NILE: Mutex<()> = Mutex::new(());
 /// A queue job holds `NILE` for its whole download: other nile runs refuse instead of waiting for it.
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 /// What the last `library sync` said about the login, for a scan that skips its sync while nile is busy.
-static SYNCED: Mutex<Option<Login>> = Mutex::new(None);
+static SYNCED: Mutex<Option<StoreLogin>> = Mutex::new(None);
 
 /// The first run of a nile build downloads Amazon's FuelSDK before anything else, so these are generous. nile sets no
 /// HTTP timeouts of its own: a dead connection would hang it forever.
@@ -100,7 +88,7 @@ impl Drop for Downloading {
     }
 }
 
-fn set_synced(login: Login) {
+fn set_synced(login: StoreLogin) {
     *SYNCED.lock().unwrap_or_else(|e| e.into_inner()) = Some(login);
 }
 
@@ -161,19 +149,19 @@ fn last_error(log: &str) -> Option<&str> {
 
 /// What `nile library sync` says about the login. Only a refresh Amazon answered (`<Response [400]>`) is a logout; a
 /// refresh that failed on the network, a traceback or no answer at all is `Unreachable`.
-fn classify_sync(output: Option<&Output>) -> Login {
+fn classify_sync(output: Option<&Output>) -> StoreLogin {
     let Some(output) = output else {
-        return Login::Unreachable;
+        return StoreLogin::Unreachable;
     };
     let log = String::from_utf8_lossy(&output.stderr);
     if output.status.success() && log.contains("Successfully synced the library") {
-        Login::LoggedIn
+        StoreLogin::LoggedIn
     } else if log.contains("User not logged in")
         || log.contains("Failed to refresh the token <Response [")
     {
-        Login::LoggedOut
+        StoreLogin::LoggedOut
     } else {
-        Login::Unreachable
+        StoreLogin::Unreachable
     }
 }
 
@@ -205,16 +193,16 @@ pub fn account_name() -> Option<String> {
 
 /// The login state: no Nile, no account in its file, else what the last sync said. Before any sync this run (a
 /// download held nile through the first scan), nile was logged in when that download started.
-pub fn login() -> Login {
+pub fn login() -> StoreLogin {
     if tools::version(&tools::NILE).is_none() {
-        Login::NoNile
+        StoreLogin::NoTool
     } else if !has_user(&cfg()) {
-        Login::LoggedOut
+        StoreLogin::LoggedOut
     } else {
         SYNCED
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .unwrap_or(Login::LoggedIn)
+            .unwrap_or(StoreLogin::LoggedIn)
     }
 }
 
@@ -271,7 +259,7 @@ pub fn register(sign_in: &SignIn, code: &str) -> Result<(), Error> {
     let output = run_short(nile(args), SYNC_TIMEOUT).ok_or(msg!(cantReachAmazon))?;
     // Sic: nile's own spelling.
     if String::from_utf8_lossy(&output.stderr).contains("Succesfully registered a device") {
-        set_synced(Login::LoggedIn);
+        set_synced(StoreLogin::LoggedIn);
         Ok(())
     } else {
         tracing::warn!(
@@ -290,7 +278,7 @@ pub fn log_out() -> Result<(), Error> {
         tracing::warn!("nile auth --logout: no answer");
     }
     forget_login(&cfg()).map_err(|e| msg!(cantLogOutAmazon, detail = e.to_string()))?;
-    set_synced(Login::LoggedOut);
+    set_synced(StoreLogin::LoggedOut);
     Ok(())
 }
 
@@ -328,7 +316,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
     }
     let cfg = cfg();
     if !has_user(&cfg) {
-        set_synced(Login::LoggedOut);
+        set_synced(StoreLogin::LoggedOut);
         return Err("not logged in".into());
     }
     let conn = db::open(&dirs.db)?;
@@ -338,7 +326,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         let output = run_short(nile(["library", "sync"]), SYNC_TIMEOUT);
         let login = classify_sync(output.as_ref());
         set_synced(login);
-        if login != Login::LoggedIn {
+        if login != StoreLogin::LoggedIn {
             if let Some(error) = output
                 .as_ref()
                 .and_then(|o| last_error(&String::from_utf8_lossy(&o.stderr)).map(str::to_owned))
@@ -1176,30 +1164,33 @@ mod tests {
     #[test]
     fn sync_output_is_classified() {
         let sync = |code, name| classify_sync(Some(&output(code, &fixture(name))));
-        assert_eq!(sync(0, "nile-sync-ok-stderr.txt"), Login::LoggedIn);
+        assert_eq!(sync(0, "nile-sync-ok-stderr.txt"), StoreLogin::LoggedIn);
         assert_eq!(
             sync(1, "nile-sync-not-logged-in-stderr.txt"),
-            Login::LoggedOut
+            StoreLogin::LoggedOut
         );
         assert_eq!(
             sync(1, "nile-sync-refresh-rejected-stderr.txt"),
-            Login::LoggedOut
+            StoreLogin::LoggedOut
         );
-        assert_eq!(sync(1, "nile-sync-offline-stderr.txt"), Login::Unreachable);
+        assert_eq!(
+            sync(1, "nile-sync-offline-stderr.txt"),
+            StoreLogin::Unreachable
+        );
         // nile exits 0 after logged errors: only the success line counts.
         assert_eq!(
             classify_sync(Some(&output(
                 0,
                 b"INFO [LIBRARY]:\t Synchronizing library\n"
             ))),
-            Login::Unreachable
+            StoreLogin::Unreachable
         );
         assert_eq!(
             classify_sync(Some(&output(1, b"Successfully synced the library"))),
-            Login::Unreachable
+            StoreLogin::Unreachable
         );
         // The deadline passed.
-        assert_eq!(classify_sync(None), Login::Unreachable);
+        assert_eq!(classify_sync(None), StoreLogin::Unreachable);
     }
 
     #[test]
@@ -1876,7 +1867,7 @@ mod tests {
                 .is_dir()
         );
         let sync = run_short(nile_in(config, ["library", "sync"]), SYNC_TIMEOUT);
-        assert_eq!(classify_sync(sync.as_ref()), Login::LoggedOut);
+        assert_eq!(classify_sync(sync.as_ref()), StoreLogin::LoggedOut);
         let login = run_short(
             nile_in(config, ["auth", "--login", "--non-interactive"]),
             SYNC_TIMEOUT,
