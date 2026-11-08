@@ -16,7 +16,7 @@ pub struct CustomGame {
     pub name: String,
     /// Absolute path of the program.
     pub exe: String,
-    /// As typed; split by `epic::split_args`.
+    /// As typed; split by `tool::split_args`.
     pub args: String,
     /// Unix seconds.
     pub added: i64,
@@ -108,7 +108,7 @@ pub fn check_exe(exe: &str) -> Result<(), Msg> {
 fn command(c: &CustomGame) -> Command {
     let exe = Path::new(&c.exe);
     let mut command = Command::new(exe);
-    command.args(super::epic::split_args(&c.args));
+    command.args(super::tool::split_args(&c.args));
     if let Some(dir) = exe.parent() {
         command.current_dir(dir);
     }

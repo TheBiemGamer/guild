@@ -5,9 +5,10 @@ pub mod custom;
 pub mod epic;
 pub mod gog;
 pub mod steam;
+pub mod tool;
 
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// What store, tool, database and file work can fail with. `Msg::from` is the one place it becomes text for the
 /// owner: a `Msg` stays as it is, everything else is `system` with its own words as the detail.
@@ -200,6 +201,13 @@ pub fn open_url(url: &str) -> Result<(), Error> {
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
     Ok(())
+}
+
+/// Seconds since the Unix epoch, as the database stores times; 0 if the clock is before 1970.
+pub fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// Percent-encodes every byte except RFC 3986 unreserved characters: for a URL query value or an

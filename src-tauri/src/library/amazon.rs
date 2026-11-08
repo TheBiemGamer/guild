@@ -14,14 +14,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError, mpsc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::epic::{InstallEvent, LaunchOptions, split_args};
 use super::gog::{Fed, feed, inside, parse_progress};
+use super::tool::{InstallEvent, LaunchOptions, read_json, same_drive, split_args};
 use super::{Art, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::info::{self, GameInfo};
@@ -131,46 +131,18 @@ fn nile_in(config: &Path, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> 
 }
 
 /// Runs `command` to its end, or kills it at `timeout` and returns `None`. Callers hold `NILE`.
-fn run_short(mut command: Command, timeout: Duration) -> Option<Output> {
-    let mut child =
-        crate::platform::spawn_tool(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
-            .inspect_err(|e| tracing::warn!("nile: {e}"))
-            .ok()?;
-    let read = |mut pipe: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            _ = pipe.read_to_end(&mut bytes);
-            bytes
-        })
-    };
-    let stdout = read(Box::new(child.stdout.take()?));
-    let stderr = read(Box::new(child.stderr.take()?));
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(100)),
-            other => {
-                if let Err(e) = other {
-                    tracing::warn!("nile: {e}");
-                } else {
-                    tracing::warn!("nile: no answer in {} s", timeout.as_secs());
-                }
-                // nile is a PyInstaller build: a bootloader and the real program as its child.
-                if let Err(e) = crate::platform::kill_tree(child.id()) {
-                    tracing::warn!("stop nile: {e}");
-                    _ = child.kill();
-                }
-                _ = child.wait();
-                return None;
-            }
+fn run_short(command: Command, timeout: Duration) -> Option<Output> {
+    match super::tool::run_with_timeout(command, b"", timeout) {
+        Ok(Some(output)) => Some(output),
+        Ok(None) => {
+            tracing::warn!("nile: no answer in {} s", timeout.as_secs());
+            None
         }
-    };
-    Some(Output {
-        status,
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
-    })
+        Err(e) => {
+            tracing::warn!("nile: {e}");
+            None
+        }
+    }
 }
 
 /// The last error in a nile log: an `ERROR [NAME]:\t ` line's message, or a traceback's exception line.
@@ -203,10 +175,6 @@ fn classify_sync(output: Option<&Output>) -> Login {
     } else {
         Login::Unreachable
     }
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&fs_err::read(path).ok()?).ok()
 }
 
 /// nile's `current_user.json`: `{"name", "user_id"}`, plain.
@@ -364,7 +332,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         return Err("not logged in".into());
     }
     let conn = db::open(&dirs.db)?;
-    let now = now_secs();
+    let now = super::unix_now();
     let (library, installed) = {
         let _nile = try_lock().ok_or("busy")?;
         let output = run_short(nile(["library", "sync"]), SYNC_TIMEOUT);
@@ -394,12 +362,6 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         .collect();
     let covers = crate::gamesdb::covers(&conn, now);
     Ok(games(&library, &installed, &covers, &updates))
-}
-
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// One `installed.json` entry; keyed by product id.
@@ -568,7 +530,7 @@ pub fn download_size(conn: Option<&Connection>, id: &str) -> Option<u64> {
         &key,
         INSTALL_INFO,
         INSTALL_INFO_MAX_AGE_SECS,
-        now_secs(),
+        super::unix_now(),
         || {
             if !has_user(&cfg()) {
                 return None;
@@ -623,7 +585,7 @@ fn check_updates(conn: Option<&Connection>) -> Option<Vec<String>> {
             UPDATES_KEY,
             UPDATES,
             &serde_json::to_string(&ids).unwrap_or_default(),
-            now_secs(),
+            super::unix_now(),
         );
     }
     Some(ids)
@@ -975,7 +937,7 @@ pub fn import(conn: Option<&Connection>, id: &str, path: &Path) -> Result<(), Er
 
 /// Moves an installed game's folder into `dest` and points nile's record at it. A rename, so only on the same drive.
 pub fn move_to(id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
-    if !super::epic::same_drive(from, dest) {
+    if !same_drive(from, dest) {
         return Err(msg!(otherDriveMove).into());
     }
     let to = dest.join(from.file_name().ok_or(msg!(folderHasNoName))?);

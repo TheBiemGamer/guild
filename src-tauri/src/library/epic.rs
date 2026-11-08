@@ -7,27 +7,24 @@
 //! - `status --json`: `{account: "<not logged in>" | name, …}`
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::os::windows::process::CommandExt;
-use std::path::{Component, Path, PathBuf, Prefix};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::msg::Msg;
 
+use super::tool::{
+    InstallEvent, LaunchOptions, SaveSync, SyncOutcome, is_error_line, last_error,
+    run_with_timeout, same_drive, split_args,
+};
+
 use super::{
     Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind,
 };
-
-/// What a running install reports back.
-#[derive(Debug, Clone)]
-pub enum InstallEvent {
-    /// Legendary's process id, so the install can be cancelled.
-    Started(u32),
-    Progress(Progress),
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -42,39 +39,6 @@ pub enum Login {
 
 pub fn list_games() -> Result<Vec<Game>, Error> {
     Ok(games(&json(&["list", "--json"])?, &installed_list()?))
-}
-
-/// A copy's own launch options, kept in `game_prefs` as JSON. `exe` is relative to the install folder.
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
-)]
-#[serde(rename_all = "camelCase", default)]
-pub struct LaunchOptions {
-    /// Extra game arguments as typed; split by `split_args`.
-    pub args: String,
-    pub offline: bool,
-    pub skip_version_check: bool,
-    pub exe: Option<String>,
-}
-
-/// Splits typed arguments on whitespace; double quotes group. No shell, no variables.
-pub fn split_args(text: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    // Some once a token has started, so `""` gives an empty argument.
-    let mut arg: Option<String> = None;
-    let mut quoted = false;
-    for c in text.chars() {
-        match c {
-            '"' => {
-                quoted = !quoted;
-                arg.get_or_insert_default();
-            }
-            c if c.is_whitespace() && !quoted => args.extend(arg.take()),
-            c => arg.get_or_insert_default().push(c),
-        }
-    }
-    args.extend(arg);
-    args
 }
 
 /// `legendary launch` arguments. Flags from `legendary launch --help` (0.21.1); its "additional arguments
@@ -130,36 +94,6 @@ pub fn launch(
     checked(&command.output()?)
 }
 
-/// Which way `sync-saves` goes. Legendary compares the newest local file with the cloud save's date.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SaveSync {
-    /// Before launch: take a newer cloud save, never upload.
-    Download,
-    /// After the game exits: send a newer local save, never download.
-    Upload,
-    /// Sync now: the newer side wins.
-    Both,
-    /// Keep cloud: download even over a newer local save.
-    KeepCloud,
-    /// Keep local: upload even over a newer cloud save.
-    KeepLocal,
-}
-
-/// What a `sync-saves` run found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyncOutcome {
-    /// Up to date, transferred, or nothing to sync.
-    Synced,
-    /// The local save is newer and uploading was off, so nothing changed.
-    LocalNewer,
-    /// The cloud save is newer and downloading was off, so nothing changed.
-    CloudNewer,
-    /// GOG: both sides changed since the last sync, so nothing changed. Asked like `CloudNewer`.
-    Conflict,
-    /// Why: often the tool's last message, as `system`.
-    Failed(Msg),
-}
-
 /// Flags from `legendary sync-saves --help` (0.21.1).
 fn sync_args(app_name: &str, sync: SaveSync) -> Vec<&str> {
     let mut args = vec!["sync-saves", app_name];
@@ -189,59 +123,9 @@ pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
         SYNC_ANSWERS,
         SYNC_TIMEOUT,
     ) {
-        Ok(Some((success, _, log))) => parse_sync(success, &log),
+        Ok(Some(o)) => parse_sync(o.status.success(), &String::from_utf8_lossy(&o.stderr)),
         Ok(None) => SyncOutcome::Failed(msg!(savesTimedOut)),
         Err(e) => SyncOutcome::Failed(Msg::system(e)),
-    }
-}
-
-/// Runs `command` with `input` on stdin (then closed, so a prompt beyond it ends the process instead of
-/// hanging) and returns whether it succeeded, its stdout and its stderr. `None` when it outlives `timeout`: its
-/// process tree is killed (legendary.exe and gogdl.exe unpack themselves into a child process).
-pub(super) fn run_with_timeout(
-    mut command: Command,
-    input: &[u8],
-    timeout: Duration,
-) -> std::io::Result<Option<(bool, String, String)>> {
-    let mut child = crate::platform::spawn_tool(
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped()),
-    )?;
-    child
-        .stdin
-        .take()
-        .expect("stdin is piped")
-        .write_all(input)?;
-    // Read aside, so a full pipe never stalls the process while this waits.
-    let read = |mut pipe: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            _ = pipe.read_to_end(&mut bytes);
-            String::from_utf8_lossy(&bytes).into_owned()
-        })
-    };
-    let out = read(Box::new(child.stdout.take().expect("stdout is piped")));
-    let err = read(Box::new(child.stderr.take().expect("stderr is piped")));
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(Some((
-                status.success(),
-                out.join().unwrap_or_default(),
-                err.join().unwrap_or_default(),
-            )));
-        }
-        if Instant::now() >= deadline {
-            if let Err(e) = crate::platform::kill_tree(child.id()) {
-                tracing::warn!("stop timed-out sync: {e}");
-                _ = child.kill();
-            }
-            _ = child.wait();
-            return Ok(None);
-        }
-        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -249,14 +133,8 @@ pub(super) fn run_with_timeout(
 /// has no save at all (`date: N/A`) is no conflict: the other side simply goes over next time.
 fn parse_sync(success: bool, log: &str) -> SyncOutcome {
     if !success {
-        let last = log.lines().rev().map(str::trim).find(|l| !l.is_empty());
         // `[cli] ERROR: Login failed!` -> `Login failed!`
-        let message = last.map(|l| {
-            l.split_once(": ")
-                .filter(|(head, _)| head.starts_with('['))
-                .map_or(l, |(_, m)| m)
-        });
-        return SyncOutcome::Failed(message.map_or(msg!(legendaryNoReason), Msg::system));
+        return SyncOutcome::Failed(last_error(log, msg!(legendaryNoReason)));
     }
     let has = |text: &str| log.contains(text);
     if has("Empty input, skipping...") || has("skipping due to --yes") {
@@ -391,19 +269,6 @@ pub fn move_to(
     Ok(log_outcome(success, &log, Some("Finished."))?)
 }
 
-/// Whether two paths are on the same drive (or network share).
-// shortcut: compares path prefixes only; a folder mounted from another disk counts as the same drive.
-pub(crate) fn same_drive(a: &Path, b: &Path) -> bool {
-    let volume = |path: &Path| match path.components().next()? {
-        Component::Prefix(p) => Some(match p.kind() {
-            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => d.to_ascii_uppercase().to_string(),
-            _ => p.as_os_str().to_string_lossy().to_lowercase(),
-        }),
-        _ => None,
-    };
-    volume(a) == volume(b)
-}
-
 /// Makes Legendary take an existing install of an owned game at `path`.
 pub fn import(app_name: &str, path: &str) -> Result<(), Error> {
     import_requires_existing_folder(Path::new(path))?;
@@ -482,7 +347,7 @@ fn parse_verify(success: bool, log: &str) -> Result<Verify, Msg> {
     } else if success && log.contains("Verification failed, ") {
         Ok(Verify::Repair)
     } else {
-        Err(log_error(log))
+        Err(last_error(log, msg!(legendaryNoReason)))
     }
 }
 
@@ -496,29 +361,8 @@ fn log_outcome(success: bool, log: &str, done: Option<&str>) -> Result<(), Msg> 
     if success && finished {
         Ok(())
     } else {
-        Err(log_error(log))
+        Err(last_error(log, msg!(legendaryNoReason)))
     }
-}
-
-/// `[cli] ERROR: …` or `[cli] CRITICAL: …` (`logger.fatal`).
-fn is_error_line(line: &str) -> bool {
-    line.contains("] ERROR: ") || line.contains("] CRITICAL: ")
-}
-
-/// The last error in a log, else its last line, without the `[cli] ERROR: ` head.
-fn log_error(log: &str) -> Msg {
-    let lines = || log.lines().rev().map(str::trim).filter(|l| !l.is_empty());
-    let Some(line) = lines()
-        .find(|l| is_error_line(l))
-        .or_else(|| lines().next())
-    else {
-        return msg!(legendaryNoReason);
-    };
-    Msg::system(
-        line.split_once(": ")
-            .filter(|(head, _)| head.starts_with('['))
-            .map_or(line, |(_, m)| m),
-    )
 }
 
 fn stream(
@@ -866,26 +710,6 @@ mod tests {
     }
 
     #[test]
-    fn split_args_groups_quotes_and_skips_spaces() {
-        assert!(split_args("").is_empty());
-        assert!(split_args("   ").is_empty());
-        assert_eq!(
-            split_args("  -windowed   -w 1280 "),
-            ["-windowed", "-w", "1280"]
-        );
-        assert_eq!(
-            split_args(r#"-name "Big Boss" x"#),
-            ["-name", "Big Boss", "x"]
-        );
-        assert_eq!(
-            split_args(r#"--path="C:\My Games\x" %APPDATA% & del"#),
-            [r"--path=C:\My Games\x", "%APPDATA%", "&", "del"]
-        );
-        assert_eq!(split_args(r#"a "" b"#), ["a", "", "b"]);
-        assert_eq!(split_args(r#""unclosed quote"#), ["unclosed quote"]);
-    }
-
-    #[test]
     fn launch_args_from_options() {
         assert_eq!(
             launch_args("Fn", &LaunchOptions::default(), false),
@@ -1200,35 +1024,6 @@ mod tests {
     }
 
     #[test]
-    fn sync_run_gives_up_after_its_timeout() {
-        let cmd = |script: &str| {
-            let mut command = Command::new("cmd");
-            command
-                .args(["/C", script])
-                .creation_flags(CREATE_NO_WINDOW);
-            command
-        };
-        let started = Instant::now();
-        let stalled = run_with_timeout(
-            cmd("ping -n 30 127.0.0.1 >nul"),
-            b"\n",
-            Duration::from_millis(300),
-        )
-        .unwrap();
-        assert_eq!(stalled, None);
-        assert!(started.elapsed() < Duration::from_secs(10));
-        let done = run_with_timeout(
-            cmd("echo out& echo hi 1>&2"),
-            b"\n",
-            Duration::from_secs(10),
-        )
-        .unwrap()
-        .unwrap();
-        assert!(done.0);
-        assert_eq!((done.1.trim(), done.2.trim()), ("out", "hi"));
-    }
-
-    #[test]
     fn sync_output_decides_the_outcome() {
         let log = |lines: &[&str]| {
             lines
@@ -1352,26 +1147,6 @@ mod tests {
 
     #[test]
     fn moves_stay_on_the_same_drive() {
-        assert!(same_drive(
-            Path::new(r"C:\Games\Goo"),
-            Path::new(r"c:\Other")
-        ));
-        assert!(same_drive(
-            Path::new(r"C:\Games\Goo"),
-            Path::new(r"\\?\C:\Other")
-        ));
-        assert!(!same_drive(
-            Path::new(r"C:\Games\Goo"),
-            Path::new(r"D:\Games")
-        ));
-        assert!(same_drive(
-            Path::new(r"\\nas\games\Goo"),
-            Path::new(r"\\NAS\Games\Other")
-        ));
-        assert!(!same_drive(
-            Path::new(r"\\nas\games\Goo"),
-            Path::new(r"C:\Games")
-        ));
         // Refused before Legendary runs, so no process starts.
         let mut started = false;
         let refused = move_to("Goo", Some(Path::new(r"C:\Games\Goo")), r"D:\Games", |_| {

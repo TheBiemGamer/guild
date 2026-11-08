@@ -11,7 +11,7 @@ pub mod update;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
@@ -19,7 +19,7 @@ use crate::cache::{self, Dirs};
 use crate::entries::{self, Entry};
 use crate::igdb;
 use crate::library::epic::Login;
-use crate::library::{Game, Progress};
+use crate::library::{Game, Progress, unix_now};
 
 /// Covers fetched and shrunk at once. A cold fast scroll asks for hundreds; each decode holds ~8 MB.
 const COVER_JOBS: usize = 8;
@@ -125,7 +125,7 @@ struct Watch {
     /// Its process was seen running, so its end times a play session.
     seen: bool,
     /// How its cloud saves are uploaded once it exits; `None` doesn't sync (always for an added game).
-    upload: Option<crate::library::epic::SaveSync>,
+    upload: Option<crate::library::tool::SaveSync>,
 }
 
 /// How a watch tells its game still runs.
@@ -213,13 +213,6 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 fn allow(app: &AppHandle, path: PathBuf) -> Option<String> {
     app.asset_protocol_scope().allow_file(&path).ok()?;
     Some(path.to_string_lossy().into_owned())
-}
-
-/// Seconds since the Unix epoch, as the database stores times; 0 if the clock is before 1970.
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// Puts native text (tray, toasts, login windows) in the Language setting's language.

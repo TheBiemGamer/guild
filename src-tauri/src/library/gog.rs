@@ -14,13 +14,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
-use super::epic::{InstallEvent, LaunchOptions, SaveSync, SyncOutcome, split_args};
+use super::tool::{
+    InstallEvent, LaunchOptions, SaveSync, SyncOutcome, last_error, read_json, run_with_timeout,
+    same_drive, split_args,
+};
 use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::msg::Msg;
@@ -126,7 +129,7 @@ pub fn login() -> (Login, Option<Creds>) {
 
 fn auth() -> Auth {
     let mut cached = lock_auth();
-    let now = now_secs();
+    let now = super::unix_now() as f64;
     if let Some(creds) = cached.as_ref().filter(|c| c.fresh(now)) {
         return Auth::In(creds.clone());
     }
@@ -190,7 +193,7 @@ pub fn log_in(code: &str) -> Result<(), Error> {
     let answer = serde_json::from_slice::<Value>(&output.stdout)
         .ok()
         .filter(|v| v["error"] != true);
-    match answer.and_then(|v| Creds::parse(&v, now_secs())) {
+    match answer.and_then(|v| Creds::parse(&v, super::unix_now() as f64)) {
         Some(creds) => {
             *cached = Some(creds);
             Ok(())
@@ -237,12 +240,6 @@ fn gogdl(args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Command {
     command
 }
 
-fn now_secs() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64())
-}
-
 /// GOG writes ids as strings or numbers.
 fn id_text(v: &Value) -> Option<String> {
     match v {
@@ -256,7 +253,7 @@ fn id_text(v: &Value) -> Option<String> {
 /// refreshes the cached account name, and marks the installed games with cloud saves. Blocks: call from a blocking thread.
 pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Game>, Error> {
     let conn = db::open(&dirs.db)?;
-    let now = now_secs() as i64;
+    let now = super::unix_now();
     let installs = db::gog_installs(&conn)?;
     let installed: Vec<u64> = installs
         .iter()
@@ -574,12 +571,6 @@ fn support(id: &str) -> PathBuf {
     dir().join("support").join(id)
 }
 
-/// A JSON file, with or without a byte order mark.
-fn read_json(path: &Path) -> Option<Value> {
-    let bytes = fs_err::read(path).ok()?;
-    serde_json::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)).ok()
-}
-
 /// The first line of stdout that is a JSON object: gogdl prints its answers on one line.
 fn json_line(stdout: &[u8]) -> Option<Value> {
     String::from_utf8_lossy(stdout)
@@ -647,7 +638,7 @@ pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
         &key,
         INSTALL_INFO,
         INSTALL_INFO_MAX_AGE_SECS,
-        now_secs() as i64,
+        super::unix_now(),
         || {
             // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
             _ = login();
@@ -659,7 +650,10 @@ pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
                 tracing::warn!(
                     "gogdl info {id}: {} {}",
                     output.status,
-                    last_error(&String::from_utf8_lossy(&output.stderr))
+                    last_error(
+                        &String::from_utf8_lossy(&output.stderr),
+                        msg!(gogdlNoReason)
+                    )
                 );
             }
             Some(info?.to_string())
@@ -902,21 +896,7 @@ fn outcome(run: &Run, done: bool) -> Result<(), Error> {
     if run.success && done && !run.log.contains("CRITICAL:") {
         return Ok(());
     }
-    Err(last_error(&run.log).into())
-}
-
-/// The last error in gogdl's log without its `[NAME] LEVEL: ` head, else its last line.
-fn last_error(log: &str) -> Msg {
-    let lines = || log.lines().rev().map(str::trim).filter(|l| !l.is_empty());
-    let is_error = |l: &&str| l.contains("] ERROR: ") || l.contains("] CRITICAL: ");
-    let Some(line) = lines().find(is_error).or_else(|| lines().next()) else {
-        return msg!(gogdlNoReason);
-    };
-    Msg::system(
-        line.split_once(": ")
-            .filter(|(head, _)| head.starts_with('['))
-            .map_or(line, |(_, m)| m),
-    )
+    Err(last_error(&run.log, msg!(gogdlNoReason)).into())
 }
 
 /// Downloads a game into a folder named after it inside `base`, with its owned DLC or none. Returns that folder.
@@ -1049,7 +1029,10 @@ pub fn import(path: &Path) -> Result<String, Error> {
             tracing::warn!(
                 "gogdl import: {} {}",
                 output.status,
-                last_error(&String::from_utf8_lossy(&output.stderr))
+                last_error(
+                    &String::from_utf8_lossy(&output.stderr),
+                    msg!(gogdlNoReason)
+                )
             );
             Err(msg!(noGogGameIn, path = path.display().to_string()).into())
         }
@@ -1058,7 +1041,7 @@ pub fn import(path: &Path) -> Result<String, Error> {
 
 /// Moves an installed game's folder into `dest` and updates its record. A rename, so only on the same drive.
 pub fn move_to(conn: &Connection, id: &str, from: &Path, dest: &Path) -> Result<(), Error> {
-    if !super::epic::same_drive(from, dest) {
+    if !same_drive(from, dest) {
         return Err(msg!(otherDriveMove).into());
     }
     let to = dest.join(from.file_name().ok_or(msg!(folderHasNoName))?);
@@ -1328,7 +1311,7 @@ fn sync_args(folder: &Path, id: &str, name: &str, ts: &str, sync: SaveSync) -> V
 /// Reads a `save-sync` log (stderr, `[SAVES] …` lines).
 fn sync_outcome(success: bool, log: &str) -> SyncOutcome {
     if !success {
-        SyncOutcome::Failed(last_error(log))
+        SyncOutcome::Failed(last_error(log, msg!(gogdlNoReason)))
     } else if log.contains("Files in conflict") {
         SyncOutcome::Conflict
     } else if log.contains("Refused to download files, newer files locally") {
@@ -1366,7 +1349,7 @@ fn save_stamps(conn: &Connection, key: &str) -> HashMap<String, String> {
 
 fn store_save_stamps(conn: &Connection, key: &str, stamps: &HashMap<String, String>) {
     let json = serde_json::to_string(stamps).unwrap_or_default();
-    if let Err(e) = db::put_info(conn, key, SAVE_TS, &json, now_secs() as i64) {
+    if let Err(e) = db::put_info(conn, key, SAVE_TS, &json, super::unix_now()) {
         tracing::warn!("gog save timestamps: {e}");
     }
 }
@@ -1417,10 +1400,16 @@ pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSyn
             _ = fs_err::create_dir_all(folder);
             let ts = stamps.get(name).map_or("0", String::as_str);
             let command = gogdl(sync_args(folder, id, name, ts, sync));
-            match super::epic::run_with_timeout(command, b"", super::epic::SYNC_TIMEOUT) {
-                Ok(Some((success, stdout, log))) => {
-                    let outcome = sync_outcome(success, &log);
-                    keep_stamp(&mut stamps, name, &outcome, &stdout);
+            match run_with_timeout(command, b"", super::epic::SYNC_TIMEOUT) {
+                Ok(Some(o)) => {
+                    let outcome =
+                        sync_outcome(o.status.success(), &String::from_utf8_lossy(&o.stderr));
+                    keep_stamp(
+                        &mut stamps,
+                        name,
+                        &outcome,
+                        &String::from_utf8_lossy(&o.stdout),
+                    );
                     outcome
                 }
                 Ok(None) => SyncOutcome::Failed(msg!(savesTimedOut)),
