@@ -2,10 +2,31 @@
 
 ## 0.1.1, 2026-11-08
 
+### New
+
+- The Manage tab on a game page groups its actions under Folder, Files and Saves.
+- An empty library offers to open Settings or add a game. A search or filter that matches nothing says so and lets you clear it.
+- Settings shows the folder new games install to by default.
+
 ### Changed
 
 - The app is now called Guild. Your library, settings, logins and Start with Windows carry over the first time it starts.
 - Updating from 0.1.0 installs Guild as a new app. Afterwards, uninstall Game Launcher in Windows Settings → Apps; your library stays.
+- Settings lists each service as a row you can fold open, with the IGDB and SteamGridDB logos.
+- Report a problem opens an issue on the Guild repository.
+- Plainer wording throughout, and Dutch that reads naturally.
+
+### Fixed
+
+- You can't uninstall a game while it runs, or start a game while another one is still uploading its cloud saves.
+- GOG, Amazon and added games are tracked by the process Guild started, so another program with the same name no longer counts as the game running.
+- Legendary, gogdl and Nile close with Guild, even when Guild is ended from Task Manager. Quitting during a download pauses the queue and keeps it for next time.
+- A slow library rescan no longer overwrites the result of a newer one.
+- Hovering over covers no longer starts Legendary, gogdl or Nile for each game.
+- Clearing the cache no longer forgets which cloud saves are in sync.
+- Last played counts by your local calendar day.
+- Removing an added game deletes only that game's own folder.
+- Search has a label and a visible focus ring, and covers tell screen readers which game they open.
 
 ## 0.1.0, 2026-11-07
 
