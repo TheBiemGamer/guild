@@ -62,8 +62,8 @@ src-tauri/src/        Rust backend
   gamesdb.rs          GOG GamesDB lookups (Steam ↔ Epic, GOG and Amazon)
   igdb.rs             how long to beat
 scripts/              benchmark and frontend tests
-docs/superpowers/     design specs, plans and mockups
-DESIGN.md             visual design system: tokens, components, motion
+PRODUCT.md            who Guild is for and what it must stay
+DESIGN.md             visual design system: tokens, components, rules
 CLAUDE.md             rules for AI coding agents working in this repo
 ```
 

@@ -74,6 +74,87 @@
         ],
         "createdAt": "2026-11-05T22:29:20.448Z",
         "reason": "Claude: false positive; the account logo tile sits beside its text in a flex row, not stacked above a heading"
+      },
+      {
+        "rule": "kicker-above-heading",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v2.html"
+        ],
+        "createdAt": "2026-11-07T00:49:34.786Z",
+        "reason": "user confirmed: the Continue-playing banner must stay 1:1 with Continue.svelte, including its kicker"
+      },
+      {
+        "rule": "radial-halo",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v2.html"
+        ],
+        "createdAt": "2026-11-07T00:49:34.976Z",
+        "reason": "DESIGN.md Afterglow: the ambient tint layer behind the app is the documented design; mockup imitates it"
+      },
+      {
+        "rule": "kicker-above-heading",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v3.html"
+        ],
+        "createdAt": "2026-11-07T00:49:35.177Z",
+        "reason": "user confirmed: the Continue-playing banner must stay 1:1 with Continue.svelte, including its kicker"
+      },
+      {
+        "rule": "radial-halo",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v3.html"
+        ],
+        "createdAt": "2026-11-07T00:49:35.384Z",
+        "reason": "DESIGN.md Afterglow: the ambient tint layer behind the app is the documented design; mockup imitates it"
+      },
+      {
+        "rule": "kicker-above-heading",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v4.html"
+        ],
+        "createdAt": "2026-11-07T00:49:35.588Z",
+        "reason": "user confirmed: the Continue-playing banner must stay 1:1 with Continue.svelte, including its kicker"
+      },
+      {
+        "rule": "radial-halo",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v4.html"
+        ],
+        "createdAt": "2026-11-07T00:49:35.781Z",
+        "reason": "DESIGN.md Afterglow: the ambient tint layer behind the app is the documented design; mockup imitates it"
+      },
+      {
+        "rule": "kicker-above-heading",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v5.html"
+        ],
+        "createdAt": "2026-11-07T00:49:36.007Z",
+        "reason": "user confirmed: the Continue-playing banner must stay 1:1 with Continue.svelte, including its kicker"
+      },
+      {
+        "rule": "radial-halo",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v5.html"
+        ],
+        "createdAt": "2026-11-07T00:49:36.206Z",
+        "reason": "DESIGN.md Afterglow: the ambient tint layer behind the app is the documented design; mockup imitates it"
+      },
+      {
+        "rule": "kicker-above-heading",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/6468-1794010770/content/layout-v7.html"
+        ],
+        "createdAt": "2026-11-07T01:01:28.809Z",
+        "reason": "user confirmed: the Continue-playing banner must stay 1:1 with Continue.svelte, including its kicker"
       }
     ]
   }

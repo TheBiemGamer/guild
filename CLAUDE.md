@@ -50,5 +50,5 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 
 ## Docs
 
-- Current spec, plan and mockups: `docs/superpowers/specs/2026-11-06-one-library-design.md`, `docs/superpowers/plans/2026-11-06-one-library.md`, and `docs/superpowers/specs/*mockup*.html`.
-- Progress ledger for the running plan (git-ignored): `.superpowers/sdd/2026-11-06-one-library/progress.md`.
+- `PRODUCT.md`: who Guild is for and what it must stay. `DESIGN.md`: the visual system. `DEVELOPMENT.md`: build, checks and releasing.
+- Specs, plans, briefs, mockups and progress notes for work in progress go in `.superpowers/` (git-ignored), never in `docs/`. When the work ships, fold any lasting decision into `DESIGN.md`, `PRODUCT.md` or this file.
