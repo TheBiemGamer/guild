@@ -1,7 +1,8 @@
 //! The library list, scanning and merging the stores, covers, the featured game and the 2 s poll.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
@@ -678,9 +679,59 @@ fn owned(state: &AppState) -> Option<Vec<Game>> {
     Some(games)
 }
 
-/// Scans, merges and saves; Epic, GOG and Amazon only when `online`. Runs on a blocking thread. Returns whether the
-/// library changed.
+/// Scans, merges and saves; Epic, GOG and Amazon only when `online`. Runs on a blocking thread and waits for a rescan
+/// already running (`ScanTurns`). Returns whether the library changed since the call.
 pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
+    let scans = &app.state::<AppState>().scans;
+    scans.run(scans.ask(), online, || rescan_now(app, online))
+}
+
+/// Rescans one at a time, so a slow older scan never overwrites a newer result. A rescan asked for while one runs
+/// waits, then skips when a scan that started after it asked (and online, if it asked for online) already ran: any
+/// number of callers waiting behind one scan make one more.
+#[derive(Default)]
+pub(super) struct ScanTurns {
+    turn: Mutex<()>,
+    /// Scans started.
+    started: AtomicU64,
+    /// `started` as it was after the last online scan started.
+    online_started: AtomicU64,
+    /// Scans that changed the library.
+    changes: AtomicU64,
+}
+
+impl ScanTurns {
+    /// The scans started and changes made so far, read without waiting.
+    fn ask(&self) -> (u64, u64) {
+        (
+            self.started.load(Ordering::SeqCst),
+            self.changes.load(Ordering::SeqCst),
+        )
+    }
+
+    /// Runs `scan` (which returns whether it changed the library) in turn, unless a scan started after `asked`
+    /// covered it. Returns whether the library changed since `asked`.
+    fn run(&self, asked: (u64, u64), online: bool, scan: impl FnOnce() -> bool) -> bool {
+        let _turn = self.turn.lock().unwrap_or_else(|e| e.into_inner());
+        let latest = if online {
+            &self.online_started
+        } else {
+            &self.started
+        };
+        if latest.load(Ordering::SeqCst) <= asked.0 {
+            let started = self.started.fetch_add(1, Ordering::SeqCst) + 1;
+            if online {
+                self.online_started.store(started, Ordering::SeqCst);
+            }
+            if scan() {
+                self.changes.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        self.changes.load(Ordering::SeqCst) != asked.1
+    }
+}
+
+fn rescan_now(app: &AppHandle, online: bool) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
     let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
@@ -1185,6 +1236,47 @@ mod tests {
 
     use crate::library::ProgressAction;
     use crate::view::tests::game;
+
+    #[test]
+    fn rescans_asked_during_a_scan_make_one_more() {
+        use std::cell::Cell;
+        let turns = ScanTurns::default();
+        let runs = Cell::new(0);
+        let mut waiting = Vec::new();
+        turns.run(turns.ask(), false, || {
+            runs.set(runs.get() + 1);
+            waiting.extend([
+                (turns.ask(), false),
+                (turns.ask(), false),
+                (turns.ask(), true),
+                (turns.ask(), true),
+            ]);
+            true
+        });
+        let changed: Vec<bool> = waiting
+            .into_iter()
+            .map(|(asked, online)| {
+                turns.run(asked, online, || {
+                    runs.set(runs.get() + 1);
+                    false
+                })
+            })
+            .collect();
+        // One offline run covers the second offline ask but not the online ones; one online run covers both.
+        assert_eq!(runs.get(), 3);
+        // Each waiter hears of the change the scan it waited behind made.
+        assert_eq!(changed, [true; 4]);
+        // An online scan covers an offline ask made before it started.
+        let asked = turns.ask();
+        turns.run(turns.ask(), true, || false);
+        turns.run(asked, false, || panic!("covered by the online scan"));
+        // A new ask after everything finished runs.
+        assert!(!turns.run(turns.ask(), false, || {
+            runs.set(runs.get() + 1);
+            false
+        }));
+        assert_eq!(runs.get(), 4);
+    }
 
     #[test]
     fn a_fetch_finishing_after_disconnect_is_not_saved() {

@@ -696,7 +696,13 @@ fn run_queue(app: &AppHandle) {
         if paused {
             continue;
         }
-        rescan(app, true);
+        // In the background: the next job need not wait for a full online scan. The poll after it shows the change.
+        let scan = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if rescan(&scan, true) {
+                scan.state::<AppState>().lock().library_changed = true;
+            }
+        });
         let mut s = state.lock();
         // A verify that found bad files ends reporting the repair.
         let repaired = s

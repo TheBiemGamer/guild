@@ -35,6 +35,8 @@ pub struct AppState {
     cover_jobs: tokio::sync::Semaphore,
     /// Held across a Steam download-size lookup, so page opens never stack Steam logons.
     steam_size: tokio::sync::Mutex<()>,
+    /// Takes turns for `library::rescan`.
+    scans: library::ScanTurns,
     /// Twitch app access token for IGDB. Never held across a network call.
     igdb: Mutex<igdb::TokenCache>,
     /// The Steam QR login in progress, if any. A cancel or newer start bumps `steam_gen` first, which is
@@ -142,6 +144,7 @@ impl AppState {
             }),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
             steam_size: tokio::sync::Mutex::new(()),
+            scans: library::ScanTurns::default(),
             igdb: Mutex::new(igdb::TokenCache::default()),
             steam_qr: tokio::sync::Mutex::new(None),
             steam_gen: std::sync::atomic::AtomicU64::new(0),
