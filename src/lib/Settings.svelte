@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Dialog } from 'bits-ui'
+  import { Dialog, Switch } from 'bits-ui'
   import { onMount, tick, untrack } from 'svelte'
   import * as api from './api'
   import { commands, type PrefixView, type ProtonKind, type ReleaseView, type SettingsView, type UpdateInfo } from './bindings'
@@ -624,13 +624,21 @@
   <span class="tile">{@render icon(name)}</span>
 {/snippet}
 
+{#snippet toggleButton(on: boolean, labelId: string, onchange: (on: boolean) => void)}
+  <Switch.Root checked={on} onCheckedChange={onchange} aria-labelledby={labelId}>
+    {#snippet child({ props })}
+      <button {...props} class="toggle"></button>
+    {/snippet}
+  </Switch.Root>
+{/snippet}
+
 {#snippet switchRow(name: Icon, setting: string, on: boolean, label: string, hint?: string)}
   <div class="r">
     {@render tile(name)}
     <div class="what">
       <span id="{setting}-label">{label}</span>{#if hint}<small>{hint}</small>{/if}
     </div>
-    <button class="toggle" role="switch" aria-checked={on} aria-labelledby="{setting}-label" onclick={() => toggle(setting, !on)}></button>
+    {@render toggleButton(on, `${setting}-label`, (v) => toggle(setting, v))}
   </div>
 {/snippet}
 
@@ -763,13 +771,7 @@
                     </div>
                     <div class="row">
                       <div id="saves-label">{t('settings.syncSaves')}</div>
-                      <button
-                        class="toggle"
-                        role="switch"
-                        aria-checked={view.cloudSaves}
-                        aria-labelledby="saves-label"
-                        onclick={() => toggle('cloud_saves', !view.cloudSaves)}
-                      ></button>
+                      {@render toggleButton(view.cloudSaves, 'saves-label', (v) => toggle('cloud_saves', v))}
                     </div>
                     <div class="row">
                       <div>{t('settings.importInstall')}</div>
@@ -869,13 +871,7 @@
                     </div>
                     <div class="row">
                       <div id="gog-saves-label">{t('settings.syncSaves')}</div>
-                      <button
-                        class="toggle"
-                        role="switch"
-                        aria-checked={view.gogCloudSaves}
-                        aria-labelledby="gog-saves-label"
-                        onclick={() => toggle('gog_cloud_saves', !view.gogCloudSaves)}
-                      ></button>
+                      {@render toggleButton(view.gogCloudSaves, 'gog-saves-label', (v) => toggle('gog_cloud_saves', v))}
                     </div>
                     <div class="row">
                       <div>{t('settings.importInstall')}</div>

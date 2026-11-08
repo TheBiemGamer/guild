@@ -7,7 +7,7 @@
   import { filterChips, removeChip, storeSegments, type Collection, type Filter } from './filters'
   import { t } from './i18n'
   import Tip from './Tip.svelte'
-  import { mergeProps } from 'bits-ui'
+  import { mergeProps, RadioGroup } from 'bits-ui'
   import { onMount, tick } from 'svelte'
   import { onOpenDownloads } from './api'
   import type { Card, Progress, QueueView, Sort, Store, UpdateInfo } from './bindings'
@@ -83,18 +83,7 @@
   /** The store segments, in order; null is All. Empty (no control) with fewer than two stores. */
   const stores = $derived(storeSegments(storesInUse))
   const storeIndex = $derived(stores.indexOf(store))
-  let segments = $state<HTMLButtonElement[]>([])
   const chips = $derived(filterChips(filters, collections))
-
-  /** Arrow keys move to the next or previous store and pick it, wrapping around (radio group). */
-  function onSegmentKey(e: KeyboardEvent) {
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
-    if (!step) return
-    e.preventDefault()
-    const i = (storeIndex + step + stores.length) % stores.length
-    store = stores[i]
-    segments[i]?.focus()
-  }
 
   const sorts = $derived(
     (['lastPlayed', 'mostPlayed', 'longestToBeat', 'shortestToBeat', 'title'] as const).map((value) => ({ value, label: t(`sort.${value}`) })),
@@ -160,28 +149,32 @@
 
   <div class="chips" role="group" aria-label={t('toolbar.filter')}>
     {#if stores.length}
-      <div class="seg" role="radiogroup" aria-label={t('toolbar.store')} style="--at: {storeIndex}">
-        <span class="thumb" aria-hidden="true"></span>
-        {#each stores as s, i (s ?? 'all')}
-          {@const name = s === null ? undefined : storeNames[s]}
-          <Tip text={name ?? ''}>
-            {#snippet children({ props })}
-              <button
-                {...props}
-                role="radio"
-                aria-checked={store === s}
-                aria-label={name}
-                tabindex={store === s ? 0 : -1}
-                bind:this={segments[i]}
-                onclick={() => (store = s)}
-                onkeydown={onSegmentKey}
-              >
-                {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
-              </button>
-            {/snippet}
-          </Tip>
-        {/each}
-      </div>
+      <RadioGroup.Root
+        orientation="horizontal"
+        aria-label={t('toolbar.store')}
+        bind:value={() => store ?? 'all', (v) => (store = v === 'all' ? null : (v as Store))}
+      >
+        {#snippet child({ props })}
+          <div {...props} class="seg" style="--at: {storeIndex}">
+            <span class="thumb" aria-hidden="true"></span>
+            {#each stores as s (s ?? 'all')}
+              {@const name = s === null ? undefined : storeNames[s]}
+              <Tip text={name ?? ''}>
+                {#snippet children({ props: tip })}
+                  <RadioGroup.Item value={s ?? 'all'} aria-label={name}>
+                    {#snippet child({ props })}
+                      <!-- The radio's props last: its id and data-state must not be replaced by the tooltip's. -->
+                      <button {...mergeProps(tip, props)}>
+                        {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
+                      </button>
+                    {/snippet}
+                  </RadioGroup.Item>
+                {/snippet}
+              </Tip>
+            {/each}
+          </div>
+        {/snippet}
+      </RadioGroup.Root>
     {/if}
     <button class="chip" aria-pressed={installedOnly} onclick={() => (installedOnly = !installedOnly)}>
       {t('play.installed')}

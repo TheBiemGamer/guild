@@ -243,7 +243,7 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - Focus is a 2px `focus` outline with 2px offset, everywhere. Disabled is 60% opacity. A busy button ("Downloading…", "Queued") is `aria-disabled` so it keeps focus.
 - **Chips:** 36px, `glass` fill, `glass-line` border, `text-2`. Selected (`aria-pressed`) is `glass-on`, `glass-on-line`, `text`.
   - The Settings chip carries an 8px amber dot only for a real problem: a saved login that stopped working, or a store that was set up and broke. A store never set up raises nothing.
-  - The store selector is one segmented control (`role="radiogroup"`) listing only the stores the library has games from. It is absent with one store.
+  - The store selector is one segmented control (a bits-ui `RadioGroup`) listing only the stores the library has games from. It is absent with one store. Arrows (all four), Home and End move to a segment and pick it, wrapping; one segment is the Tab stop.
   - The Downloads chip shows progress as a 2px `accent-2` ring that fills clockwise and updates per poll, never per frame.
 - **Tooltips** (`Tip.svelte`, bits-ui): `surface-2`, `glass-on-line` border, 8px radius, 12px `text`, shadow `0 8px 24px rgb(0 0 0 / .5)` (`--shadow-modal` is for dialogs). One provider in `App.svelte`: opens after 500ms, and a neighbour within 300ms opens at once. Fades in 120ms, not under reduced motion.
   - Use on icon-only buttons (keep the `aria-label`) and on labelled buttons whose hint explains something else. A button that can be disabled gets a `tip-anchor` wrapper (`inline-flex`), since a disabled button fires no pointer events; the wrapper also opens on focus of the button inside. Text that shows less than the tooltip (a file name for its path) gets a plain `Tip`.
@@ -269,20 +269,20 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - On hover: lift, white ring, title, and a small Play or Install pill. The hover overlay is absent when idle, not transparent, to keep scrolling cheap.
 - **Notices:** `glass-strong`, 12px radius, with a dismiss button. Errors get a red border and `error-text` and are `role="alert"`; the others are `role="status"`.
 - **Fields:** 36px, `glass` fill, `glass-line` border, `text-3` placeholder. Saved secrets show only as a read-only "••••••••" field with "Saved", Replace and Remove; the real value never reaches the UI.
-- **Toggle:** 40×22 pill, white 18% off, `accent` on, `role="switch"`.
+- **Toggle:** 40×22 pill, white 18% off, `accent` on, a bits-ui `Switch`; Space and Enter flip it.
 - **Game page:**
   - The window tint switches to this game's art while the page is open.
   - The hero has a gradient top (`glass`) and bottom (`scrim`), the title and a meta line bottom-left, and actions bottom-right: a round ⋯ button and the large white pill.
   - A game owned in more than one store gets a split pill: the left half picks the store, the right half plays or installs. The choice isn't stored.
   - Fact tiles (Playtime, Last played, How long to beat) are all exactly two lines tall, so a late answer never changes the row height. A tile with nothing to say is absent.
   - How long to beat carries a small "IGDB" credit link; the attribution is required.
-  - Tabs with nothing for the game are hidden, but the tab row always shows.
+  - Tabs with nothing for the game are hidden, but the tab row always shows. They are bits-ui `Tabs`: Left, Right, Home and End move focus and open the tab, wrapping; the open tab is the Tab stop.
 - **Install panel** (Epic, GOG, Amazon; Steam uses its own dialog): one component, `InstallPanel.svelte`, with the same fields in the same order everywhere. In the library it floats beside the cover (380px, `surface-2`, 18px radius, modal shadow; a scroll elsewhere or a click outside closes it). On the game page it opens over the page under the Install pill, right edges aligned, without a title; nothing below moves. A click outside or Escape closes it either way.
   - A sizes line ("1.8 GB download · 3.4 GB on disk"), each part only when the store tool reports it. The sizes are cached, so a second open is complete at once.
   - Folder: the real path in monospace, a 6px bar of the drive's use with the game added (`accent`, `warn` when it doesn't fit) and "N free after install". The path is always the real target: with no install folder set, Epic's is Legendary's own (`install_dir` in its `config.ini`, else `~/Games`) plus the game's `FolderName`; GOG and Amazon use `~/Games`. Change opens a menu: the store's install folder, folders used before for it, a `Games` folder on each other drive, then Another folder…. The folder installed to becomes the store's install folder.
   - Not enough room: Install is disabled and the line reads "Needs X, Y free" in `warn`. Rust checks again before queueing.
   - DLC: a checkbox row per DLC with its size for up to 4; from 5 one All DLC (N) row that folds out the list. All start ticked.
-  - Language (GOG with more than one) is a menu row; Build (GOG on Linux with a native build) is a segmented Linux / Windows control.
+  - Language (GOG with more than one) is a menu row; Build (GOG on Linux with a native build) is a segmented Linux / Windows control, a bits-ui `RadioGroup` like the store segments.
 - **Link chips:** 28px pills with a 14px logo, `glass-hover` fill. The UI sends a link kind and Rust builds the URL.
 - **Text:**
   - Every UI string goes through `t()` from `src/lib/i18n/<lang>.json`.

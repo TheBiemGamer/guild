@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DropdownMenu } from 'bits-ui'
+  import { DropdownMenu, RadioGroup } from 'bits-ui'
   import { onMount } from 'svelte'
   import * as api from './api'
   import { commands, type Build, type InstallChoice, type InstallFolder, type InstallPlan, type Store } from './bindings'
@@ -272,19 +272,29 @@
   {/if}
 
   {#if plan?.builds.length}
+    {@const builds = plan.builds}
     <div class="label" id="build-label">{t('install.build')}</div>
-    <div class="seg" role="radiogroup" aria-labelledby="build-label">
-      {#each plan.builds as b (b)}
-        <button
-          role="radio"
-          aria-checked={build === b}
-          onclick={() => {
-            build = b
-            ask()
-          }}>{b === 'linux' ? 'Linux' : 'Windows'}</button
-        >
-      {/each}
-    </div>
+    <RadioGroup.Root
+      orientation="horizontal"
+      aria-labelledby="build-label"
+      bind:value={
+        () => build ?? '',
+        (v) => {
+          build = v as Build
+          ask()
+        }
+      }
+    >
+      {#snippet child({ props })}
+        <div {...props} class="seg">
+          {#each builds as b (b)}
+            <RadioGroup.Item value={b}>
+              {#snippet child({ props })}<button {...props}>{b === 'linux' ? 'Linux' : 'Windows'}</button>{/snippet}
+            </RadioGroup.Item>
+          {/each}
+        </div>
+      {/snippet}
+    </RadioGroup.Root>
   {/if}
 
   <div class="buttons">
