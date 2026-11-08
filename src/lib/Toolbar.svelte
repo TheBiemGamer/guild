@@ -6,6 +6,7 @@
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, storeSegments, type Collection, type Filter } from './filters'
   import { t } from './i18n'
+  import Tip from './Tip.svelte'
   import { onMount } from 'svelte'
   import { onOpenDownloads } from './api'
   import type { Card, Progress, QueueView, Sort, Store, UpdateInfo } from './bindings'
@@ -167,18 +168,22 @@
         <span class="thumb" aria-hidden="true"></span>
         {#each stores as s, i (s ?? 'all')}
           {@const name = s === null ? undefined : storeNames[s]}
-          <button
-            role="radio"
-            aria-checked={store === s}
-            aria-label={name}
-            title={name}
-            tabindex={store === s ? 0 : -1}
-            bind:this={segments[i]}
-            onclick={() => (store = s)}
-            onkeydown={onSegmentKey}
-          >
-            {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
-          </button>
+          <Tip text={name ?? ''}>
+            {#snippet children({ props })}
+              <button
+                {...props}
+                role="radio"
+                aria-checked={store === s}
+                aria-label={name}
+                tabindex={store === s ? 0 : -1}
+                bind:this={segments[i]}
+                onclick={() => (store = s)}
+                onkeydown={onSegmentKey}
+              >
+                {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
+              </button>
+            {/snippet}
+          </Tip>
         {/each}
       </div>
     {/if}
@@ -249,42 +254,49 @@
 
   {#if downloading}
     <div class="dd">
-      <button
-        class="chip icon"
-        bind:this={downloadsChip}
-        aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
-        title={t('downloads.title')}
-        aria-haspopup="dialog"
-        aria-expanded={open === 'downloads'}
-        onclick={() => (open = open === 'downloads' ? null : 'downloads')}
-      >
-        <span class="ring" style="--done: {fraction * 100}%"></span>
-        <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-      </button>
+      <Tip text={t('downloads.title')}>
+        {#snippet children({ props })}
+          <button
+            {...props}
+            class="chip icon"
+            bind:this={downloadsChip}
+            aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
+            aria-haspopup="dialog"
+            aria-expanded={open === 'downloads'}
+            onclick={() => (open = open === 'downloads' ? null : 'downloads')}
+          >
+            <span class="ring" style="--done: {fraction * 100}%"></span>
+            <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+          </button>
+        {/snippet}
+      </Tip>
       {#if open === 'downloads'}
         <DownloadsPopover {progress} {queue} {games} anchor={downloadsChip} onclose={close} {oncancel} {onpause} {onresume} {onmove} />
       {/if}
     </div>
   {/if}
 
-  <button class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')} title={t('toolbar.addGame')}>
-    <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-  </button>
+  <Tip text={t('toolbar.addGame')}>
+    {#snippet children({ props })}
+      <button {...props} class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')}>
+        <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    {/snippet}
+  </Tip>
 
-  <button
-    class="chip icon settings"
-    onclick={onsettings}
-    aria-label={attention ? t('toolbar.settingsAttention') : t('toolbar.settings')}
-    title={t('toolbar.settings')}
-  >
-    <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path
-        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-      />
-    </svg>
-    {#if attention}<span class="dot"></span>{/if}
-  </button>
+  <Tip text={t('toolbar.settings')}>
+    {#snippet children({ props })}
+      <button {...props} class="chip icon settings" onclick={onsettings} aria-label={attention ? t('toolbar.settingsAttention') : t('toolbar.settings')}>
+        <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+          />
+        </svg>
+        {#if attention}<span class="dot"></span>{/if}
+      </button>
+    {/snippet}
+  </Tip>
 </nav>
 
 <style>

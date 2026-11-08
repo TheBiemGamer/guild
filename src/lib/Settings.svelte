@@ -4,6 +4,7 @@
   import { commands, type PrefixView, type ProtonKind, type ReleaseView, type SettingsView, type UpdateInfo } from './bindings'
   import { sizeLabel } from './format'
   import StoreIcon from './StoreIcon.svelte'
+  import Tip from './Tip.svelte'
   import SteamLogin from './SteamLogin.svelte'
   import NotesPopover, { installedNotes } from './NotesPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
@@ -677,16 +678,15 @@
           <h3>{t('settings.section.accounts')}</h3>
           {#if refreshing}<span class="ago still">{t('settings.refreshing')}</span>{/if}
           <span class="ago" class:moving={refreshing}>{ago(refreshedAt, now)}</span>
-          <button
-            class="refresh"
-            class:spinning={refreshing}
-            disabled={refreshing}
-            onclick={onrefresh}
-            aria-label={t('settings.refreshLibrary')}
-            title={t('settings.refreshLibrary')}
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
-          </button>
+          <Tip text={t('settings.refreshLibrary')}>
+            {#snippet children({ props })}
+              <span {...props} class="tip-anchor">
+                <button class="refresh" class:spinning={refreshing} disabled={refreshing} onclick={onrefresh} aria-label={t('settings.refreshLibrary')}>
+                  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
+                </button>
+              </span>
+            {/snippet}
+          </Tip>
         </div>
         <div class="group">
           <div class="r">
@@ -778,12 +778,15 @@
                   </div>
                 </div>
               {/if}
-              {#if importNote}<p class="note" role="status" title={importNote}>{importNote}</p>{/if}
+              {#if importNote}<Tip text={importNote} truncated
+                  >{#snippet children({ props })}<p {...props} class="note" role="status">{importNote}</p>{/snippet}</Tip
+                >{/if}
               <div class="row">
                 <div>{t('settings.eglSync')}<span>{t('settings.eglSyncHint')}</span></div>
                 <button class="btn" disabled={managing !== null} onclick={eglSync}>{managing === 'egl' ? t('settings.syncing') : t('settings.sync')}</button>
               </div>
-              {#if eglNote}<p class="note" role="status" title={eglNote}>{eglNote}</p>{/if}
+              {#if eglNote}<Tip text={eglNote} truncated>{#snippet children({ props })}<p {...props} class="note" role="status">{eglNote}</p>{/snippet}</Tip
+                >{/if}
               {#if legendary?.update}
                 <div class="row">
                   <div>Legendary {legendary.version ?? ''}<span>{t('settings.toolAvailable', { version: legendary.pinned })}</span></div>
@@ -791,7 +794,9 @@
                     {legendaryJob ? jobLabel('update', legendaryJob) : t('play.update')}
                   </button>
                 </div>
-                {#if legendaryError}<p class="note" role="status" title={legendaryError}>{legendaryError}</p>{/if}
+                {#if legendaryError}<Tip text={legendaryError} truncated
+                    >{#snippet children({ props })}<p {...props} class="note" role="status">{legendaryError}</p>{/snippet}</Tip
+                  >{/if}
               {/if}
             </div>
           {/if}
@@ -858,7 +863,9 @@
                 <div>{t('settings.importInstall')}</div>
                 <button class="btn" disabled={gogImporting} onclick={gogImport}>{gogImporting ? t('settings.importing') : t('settings.importButton')}</button>
               </div>
-              {#if gogImportNote}<p class="note" role="status" title={gogImportNote}>{gogImportNote}</p>{/if}
+              {#if gogImportNote}<Tip text={gogImportNote} truncated
+                  >{#snippet children({ props })}<p {...props} class="note" role="status">{gogImportNote}</p>{/snippet}</Tip
+                >{/if}
               {#if gogdl?.update}
                 <div class="row">
                   <div>gogdl {gogdl.version ?? ''}<span>{t('settings.toolAvailable', { version: gogdl.pinned })}</span></div>
@@ -866,7 +873,9 @@
                     {gogdlJob ? jobLabel('update', gogdlJob) : t('play.update')}
                   </button>
                 </div>
-                {#if gogdlError}<p class="note" role="status" title={gogdlError}>{gogdlError}</p>{/if}
+                {#if gogdlError}<Tip text={gogdlError} truncated
+                    >{#snippet children({ props })}<p {...props} class="note" role="status">{gogdlError}</p>{/snippet}</Tip
+                  >{/if}
               {/if}
             </div>
           {/if}
@@ -943,7 +952,9 @@
                   </div>
                 </div>
               {/if}
-              {#if amazonImportNote}<p class="note" role="status" title={amazonImportNote}>{amazonImportNote}</p>{/if}
+              {#if amazonImportNote}<Tip text={amazonImportNote} truncated
+                  >{#snippet children({ props })}<p {...props} class="note" role="status">{amazonImportNote}</p>{/snippet}</Tip
+                >{/if}
               {#if nile?.update}
                 <div class="row">
                   <div>Nile {nile.version ?? ''}<span>{t('settings.toolAvailable', { version: nile.pinned })}</span></div>
@@ -951,7 +962,9 @@
                     {nileJob ? jobLabel('update', nileJob) : t('play.update')}
                   </button>
                 </div>
-                {#if nileError}<p class="note" role="status" title={nileError}>{nileError}</p>{/if}
+                {#if nileError}<Tip text={nileError} truncated
+                    >{#snippet children({ props })}<p {...props} class="note" role="status">{nileError}</p>{/snippet}</Tip
+                  >{/if}
               {/if}
             </div>
           {/if}
@@ -1100,7 +1113,8 @@
                 {/if}
               </div>
             {/if}
-            {#if wineError}<p class="note" role="status" title={wineError}>{wineError}</p>{/if}
+            {#if wineError}<Tip text={wineError} truncated>{#snippet children({ props })}<p {...props} class="note" role="status">{wineError}</p>{/snippet}</Tip
+              >{/if}
           </div>
 
           <h4>{t('settings.group.prefixes')}</h4>
@@ -1119,11 +1133,7 @@
                 {:else}
                   <button class="btn" onclick={() => run(() => commands.openPrefix(p.key))}>{t('settings.openFolder')}</button>
                   <button class="btn" onclick={() => run(() => commands.runInPrefix(p.key, 'winecfg'))}>winecfg</button>
-                  <button
-                    class="btn"
-                    disabled={!view.runner.winetricks}
-                    title={view.runner.winetricks ? undefined : t('settings.noWinetricks')}
-                    onclick={() => run(() => commands.runInPrefix(p.key, 'winetricks'))}>winetricks</button
+                  <button class="btn" disabled={!view.runner.winetricks} onclick={() => run(() => commands.runInPrefix(p.key, 'winetricks'))}>winetricks</button
                   >
                   <button class="btn danger" onclick={() => (confirmPrefix = p.key)}>{t('menu.remove')}</button>
                 {/if}

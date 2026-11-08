@@ -5,6 +5,7 @@
   import { collectionFilter, filterGroups, filterName, toggleFilter, type Collection, type Filter } from './filters'
   import { popover } from './popover'
   import { t } from './i18n'
+  import Tip from './Tip.svelte'
 
   let {
     filters = $bindable(),
@@ -126,20 +127,22 @@
               onblur={() => saveRename(c)}
             />
           {:else}
-            <button
-              class="name"
-              data-name={c.id}
-              title={t('filters.rename')}
-              aria-label={t('filters.renameNamed', { name: c.name })}
-              onclick={() => startRename(c)}>{c.name}</button
-            >
+            <Tip text={t('filters.rename')}>
+              {#snippet children({ props })}
+                <button {...props} class="name" data-name={c.id} aria-label={t('filters.renameNamed', { name: c.name })} onclick={() => startRename(c)}
+                  >{c.name}</button
+                >
+              {/snippet}
+            </Tip>
             <button class="x" data-delete={c.id} aria-label={t('filters.deleteNamed', { name: c.name })} onclick={() => askDelete(c)}>✕</button>
           {/if}
         </div>
       {:else}
         <p class="note">{t('filters.noCollections')}</p>
       {/each}
-      {#if problem}<p class="note problem" role="alert" title={problem}>{problem}</p>{/if}
+      {#if problem}<Tip text={problem} truncated>
+          {#snippet children({ props })}<p {...props} class="note problem" role="alert">{problem}</p>{/snippet}
+        </Tip>{/if}
     </div>
   {/if}
 </div>

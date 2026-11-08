@@ -4,6 +4,7 @@
   import { commands, type Build, type InstallChoice, type InstallFolder, type InstallPlan, type Store } from './bindings'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import Check from './Check.svelte'
+  import Tip from './Tip.svelte'
   import { popover } from './popover'
   import { sizeLabel } from './format'
   import { t } from './i18n'
@@ -180,7 +181,9 @@
   <div class="group">
     <div class="row">
       <div class="grow">
-        <span class="path" title={path ?? ''}>{path ?? ''}</span>
+        <Tip text={path ?? ''} truncated>
+          {#snippet children({ props })}<span {...props} class="path">{path ?? ''}</span>{/snippet}
+        </Tip>
         {#if folder?.totalBytes && free !== null}
           {@const used = folder.totalBytes - free}
           <div class="bar" aria-hidden="true">

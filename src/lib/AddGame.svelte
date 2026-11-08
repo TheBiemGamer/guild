@@ -4,6 +4,7 @@
   import type { CustomGame, GridCover } from './bindings'
   import { nameFromExe } from './format'
   import { popover } from './popover'
+  import Tip from './Tip.svelte'
   import { around, t } from './i18n'
 
   let {
@@ -105,7 +106,11 @@
     <div class="f">
       <label for="add-exe">{t('addGame.program')}</label>
       <div class="in">
-        <input id="add-exe" readonly value={exe} spellcheck="false" title={exe || undefined} onclick={browse} />
+        <Tip text={exe} truncated>
+          {#snippet children({ props })}
+            <input {...props} id="add-exe" readonly value={exe} spellcheck="false" onclick={browse} />
+          {/snippet}
+        </Tip>
         <button class="glass" onclick={browse}>{t('common.browse')}</button>
       </div>
     </div>
@@ -125,7 +130,9 @@
         <p class="note">{before}<button class="link" onclick={onsettings}>{t('addGame.noKeyLink')}</button>{after}</p>
         <div class="in file">
           <button class="glass" onclick={pickFile}>{t('addGame.useFile')}</button>
-          {#if file}<span title={file}>{fileName}</span>{/if}
+          {#if file}<Tip text={file} truncated>
+              {#snippet children({ props })}<span {...props}>{fileName}</span>{/snippet}
+            </Tip>{/if}
         </div>
       {:else}
         <!-- Four slots always, so nothing moves while the search runs. -->
@@ -142,7 +149,10 @@
           {/each}
         </div>
         <small
-          ><span title={file ?? undefined}>{file ? fileName : t('addGame.fromGrid')}</span> ·
+          ><Tip text={file ?? ''} truncated>
+            {#snippet children({ props })}<span {...props}>{file ? fileName : t('addGame.fromGrid')}</span>{/snippet}
+          </Tip>
+          ·
           <button class="link" onclick={pickFile}>{t('addGame.useFile')}</button></small
         >
       {/if}

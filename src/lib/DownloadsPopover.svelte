@@ -4,6 +4,7 @@
   import { popover } from './popover'
   import { t } from './i18n'
   import StoreIcon from './StoreIcon.svelte'
+  import Tip from './Tip.svelte'
 
   let {
     progress,
@@ -97,22 +98,29 @@
         <small>{activeText(progress[active.key])}</small>
       </div>
       {#if queue.paused}
-        <button class="glass icon" aria-label={t('common.resume')} title={t('common.resume')} onclick={onresume}>
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
-        </button>
+        <Tip text={t('common.resume')}>
+          {#snippet children({ props })}
+            <button {...props} class="glass icon" aria-label={t('common.resume')} onclick={onresume}>
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
+            </button>
+          {/snippet}
+        </Tip>
       {:else}
-        <button class="glass icon" aria-label={t('common.pause')} title={t('common.pause')} onclick={onpause}>
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
-        </button>
+        <Tip text={t('common.pause')}>
+          {#snippet children({ props })}
+            <button {...props} class="glass icon" aria-label={t('common.pause')} onclick={onpause}>
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+            </button>
+          {/snippet}
+        </Tip>
       {/if}
-      <button
-        class="glass icon"
-        aria-label={t('downloads.cancelGame', { title: title(active.key) })}
-        title={t('common.cancel')}
-        onclick={() => oncancel(active.key)}
-      >
-        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-      </button>
+      <Tip text={t('common.cancel')}>
+        {#snippet children({ props })}
+          <button {...props} class="glass icon" aria-label={t('downloads.cancelGame', { title: title(active.key) })} onclick={() => oncancel(active.key)}>
+            <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        {/snippet}
+      </Tip>
     </div>
   {/if}
   {#each other as [key, p] (key)}{@render job(key, p)}{/each}

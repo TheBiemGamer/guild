@@ -63,6 +63,7 @@
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
+  import Tip from './Tip.svelte'
   import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
 
   let {
@@ -736,23 +737,32 @@
               <span class="key" id="saves-cloud">{t('detail.cloudSaves')}</span>
               <div class="chips" role="group" aria-labelledby="saves-cloud">
                 {#each [{ value: null, label: t('detail.default'), title: t('detail.syncSavesHint') }, { value: true, label: t('common.on') }, { value: false, label: t('common.off') }] as option (option.value)}
-                  <button
-                    class="chip"
-                    title={option.title}
-                    aria-pressed={saves !== null && saves.choice === option.value}
-                    onclick={() => setSaves(option.value)}
-                  >
-                    {option.label}
-                  </button>
+                  <Tip text={option.title ?? ''}>
+                    {#snippet children({ props })}
+                      <button {...props} class="chip" aria-pressed={saves !== null && saves.choice === option.value} onclick={() => setSaves(option.value)}>
+                        {option.label}
+                      </button>
+                    {/snippet}
+                  </Tip>
                 {/each}
               </div>
             </div>
             <div class="row">
               <span class="key">{t('detail.saves')}</span>
-              <span class="value" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</span>
-              <button class="chip" title={t('detail.syncNowHint')} disabled={!!shown || running || syncing} onclick={syncNow}
-                >{syncing ? t('detail.syncing') : t('detail.syncNow')}</button
-              >
+              <Tip text={savesLine ?? ''} truncated>
+                {#snippet children({ props })}
+                  <span {...props} class="value" class:failed={!!saves?.error}>{savesLine ?? ' '}</span>
+                {/snippet}
+              </Tip>
+              <Tip text={t('detail.syncNowHint')}>
+                {#snippet children({ props })}
+                  <span {...props} class="tip-anchor">
+                    <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}
+                      >{syncing ? t('detail.syncing') : t('detail.syncNow')}</button
+                    >
+                  </span>
+                {/snippet}
+              </Tip>
             </div>
           </section>
         {:else if current === 'launch'}
@@ -844,15 +854,18 @@
             {#if copy!.installDir}
               <div class="row">
                 <span class="key">{t('detail.folder')}</span>
-                <span class="value" title={copy!.installDir}>{copy!.installDir}</span>
+                <Tip text={copy!.installDir} truncated>
+                  {#snippet children({ props })}<span {...props} class="value">{copy!.installDir}</span>{/snippet}
+                </Tip>
                 <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.open')}</button>
                 {#if manageable}
-                  <button
-                    class="chip"
-                    title={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}
-                    disabled={!!shown || running}
-                    onclick={move}>{t('detail.moveButton')}</button
-                  >
+                  <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}>
+                    {#snippet children({ props })}
+                      <span {...props} class="tip-anchor">
+                        <button class="chip" disabled={!!shown || running} onclick={move}>{t('detail.moveButton')}</button>
+                      </span>
+                    {/snippet}
+                  </Tip>
                 {/if}
               </div>
             {/if}
@@ -861,12 +874,13 @@
                 <span class="key">{t('detail.files')}</span>
                 <span class="value">{copy!.sizeBytes !== null ? sizeLabel(copy!.sizeBytes) : ''}</span>
                 {#if manageable}
-                  <button
-                    class="chip"
-                    title={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}
-                    disabled={!!shown || running}
-                    onclick={() => act('verify')}>{t('detail.verify')}</button
-                  >
+                  <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}>
+                    {#snippet children({ props })}
+                      <span {...props} class="tip-anchor">
+                        <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>{t('detail.verify')}</button>
+                      </span>
+                    {/snippet}
+                  </Tip>
                 {/if}
               </div>
             {/if}
@@ -882,20 +896,27 @@
           {#if manageable}
             <div class="foot">
               <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
-              <button
-                class="chip danger"
-                title={copy!.provider === 'steam' ? t('detail.inSteam') : undefined}
-                disabled={!!shown || running}
-                onclick={() => {
-                  uninstall()
-                  tick().then(() => confirmCancel?.focus())
-                }}>{t('detail.uninstall')}</button
-              >
+              <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : ''}>
+                {#snippet children({ props })}
+                  <span {...props} class="tip-anchor">
+                    <button
+                      class="chip danger"
+                      disabled={!!shown || running}
+                      onclick={() => {
+                        uninstall()
+                        tick().then(() => confirmCancel?.focus())
+                      }}>{t('detail.uninstall')}</button
+                    >
+                  </span>
+                {/snippet}
+              </Tip>
             </div>
           {/if}
         {:else}
           {#if savesError}
-            <p class="sync-note" title={savesError}>{savesError}</p>
+            <Tip text={savesError} truncated>
+              {#snippet children({ props })}<p {...props} class="sync-note">{savesError}</p>{/snippet}
+            </Tip>
           {/if}
           {#if showTiles}
             <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
@@ -921,13 +942,19 @@
                 <div class="tile">
                   <div class="head">
                     <h2>{t('detail.ttb')}</h2>
-                    <button class="credit" title={t('detail.igdbCredit')} aria-label={t('detail.igdbCredit')} onclick={() => run(commands.openIgdb)}
-                      >IGDB</button
-                    >
+                    <Tip text={t('detail.igdbCredit')}>
+                      {#snippet children({ props })}
+                        <button {...props} class="credit" aria-label={t('detail.igdbCredit')} onclick={() => run(commands.openIgdb)}>IGDB</button>
+                      {/snippet}
+                    </Tip>
                   </div>
-                  <p title={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')}>
-                    <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}
-                  </p>
+                  <Tip text={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')} truncated>
+                    {#snippet children({ props })}
+                      <p {...props}>
+                        <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}
+                      </p>
+                    {/snippet}
+                  </Tip>
                 </div>
               {/if}
             </div>
