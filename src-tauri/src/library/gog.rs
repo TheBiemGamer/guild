@@ -527,8 +527,8 @@ pub fn account_name(conn: &rusqlite::Connection) -> Option<String> {
 /// `info` kind of `gogdl info`'s answer for a game (sizes, languages, DLC, folder name), kept a week.
 const INSTALL_INFO: &str = "gog-install-info";
 const INSTALL_INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
-/// `info` kind of a game's cloud save timestamps, one row per game: `{location name: timestamp}`. Forgotten with the install.
-const SAVE_TS: &str = "gog-save-ts";
+/// `game_prefs` name of a game's cloud save timestamps: `{location name: timestamp}`. Forgotten with the install.
+const SAVE_TS: &str = "gog_save_ts";
 /// gogdl retries forever without a connection, so a job that sends no progress this long is stopped.
 const STALL: Duration = Duration::from_secs(5 * 60);
 const DEFAULT_LANG: &str = "en-US";
@@ -1000,7 +1000,7 @@ pub fn uninstall(conn: &Connection, id: &str, dir: &Path) -> Result<(), Error> {
     _ = fs_err::remove_dir_all(support(id));
     let key = ProviderKind::Gog.key(id);
     db::set_gog_install(conn, &key, None)?;
-    db::delete_info(conn, &key, SAVE_TS)?;
+    db::set_pref(conn, &key, SAVE_TS, None)?;
     Ok(())
 }
 
@@ -1328,16 +1328,14 @@ fn first_to_report(outcomes: Vec<SyncOutcome>) -> SyncOutcome {
 
 /// When each save location of the game `key` last synced, as gogdl printed it.
 fn save_stamps(conn: &Connection, key: &str) -> HashMap<String, String> {
-    let json = db::cached_info(conn, key, SAVE_TS, i64::MAX / 2, 0)
-        .ok()
-        .flatten();
+    let json = db::pref(conn, key, SAVE_TS).ok().flatten();
     json.and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default()
 }
 
 fn store_save_stamps(conn: &Connection, key: &str, stamps: &HashMap<String, String>) {
     let json = serde_json::to_string(stamps).unwrap_or_default();
-    if let Err(e) = db::put_info(conn, key, SAVE_TS, &json, super::unix_now()) {
+    if let Err(e) = db::set_pref(conn, key, SAVE_TS, Some(&json)) {
         tracing::warn!("gog save timestamps: {e}");
     }
 }
@@ -2072,10 +2070,7 @@ mod tests {
         uninstall(&conn, "0", &dir).unwrap();
         assert!(!dir.exists());
         assert!(db::gog_installs(&conn).unwrap().is_empty());
-        assert_eq!(
-            db::cached_info(&conn, "gog-0", SAVE_TS, i64::MAX / 2, 0).unwrap(),
-            None
-        );
+        assert_eq!(db::pref(&conn, "gog-0", SAVE_TS).unwrap(), None);
         assert!(save_stamps(&conn, "gog-0").is_empty());
     }
 

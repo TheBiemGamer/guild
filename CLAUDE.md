@@ -23,7 +23,7 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
   - Steam passwords and Steam Guard codes are never stored.
 - **The database** file is `library.sqlite`; never change the file name. Schema changes are new migration steps at the end of `STEPS` in `cache/db.rs` (`PRAGMA user_version` counts the ones run); never edit a step that shipped.
   - Open it only through `cache::db::open`, which sets WAL and the busy timeout and runs the migrations.
-  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites and hidden games, by copy key), `playtime`, `collections`, `collection_games` (members by copy key), `custom_games` (games the owner added) and `gog_installs` (where each GOG game is installed). Their covers are owner data too: files in `<data_local_dir>/custom/<id>/`, never the cache folder.
+  - The owner's data lives in `settings`, `launches`, `game_prefs` (per-game choices, favorites, hidden games and cloud save sync state, by copy key), `playtime`, `collections`, `collection_games` (members by copy key), `custom_games` (games the owner added) and `gog_installs` (where each GOG game is installed). Their covers are owner data too: files in `<data_local_dir>/custom/<id>/`, never the cache folder.
   - `info` is cache only: use it with a new `kind` for new cached data, never for anything the owner chose or built up.
 - **Keys:**
   - A store copy is keyed `steam-<appid>`, `epic-<app_name>`, `gog-<product_id>` or `amazon-<product id>` (`amzn1.adg.product.…`); a game the owner added is `custom-<id>` and never merges.

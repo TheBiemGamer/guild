@@ -956,10 +956,8 @@ pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()>
 
 /// `game_prefs` name for an Epic or GOG copy's own cloud save choice, `on` or `off`; none follows its store's setting.
 const SAVES_CHOICE: &str = "cloud_saves";
-/// Info cache kind for an Epic or GOG copy's last cloud save sync, as a `SyncRecord`.
-const SAVES_SYNC: &str = "cloud-saves-sync";
-/// Info rows are read with a maximum age; these never go stale.
-const FOREVER: i64 = i64::MAX / 2;
+/// `game_prefs` name for an Epic or GOG copy's last cloud save sync, as a `SyncRecord`.
+const SAVES_SYNC: &str = "cloud_saves_sync";
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct SyncRecord {
@@ -986,9 +984,7 @@ fn saves_choice(conn: &Connection, key: &str) -> Option<bool> {
 }
 
 fn last_sync(conn: &Connection, key: &str) -> Option<SyncRecord> {
-    let json = cache::db::cached_info(conn, key, SAVES_SYNC, FOREVER, unix_now())
-        .ok()
-        .flatten()?;
+    let json = cache::db::pref(conn, key, SAVES_SYNC).ok().flatten()?;
     serde_json::from_str(&json).ok()
 }
 
@@ -1027,7 +1023,7 @@ fn record_sync(conn: Option<&Connection>, key: &str, outcome: &SyncOutcome) {
     record.cloud_newer |=
         record.error.is_some() && last_sync(conn, key).is_some_and(|r| r.cloud_newer);
     let json = serde_json::to_string(&record).unwrap_or_default();
-    if let Err(e) = cache::db::put_info(conn, key, SAVES_SYNC, &json, at) {
+    if let Err(e) = cache::db::set_pref(conn, key, SAVES_SYNC, Some(&json)) {
         tracing::warn!("record sync {key}: {e}");
     }
 }
@@ -2285,6 +2281,25 @@ mod tests {
             Ok(Some(SaveSync::KeepCloud))
         );
         assert_eq!(pre_launch_sync(Some(Keep::Local), false), Ok(None));
+    }
+
+    #[test]
+    fn last_sync_is_owner_data_and_round_trips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = cache::db::open(&tmp.path().join("t.sqlite")).unwrap();
+        record_sync(Some(&conn), "epic-a", &SyncOutcome::CloudNewer);
+        // A failure keeps the newer cloud save waiting.
+        record_sync(
+            Some(&conn),
+            "epic-a",
+            &SyncOutcome::Failed(msg!(savesTimedOut)),
+        );
+        let last = last_sync(&conn, "epic-a").unwrap();
+        assert!(last.cloud_newer && last.error.is_some());
+        let in_info: i64 = conn
+            .query_row("SELECT count(*) FROM info", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(in_info, 0);
     }
 
     #[test]

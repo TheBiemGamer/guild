@@ -1,6 +1,6 @@
 //! SQLite library cache so startup can render before the stores are scanned. The same file keeps
-//! user data that is not a cache: settings, launch history, per-game choices (`game_prefs`, favorites and
-//! hidden games among them), playtime, collections and the games the owner added (`custom_games`). The `info`
+//! user data that is not a cache: settings, launch history, per-game choices (`game_prefs`, favorites, hidden games
+//! and cloud save sync state among them), playtime, collections and the games the owner added (`custom_games`). The `info`
 //! table is cache only.
 
 use std::collections::HashMap;
@@ -92,6 +92,13 @@ const STEPS: &[&str] = &[
         key TEXT PRIMARY KEY,
         path TEXT NOT NULL
     );",
+    // 6: cloud save sync state is owner data, so clearing a cache must not lose it: each copy's last sync and its GOG
+    // save timestamps move from `info` to `game_prefs`.
+    "INSERT INTO game_prefs (key, name, value)
+        SELECT key, 'cloud_saves_sync', json FROM info WHERE kind = 'cloud-saves-sync';
+    INSERT INTO game_prefs (key, name, value)
+        SELECT key, 'gog_save_ts', json FROM info WHERE kind = 'gog-save-ts';
+    DELETE FROM info WHERE kind IN ('cloud-saves-sync', 'gog-save-ts');",
 ];
 
 /// Opens the database and brings its schema up to date. Every connection goes through here.
@@ -737,6 +744,7 @@ mod tests {
             put_info(&conn, "epic-Fallout", "cloud-saves", "off", 10).unwrap();
             put_info(&conn, "epic-Other", "cloud-saves", "default", 10).unwrap();
             put_info(&conn, "epic-Fallout", "cloud-saves-sync", r#"{"at":5}"#, 10).unwrap();
+            put_info(&conn, "gog-1", "gog-save-ts", r#"{"saves":"1.5"}"#, 10).unwrap();
             put_info(&conn, "epic-Fallout", "twin", "{}", 10).unwrap();
             put_info(&conn, "epic-Fallout", "twin2", "{}", 10).unwrap();
             put_info(&conn, "epic-Fallout", "twin3", "[30]", 10).unwrap();
@@ -768,7 +776,18 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(kinds, ["cloud-saves-sync", "twin3"]);
+        assert_eq!(kinds, ["twin3"]);
+        // Cloud save sync state moved too.
+        assert_eq!(
+            pref(&conn, "epic-Fallout", "cloud_saves_sync")
+                .unwrap()
+                .as_deref(),
+            Some(r#"{"at":5}"#)
+        );
+        assert_eq!(
+            pref(&conn, "gog-1", "gog_save_ts").unwrap().as_deref(),
+            Some(r#"{"saves":"1.5"}"#)
+        );
         let games = load(&conn).unwrap();
         assert_eq!(games.len(), 1);
         let g = &games[0];
