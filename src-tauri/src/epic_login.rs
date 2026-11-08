@@ -2,9 +2,7 @@
 //! redirect page with an `authorizationCode`; a small script forwards that code to a dead
 //! URL (`launcher.invalid`), where the navigation hook catches it and cancels the load.
 
-use std::sync::mpsc;
-
-use tauri::{AppHandle, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Url};
 
 /// Where Legendary's `https://legendary.gl/epiclogin` redirects: log in, then land on
 /// Epic's redirect API, which shows JSON with an `authorizationCode` for `legendary auth --code`.
@@ -27,32 +25,15 @@ window.addEventListener('DOMContentLoaded', () => {
 /// Opens the login window and waits (call from a blocking thread) until it yields a code
 /// or the user closes it (`Ok(None)`).
 pub fn run(app: &AppHandle) -> Result<Option<String>, crate::msg::Msg> {
-    let (tx, rx) = mpsc::channel();
-    let closed = tx.clone();
     let url = Url::parse(LOGIN_URL).expect("valid constant URL");
-    let window = WebviewWindowBuilder::new(app, "epic-login", WebviewUrl::External(url))
-        .title(crate::msg::native("logInEpicTitle"))
-        .inner_size(520.0, 760.0)
-        // Fresh cookies every time, so the user picks the account (as Legendary's login does).
-        .incognito(true)
-        .initialization_script(CAPTURE_JS)
-        .on_navigation(move |url| match login_code(url) {
-            Some(code) => {
-                let _ = tx.send(Some(code));
-                false
-            }
-            None => true,
-        })
-        .build()
-        .map_err(|e| msg!(cantOpenLoginWindow, detail = e.to_string()))?;
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::Destroyed) {
-            let _ = closed.send(None);
-        }
-    });
-    let code = rx.recv().ok().flatten();
-    let _ = window.close();
-    Ok(code)
+    crate::login_window::run(
+        app,
+        "epic-login",
+        "logInEpicTitle",
+        url,
+        Some(CAPTURE_JS),
+        login_code,
+    )
 }
 
 fn login_code(url: &Url) -> Option<String> {

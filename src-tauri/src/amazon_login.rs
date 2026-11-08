@@ -2,9 +2,7 @@
 //! the browser to `www.amazon.com/?openid.assoc_handle=amzn_sonic_games_launcher&…&openid.oa2.authorization_code=…`;
 //! the navigation hook takes the code and cancels that load.
 
-use std::sync::mpsc;
-
-use tauri::{AppHandle, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Url};
 
 /// Nile's sign-in page for this device; anything else is refused.
 pub fn sign_in_page(url: &str) -> Option<Url> {
@@ -17,30 +15,14 @@ pub fn sign_in_page(url: &str) -> Option<Url> {
 /// closes it (`Ok(None)`).
 pub fn run(app: &AppHandle, url: &str) -> Result<Option<String>, crate::msg::Msg> {
     let url = sign_in_page(url).ok_or(msg!(nileOddLoginPage))?;
-    let (tx, rx) = mpsc::channel();
-    let closed = tx.clone();
-    let window = WebviewWindowBuilder::new(app, "amazon-login", WebviewUrl::External(url))
-        .title(crate::msg::native("logInAmazonTitle"))
-        .inner_size(520.0, 760.0)
-        // Fresh cookies every time, so the user picks the account.
-        .incognito(true)
-        .on_navigation(move |url| match login_code(url) {
-            Some(code) => {
-                let _ = tx.send(Some(code));
-                false
-            }
-            None => true,
-        })
-        .build()
-        .map_err(|e| msg!(cantOpenLoginWindow, detail = e.to_string()))?;
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::Destroyed) {
-            let _ = closed.send(None);
-        }
-    });
-    let code = rx.recv().ok().flatten();
-    let _ = window.close();
-    Ok(code)
+    crate::login_window::run(
+        app,
+        "amazon-login",
+        "logInAmazonTitle",
+        url,
+        None,
+        login_code,
+    )
 }
 
 fn login_code(url: &Url) -> Option<String> {

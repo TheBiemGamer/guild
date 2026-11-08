@@ -19,6 +19,7 @@ mod info;
 mod library;
 mod links;
 mod log;
+mod login_window;
 mod migrate;
 mod platform;
 mod settings;
