@@ -486,7 +486,7 @@ pub async fn set_steamgriddb_key(value: Option<String>) -> Res<()> {
 #[tauri::command]
 #[specta::specta]
 pub fn open_steamgriddb() -> Res<()> {
-    crate::library::open_url("https://www.steamgriddb.com/profile/preferences/api")
+    crate::platform::open_url("https://www.steamgriddb.com/profile/preferences/api")
         .map_err(Msg::from)
 }
 
@@ -518,14 +518,14 @@ pub async fn clear_cache(app: AppHandle) -> Res<()> {
 #[tauri::command]
 #[specta::specta]
 pub fn open_twitch_console() -> Res<()> {
-    crate::library::open_url("https://dev.twitch.tv/console/apps").map_err(Msg::from)
+    crate::platform::open_url("https://dev.twitch.tv/console/apps").map_err(Msg::from)
 }
 
 /// IGDB's site, for the "Data from IGDB" credit next to how long to beat.
 #[tauri::command]
 #[specta::specta]
 pub fn open_igdb() -> Res<()> {
-    crate::library::open_url("https://www.igdb.com").map_err(Msg::from)
+    crate::platform::open_url("https://www.igdb.com").map_err(Msg::from)
 }
 
 /// Opens the folder with launcher.log in File Explorer.
@@ -534,11 +534,7 @@ pub fn open_igdb() -> Res<()> {
 pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
     let dir = &state.dirs.logs;
     fs_err::create_dir_all(dir).map_err(Msg::system)?;
-    std::process::Command::new("explorer.exe")
-        .arg(dir)
-        .spawn()
-        .map(drop)
-        .map_err(Msg::system)
+    crate::platform::shell_open(dir).map_err(Msg::from)
 }
 
 /// Opens a new GitHub bug report with the app and Windows versions filled in.
@@ -553,7 +549,7 @@ pub fn report_problem(app: AppHandle) -> Res<()> {
         percent_encode(&version),
         percent_encode(&os)
     );
-    crate::library::open_url(&url).map_err(Msg::from)
+    crate::platform::open_url(&url).map_err(Msg::from)
 }
 
 /// One answer to the dialog's poll. Never carries the refresh token.

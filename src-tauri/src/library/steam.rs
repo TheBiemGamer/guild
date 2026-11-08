@@ -46,24 +46,24 @@ pub fn list_games() -> Result<Vec<Game>, Error> {
 
 /// Starts Steam first if it isn't running.
 pub fn launch(game: &Game) -> Result<(), Error> {
-    super::open_uri(&format!("steam://rungameid/{}", game.external_id))
+    crate::platform::shell_open(format!("steam://rungameid/{}", game.external_id))
 }
 
 /// Steam shows its own install dialog.
 pub fn install(game: &Game) -> Result<(), Error> {
-    super::open_uri(&format!("steam://install/{}", game.external_id))
+    crate::platform::shell_open(format!("steam://install/{}", game.external_id))
 }
 
 /// Steam shows its own confirmation dialog.
 pub fn uninstall(game: &Game) -> Result<(), Error> {
-    super::open_uri(&format!("steam://uninstall/{}", game.external_id))
+    crate::platform::shell_open(format!("steam://uninstall/{}", game.external_id))
 }
 
 pub fn running_game() -> Option<String> {
-    let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-        .open_subkey(r"Software\Valve\Steam")
-        .ok()?;
-    let id = running_id(steam.get_value("RunningAppID"))?;
+    let id = running_id(crate::platform::user_registry_u32(
+        r"Software\Valve\Steam",
+        "RunningAppID",
+    ))?;
     // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
     // trust it while the Steam process it was written by is still alive.
     steam_alive(steam_pid()?).then_some(id)
@@ -81,13 +81,7 @@ pub fn download_progress(game: &Game) -> Option<Progress> {
 }
 /// The Steam client's pid, as Steam last wrote it.
 fn steam_pid() -> Option<u32> {
-    let steam = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-        .open_subkey(r"Software\Valve\Steam")
-        .ok()?;
-    steam
-        .open_subkey("ActiveProcess")
-        .and_then(|k| k.get_value("pid"))
-        .ok()
+    crate::platform::user_registry_u32(r"Software\Valve\Steam\ActiveProcess", "pid").ok()
 }
 
 /// Steam rewrites an appmanifest only when a download pauses or ends, so its byte counters stand still
@@ -329,7 +323,7 @@ fn running_id(raw: std::io::Result<u32>) -> Option<String> {
 
 /// Whether `pid` is a live steam.exe (the name check guards against a reused pid).
 fn steam_alive(pid: u32) -> bool {
-    super::process_listed(&format!("PID eq {pid}"), "steam.exe")
+    crate::platform::process_listed(&format!("PID eq {pid}"), "steam.exe")
 }
 
 fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {

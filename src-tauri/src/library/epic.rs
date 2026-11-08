@@ -8,7 +8,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, ErrorKind, Read};
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -22,9 +21,7 @@ use super::tool::{
     run_with_timeout, same_drive, split_args,
 };
 
-use super::{
-    Art, CREATE_NO_WINDOW, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind,
-};
+use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 
 pub fn list_games() -> Result<Vec<Game>, Error> {
     Ok(games(&json(&["list", "--json"])?, &installed_list()?))
@@ -76,9 +73,8 @@ pub fn launch(
     skip_version_check: bool,
 ) -> Result<(), Error> {
     let mut command = Command::new(legendary_exe());
-    command
-        .args(launch_args(app_name, options, skip_version_check))
-        .creation_flags(CREATE_NO_WINDOW);
+    command.args(launch_args(app_name, options, skip_version_check));
+    crate::platform::no_window(&mut command);
     // Not `run`: outside the store tools' job, which would end the game Legendary starts when the app closes.
     checked(&command.output()?)
 }
@@ -459,7 +455,7 @@ pub fn executable(game: &Game) -> Result<Option<String>, Error> {
 /// Whether a process named `exe` runs.
 // shortcut: games whose executable is a bootstrapper that hands off to another exe stop counting as running early.
 pub fn is_running(exe: &str) -> bool {
-    super::process_listed(&format!("IMAGENAME eq {exe}"), exe)
+    crate::platform::process_listed(&format!("IMAGENAME eq {exe}"), exe)
 }
 
 pub fn login_state() -> StoreLogin {
@@ -494,7 +490,7 @@ fn legendary_exe() -> PathBuf {
 
 fn legendary(args: &[&str]) -> Command {
     let mut command = Command::new(legendary_exe());
-    command.args(args).creation_flags(CREATE_NO_WINDOW);
+    crate::platform::no_window(command.args(args));
     command
 }
 

@@ -187,10 +187,7 @@ pub fn read_json(path: &Path) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::windows::process::CommandExt;
-
     use super::*;
-    use crate::library::CREATE_NO_WINDOW;
 
     #[test]
     fn split_args_groups_quotes_and_skips_spaces() {
@@ -216,9 +213,7 @@ mod tests {
     fn sync_run_gives_up_after_its_timeout() {
         let cmd = |script: &str| {
             let mut command = Command::new("cmd");
-            command
-                .args(["/C", script])
-                .creation_flags(CREATE_NO_WINDOW);
+            crate::platform::no_window(command.args(["/C", script]));
             command
         };
         let started = Instant::now();

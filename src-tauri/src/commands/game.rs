@@ -163,11 +163,7 @@ pub fn open_folder(state: State<'_, AppState>, key: String) -> Res<()> {
     if !dir.is_dir() {
         return Err(msg!(installFolderMissing, path = dir.display().to_string()));
     }
-    std::process::Command::new("explorer.exe")
-        .arg(dir)
-        .spawn()
-        .map(drop)
-        .map_err(Msg::system)
+    crate::platform::shell_open(dir).map_err(Msg::from)
 }
 
 /// Opens one of the game page's links in the default browser. The URL is built here from the kind.
@@ -192,7 +188,7 @@ pub async fn open_link(app: AppHandle, key: String, kind: LinkKind) -> Res<()> {
         };
         let epic_url = epic_key.and_then(|k| igdb::epic_url(&open_db(&state)?, &k));
         let url = links::url(kind, appid, epic_url.as_deref(), &title).ok_or(msg!(noPageThere))?;
-        crate::library::open_url(&url).map_err(Msg::from)
+        crate::platform::open_url(&url).map_err(Msg::from)
     })
     .await
 }
@@ -331,9 +327,9 @@ fn act_blocking(
             Action::Update => Err(msg!(steamUpdatesItself).into()),
             Action::Uninstall => steam::uninstall(game),
             Action::Verify => {
-                crate::library::open_uri(&format!("steam://validate/{}", game.external_id))
+                crate::platform::shell_open(format!("steam://validate/{}", game.external_id))
             }
-            Action::Move => crate::library::open_uri("steam://open/storage"),
+            Action::Move => crate::platform::shell_open("steam://open/storage"),
         };
         return result
             .map(|()| None)
@@ -954,7 +950,7 @@ pub fn open_steam_properties(state: State<'_, AppState>, key: String) -> Res<()>
         .game(&key)
         .filter(|g| g.provider == ProviderKind::Steam)
         .ok_or(msg!(notFromSteam))?;
-    crate::library::open_uri(&format!("steam://gameproperties/{}", game.external_id))
+    crate::platform::shell_open(format!("steam://gameproperties/{}", game.external_id))
         .map_err(Msg::from)
 }
 

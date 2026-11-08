@@ -1,10 +1,66 @@
 //! OS-specific calls. Windows only for now.
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// Keeps a console program from flashing a window.
 #[cfg(windows)]
 pub fn no_window(command: &mut std::process::Command) -> &mut std::process::Command {
     use std::os::windows::process::CommandExt;
-    command.creation_flags(crate::library::CREATE_NO_WINDOW)
+    command.creation_flags(CREATE_NO_WINDOW)
+}
+
+/// Opens a folder in File Explorer, or a store URI (`steam://…`, `com.epicgames.launcher://…`) with its registered
+/// handler. explorer.exe hands it to the shell without cmd.exe parsing, so `&` in a URI is safe.
+// shortcut: explorer never reports a missing handler (Windows shows its own dialog); use ShellExecuteW if we need the error in-app.
+#[cfg(windows)]
+pub fn shell_open(target: impl AsRef<std::ffi::OsStr>) -> Result<(), crate::library::Error> {
+    std::process::Command::new("explorer.exe")
+        .arg(target)
+        .spawn()?;
+    Ok(())
+}
+
+/// Opens an `https://` URL in the default browser. explorer.exe would open the Documents folder
+/// for anything but a registered protocol; rundll32 hands the URL straight to the shell, no cmd.exe,
+/// so `&` and `?` are safe.
+#[cfg(windows)]
+pub fn open_url(url: &str) -> Result<(), crate::library::Error> {
+    if !url.starts_with("https://") {
+        return Err(format!("not an https URL: {url}").into());
+    }
+    no_window(
+        std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]),
+    )
+    .spawn()?;
+    Ok(())
+}
+
+/// Whether `tasklist /FI <filter>` (e.g. `PID eq 42`) lists a process named `image`.
+// shortcut: starts a tasklist process; callers only ask while a game is believed to be running.
+#[cfg(windows)]
+pub fn process_listed(filter: &str, image: &str) -> bool {
+    let output = no_window(
+        std::process::Command::new("tasklist").args(["/FI", filter, "/FO", "CSV", "/NH"]),
+    )
+    .output();
+    output.is_ok_and(|o| lists_image(&String::from_utf8_lossy(&o.stdout), image))
+}
+
+/// tasklist CSV rows look like `"steam.exe","16176","Console","1","131.968 K"`.
+fn lists_image(tasklist_csv: &str, image: &str) -> bool {
+    let wanted = format!("\"{}\"", image.to_ascii_lowercase());
+    tasklist_csv
+        .lines()
+        .any(|row| row.to_ascii_lowercase().starts_with(&wanted))
+}
+
+/// A DWORD value under `HKEY_CURRENT_USER\<key>`.
+#[cfg(windows)]
+pub fn user_registry_u32(key: &str, name: &str) -> std::io::Result<u32> {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(key)?
+        .get_value(name)
 }
 
 /// Kills a process and every process it started (Legendary and gogdl unpack themselves into a child process,
@@ -35,7 +91,7 @@ pub fn spawn_tool(command: &mut std::process::Command) -> std::io::Result<std::p
     use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
     let mut child = command
-        .creation_flags(crate::library::CREATE_NO_WINDOW | CREATE_SUSPENDED)
+        .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
         .spawn()?;
     // SAFETY: the job handle stays open for the app's life, the process handle for `child`'s.
     if let Some(job) = tool_job()
@@ -240,6 +296,41 @@ pub fn windows_version() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn open_url_refuses_non_https() {
+        for url in [
+            "http://example.com",
+            "steam://open/main",
+            "file:///C:/Windows",
+            "notepad.exe",
+            "",
+        ] {
+            assert!(open_url(url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn lists_image_matches_whole_name_ignoring_case() {
+        let row = "\"Steam.exe\",\"16176\",\"Console\",\"1\",\"131.968 K\"\r\n";
+        assert!(lists_image(row, "steam.exe"));
+        // No match: tasklist prints an INFO line instead of a row.
+        assert!(!lists_image(
+            "INFO: No tasks are running which match the specified criteria.\r\n",
+            "steam.exe"
+        ));
+        // Pid reused by another program, or a name that only starts the same.
+        assert!(!lists_image(
+            "\"notepad.exe\",\"16176\",\"Console\",\"1\",\"9 K\"",
+            "steam.exe"
+        ));
+        assert!(!lists_image(
+            "\"steamwebhelper.exe\",\"16176\",\"Console\",\"1\",\"9 K\"",
+            "steam.exe"
+        ));
+    }
+
     #[test]
     fn a_store_tool_runs_in_the_job_and_to_its_end() {
         use std::os::windows::io::AsRawHandle;
