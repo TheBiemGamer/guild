@@ -7,8 +7,8 @@
 <p align="center"><b>G</b>ames <b>U</b>nified <b>I</b>n one <b>L</b>ibrary, <b>D</b>uh.</p>
 
 <p align="center">
-  <a href="https://github.com/TheBiemGamer/game-launcher/releases/latest"><img src="https://img.shields.io/github/v/release/TheBiemGamer/game-launcher" alt="Latest release"></a>
-  <a href="https://github.com/TheBiemGamer/game-launcher/releases"><img src="https://img.shields.io/github/downloads/TheBiemGamer/game-launcher/total" alt="Downloads"></a>
+  <a href="https://github.com/TheBiemGamer/guild/releases/latest"><img src="https://img.shields.io/github/v/release/TheBiemGamer/guild" alt="Latest release"></a>
+  <a href="https://github.com/TheBiemGamer/guild/releases"><img src="https://img.shields.io/github/downloads/TheBiemGamer/guild/total" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4" alt="Platform: Windows 10 and 11">
 </p>
 
@@ -26,7 +26,7 @@ You can sort by title, recent play, playtime or length, filter by store and inst
 
 ## Install
 
-Download the file ending in `x64-setup.exe` from the [latest release](https://github.com/TheBiemGamer/game-launcher/releases/latest) and run it. It installs for your Windows user only, so it doesn't ask for admin rights.
+Download the file ending in `x64-setup.exe` from the [latest release](https://github.com/TheBiemGamer/guild/releases/latest) and run it. It installs for your Windows user only, so it doesn't ask for admin rights.
 
 Guild isn't code-signed yet, so Windows SmartScreen may warn you the first time. Click More info, then Run anyway. After that, Guild tells you when there's a new version and installs it when you say so.
 

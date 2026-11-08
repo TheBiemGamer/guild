@@ -1,4 +1,4 @@
-# Guild (game-launcher)
+# Guild
 
 Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libraries. Built with Tauri 2, Svelte 5 + TypeScript, and Rust (`src-tauri/src`). Epic goes through the Legendary CLI, GOG through gogdl, Amazon through Nile; Steam through local files and steam-vent.
 
