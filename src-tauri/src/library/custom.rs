@@ -80,9 +80,11 @@ pub fn new_id() -> String {
     )
 }
 
-/// The id in a `custom-<id>` key.
+/// The id in a `custom-<id>` key: hex, as `new_id` makes it. Anything else is refused, since the id names a folder
+/// that removing the game deletes.
 pub fn id_of(key: &str) -> Option<&str> {
-    key.strip_prefix("custom-").filter(|id| !id.is_empty())
+    key.strip_prefix("custom-")
+        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 /// Installed while the program is there; the install folder is the program's folder.
@@ -185,6 +187,15 @@ mod tests {
         assert_eq!(ProviderKind::parse("custom"), Some(ProviderKind::Custom));
         assert_eq!(id_of("custom-"), None);
         assert_eq!(id_of("epic-custom-1"), None);
+        for bad in [
+            "custom-..",
+            r"custom-C:\x",
+            "custom-a/b",
+            r"custom-..\..",
+            "custom-18f2a ",
+        ] {
+            assert_eq!(id_of(bad), None, "{bad}");
+        }
     }
 
     #[test]
