@@ -246,8 +246,8 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - The store selector is one segmented control (`role="radiogroup"`) listing only the stores the library has games from. It is absent with one store.
   - The Downloads chip shows progress as a 2px `accent-2` ring that fills clockwise and updates per poll, never per frame.
 - **Tooltips** (`Tip.svelte`, bits-ui): `surface-2`, `glass-on-line` border, 8px radius, 12px `text`, shadow `0 8px 24px rgb(0 0 0 / .5)` (`--shadow-modal` is for dialogs). One provider in `App.svelte`: opens after 500ms, and a neighbour within 300ms opens at once. Fades in 120ms, not under reduced motion.
-  - Use on icon-only buttons (keep the `aria-label`) and on labelled buttons whose hint explains something else. A button that can be disabled gets a `tip-anchor` wrapper (`inline-flex`), since a disabled button fires no pointer events.
-  - Text that may be cut off (paths, `.note` lines) uses `truncated`: hover only, no tab stop, and it opens only while the text is actually cut. The game card keeps its native `title`.
+  - Use on icon-only buttons (keep the `aria-label`) and on labelled buttons whose hint explains something else. A button that can be disabled gets a `tip-anchor` wrapper (`inline-flex`), since a disabled button fires no pointer events; the wrapper also opens on focus of the button inside. Text that shows less than the tooltip (a file name for its path) gets a plain `Tip`.
+  - Ellipsized text whose tooltip repeats it in full (paths, `.note` lines) uses `truncated`: hover only, no tab stop, and it opens only while the text is actually cut. The game card keeps its native `title`.
 - **Popovers** (Filters, Sort, Downloads, Notes, the ⋯ menu, Play with): `surface-2`, `glass-on-line` border, 12px radius, modal shadow.
   - Keyboard (`src/lib/popover.ts`): focus moves in on open, Tab stays inside, Escape closes and returns focus, a click outside closes.
   - Chosen rows carry the same check mark (`Check.svelte`).

@@ -130,7 +130,7 @@
         <p class="note">{before}<button class="link" onclick={onsettings}>{t('addGame.noKeyLink')}</button>{after}</p>
         <div class="in file">
           <button class="glass" onclick={pickFile}>{t('addGame.useFile')}</button>
-          {#if file}<Tip text={file} truncated>
+          {#if file}<Tip text={file}>
               {#snippet children({ props })}<span {...props}>{fileName}</span>{/snippet}
             </Tip>{/if}
         </div>
@@ -149,7 +149,7 @@
           {/each}
         </div>
         <small
-          ><Tip text={file ?? ''} truncated>
+          ><Tip text={file ?? ''}>
             {#snippet children({ props })}<span {...props}>{file ? fileName : t('addGame.fromGrid')}</span>{/snippet}
           </Tip>
           ·

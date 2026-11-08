@@ -948,7 +948,7 @@
                       {/snippet}
                     </Tip>
                   </div>
-                  <Tip text={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')} truncated>
+                  <Tip text={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')}>
                     {#snippet children({ props })}
                       <p {...props}>
                         <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}
