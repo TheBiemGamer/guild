@@ -155,7 +155,7 @@
   }
 </script>
 
-<!-- At the pointer it leaves the page live (no scroll lock), so the grid can still scroll and close it. -->
+<!-- No scroll lock, so the grid can still scroll and close the menu opened at the pointer. -->
 <svelte:window onscrollcapture={onscroll} />
 
 <!-- The ⋯ menu stays mounted between opens, so it starts over each time. -->
@@ -174,7 +174,7 @@
       align={at ? 'start' : 'end'}
       sideOffset={at ? 0 : 8}
       collisionPadding={8}
-      preventScroll={!at}
+      preventScroll={false}
       aria-label={label}
       onInteractOutside={keepOnBackForward}
       onOpenAutoFocus={focusFirst}

@@ -238,7 +238,7 @@
       {#snippet trigger({ props })}
         <Tip text={t('downloads.title')}>
           {#snippet children({ props: tip })}
-            <button {...mergeProps(props, tip)} class="chip icon" aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}>
+            <button {...mergeProps(tip, props)} class="chip icon" aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}>
               <span class="ring" style="--done: {fraction * 100}%"></span>
               <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
             </button>

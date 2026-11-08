@@ -38,7 +38,15 @@
     {/snippet}
   </DropdownMenu.Trigger>
   <DropdownMenu.Portal>
-    <DropdownMenu.Content bind:ref={content} align="end" sideOffset={8} aria-label={label} onInteractOutside={keepOnBackForward} onOpenAutoFocus={focusChosen}>
+    <DropdownMenu.Content
+      bind:ref={content}
+      align="end"
+      sideOffset={8}
+      preventScroll={false}
+      aria-label={label}
+      onInteractOutside={keepOnBackForward}
+      onOpenAutoFocus={focusChosen}
+    >
       {#snippet child({ props, wrapperProps })}
         <div {...wrapperProps}>
           <div {...props} class="pop">

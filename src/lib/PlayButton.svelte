@@ -111,6 +111,7 @@
           customAnchor={pair}
           align="end"
           sideOffset={8}
+          preventScroll={false}
           aria-label={t('play.playWith')}
           onInteractOutside={keepOnBackForward}
           onOpenAutoFocus={focusChosen}

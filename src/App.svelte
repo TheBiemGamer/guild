@@ -405,6 +405,8 @@
     // mouseup and auxclick both arrive for one press; only mouseup acts. Settings (and the Steam log in
     // inside it) is modal: the page behind it stays put and focus stays in the dialog.
     if (e.type !== 'mouseup' || settingsOpen || popoverOpen || adding) return
+    // Nor under any other open menu or popover (the ⋯ menu, Play with, the install panel, notes).
+    if (document.querySelector('[data-dropdown-menu-content],[data-popover-content],[data-combobox-content],[data-install-panel]')) return
     const step = navStep(e.button, open, lastClosed)
     if (!step) return
     if (step.open === null) {

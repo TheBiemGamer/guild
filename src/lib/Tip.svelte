@@ -21,6 +21,12 @@
       hovered = e.currentTarget as HTMLElement
       ;(handler as Handler | undefined)?.(e)
     }
+  /** Keyboard focus only: focus handed back after a mouse close, or moved in by a popover, opens nothing. The target, not the wrapper, carries :focus-visible. */
+  const focusin =
+    (handler: unknown): Handler =>
+    (e) => {
+      if ((e.target as Element).matches(':focus-visible')) track(handler)(e)
+    }
 </script>
 
 <Tooltip.Root bind:open onOpenChange={change} disableHoverableContent>
@@ -29,7 +35,7 @@
       <!-- The caller's element keeps its own focus, type and disabled. focusin and focusout instead of focus and blur, so a wrapper opens when the button inside it is focused. -->
       {@const { tabindex: _tabindex, type: _type, disabled: _disabled, onfocus, onblur, onpointerenter, onpointermove, ...rest } = props}
       {@render children({
-        props: { ...rest, onpointerenter: track(onpointerenter), onpointermove: track(onpointermove), onfocusin: track(onfocus), onfocusout: onblur },
+        props: { ...rest, onpointerenter: track(onpointerenter), onpointermove: track(onpointermove), onfocusin: focusin(onfocus), onfocusout: onblur },
       })}
     {/snippet}
   </Tooltip.Trigger>

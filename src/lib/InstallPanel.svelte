@@ -108,10 +108,10 @@
     if (e.key === 'Escape' && !menuOpen && !languagesOpen) oncancel()
   }
 
-  // A click outside closes it. Clicks on the cover or the Install pill are left to them (they toggle it).
+  // A click outside closes it; mouse Back and Forward don't. Clicks on the cover or the Install pill are left to them (they toggle it).
   function onpointerdown(e: PointerEvent) {
     const target = e.target as Node
-    if (menuOpen || languagesOpen || el.contains(target) || opener?.contains(target)) return
+    if (e.button > 2 || menuOpen || languagesOpen || el.contains(target) || opener?.contains(target)) return
     const inside = !!anchor && e.clientX >= anchor.left && e.clientX <= anchor.right && e.clientY >= anchor.top && e.clientY <= anchor.bottom
     if (!inside) oncancel()
   }
@@ -148,6 +148,7 @@
 <div
   class="panel"
   class:popup={anchor}
+  data-install-panel
   bind:this={el}
   bind:clientHeight={height}
   role="dialog"
