@@ -132,12 +132,10 @@ fn nile_in(config: &Path, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> 
 
 /// Runs `command` to its end, or kills it at `timeout` and returns `None`. Callers hold `NILE`.
 fn run_short(mut command: Command, timeout: Duration) -> Option<Output> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .inspect_err(|e| tracing::warn!("nile: {e}"))
-        .ok()?;
+    let mut child =
+        crate::platform::spawn_tool(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
+            .inspect_err(|e| tracing::warn!("nile: {e}"))
+            .ok()?;
     let read = |mut pipe: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -758,10 +756,9 @@ fn run(
     action: ProgressAction,
     mut on_event: impl FnMut(InstallEvent),
 ) -> Result<Run, Error> {
-    let mut child = nile(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child =
+        crate::platform::spawn_tool(nile(args).stdout(Stdio::piped()).stderr(Stdio::piped()))?;
+
     let pid = child.id();
     on_event(InstallEvent::Started(pid));
     let mut stdout = child.stdout.take().expect("stdout is piped");

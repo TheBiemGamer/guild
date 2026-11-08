@@ -79,8 +79,13 @@ fn main() {
             Ok(())
         })
         .invoke_handler(bindings.invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("the launcher window could not start");
+        .build(tauri::generate_context!())
+        .expect("the launcher window could not start")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                commands::game::stop_queue_on_exit(app);
+            }
+        });
 }
 
 /// Every command, for Tauri and for the generated TypeScript (`src/lib/bindings.ts`). Command errors reject the

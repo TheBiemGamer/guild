@@ -25,6 +25,121 @@ pub fn kill_tree(pid: u32) -> Result<(), crate::library::Error> {
     }
 }
 
+/// Starts a store tool (Legendary, gogdl, Nile) in a job that Windows ends with the app, even when the app is killed,
+/// so a download never runs on after it. Suspended until it is in the job, so the child a PyInstaller build starts at
+/// once lands there too. Never for games or `legendary launch`: a game in the job would close with the app.
+#[cfg(windows)]
+pub fn spawn_tool(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+    let mut child = command
+        .creation_flags(crate::library::CREATE_NO_WINDOW | CREATE_SUSPENDED)
+        .spawn()?;
+    // SAFETY: the job handle stays open for the app's life, the process handle for `child`'s.
+    if let Some(job) = tool_job()
+        && unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } == 0
+    {
+        tracing::warn!(
+            "store tool outside the job: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    if let Err(e) = resume(child.id()) {
+        _ = child.kill();
+        _ = child.wait();
+        return Err(e);
+    }
+    Ok(child)
+}
+
+/// `Command::output` for a store tool, started through `spawn_tool`.
+#[cfg(windows)]
+pub fn tool_output(command: &mut std::process::Command) -> std::io::Result<std::process::Output> {
+    use std::process::Stdio;
+    spawn_tool(
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )?
+    .wait_with_output()
+}
+
+/// The job store tools run in, made once. Its handle is never closed: the app's exit closes it, which ends them.
+#[cfg(windows)]
+fn tool_job() -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectExtendedLimitInformation, SetInformationJobObject,
+    };
+    // A handle is a pointer, which a static can't hold; kept as its address.
+    static JOB: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    let job = JOB.get_or_init(|| {
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: the handle is checked before use; `limits` outlives the call that reads it.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                tracing::warn!("store tool job: {}", std::io::Error::last_os_error());
+                return None;
+            }
+            let set = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                size_of_val(&limits) as u32,
+            );
+            if set == 0 {
+                tracing::warn!("store tool job: {}", std::io::Error::last_os_error());
+                CloseHandle(job);
+                return None;
+            }
+            Some(job as usize)
+        }
+    });
+    job.map(|j| j as windows_sys::Win32::Foundation::HANDLE)
+}
+
+/// Resumes the threads of a process started suspended.
+#[cfg(windows)]
+fn resume(pid: u32) -> std::io::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    let mut entry = THREADENTRY32 {
+        dwSize: size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: every handle is checked before use and closed once; `entry` is a plain struct the calls fill in.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut resumed = false;
+        let mut more = Thread32First(snapshot, &mut entry) != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid {
+                let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                if !thread.is_null() {
+                    resumed |= ResumeThread(thread) != u32::MAX;
+                    CloseHandle(thread);
+                }
+            }
+            more = Thread32Next(snapshot, &mut entry) != 0;
+        }
+        let error = std::io::Error::last_os_error();
+        CloseHandle(snapshot);
+        if resumed { Ok(()) } else { Err(error) }
+    }
+}
+
 /// Bytes a process has written since it started (`WriteTransferCount`), or `None` when it's gone or not ours to read.
 #[cfg(windows)]
 pub fn process_bytes_written(pid: u32) -> Option<u64> {
@@ -120,5 +235,29 @@ pub fn windows_version() -> String {
     match build {
         Some(b) => format!("Windows {} (build {b})", if b >= 22_000 { 11 } else { 10 }),
         None => "Windows".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_store_tool_runs_in_the_job_and_to_its_end() {
+        use std::os::windows::io::AsRawHandle;
+        use std::process::{Command, Stdio};
+        let mut command = Command::new("cmd");
+        command.args(["/C", "echo hi"]).stdout(Stdio::piped());
+        let child = super::spawn_tool(&mut command).unwrap();
+        let mut in_job = 0;
+        // SAFETY: both handles are open; `in_job` is written by the call.
+        let ok = unsafe {
+            windows_sys::Win32::System::JobObjects::IsProcessInJob(
+                child.as_raw_handle(),
+                super::tool_job().unwrap(),
+                &mut in_job,
+            )
+        };
+        assert!(ok != 0 && in_job != 0);
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hi");
     }
 }

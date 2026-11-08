@@ -111,10 +111,9 @@ pub fn version(tool: &'static Tool) -> Option<String> {
         .get_or_insert_default()
         .entry(tool.name)
         .or_insert_with(|| {
-            let mut command = Command::new(tool.exe());
-            let output = crate::platform::no_window(command.arg("--version"))
-                .output()
-                .ok()?;
+            let output =
+                crate::platform::tool_output(Command::new(tool.exe()).arg("--version")).ok()?;
+
             parse_version(&String::from_utf8_lossy(&output.stdout))
         })
         .clone()

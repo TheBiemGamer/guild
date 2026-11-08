@@ -134,7 +134,7 @@ fn auth() -> Auth {
     if !has_login(&auth_file()) {
         return Auth::Out;
     }
-    let output = match gogdl(["auth"]).output() {
+    let output = match crate::platform::tool_output(&mut gogdl(["auth"])) {
         Ok(output) => output,
         Err(e) => {
             tracing::warn!("gogdl auth: {e}");
@@ -186,7 +186,7 @@ fn has_login(file: &Path) -> bool {
 pub fn log_in(code: &str) -> Result<(), Error> {
     let mut cached = lock_auth();
     std::fs::create_dir_all(dir())?;
-    let output = gogdl(["auth", "--code", code]).output()?;
+    let output = crate::platform::tool_output(&mut gogdl(["auth", "--code", code]))?;
     let answer = serde_json::from_slice::<Value>(&output.stdout)
         .ok()
         .filter(|v| v["error"] != true);
@@ -689,8 +689,7 @@ pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
         || {
             // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
             _ = login();
-            let output = gogdl(["info", id, "--os", "windows"])
-                .output()
+            let output = crate::platform::tool_output(&mut gogdl(["info", id, "--os", "windows"]))
                 .inspect_err(|e| tracing::warn!("gogdl info {id}: {e}"))
                 .ok()?;
             let info = json_line(&output.stdout).filter(|v| v["size"].is_object());
@@ -860,10 +859,9 @@ fn run(
     mut action: ProgressAction,
     mut on_event: impl FnMut(InstallEvent),
 ) -> Result<Run, Error> {
-    let mut child = gogdl(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child =
+        crate::platform::spawn_tool(gogdl(args).stdout(Stdio::piped()).stderr(Stdio::piped()))?;
+
     let pid = child.id();
     on_event(InstallEvent::Started(pid));
     let mut stdout = child.stdout.take().expect("stdout is piped");
@@ -1081,7 +1079,8 @@ pub fn import(path: &Path) -> Result<String, Error> {
     if !path.is_dir() {
         return Err(msg!(notAFolder, path = path.display().to_string()).into());
     }
-    let output = gogdl([OsStr::new("import"), path.as_os_str()]).output()?;
+    let output =
+        crate::platform::tool_output(&mut gogdl([OsStr::new("import"), path.as_os_str()]))?;
     match json_line(&output.stdout).and_then(|v| id_text(&v["appName"])) {
         Some(id) => Ok(id),
         None => {

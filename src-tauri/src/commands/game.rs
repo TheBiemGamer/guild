@@ -1877,6 +1877,15 @@ pub(super) fn stop_queue_for_restart(app: &AppHandle) -> bool {
     was_paused
 }
 
+/// On a normal exit (tray Quit, or the window closed while close-to-tray is off): stops a running download as an
+/// update restart does, so the next start resumes it rather than racing a tool still at work. Skipped without a
+/// runner, which also keeps what `install_update` stored.
+pub(crate) fn stop_queue_on_exit(app: &AppHandle) {
+    if app.state::<AppState>().lock().queue_running {
+        stop_queue_for_restart(app);
+    }
+}
+
 /// The queue as stored across an update restart. The live queue stays paused, so the runner can't start
 /// the next job before the app exits.
 fn stored_for_restart(queue: &Queue, was_paused: bool) -> Queue {

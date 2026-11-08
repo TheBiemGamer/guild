@@ -154,7 +154,8 @@ pub fn launch(
     command
         .args(launch_args(app_name, options, skip_version_check))
         .creation_flags(CREATE_NO_WINDOW);
-    run(command)
+    // Not `run`: outside the store tools' job, which would end the game Legendary starts when the app closes.
+    checked(&command.output()?)
 }
 
 /// Which way `sync-saves` goes. Legendary compares the newest local file with the cloud save's date.
@@ -230,11 +231,12 @@ pub(super) fn run_with_timeout(
     input: &[u8],
     timeout: Duration,
 ) -> std::io::Result<Option<(bool, String, String)>> {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child = crate::platform::spawn_tool(
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )?;
     child
         .stdin
         .take()
@@ -457,11 +459,12 @@ fn run_logged(
     mut command: Command,
     mut on_event: impl FnMut(InstallEvent),
 ) -> Result<(bool, String), Error> {
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child = crate::platform::spawn_tool(
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )?;
     on_event(InstallEvent::Started(child.id()));
     let mut stderr = child.stderr.take().expect("stderr is piped");
     // Read aside, so a full pipe never stalls the process.
@@ -551,10 +554,8 @@ fn stream(
     action: ProgressAction,
     mut on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
-    let mut child = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child =
+        crate::platform::spawn_tool(command.stdout(Stdio::null()).stderr(Stdio::piped()))?;
     on_event(InstallEvent::Started(child.id()));
     let mut downloaded_mib = 0.0;
     let mut last_line = String::new();
@@ -693,16 +694,19 @@ fn legendary(args: &[&str]) -> Command {
 }
 
 fn run(mut command: Command) -> Result<(), Error> {
-    let output = command.output()?;
+    checked(&crate::platform::tool_output(&mut command)?)
+}
+
+fn checked(output: &std::process::Output) -> Result<(), Error> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(failure(&output).into())
+        Err(failure(output).into())
     }
 }
 
 fn json(args: &[&str]) -> Result<Value, Error> {
-    let output = legendary(args).output()?;
+    let output = crate::platform::tool_output(&mut legendary(args))?;
     if !output.status.success() {
         return Err(failure(&output).into());
     }
