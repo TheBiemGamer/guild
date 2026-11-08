@@ -9,7 +9,7 @@
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { around, t } from './i18n'
   import igdbSvg from './icons/igdb.svg?raw'
-  // Multicolour, so an <img>; `no-inline` keeps it out of data: URLs, which the CSP blocks.
+  // Multicolour, so an img element; `no-inline` keeps it out of data: URLs, which the CSP blocks.
   import gridFile from './icons/steamgriddb.svg?no-inline'
 
   let {
