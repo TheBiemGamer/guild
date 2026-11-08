@@ -673,7 +673,7 @@
           {/snippet}
         </Tabs.List>
 
-        <Tabs.Content value={current}>
+        <Tabs.Content value={current} tabindex={-1}>
           {#if current === 'dlc'}
             <section class="panel" aria-label={t('detail.tab.dlc')}>
               <ul class="dlc">
