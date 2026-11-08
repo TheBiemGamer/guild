@@ -540,7 +540,11 @@ pub(crate) fn refresh_owned(app: AppHandle, force: bool) {
         let Some((token, _running)) = blocking(move || owned_job(&job, force)).await else {
             return;
         };
+        // One Steam logon at a time, shared with the download-size and DLC lookups.
+        let state = app.state::<AppState>();
+        let one = state.steam_size.lock().await;
         let result = steam_owned::fetch(&token).await;
+        drop(one);
         drop(token);
         if let Err(e) = &result {
             tracing::warn!("steam owned: {}", error_kind(e));

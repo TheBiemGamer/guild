@@ -33,7 +33,7 @@ pub struct AppState {
     http: reqwest::Client,
     shared: Mutex<Shared>,
     cover_jobs: tokio::sync::Semaphore,
-    /// Held across a Steam download-size lookup, so page opens never stack Steam logons.
+    /// Held across every Steam logon (download size, DLC, owned games), so they never stack.
     steam_size: tokio::sync::Mutex<()>,
     /// Takes turns for `library::rescan`.
     scans: library::ScanTurns,
