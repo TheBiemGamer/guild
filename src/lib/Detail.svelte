@@ -796,7 +796,7 @@
                 <div class="tile">
                   <div class="head">
                     <h2>{t('detail.playtime')}</h2>
-                    {#if game.playtimeBoth}<small>Steam + Epic</small>{/if}
+                    {#if game.playtimeStores.length}<small>{game.playtimeStores.map((p) => storeNames[p]).join(' + ')}</small>{/if}
                   </div>
                   <p><b>{playtime}</b></p>
                 </div>

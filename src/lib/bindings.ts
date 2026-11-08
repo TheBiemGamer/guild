@@ -322,8 +322,8 @@ export type Detail = {
 	chosen: string,
 	/**  Playtime tile minutes, 0 being never played; `None` hides the tile (an Epic copy with no known playtime). */
 	playtimeMinutes: number | null,
-	/**  Both copies contributed to the playtime. */
-	playtimeBoth: boolean,
+	/**  The stores whose playtime is summed, only when more than one is. */
+	playtimeStores: Store[],
 	/**  Unix seconds; `None` when never played. */
 	lastPlayed: number | null,
 	/**  The store played on last, only for an entry with several copies. */

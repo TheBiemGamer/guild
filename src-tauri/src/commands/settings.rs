@@ -37,7 +37,10 @@ use crate::tools;
 #[specta::specta]
 pub async fn epic_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
-        let code = epic_login::run(&app)?.ok_or(msg!(loginWindowClosed))?;
+        // Closing the window yourself is no error.
+        let Some(code) = epic_login::run(&app)? else {
+            return Ok(());
+        };
         epic::log_in(&code)?;
         rescan(&app, true);
         Ok(())
@@ -71,7 +74,9 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
 #[specta::specta]
 pub async fn gog_log_in(app: AppHandle) -> Res<()> {
     blocking(move || {
-        let code = gog_login::run(&app)?.ok_or(msg!(loginWindowClosed))?;
+        let Some(code) = gog_login::run(&app)? else {
+            return Ok(());
+        };
         gog::log_in(&code)?;
         rescan(&app, true);
         fill_twins(app.clone());
@@ -102,7 +107,9 @@ pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
         let sign_in = amazon::sign_in()?;
         // Starting may have logged a stale account out.
         app.state::<AppState>().lock().amazon_login = Some(amazon::login());
-        let code = amazon_login::run(&app, &sign_in.url)?.ok_or(msg!(loginWindowClosed))?;
+        let Some(code) = amazon_login::run(&app, &sign_in.url)? else {
+            return Ok(());
+        };
         amazon::register(&sign_in, &code)?;
         rescan(&app, true);
         fill_twins(app.clone());

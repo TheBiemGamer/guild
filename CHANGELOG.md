@@ -1,13 +1,13 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 (unreleased)
 
 ### Changed
 
 - The app is now called Guild. Your library, settings, logins and Start with Windows carry over the first time it starts.
 - Updating from 0.1.0 installs Guild as a new app. Afterwards, uninstall Game Launcher in Windows Settings → Apps; your library stays.
 
-## 0.1.0 — 2026-11-07
+## 0.1.0, 2026-11-07
 
 ### New
 
@@ -18,12 +18,11 @@
 - Cloud saves and per-game launch options for Epic games.
 - GOG games in the same library, through gogdl: play, install, update, verify, repair, move and uninstall them and their DLC in the same download queue, and import games you already installed. Cloud saves, launch options and GOG's playtime too.
 - Amazon Games in the same library, through Nile: play, install, update, verify, repair, move and uninstall them in the same download queue, and import games you already installed. Launch options too.
-- The settings button's dot shows only when a store you set up needs you, not for stores you never used.
 - Game pages with the description, screenshots, playtime, last played, how long to beat, and links to the store, PCGamingWiki, SteamDB and ProtonDB.
 - Sort and filter by store, install status, playtime and how long to beat.
 - Favorites, hidden games and your own collections.
 - Add your own games, with covers from SteamGridDB.
 - Start with Windows, keep running in the tray, and get a notification when a download finishes.
 - Works offline from its local cache.
-- Settings → Report a problem opens a GitHub bug report with your app and Windows versions filled in.
+- Settings → About → Report a problem opens a GitHub bug report with your app and Windows versions filled in.
 - A Windows installer, and updates that install themselves.

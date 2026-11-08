@@ -6,11 +6,11 @@ import { parseNotes, section } from '../src/lib/changelog.ts'
 const log = [
   '# Changelog',
   '',
-  '## 0.2.0 — 2026-12-01',
+  '## 0.2.0 (unreleased)',
   '### Fixed',
   '- Covers stay while scrolling',
   '',
-  '## v0.1.0 — 2026-11-07',
+  '## v0.1.0, 2026-11-07',
   '### New',
   '- One library',
   '',

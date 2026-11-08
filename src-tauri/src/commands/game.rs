@@ -40,8 +40,8 @@ pub struct Detail {
     chosen: String,
     /// Playtime tile minutes, 0 being never played; `None` hides the tile (an Epic copy with no known playtime).
     playtime_minutes: Option<u64>,
-    /// Both copies contributed to the playtime.
-    playtime_both: bool,
+    /// The stores whose playtime is summed, only when more than one is.
+    playtime_stores: Vec<ProviderKind>,
     /// Unix seconds; `None` when never played.
     last_played: Option<u64>,
     /// The store played on last, only for an entry with several copies.
@@ -99,7 +99,10 @@ fn detail(
     twins: &HashMap<String, u32>,
     lists: &view::Lists,
 ) -> Detail {
-    let (minutes, both) = entries::playtime(entry, games);
+    let (minutes, mut playtime_stores) = entries::playtime(entry, games);
+    if playtime_stores.len() < 2 {
+        playtime_stores.clear();
+    }
     let chosen = &games[entries::default_copy(entry, games)];
     // Steam's zero is a fact, so a Steam copy decides the tile; Epic alone shows only known playtime.
     let tile_provider = entry
@@ -134,7 +137,7 @@ fn detail(
             .collect(),
         chosen: chosen.key(),
         playtime_minutes: view::playtime_tile(tile_provider, minutes),
-        playtime_both: both,
+        playtime_stores,
         last_played: last.map(|(t, _)| t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())),
         last_played_store: last.filter(|_| entry.copies.len() > 1).map(|(_, p)| p),
         dlc: epic_dlc(&entry.copies.iter().map(|&i| &games[i]).collect::<Vec<_>>()),
@@ -2148,7 +2151,7 @@ mod tests {
         assert_eq!(d.chosen, "steam-635320");
         assert_eq!(d.copies.len(), 2);
         assert_eq!(d.playtime_minutes, Some(120));
-        assert!(!d.playtime_both);
+        assert!(d.playtime_stores.is_empty());
         assert_eq!(d.links.len(), 5);
     }
 
