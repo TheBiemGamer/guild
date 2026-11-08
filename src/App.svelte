@@ -476,7 +476,9 @@
 <Tooltip.Provider delayDuration={500} skipDelayDuration={300}>
   <Ambient hero={ambientHero} enabled={settings?.ambient ?? true} />
 
-  <main>
+  <!-- Screen readers and focus skip the app behind a dialog. The dialogs below are portalled to body; main
+       comes before them, so Svelte lifts inert before a closing dialog hands focus back to its opener in here. -->
+  <main inert={settingsOpen || adding !== null}>
     <Toolbar
       bind:query
       bind:store

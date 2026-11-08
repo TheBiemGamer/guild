@@ -257,7 +257,7 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - Menus use `menuitemradio` or `menuitemcheckbox`.
   - Destructive confirms ask inline in the menu or row, and focus goes to Cancel.
 - **Dialogs** (Settings, Add a game, Steam log in): bits-ui `Dialog`s over a dimmed scrim, `surface-2` (Settings frosted), `glass-on-line` border, 18px radius, modal shadow.
-  - Focus moves in on open: Settings to its close button, Add a game to the program field, Steam log in to the account field. Tab stays inside, and the dialog is `aria-modal`, so screen readers skip what is behind it.
+  - Focus moves in on open: Settings to its close button, Add a game to the program field, Steam log in to the account field. Tab stays inside. The dialog is `aria-modal` and the app behind it is `inert`, so screen readers and focus skip it.
   - Escape or a click outside closes only the top layer (a menu, popover or tooltip opened inside, or Steam log in over Settings) and returns focus to what opened it. Mouse Back and Forward never close a dialog (`keepOnBackForward`), and App ignores them while one is open.
   - Stacking: Settings and Add a game 20, the install popup and Notes 30, Steam log in 40, menus and the other popovers 50, tooltips 60.
 - **Cover card:**

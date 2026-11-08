@@ -603,7 +603,7 @@
   function opened(e: Event) {
     e.preventDefault()
     tick().then(() => {
-      closeButton.focus()
+      closeButton?.focus()
       if (section) go(section)
     })
   }

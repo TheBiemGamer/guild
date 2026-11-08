@@ -104,7 +104,7 @@
     let timer: ReturnType<typeof setTimeout> | undefined
     let failures = 0
 
-    async function tick() {
+    async function poll() {
       try {
         const step = await commands.steamConnectPoll()
         if (!alive) return
@@ -123,14 +123,14 @@
           return
         }
       }
-      timer = setTimeout(tick, POLL_MS)
+      timer = setTimeout(poll, POLL_MS)
     }
 
     commands.steamConnectStart().then(
       (svgCode) => {
         if (!alive) return
         svg = svgCode
-        timer = setTimeout(tick, POLL_MS)
+        timer = setTimeout(poll, POLL_MS)
       },
       (e) => alive && (qrFailure = api.message(e)),
     )
