@@ -122,20 +122,28 @@
     }
   }
 
-  /** Keys typed into the name stay in the field: no typeahead, item or submenu keys. Tab still leaves like from an item. */
-  async function nameKeydown(e: KeyboardEvent) {
+  /** Keys typed into the name stay in the field: no typeahead, item or submenu keys. Escape (`subEscape`) and Tab go to the menu. */
+  function nameKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault()
       create()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      naming = false
-      await tick()
-      newButton?.focus()
-    } else if (e.key !== 'Tab') {
+    } else if (e.key !== 'Escape' && e.key !== 'Tab') {
       e.stopPropagation()
     }
+  }
+
+  /** Escape in the submenu: while naming it only cancels the name; otherwise the submenu closes and focus goes back to its row. */
+  async function subEscape(e: KeyboardEvent) {
+    if (!naming) return subTrigger?.focus()
+    e.preventDefault()
+    naming = false
+    await tick()
+    newButton?.focus()
+  }
+
+  /** While naming, hovering must not pull focus out of the field or close the submenu. Stopped on the wrappers, above every bits-ui pointer listener. */
+  function holdWhileNaming(e: PointerEvent) {
+    if (naming) e.stopPropagation()
   }
 
   /** Opened at the pointer, it would stay put while the grid scrolls the card away. */
@@ -173,7 +181,7 @@
       onCloseAutoFocus={closeFocus}
     >
       {#snippet child({ props, wrapperProps })}
-        <div {...wrapperProps}>
+        <div {...wrapperProps} onpointermovecapture={holdWhileNaming} onpointerleavecapture={holdWhileNaming}>
           <div {...props} class="menu">
             {#if removing}
               <!-- Asks inline, like the Epic uninstall: a group of two menu items, named by the question. -->
@@ -209,7 +217,7 @@
                     </button>
                   {/snippet}
                 </DropdownMenu.SubTrigger>
-                <!-- Escape closes only the submenu, as Left does. -->
+                <!-- Escape closes only the submenu, as Left does (or only the name field, see subEscape). -->
                 <DropdownMenu.SubContent
                   bind:ref={sub}
                   sideOffset={10}
@@ -217,11 +225,11 @@
                   collisionPadding={8}
                   aria-label={t('menu.addToCollection')}
                   escapeKeydownBehavior="close"
-                  onEscapeKeydown={() => subTrigger?.focus()}
+                  onEscapeKeydown={subEscape}
                   onInteractOutside={keepOnBackForward}
                 >
                   {#snippet child({ props, wrapperProps })}
-                    <div {...wrapperProps}>
+                    <div {...wrapperProps} onpointermovecapture={holdWhileNaming} onpointerleavecapture={holdWhileNaming}>
                       <div {...props} class="menu sub">
                         {#each collections as c (c.id)}
                           {@const on = game.collections.includes(c.id)}
