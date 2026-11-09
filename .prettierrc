@@ -3,7 +3,7 @@
   "singleQuote": true,
   "printWidth": 160,
   "trailingComma": "all",
-  "endOfLine": "crlf",
+  "endOfLine": "auto",
   "plugins": ["prettier-plugin-svelte"],
   "overrides": [{ "files": "*.md", "options": { "singleQuote": false } }]
 }
