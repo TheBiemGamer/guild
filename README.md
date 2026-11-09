@@ -55,7 +55,7 @@ Open Settings with the gear at the top right. Under Accounts, log in to the stor
 - Steam: your password, or the QR code in the Steam mobile app. Steam itself has to be installed to play Steam games.
 - Epic Games, GOG and Amazon Games: Guild first offers to install the small open-source tool each one needs ([Legendary](https://github.com/derrod/legendary), [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl), [Nile](https://github.com/imLinguin/nile)), then opens the store's own login page. Each store's Options holds its install folder and import.
 
-For how long a game takes to beat, make a free app in the [Twitch developer console](https://dev.twitch.tv/console/apps) and paste its client ID and secret under Services. For covers of games you add yourself, paste a free [SteamGridDB](https://www.steamgriddb.com) API key there too.
+For how long a game takes to beat, make a free app in the [Twitch developer console](https://dev.twitch.tv/console/apps) and paste its client ID and secret under Settings → Accounts. For covers of games you add yourself, paste a free [SteamGridDB](https://www.steamgriddb.com) API key there too.
 
 ## FAQ
 
@@ -96,5 +96,7 @@ Guild is built on [Tauri](https://tauri.app) and [Svelte](https://svelte.dev), w
 Found a bug? Settings → About → Report a problem opens a GitHub issue with your Guild and system versions filled in. To build Guild yourself, see [DEVELOPMENT.md](DEVELOPMENT.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
+
+Copyright (C) 2026 TheBiemGamer
 
 [GPL-3.0](LICENSE)

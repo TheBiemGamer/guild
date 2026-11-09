@@ -685,7 +685,7 @@
         onsaved={reload}
         onsettings={() => {
           adding = null
-          openSettings('services')
+          openSettings('gamedata')
         }}
       />
     {/key}
