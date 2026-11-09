@@ -251,6 +251,10 @@ export const commands = {
 	openLink: (key: string, kind: LinkKind) => __TAURI_INVOKE<null>("open_link", { key, kind }),
 	/**  IGDB's site, for the "Data from IGDB" credit next to how long to beat. */
 	openIgdb: () => __TAURI_INVOKE<null>("open_igdb"),
+	/**  Guild's repository, for "Source code" in About. */
+	openSource: () => __TAURI_INVOKE<null>("open_source"),
+	/**  The README's Thanks section, for "Credits" in About. */
+	openCredits: () => __TAURI_INVOKE<null>("open_credits"),
 	/**  Opens the folder with launcher.log in File Explorer. */
 	openLogFolder: () => __TAURI_INVOKE<null>("open_log_folder"),
 	/**  Opens a new GitHub bug report with the app and Windows versions filled in. */

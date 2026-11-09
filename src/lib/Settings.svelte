@@ -15,6 +15,7 @@
   import igdbSvg from './icons/igdb.svg?raw'
   // Multicolour, so an img element; `no-inline` keeps it out of data: URLs, which the CSP blocks.
   import gridFile from './icons/steamgriddb.svg?no-inline'
+  import guildFile from '../../src-tauri/icons/source/guild.svg?no-inline'
 
   let {
     view,
@@ -1263,12 +1264,25 @@
 
             <section id={id('about')}>
               <h3>{t('settings.section.about')}</h3>
+              <div class="ident">
+                <img src={guildFile} width="64" height="64" alt="" />
+                <div>
+                  <div class="name">Guild<span>{view.appVersion}</span></div>
+                  <p class="acronym">{t('settings.about.acronym')}</p>
+                  <p>{t('settings.about.what')}</p>
+                  <p class="links">
+                    <button class="link" onclick={() => run(commands.openSource)}>{t('settings.about.source')}</button> · GPL-3.0 ·
+                    <button class="link" onclick={() => run(commands.openCredits)}>{t('settings.about.credits')}</button>
+                  </p>
+                </div>
+              </div>
               <h4>{t('settings.group.updates')}</h4>
               <div class="group">
                 <div class="r">
                   {@render tile('about')}
                   <div class="what">
-                    {t('settings.version', { version: view.appVersion })}{#if versionNote}<small>{versionNote}</small>{/if}
+                    <!-- The header shows the version, so this row says only what the last check found. -->
+                    {versionNote ?? t('settings.version', { version: view.appVersion })}
                   </div>
                   {#if notes}
                     <button class="btn" bind:this={notesButton} aria-haspopup="dialog" aria-expanded={notesOpen} onclick={() => (notesOpen = !notesOpen)}>
@@ -1492,6 +1506,46 @@
     border-radius: 10px;
     border: 1px solid rgb(239 68 68 / 0.35);
     color: var(--error-text);
+  }
+
+  .ident {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 4px;
+  }
+
+  .ident img {
+    flex: none;
+  }
+
+  .ident p {
+    margin: 2px 0 0;
+    color: var(--text-2);
+  }
+
+  .ident .name {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .ident .name span {
+    margin-left: 6px;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-3);
+  }
+
+  .ident .acronym {
+    margin: 0;
+    font-size: 13px;
+    font-style: italic;
+    color: var(--text-3);
+  }
+
+  .ident .links {
+    color: var(--text-3);
   }
 
   /* One rounded group per heading; its rows (and an open Options panel) are split by thin lines. No overflow

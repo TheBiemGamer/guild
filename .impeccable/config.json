@@ -155,6 +155,12 @@
         ],
         "createdAt": "2026-11-07T01:01:28.809Z",
         "reason": "user confirmed: the Continue-playing banner must stay 1:1 with Continue.svelte, including its kicker"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "ui variable text\",\"segoe ui\",system-ui,sans-serif",
+        "createdAt": "2026-11-09T19:33:19.472Z",
+        "reason": "Claude: this is the DESIGN.md typography stack; the detector split 'Segoe UI Variable Text' at its first space"
       }
     ]
   }

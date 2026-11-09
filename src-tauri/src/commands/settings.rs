@@ -544,6 +544,20 @@ pub fn open_igdb() -> Res<()> {
     crate::platform::open_url("https://www.igdb.com").map_err(Msg::from)
 }
 
+/// Guild's repository, for "Source code" in About.
+#[tauri::command]
+#[specta::specta]
+pub fn open_source() -> Res<()> {
+    crate::platform::open_url("https://github.com/TheBiemGamer/guild").map_err(Msg::from)
+}
+
+/// The README's Thanks section, for "Credits" in About.
+#[tauri::command]
+#[specta::specta]
+pub fn open_credits() -> Res<()> {
+    crate::platform::open_url("https://github.com/TheBiemGamer/guild#thanks").map_err(Msg::from)
+}
+
 /// Opens the folder with launcher.log in File Explorer.
 #[tauri::command]
 #[specta::specta]

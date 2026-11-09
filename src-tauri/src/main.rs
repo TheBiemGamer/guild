@@ -182,6 +182,8 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
             commands::game::open_folder,
             commands::game::open_link,
             commands::settings::open_igdb,
+            commands::settings::open_source,
+            commands::settings::open_credits,
             commands::settings::open_log_folder,
             commands::settings::report_problem,
             commands::library::bench_speed,
