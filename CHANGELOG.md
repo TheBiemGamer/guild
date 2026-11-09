@@ -4,7 +4,7 @@
 
 ### New
 
-- Guild runs on Linux, as an AppImage, a .deb or from the AUR. Steam works from a regular or a Flatpak install, and your Steam login and API keys are kept in your desktop's keyring.
+- Guild runs on Linux, as an AppImage or a .deb. Steam works from a regular or a Flatpak install, and your Steam login and API keys are kept in your desktop's keyring.
 - On Linux, Epic, GOG, Amazon and added Windows games run through umu-launcher and Proton, each game in its own Wine prefix. GOG installs a game's Linux version when GOG has one.
 - Settings → Wine on Linux: install umu-launcher, GE-Proton and Proton-CachyOS, choose the default Proton, and open, configure or remove each game's prefix. A game's Launch tab can pick its own Proton.
 - Uninstalling a Windows game on Linux keeps its prefix, and with it your saves, unless you tick the box to remove it.
