@@ -8,6 +8,7 @@ import {
   playtimeLabel,
   progressLong,
   progressShort,
+  protonName,
   sizeLabel,
   syncedLabel,
   ttbLabel,
@@ -130,4 +131,12 @@ test('a picked program suggests its file name', () => {
   assert.equal(nameFromExe('D:\\Games\\Hollow Knight\\hollow_knight.exe'), 'hollow_knight')
   assert.equal(nameFromExe('C:/Games/Celeste/Celeste.EXE'), 'Celeste')
   assert.equal(nameFromExe('D:\\Emu\\pcsx2-qt.v1.7.exe'), 'pcsx2-qt.v1.7')
+})
+
+test('protonName reads Proton folder names', () => {
+  assert.equal(protonName('proton-cachyos-11.0-20261015-slr-x86_64_v3'), 'Proton-CachyOS 11.0 (v3)')
+  assert.equal(protonName('proton-cachyos-10.0-20250714-slr-x86_64'), 'Proton-CachyOS 10.0')
+  assert.equal(protonName('GE-Proton11-12-x86_64'), 'GE-Proton11-12')
+  assert.equal(protonName('GE-Proton11-12'), 'GE-Proton11-12')
+  assert.equal(protonName('Proton - Experimental'), 'Proton - Experimental')
 })

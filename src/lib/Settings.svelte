@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import * as api from './api'
   import { commands, type PrefixView, type ProtonKind, type ReleaseView, type SettingsView, type UpdateInfo } from './bindings'
-  import { sizeLabel } from './format'
+  import { protonName, sizeLabel } from './format'
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
   import NotesPopover, { installedNotes } from './NotesPopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
+  import ActionMenu from './ActionMenu.svelte'
   import { around, t } from './i18n'
   import igdbSvg from './icons/igdb.svg?raw'
   // Multicolour, so an img element; `no-inline` keeps it out of data: URLs, which the CSP blocks.
@@ -77,7 +78,6 @@
     file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
     wine: 'M8 3h8l-.5 6a3.5 3.5 0 0 1-7 0zM12 12.5V20M8.5 21h7',
     window: 'M4 5h16v14H4zM4 9h16M7 7h.01M10 7h.01',
-    download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
     layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
   }
   type Icon = keyof typeof icons
@@ -141,8 +141,9 @@
   /** Linux, the Wine section: umu-launcher's download while it runs, like Legendary's. */
   let umuJob = $state<{ percent: number | null } | null>(null)
   let wineError = $state('')
-  /** The Proton source whose releases are open, and what asking GitHub for them gave. */
-  let releasesKind = $state<ProtonKind | null>(null)
+  /** The Install another build panel, the Proton source picked in it, and what asking GitHub for its releases gave. */
+  let installOpen = $state(false)
+  let releasesKind = $state<ProtonKind>('geProton')
   let releases = $state<ReleaseView[] | null>(null)
   let releasesState = $state<'loading' | 'failed' | 'done'>('done')
   /** One Proton build installs at a time: the release, with its percent once known. */
@@ -150,13 +151,32 @@
   let removingProton = $state<string | null>(null)
   let confirmProton = $state<string | null>(null)
   let prefixes = $state<PrefixView[]>([])
-  /** Prefix sizes by copy key; they arrive after the list. */
+  /** Sizes by prefix copy key and by Proton build name; they arrive after the lists. */
   let prefixSizes = $state<Record<string, number>>({})
+  let protonSizes = $state<Record<string, number>>({})
+  const prefixTotal = $derived(Object.values(prefixSizes).reduce((a, b) => a + b, 0))
   let confirmPrefix = $state<string | null>(null)
+  let confirmPrefixCancel = $state<HTMLButtonElement>()
+  /** The prefix whose ⋯ menu is open, and its button. */
+  let prefixMenu = $state<string | null>(null)
+  let prefixMenuButton = $state<HTMLButtonElement>()
   /** The build games run with when they choose none: the one set as default, else the newest found. */
   const defaultProton = $derived(
     view.runner ? (view.runner.protons.find((p) => p.name === view.runner!.proton)?.name ?? view.runner.protons[0]?.name ?? null) : null,
   )
+  /** The Proton for Windows games menu: Newest (naming the build it is now), then each build; '' is Newest. */
+  let protonOpen = $state(false)
+  let protonButton = $state<HTMLButtonElement>()
+  const protonChoices = $derived(
+    view.runner?.protons.length
+      ? [
+          { value: '', label: t('settings.protonNewest', { name: protonName(view.runner.protons[0].name) }) },
+          ...view.runner.protons.map((p) => ({ value: p.name, label: protonName(p.name) })),
+        ]
+      : [],
+  )
+  /** A default that is no longer found counts as Newest, as it does when a game starts. */
+  const protonChoice = $derived(view.runner?.protons.some((p) => p.name === view.runner!.proton) ? view.runner!.proton! : '')
 
   async function installUmu() {
     wineError = ''
@@ -178,10 +198,10 @@
     releasesState = found ? 'done' : 'failed'
   }
 
-  function toggleReleases(kind: ProtonKind) {
-    releasesKind = releasesKind === kind ? null : kind
+  function pickReleases(kind: ProtonKind) {
+    releasesKind = kind
     releases = null
-    if (releasesKind) loadReleases(releasesKind)
+    loadReleases(kind)
   }
 
   async function installProton(kind: ProtonKind, tag: string) {
@@ -195,6 +215,7 @@
     protonJob = null
     await onchange()
     if (releasesKind === kind) loadReleases(kind)
+    loadPrefixes()
   }
 
   async function removeProton(name: string) {
@@ -202,12 +223,21 @@
     removingProton = name
     await change(() => commands.removeProton(name))
     removingProton = null
+    loadPrefixes()
   }
 
+  /** The prefixes, then every prefix's and Proton build's size, which take longer. */
   async function loadPrefixes() {
     prefixes = await commands.winePrefixes()
-    const sizes = await commands.prefixSizes()
-    prefixSizes = Object.fromEntries(sizes.map((s) => [s.key, s.bytes]))
+    const sizes = await commands.wineSizes()
+    prefixSizes = Object.fromEntries(sizes.prefixes.map((s) => [s.key, s.bytes]))
+    protonSizes = Object.fromEntries(sizes.protons.map((s) => [s.key, s.bytes]))
+  }
+
+  async function askRemovePrefix(key: string) {
+    confirmPrefix = key
+    await tick()
+    confirmPrefixCancel?.focus()
   }
 
   async function removePrefix(key: string) {
@@ -1004,80 +1034,102 @@
       </section>
 
       {#if view.runner}
+        {@const runner = view.runner}
         <section id={id('wine')}>
           <h3>{t('settings.section.wine')}</h3>
           <div class="group">
-            <div class="r">
-              {@render tile('window')}
-              <div class="what">
-                umu-launcher
-                {#if !view.runner.umu}<small class="problem">{t('settings.umuMissing')}</small>{/if}
-              </div>
-              {#if !view.runner.umu}
+            {#if !runner.umu}
+              <div class="r">
+                {@render tile('window')}
+                <div class="what">umu-launcher<small class="problem">{t('settings.umuMissing')}</small></div>
                 <button class="btn" disabled={umuJob !== null} aria-live="polite" onclick={installUmu}>
                   {umuJob ? jobLabel('install', umuJob) : t('settings.installTool', { tool: 'umu-launcher' })}
                 </button>
+              </div>
+            {/if}
+            <div class="r">
+              {@render tile('layers')}
+              <div class="what">
+                {t('settings.protonFor')}
+                {#if runner.protons.length}<small>{t('settings.protonForHint')}</small>
+                {:else}<small class="problem">{t('settings.protonMissing')}</small>{/if}
+              </div>
+              {#if runner.protons.length}
+                {@const chosen = protonChoices.find((c) => c.value === protonChoice)?.label ?? ''}
+                <div class="choice">
+                  <button
+                    class="btn opt"
+                    class:open={protonOpen}
+                    bind:this={protonButton}
+                    aria-haspopup="menu"
+                    aria-expanded={protonOpen}
+                    aria-label={t('settings.protonNow', { name: chosen })}
+                    onclick={() => (protonOpen = !protonOpen)}
+                  >
+                    {chosen}
+                    {@render chevron()}
+                  </button>
+                  {#if protonOpen}
+                    <ChoiceMenu
+                      bind:value={() => protonChoice, (v) => change(() => commands.updateSetting('proton', v || null))}
+                      options={protonChoices}
+                      label={t('settings.protonFor')}
+                      anchor={protonButton}
+                      onclose={(refocus) => {
+                        protonOpen = false
+                        if (refocus) protonButton?.focus()
+                      }}
+                    />
+                  {/if}
+                </div>
               {/if}
             </div>
           </div>
 
-          <h4>{t('settings.group.proton')}</h4>
-          <div class="group">
-            {#each view.runner.protons as p (p.name)}
+          <h4>{t('settings.group.protonBuilds')}</h4>
+          <div class="group even">
+            {#each runner.protons as p (p.name)}
               <div class="r">
-                {@render tile('layers')}
                 <div class="what">
-                  {p.name}
-                  {#if confirmProton === p.name}<small class="problem">{t('settings.removeProtonAsk')}</small>
-                  {:else if p.name === defaultProton || !p.removable}<small
-                      >{[p.name === defaultProton ? t('settings.protonDefault') : '', p.removable ? '' : t('settings.fromSteam')]
-                        .filter(Boolean)
-                        .join(' · ')}</small
-                    >{/if}
+                  {protonName(p.name)}
+                  {#if p.name === defaultProton}<span class="tag in-use">{t('settings.inUse')}</span>{/if}
+                  {#if !p.removable}<span class="tag">Steam</span>{/if}
+                  {#if confirmProton === p.name}<small class="problem">{t('settings.removeProtonAsk')}</small>{/if}
                 </div>
+                {#if protonSizes[p.name] !== undefined}<span class="num">{sizeLabel(protonSizes[p.name])}</span>{/if}
                 {#if confirmProton === p.name}
                   <button class="btn danger" onclick={() => removeProton(p.name)}>{t('menu.remove')}</button>
                   <button class="btn" onclick={() => (confirmProton = null)}>{t('common.cancel')}</button>
-                {:else}
-                  {#if p.name !== defaultProton}
-                    <button class="btn" disabled={busy} onclick={() => change(() => commands.updateSetting('proton', p.name))}
-                      >{t('settings.makeDefault')}</button
-                    >
-                  {:else if view.runner.proton}
-                    <button class="btn" disabled={busy} onclick={() => change(() => commands.updateSetting('proton', null))}>{t('settings.useNewest')}</button>
-                  {/if}
-                  {#if p.removable}
-                    <button class="btn danger" disabled={removingProton !== null} onclick={() => (confirmProton = p.name)}>
-                      {removingProton === p.name ? t('settings.removing') : t('menu.remove')}
-                    </button>
-                  {/if}
+                {:else if p.removable}
+                  <button class="btn danger" disabled={removingProton !== null} onclick={() => (confirmProton = p.name)}>
+                    {removingProton === p.name ? t('settings.removing') : t('menu.remove')}
+                  </button>
                 {/if}
-              </div>
-            {:else}
-              <div class="r">
-                {@render tile('layers')}
-                <div class="what">{t('settings.proton')}<small class="problem">{t('settings.protonMissing')}</small></div>
               </div>
             {/each}
             <div class="r">
-              {@render tile('download')}
-              <div class="what">{t('settings.installProton')}</div>
-              {#each [['geProton', 'GE-Proton'], ['protonCachyos', 'Proton-CachyOS']] as const as [kind, name] (kind)}
-                <button
-                  class="btn opt"
-                  class:open={releasesKind === kind}
-                  aria-expanded={releasesKind === kind}
-                  aria-controls="proton-releases"
-                  onclick={() => toggleReleases(kind)}
-                >
-                  {name}
-                  {@render chevron()}
-                </button>
-              {/each}
+              <div class="what">{t('settings.installAnother')}</div>
+              <button
+                class="btn opt"
+                class:open={installOpen}
+                aria-expanded={installOpen}
+                aria-controls="proton-releases"
+                onclick={() => {
+                  installOpen = !installOpen
+                  if (installOpen && !releases) loadReleases(releasesKind)
+                }}
+              >
+                {installOpen ? t('settings.hide') : t('settings.show')}
+                {@render chevron()}
+              </button>
             </div>
-            {#if releasesKind}
-              {@const kind = releasesKind}
-              <div class="opts" id="proton-releases">
+            {#if installOpen}
+              <div class="opts releases" id="proton-releases">
+                <div class="seg" role="radiogroup" aria-label={t('settings.installAnother')}>
+                  {#each [['geProton', 'GE-Proton'], ['protonCachyos', 'Proton-CachyOS']] as const as [kind, name] (kind)}
+                    <button role="radio" aria-checked={releasesKind === kind} onclick={() => pickReleases(kind)}>{name}</button>
+                  {/each}
+                </div>
                 {#if releasesState === 'loading'}
                   <p class="note" role="status">{t('settings.releasesLoading')}</p>
                 {:else if releasesState === 'failed'}
@@ -1085,9 +1137,10 @@
                 {:else if releases?.length === 0}
                   <p class="note" role="status">{t('settings.releasesNone')}</p>
                 {:else}
+                  {@const kind = releasesKind}
                   {#each releases ?? [] as r (r.tag)}
                     <div class="row">
-                      <div>{r.name}</div>
+                      <div>{protonName(r.name)}</div>
                       {#if r.installed}
                         <small class="ok">{t('play.installed')}</small>
                       {:else}
@@ -1103,38 +1156,72 @@
             {#if wineError}<p class="note" role="status" title={wineError}>{wineError}</p>{/if}
           </div>
 
-          <h4>{t('settings.group.prefixes')}</h4>
-          <div class="group">
+          <h4 class="split">
+            {t('settings.group.prefixes')}
+            {#if prefixes.length}<span>{[prefixes.length, ...(Object.keys(prefixSizes).length ? [sizeLabel(prefixTotal)] : [])].join(' · ')}</span>{/if}
+          </h4>
+          <div class="group even">
             {#each prefixes as p (p.key)}
               <div class="r">
-                {@render tile('window')}
                 <div class="what">
                   {p.title ?? p.key}
                   {#if confirmPrefix === p.key}<small class="problem">{t('settings.removePrefixAsk')}</small>
-                  {:else if prefixSizes[p.key] !== undefined}<small>{sizeLabel(prefixSizes[p.key])}</small>{/if}
+                  {:else if p.title === null}<small>{t('settings.prefixGameGone')}</small>{/if}
                 </div>
+                {#if prefixSizes[p.key] !== undefined}<span class="num">{sizeLabel(prefixSizes[p.key])}</span>{/if}
                 {#if confirmPrefix === p.key}
                   <button class="btn danger" disabled={busy} onclick={() => removePrefix(p.key)}>{t('menu.remove')}</button>
-                  <button class="btn" onclick={() => (confirmPrefix = null)}>{t('common.cancel')}</button>
-                {:else}
-                  <button class="btn" onclick={() => run(() => commands.openPrefix(p.key))}>{t('settings.openFolder')}</button>
-                  <button class="btn" onclick={() => run(() => commands.runInPrefix(p.key, 'winecfg'))}>winecfg</button>
                   <button
                     class="btn"
-                    disabled={!view.runner.winetricks}
-                    title={view.runner.winetricks ? undefined : t('settings.noWinetricks')}
-                    onclick={() => run(() => commands.runInPrefix(p.key, 'winetricks'))}>winetricks</button
+                    bind:this={confirmPrefixCancel}
+                    onclick={async () => {
+                      confirmPrefix = null
+                      await tick()
+                      document.getElementById(`prefix-more-${p.key}`)?.focus()
+                    }}>{t('common.cancel')}</button
                   >
-                  <button class="btn danger" onclick={() => (confirmPrefix = p.key)}>{t('menu.remove')}</button>
+                {:else}
+                  <div class="choice">
+                    <button
+                      class="btn more"
+                      id="prefix-more-{p.key}"
+                      aria-haspopup="menu"
+                      aria-expanded={prefixMenu === p.key}
+                      aria-label={t('settings.prefixActions', { name: p.title ?? p.key })}
+                      onclick={(e) => {
+                        prefixMenu = prefixMenu === p.key ? null : p.key
+                        prefixMenuButton = e.currentTarget
+                      }}>⋯</button
+                    >
+                    {#if prefixMenu === p.key}
+                      <ActionMenu
+                        label={t('settings.prefixActions', { name: p.title ?? p.key })}
+                        anchor={prefixMenuButton}
+                        onclose={(refocus) => {
+                          prefixMenu = null
+                          if (refocus) prefixMenuButton?.focus()
+                        }}
+                        actions={[
+                          { label: t('settings.openFolder'), run: () => run(() => commands.openPrefix(p.key)) },
+                          { label: 'winecfg', run: () => run(() => commands.runInPrefix(p.key, 'winecfg')) },
+                          {
+                            label: 'winetricks',
+                            run: () => run(() => commands.runInPrefix(p.key, 'winetricks')),
+                            disabledWhy: runner.winetricks ? undefined : t('settings.noWinetricks'),
+                          },
+                          { label: t('settings.removeEllipsis'), run: () => askRemovePrefix(p.key), danger: true, apart: true },
+                        ]}
+                      />
+                    {/if}
+                  </div>
                 {/if}
               </div>
             {:else}
               <div class="r">
-                {@render tile('window')}
                 <div class="what"><small>{t('settings.noPrefixes')}</small></div>
               </div>
             {/each}
-            {#if !view.runner.winetricks && prefixes.length > 0}<p class="note">{t('settings.noWinetricks')}</p>{/if}
+            {#if !runner.winetricks && prefixes.length > 0}<p class="note">{t('settings.noWinetricks')}</p>{/if}
           </div>
         </section>
       {/if}
@@ -1408,6 +1495,88 @@
 
   h3 + h4 {
     margin-top: 0;
+  }
+
+  /* A heading with a summary on the right: the prefix count and their total size. */
+  h4.split {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  h4.split span {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Where a Proton build comes from, and the one games use when they choose none. */
+  .tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 7px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-line);
+    color: var(--text-3);
+    font-size: 11px;
+    line-height: 18px;
+    vertical-align: 1px;
+  }
+
+  .tag.in-use {
+    color: var(--accent-2);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+
+  .num {
+    color: var(--text-2);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Rows with and without a button are the same height, so the list reads evenly. */
+  .even > .r {
+    min-height: 60px;
+  }
+
+  .group > .note {
+    margin: 0;
+    padding: 10px 14px;
+  }
+
+  .btn.more {
+    padding: 8px 12px;
+    line-height: 1;
+  }
+
+  .opts.releases {
+    padding-left: 14px;
+  }
+
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    height: 36px;
+    margin: 4px 0;
+    padding: 2px;
+    box-sizing: border-box;
+    border-radius: 10px;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+  }
+
+  .seg button {
+    padding: 0 14px;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-2);
+  }
+
+  .seg button[aria-checked='true'] {
+    background: var(--glass-on);
+    color: var(--text);
   }
 
   .head {

@@ -178,7 +178,7 @@ The last-played game's art, heavily blurred and saturated, tints the whole windo
 - **Base:** `bg`, `surface`, `surface-2` and `line`, a near-black blue-violet. Text is `text`, `text-2` (white 75%), `text-3` (white 50%) and `muted`.
 - **Glass:** `glass`, `glass-strong`, `glass-hover`, `glass-line`, `glass-on`, `glass-on-line` fill and border every bar, chip, field, notice and panel. Don't invent a new alpha.
 - **White pill** (`pill`, `pill-hover`): the primary action only (Play, Install, Log in). Written as literals in `app.css` (`button.pill`).
-- **Accent violet** (`accent`, `accent-2`): toggles that are on, links in Settings, progress bars and the Update chip's arrow. Never the main call to action.
+- **Accent violet** (`accent`, `accent-2`): toggles that are on, links in Settings, progress bars, the Update chip's arrow and the Proton build that is in use (Settings → Wine). Never the main call to action.
 - **Status:**
   - `play` green: a running game only (the Playing badge and the card ring).
   - `warn` amber: a store needs attention.
@@ -218,7 +218,11 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   | Title            | none                                                                      |
 
 - **Toolbar,** left to right: search, store selector, Installed, active filter chips, Filters, spacer, Sort, Update (only when one is ready), Downloads (only while something downloads), Add a game, Settings. No sidebar.
-- **Settings:** a modal panel, max 760px wide, with a 190px section list on the left (stacked under 640px). Sections: Accounts, General, Services, About. Each section is a title, then Label headings over one rounded `glass` group per heading, its rows split by `glass-line` rules. Never a box per row. On Linux a Wine section sits between General and Services (Windows never shows it): umu-launcher, with Install only while it is missing; Proton, one row per build found with Default and From Steam as the only labels, Make default (Use newest on an explicit default), and Remove with an inline confirm for builds Guild installed only; Install Proton with GE-Proton and Proton-CachyOS chips that fold out their releases, each with Install (its percent while it runs) or Installed; Prefixes, one row per game prefix with its name (the copy key once the game is gone), its size once measured, Open folder, winecfg, winetricks (disabled with a one-line reason when neither the system nor any Proton build has it) and Remove, whose inline confirm says saves in it are lost unless cloud saves are on.
+- **Settings:** a modal panel, max 760px wide, with a 190px section list on the left (stacked under 640px). Sections: Accounts, General, Services, About. Each section is a title, then Label headings over one rounded `glass` group per heading, its rows split by `glass-line` rules. Never a box per row. On Linux a Wine section sits between General and Services (Windows never shows it), direction A (2026-11-09):
+  - The top group: an umu-launcher row with Install only while umu is missing, then Proton for Windows games, one menu (Newest, naming the build that is now, then each build) with the subtitle that a game's own choice in Launch options comes first.
+  - Proton builds: one row per build, by a readable name where the folder name allows ("Proton-CachyOS 11.0 (v3)", `protonName` in `format.ts`), with an accent "in use" tag on the build games run with, a "Steam" tag on Steam's, its size once measured, and Remove with an inline confirm for Guild's own only. The last row, Install another build, folds out one panel with a GE-Proton / Proton-CachyOS segmented control and that source's releases, each with Install (its percent while it runs) or Installed.
+  - Prefixes: the heading carries the count and total size on the right. One row per game prefix with its name (the copy key and "Game no longer in your library" once the game is gone), its size once measured, and a ⋯ menu with Open folder, winecfg, winetricks (disabled when neither the system nor any Proton build has it; a note under the group says why) and Remove…, which asks in the row that saves in it are lost unless cloud saves are on, with focus on Cancel.
+  - Rows in these two lists are one height, with or without a button.
 - **Game page:** covers the content area while the library stays mounted underneath, so its scroll position survives. A column up to 1360px: the 300px hero, a tab row (Overview, DLC, Saves, Launch options, Installation); on Linux, Launch options adds a Proton menu chip (Default follows Settings), also for added games, where it is the only row, and never for a native Linux GOG build. A Windows game's first launch on Linux shows Setting up… in the busy pill, the card badge and Continue until its program runs. Once a Windows game has run on Linux, Installation gets a Wine prefix row with Open, winecfg and winetricks (disabled with the same reason as in Settings); never for a native Linux build, and never Remove, which stays in Settings and the uninstall confirm. Its uninstall confirm offers an Also remove its Wine prefix checkbox, off by default, then three fact tiles and an About / Details grid (1.7fr / 1fr).
 
 ## Elevation and shapes
@@ -245,7 +249,7 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - The Settings chip carries an 8px amber dot only for a real problem: a saved login that stopped working, or a store that was set up and broke. A store never set up raises nothing.
   - The store selector is one segmented control (`role="radiogroup"`) listing only the stores the library has games from. It is absent with one store.
   - The Downloads chip shows progress as a 2px `accent-2` ring that fills clockwise and updates per poll, never per frame.
-- **Popovers** (Filters, Sort, Downloads, Notes, the ⋯ menu, Play with): `surface-2`, `glass-on-line` border, 12px radius, modal shadow.
+- **Popovers** (Filters, Sort, Downloads, Notes, the ⋯ menu, a Settings row's ⋯ menu (`ActionMenu.svelte`), Play with): `surface-2`, `glass-on-line` border, 12px radius, modal shadow.
   - Keyboard (`src/lib/popover.ts`): focus moves in on open, Tab stays inside, Escape closes and returns focus, a click outside closes.
   - Chosen rows carry the same check mark (`Check.svelte`).
   - Menus use `menuitemradio` or `menuitemcheckbox`, with arrows, Home and End.
@@ -306,6 +310,7 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
 - Add a game is a chip in the toolbar. Covers come from SteamGridDB or a file (2026-11-07).
 - Downloads popover layout F2: one two-line row per download where the row itself is the progress bar (2026-11-07).
 - Install panel direction A: beside the cover in the library, inline under Install on the game page, real folder and drive space, DLC chosen there (2026-11-09).
+- Settings → Wine direction A: Proton for Windows games as one menu on top, builds listed with their source, one Install another build panel, prefix actions behind ⋯ (2026-11-09).
 - Installation tab layout C: rows named after what they're about, words only, no icons (2026-11-08).
 - Non-goals: a light theme, achievements, friends, chat, store browsing, macOS.
 
