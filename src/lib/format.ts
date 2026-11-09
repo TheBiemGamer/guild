@@ -88,3 +88,11 @@ export function nameFromExe(path: string): string {
   const file = path.split(/[\\/]/).pop() ?? ''
   return file.replace(/\.[^.]*$/, '')
 }
+
+/** A Proton build's folder name as people say it: "proton-cachyos-11.0-20261015-slr-x86_64_v3" is "Proton-CachyOS 11.0 (v3)",
+ * "GE-Proton11-12-x86_64" is "GE-Proton11-12". Any other name stays as it is. */
+export function protonName(folder: string): string {
+  const cachy = /^proton-cachyos-([\d.]+)-\d+(?:-slr)?-x86_64(?:_(v\d))?$/i.exec(folder)
+  if (cachy) return `Proton-CachyOS ${cachy[1]}${cachy[2] ? ` (${cachy[2]})` : ''}`
+  return folder.replace(/^(GE-Proton[\d-]+?)-x86_64$/, '$1')
+}

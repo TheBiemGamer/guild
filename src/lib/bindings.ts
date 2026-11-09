@@ -190,8 +190,8 @@ export const commands = {
 	removeProton: (name: string) => __TAURI_INVOKE<null>("remove_proton", { name }),
 	/**  The games' Wine prefixes, by copy key. Their sizes come from `prefix_sizes`, which takes longer. */
 	winePrefixes: () => __TAURI_INVOKE<PrefixView[]>("wine_prefixes"),
-	/**  Each prefix's size on disk, walked in the background. */
-	prefixSizes: () => __TAURI_INVOKE<PrefixSize[]>("prefix_sizes"),
+	/**  Each prefix's and Proton build's size on disk, walked in the background. */
+	wineSizes: () => __TAURI_INVOKE<WineSizes>("wine_sizes"),
 	/**
 	 *  The Wine prefix of a copy, for its game page: only on Linux, once its game has run, and never for a native Linux
 	 *  build.
@@ -388,6 +388,12 @@ export type DetailArt = {
 	hero: string | null,
 };
 
+export type DirSize = {
+	/**  A prefix's copy key, or a Proton build's name. */
+	key: string,
+	bytes: number,
+};
+
 export type Dlc = {
 	id: string,
 	title: string,
@@ -554,11 +560,6 @@ export type Poll = {
 	queue: QueueView,
 	/**  A resumed download failed; shown like the failure of one started now. */
 	failed: Msg | null,
-};
-
-export type PrefixSize = {
-	key: string,
-	bytes: number,
 };
 
 export type PrefixTool = "winecfg" | "winetricks";
@@ -759,5 +760,10 @@ export type ViewPrefs = {
 	sort: Sort,
 	updatedTo: string | null,
 	uiLanguage: string,
+};
+
+export type WineSizes = {
+	prefixes: DirSize[],
+	protons: DirSize[],
 };
 
