@@ -234,14 +234,41 @@ fn has_cloud_saves(metadata: &Value) -> bool {
     !metadata["customAttributes"]["CloudSaveFolder"].is_null()
 }
 
-/// Legendary's installed games, as `list-installed --json` lists them: the values of its `installed.json`. No file
-/// means nothing is installed; an unreadable one is an error, so a scan keeps what it knew.
+/// Legendary's installed games, as `list-installed --json` lists them: the values of its `installed.json`, with
+/// `remote_version` from `assets.json` (`with_remote_versions`). No file means nothing is installed; an unreadable one
+/// is an error, so a scan keeps what it knew.
 fn installed() -> Result<Value, Error> {
-    let path = config_dir().ok_or("no home folder")?.join("installed.json");
-    match std::fs::read(&path) {
-        Ok(bytes) => installed_from(&bytes),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(Value::Array(Vec::new())),
-        Err(e) => Err(e.into()),
+    let dir = config_dir().ok_or("no home folder")?;
+    let mut installed = match std::fs::read(dir.join("installed.json")) {
+        Ok(bytes) => installed_from(&bytes)?,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Value::Array(Vec::new())),
+        Err(e) => return Err(e.into()),
+    };
+    // Unreadable or missing, it marks no updates.
+    let assets = std::fs::read(dir.join("assets.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or(Value::Null);
+    with_remote_versions(&mut installed, &assets);
+    Ok(installed)
+}
+
+/// Gives each installed entry the `remote_version` that `assets.json` (`{platform: [{app_name, build_version, …}]}`,
+/// refreshed for every installed platform by each `list --json`) has for its app on its platform, as
+/// `list-installed --check-updates` compares them.
+fn with_remote_versions(installed: &mut Value, assets: &Value) {
+    for g in installed.as_array_mut().into_iter().flatten() {
+        let platform = g["platform"].as_str().unwrap_or("Windows");
+        let remote = assets[platform]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|a| a["app_name"] == g["app_name"])
+            .and_then(|a| a["build_version"].as_str())
+            .map(str::to_owned);
+        if let Some(remote) = remote {
+            g["remote_version"] = remote.into();
+        }
     }
 }
 
@@ -813,13 +840,11 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
     }
 }
 
-/// An installed entry marks an update with `update_available`, or by a `remote_version` that differs from `version`. // shortcut: both spellings are read because no real capture with an update exists yet.
+/// An installed entry has an update when its `remote_version` (`with_remote_versions`) differs from `version`.
 fn has_update(local: &Value) -> bool {
-    local["update_available"].as_bool().unwrap_or_else(|| {
-        local["remote_version"]
-            .as_str()
-            .is_some_and(|remote| local["version"].as_str().is_some_and(|v| v != remote))
-    })
+    local["remote_version"]
+        .as_str()
+        .is_some_and(|remote| local["version"].as_str().is_some_and(|v| v != remote))
 }
 
 /// Epic catalog `keyImages`: tall box art is the cover, the wide one is header and hero.
@@ -962,13 +987,42 @@ mod tests {
         // Fortnite: the store's version differs. Imported: no remote version, so no update.
         assert!(all[0].update_available);
         assert!(!all[2].update_available);
-        let flagged =
-            serde_json::json!([{ "app_name": "A", "version": "1", "update_available": true }]);
-        assert!(games(&Value::Null, &flagged)[0].update_available);
         let same = serde_json::json!([{ "app_name": "A", "version": "1", "remote_version": "1" }]);
         assert!(!games(&Value::Null, &same)[0].update_available);
         // Not installed: nothing to update.
         assert!(!all[1].update_available);
+    }
+
+    #[test]
+    fn assets_give_the_remote_version() {
+        let assets = serde_json::json!({
+            "Windows": [
+                { "app_name": "Old", "build_version": "2" },
+                { "app_name": "Current", "build_version": "1" },
+                { "app_name": "MacOnly", "build_version": "9" }
+            ],
+            "Mac": [{ "app_name": "Mac", "build_version": "1" }]
+        });
+        let mut installed = serde_json::json!([
+            { "app_name": "Old", "version": "1", "platform": "Windows" },
+            { "app_name": "Current", "version": "1", "platform": "Windows" },
+            { "app_name": "Missing", "version": "1", "platform": "Windows" },
+            // Only the Windows build is newer; the Mac install is current.
+            { "app_name": "Mac", "version": "1", "platform": "Mac" },
+            { "app_name": "MacOnly", "version": "1", "platform": "Mac" }
+        ]);
+        with_remote_versions(&mut installed, &assets);
+        let mut updates: Vec<String> = games(&Value::Null, &installed)
+            .into_iter()
+            .filter(|g| g.update_available)
+            .map(|g| g.external_id)
+            .collect();
+        updates.sort();
+        assert_eq!(updates, ["Old"]);
+        // No assets.json: no updates.
+        let mut installed = serde_json::json!([{ "app_name": "Old", "version": "1" }]);
+        with_remote_versions(&mut installed, &Value::Null);
+        assert!(!games(&Value::Null, &installed)[0].update_available);
     }
 
     #[test]
