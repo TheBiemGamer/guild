@@ -30,6 +30,8 @@ Download the file ending in `x64-setup.exe` from the [latest release](https://gi
 
 Guild isn't code-signed yet, so Windows SmartScreen may warn you the first time. Click More info, then Run anyway. After that, Guild tells you when there's a new version and installs it when you say so.
 
+On Linux, download the file ending in `.AppImage`, make it executable with `chmod +x`, and run it. It updates the same way. The `.deb` is for Debian and Ubuntu; it doesn't update itself, so install new versions from the releases page.
+
 ## Getting started
 
 Open Settings with the gear at the top right. Under Accounts, log in to the stores you use:
