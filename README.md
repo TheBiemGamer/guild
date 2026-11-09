@@ -77,7 +77,7 @@ Guild is built on [Tauri](https://tauri.app) and [Svelte](https://svelte.dev), w
 
 ## Contributing
 
-Found a bug? Settings → About → Report a problem opens a GitHub issue with your app and Windows versions filled in. To build Guild yourself, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Found a bug? Settings → About → Report a problem opens a GitHub issue with your app and Windows versions filled in. To build Guild yourself, see [DEVELOPMENT.md](DEVELOPMENT.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
