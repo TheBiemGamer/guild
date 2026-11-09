@@ -331,6 +331,8 @@ pub struct SettingsView {
     gog_cloud_saves: bool,
     /// Read from the autostart entry itself, so it can't drift from what Windows runs.
     start_with_windows: bool,
+    /// Picks the Linux wording where the Windows one names Windows.
+    linux: bool,
     close_to_tray: bool,
     notify_downloads: bool,
     app_version: String,
@@ -402,6 +404,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             cloud_saves: saved.cloud_saves,
             gog_cloud_saves: saved.gog_cloud_saves,
             start_with_windows: app.autolaunch().is_enabled().unwrap_or(false),
+            linux: cfg!(target_os = "linux"),
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
@@ -440,7 +443,13 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
             } else {
                 autostart.disable()
             };
-            return done.map_err(|e| msg!(cantChangeStartup, detail = e.to_string()));
+            return done.map_err(|e| {
+                if cfg!(windows) {
+                    msg!(cantChangeStartup, detail = e.to_string())
+                } else {
+                    msg!(cantChangeAutostart, detail = e.to_string())
+                }
+            });
         }
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db)?;
@@ -1043,6 +1052,7 @@ mod tests {
             cloud_saves: true,
             gog_cloud_saves: false,
             start_with_windows: false,
+            linux: false,
             close_to_tray: true,
             notify_downloads: true,
             app_version: env!("CARGO_PKG_VERSION").into(),

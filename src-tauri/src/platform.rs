@@ -151,10 +151,61 @@ pub fn steam_pid() -> Option<u32> {
 /// The Steam client's pid, as Steam last wrote it.
 #[cfg(target_os = "linux")]
 pub fn steam_pid() -> Option<u32> {
-    let home = directories::BaseDirs::new()?
-        .home_dir()
-        .join(".steam/steam.pid");
-    std::fs::read_to_string(home).ok()?.trim().parse().ok()
+    let dot = steam_dot_dir()?;
+    let pid = std::fs::read_to_string(dot.join("steam.pid"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    if dot.parent()?.ends_with(FLATPAK_HOME) {
+        flatpak_host_pid(pid)
+    } else {
+        Some(pid)
+    }
+}
+
+/// Flatpak Steam's home, under the user's home.
+#[cfg(target_os = "linux")]
+const FLATPAK_HOME: &str = ".var/app/com.valvesoftware.Steam";
+
+/// Flatpak Steam writes its pid as seen inside its sandbox; on the host it is the `steam` process whose `NSpid`
+/// (its pid in each nested namespace) ends in that pid.
+#[cfg(target_os = "linux")]
+fn flatpak_host_pid(sandbox_pid: u32) -> Option<u32> {
+    std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
+        let pid = e.file_name().to_str()?.parse().ok()?;
+        let status = std::fs::read_to_string(e.path().join("status")).ok()?;
+        (nspid_ends_in(&status, sandbox_pid) && pid_is(pid, "steam")).then_some(pid)
+    })
+}
+
+/// Whether `/proc/<pid>/status` shows the process in a nested pid namespace with `pid` as its innermost id.
+#[cfg(target_os = "linux")]
+fn nspid_ends_in(status: &str, pid: u32) -> bool {
+    let Some(ids) = status.lines().find_map(|l| l.strip_prefix("NSpid:")) else {
+        return false;
+    };
+    let ids: Vec<&str> = ids.split_whitespace().collect();
+    ids.len() > 1 && ids.last() == Some(&pid.to_string().as_str())
+}
+
+/// The `.steam` folder (pid, registry.vdf) of the Steam steamlocate finds: inside the Flatpak's home for Flatpak
+/// Steam, else in the user's home.
+#[cfg(target_os = "linux")]
+fn steam_dot_dir() -> Option<std::path::PathBuf> {
+    let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
+    let steam = steamlocate::SteamDir::locate().ok()?;
+    Some(dot_dir_for(&home, steam.path()))
+}
+
+#[cfg(target_os = "linux")]
+fn dot_dir_for(home: &std::path::Path, steam: &std::path::Path) -> std::path::PathBuf {
+    let flatpak = home.join(FLATPAK_HOME);
+    if steam.starts_with(&flatpak) {
+        flatpak.join(".steam")
+    } else {
+        home.join(".steam")
+    }
 }
 
 /// The app id Steam says runs: 0 when none does, an error when Steam was never installed for this user.
@@ -163,15 +214,13 @@ pub fn steam_running_app() -> std::io::Result<u32> {
     user_registry_u32(r"Software\Valve\Steam", "RunningAppID")
 }
 
-/// The app id Steam says runs, from the registry Steam keeps in `~/.steam/registry.vdf` on Linux.
-// shortcut: Flatpak Steam keeps it under ~/.var/app/com.valvesoftware.Steam; read there too if owners use it.
+/// The app id Steam says runs, from the registry Steam keeps in `.steam/registry.vdf` on Linux.
 #[cfg(target_os = "linux")]
 pub fn steam_running_app() -> std::io::Result<u32> {
-    let home = directories::BaseDirs::new()
+    let path = steam_dot_dir()
         .ok_or(std::io::ErrorKind::NotFound)?
-        .home_dir()
-        .join(".steam/registry.vdf");
-    registry_vdf_u32(&std::fs::read_to_string(home)?, "RunningAppID")
+        .join("registry.vdf");
+    registry_vdf_u32(&std::fs::read_to_string(path)?, "RunningAppID")
         .ok_or_else(|| std::io::ErrorKind::NotFound.into())
 }
 
@@ -774,6 +823,29 @@ mod tests {
                 .unwrap()
                 .trim_end()
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dot_dir_follows_flatpak_steam() {
+        use std::path::Path;
+        let home = Path::new("/home/a");
+        assert_eq!(
+            dot_dir_for(home, Path::new("/home/a/.local/share/Steam")),
+            Path::new("/home/a/.steam")
+        );
+        assert_eq!(
+            dot_dir_for(
+                home,
+                Path::new("/home/a/.var/app/com.valvesoftware.Steam/.local/share/Steam")
+            ),
+            Path::new("/home/a/.var/app/com.valvesoftware.Steam/.steam")
+        );
+        assert!(nspid_ends_in("Name:\tsteam\nNSpid:\t4242\t2\n", 2));
+        // Not in a nested namespace, or another innermost pid.
+        assert!(!nspid_ends_in("NSpid:\t2\n", 2));
+        assert!(!nspid_ends_in("NSpid:\t4242\t12\n", 2));
+        assert!(!nspid_ends_in("Name:\tsteam\n", 2));
     }
 
     #[cfg(target_os = "linux")]
