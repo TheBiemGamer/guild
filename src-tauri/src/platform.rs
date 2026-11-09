@@ -770,13 +770,27 @@ pub fn os_version() -> String {
     }
 }
 
-/// The distribution's name, like "CachyOS Linux" (`PRETTY_NAME` in `/etc/os-release`).
+/// The distribution's name (`PRETTY_NAME` in `/etc/os-release`), then the desktop and session type when the session
+/// sets them, like "CachyOS Linux, KDE, wayland": WebKitGTK and tray bugs often depend on those two.
 #[cfg(target_os = "linux")]
 pub fn os_version() -> String {
-    std::fs::read_to_string("/etc/os-release")
+    let distro = std::fs::read_to_string("/etc/os-release")
         .ok()
         .and_then(|text| pretty_name(&text))
-        .unwrap_or_else(|| "Linux".into())
+        .unwrap_or_else(|| "Linux".into());
+    let var = |name| std::env::var(name).ok();
+    system_line(distro, var("XDG_CURRENT_DESKTOP"), var("XDG_SESSION_TYPE"))
+}
+
+#[cfg(target_os = "linux")]
+fn system_line(distro: String, desktop: Option<String>, session: Option<String>) -> String {
+    [Some(distro), desktop, session]
+        .into_iter()
+        .flatten()
+        .map(|part| part.trim().to_owned())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(target_os = "linux")]
@@ -975,6 +989,19 @@ mod tests {
             Some("CachyOS Linux")
         );
         assert_eq!(pretty_name("NAME=Arch\n"), None);
+        let line = |desktop: Option<&str>, session: Option<&str>| {
+            system_line(
+                "Arch Linux".into(),
+                desktop.map(Into::into),
+                session.map(Into::into),
+            )
+        };
+        assert_eq!(
+            line(Some("KDE"), Some("wayland")),
+            "Arch Linux, KDE, wayland"
+        );
+        assert_eq!(line(None, Some("x11")), "Arch Linux, x11");
+        assert_eq!(line(Some(" "), None), "Arch Linux");
     }
 
     #[cfg(target_os = "linux")]
