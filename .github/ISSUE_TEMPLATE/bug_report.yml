@@ -23,7 +23,23 @@ body:
   - type: input
     id: os
     attributes:
-      label: Windows version
+      label: System
+      description: Report a problem in Settings → About fills this in. On Linux, add your graphics card if the window looks wrong.
+  - type: dropdown
+    id: package
+    attributes:
+      label: How you installed Guild
+      options:
+        - Windows installer
+        - AppImage
+        - .deb
+        - PKGBUILD (Arch)
+        - Built it myself
+  - type: input
+    id: proton
+    attributes:
+      label: Proton
+      description: Only for a Windows game on Linux. The Proton build it runs with, from its Launch options tab or Settings → Wine.
   - type: textarea
     id: log
     attributes:
