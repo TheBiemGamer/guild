@@ -1,5 +1,6 @@
-# A pushed v* tag builds, signs and publishes a GitHub release with the installer and latest.json for the
-# updater. A manual run only builds and signs, and keeps the files as workflow artifacts.
+# A pushed v* tag builds and signs the Windows installer and the Linux AppImage and .deb, then publishes a
+# GitHub release with them and latest.json for the updater. A manual run only builds and signs, and keeps
+# the files as workflow artifacts.
 name: Release
 
 on:
@@ -11,10 +12,12 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
     # The signing key lives in this environment, which only v* tags may use.
     environment: release
+    outputs:
+      notes: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v7
 
@@ -62,14 +65,96 @@ jobs:
           Add-Content $env:GITHUB_OUTPUT ($notes -join "`n")
           Add-Content $env:GITHUB_OUTPUT $delimiter
 
-      - uses: tauri-apps/tauri-action@v1
+      - run: npm run tauri build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v7
         with:
-          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
-          releaseName: ${{ github.event_name == 'push' && format('Guild {0}', github.ref_name) || '' }}
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
-          uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
+          name: windows
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe*
+          if-no-files-found: error
+
+  linux:
+    # The oldest supported runner, so the AppImage runs on distributions with an older glibc.
+    runs-on: ubuntu-22.04
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev patchelf
+
+      - run: npm ci
+
+      - run: cargo test
+        working-directory: src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      - run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage*
+            src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  # One job writes latest.json from both builds, so neither platform's entry overwrites the other's.
+  publish:
+    if: github.event_name == 'push'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write latest.json and publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          NOTES: ${{ needs.windows.outputs.notes }}
+        run: |
+          set -euo pipefail
+          cd dist
+          exe=$(echo nsis/*-setup.exe)
+          appimage=$(echo appimage/*.AppImage)
+          base="https://github.com/$GH_REPO/releases/download/$TAG"
+          jq -n \
+            --arg version "${TAG#v}" \
+            --arg notes "$NOTES" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg wsig "$(cat "$exe.sig")" \
+            --arg wurl "$base/$(basename "$exe")" \
+            --arg lsig "$(cat "$appimage.sig")" \
+            --arg lurl "$base/$(basename "$appimage")" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: {
+              "windows-x86_64": {signature: $wsig, url: $wurl},
+              "linux-x86_64": {signature: $lsig, url: $lurl}}}' > latest.json
+          # A draft until every file is attached, so the updater never finds a release without latest.json.
+          gh release create "$TAG" --draft --title "Guild $TAG" --notes "$NOTES" \
+            "$exe" "$exe.sig" "$appimage" "$appimage.sig" deb/*.deb latest.json
+          gh release edit "$TAG" --draft=false
