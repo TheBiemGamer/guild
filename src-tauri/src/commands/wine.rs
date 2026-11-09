@@ -85,6 +85,30 @@ pub async fn prefix_sizes() -> Vec<PrefixSize> {
     .await
 }
 
+#[derive(Serialize, specta::Type)]
+pub struct GamePrefix {
+    /// Whether winetricks can run in it: the system's, or one a Proton build here bundles.
+    winetricks: bool,
+}
+
+/// The Wine prefix of a copy, for its game page: only on Linux, once its game has run, and never for a native Linux
+/// build.
+#[tauri::command]
+#[specta::specta]
+pub async fn game_prefix(app: AppHandle, key: String) -> Option<GamePrefix> {
+    let game = app.state::<AppState>().game(&key);
+    blocking(move || {
+        if game.as_ref().is_some_and(super::game::native_build) {
+            return None;
+        }
+        platform::prefixes().iter().find(|(k, _)| *k == key)?;
+        Some(GamePrefix {
+            winetricks: platform::runner()?.winetricks,
+        })
+    })
+    .await
+}
+
 /// Whether the copy `key` is the game watched as running.
 fn runs(app: &AppHandle, key: &str) -> bool {
     let state = app.state::<AppState>();

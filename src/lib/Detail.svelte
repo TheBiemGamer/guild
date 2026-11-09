@@ -50,6 +50,7 @@
     type Detail,
     type Dlc,
     type GameInfo,
+    type GamePrefix,
     type LaunchOptions,
     type LinkKind,
     type Progress,
@@ -511,6 +512,26 @@
   // A tab that went away (the DLC list emptied, the copy was uninstalled) falls back to Overview.
   const current = $derived(tabs.some((t) => t.id === tab) ? tab : 'overview')
 
+  /** Linux: the copy's Wine prefix, asked again each time Installation opens, since the first launch makes it. */
+  let winePrefix = $state<GamePrefix | null>(null)
+  let winePrefixOf: string | null = null
+  $effect(() => {
+    const key = launchKey
+    if (key !== winePrefixOf) {
+      winePrefix = null
+      winePrefixOf = key
+    }
+    if (!key || current !== 'installation') return
+    let alive = true
+    commands.gamePrefix(key).then(
+      (p) => alive && (winePrefix = p),
+      () => {},
+    )
+    return () => {
+      alive = false
+    }
+  })
+
   /** Arrow keys, Home and End move between tabs (roving tabindex); the focused tab opens. */
   function tabKeydown(e: KeyboardEvent) {
     const at = tabs.findIndex((t) => t.id === current)
@@ -868,6 +889,21 @@
                     onclick={() => act('verify')}>{t('detail.verify')}</button
                   >
                 {/if}
+              </div>
+            {/if}
+            {#if winePrefix}
+              {@const key = copy!.key}
+              <div class="row">
+                <span class="key">{t('detail.winePrefix')}</span>
+                <span class="value"></span>
+                <button class="chip" onclick={() => run(() => commands.openPrefix(key))}>{t('detail.open')}</button>
+                <button class="chip" onclick={() => run(() => commands.runInPrefix(key, 'winecfg'))}>winecfg</button>
+                <button
+                  class="chip"
+                  disabled={!winePrefix.winetricks}
+                  title={winePrefix.winetricks ? undefined : t('settings.noWinetricks')}
+                  onclick={() => run(() => commands.runInPrefix(key, 'winetricks'))}>winetricks</button
+                >
               </div>
             {/if}
             {#if copy!.updateAvailable}

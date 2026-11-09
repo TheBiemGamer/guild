@@ -943,18 +943,18 @@ fn has_launch_options(g: &Game) -> bool {
 pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
     let game = app.state::<AppState>().game(&key);
     blocking(move || {
-        let native = game
-            .as_ref()
-            .filter(|g| g.provider == ProviderKind::Gog)
-            .and_then(installed_dir)
-            .is_some_and(|dir| gog::native(dir));
-        if native {
+        if game.as_ref().is_some_and(native_build) {
             Vec::new()
         } else {
             crate::platform::protons()
         }
     })
     .await
+}
+
+/// A GOG game installed as its native Linux build, which runs without Proton.
+pub(super) fn native_build(game: &Game) -> bool {
+    game.provider == ProviderKind::Gog && installed_dir(game).is_some_and(|dir| gog::native(dir))
 }
 
 /// The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others.
