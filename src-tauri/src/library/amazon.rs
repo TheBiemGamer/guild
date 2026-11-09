@@ -311,6 +311,16 @@ fn forget_login(cfg: &Path) -> std::io::Result<()> {
 /// (a download), so the cached games and the login state stay. With games installed, it also asks which have an
 /// update, at most every `UPDATES_MAX_AGE_SECS`. Blocks: call from a blocking thread.
 pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
+    read(dirs, true)
+}
+
+/// The owned Amazon games as nile's last sync left them, with their installs read again: no sync and no update
+/// check, for a rescan after a job.
+pub fn local_games(dirs: &Dirs) -> Result<Vec<Game>, Error> {
+    read(dirs, false)
+}
+
+fn read(dirs: &Dirs, sync: bool) -> Result<Vec<Game>, Error> {
     if tools::version(&tools::NILE).is_none() {
         return Err("Nile isn't installed".into());
     }
@@ -323,23 +333,24 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
     let now = super::unix_now();
     let (library, installed) = {
         let _nile = try_lock().ok_or("busy")?;
-        let output = run_short(nile(["library", "sync"]), SYNC_TIMEOUT);
-        let login = classify_sync(output.as_ref());
-        set_synced(login);
-        if login != StoreLogin::LoggedIn {
-            if let Some(error) = output
-                .as_ref()
-                .and_then(|o| last_error(&String::from_utf8_lossy(&o.stderr)).map(str::to_owned))
-            {
-                tracing::warn!("nile library sync: {error}");
+        if sync {
+            let output = run_short(nile(["library", "sync"]), SYNC_TIMEOUT);
+            let login = classify_sync(output.as_ref());
+            set_synced(login);
+            if login != StoreLogin::LoggedIn {
+                if let Some(error) = output.as_ref().and_then(|o| {
+                    last_error(&String::from_utf8_lossy(&o.stderr)).map(str::to_owned)
+                }) {
+                    tracing::warn!("nile library sync: {error}");
+                }
+                return Err(format!("{login:?}").into());
             }
-            return Err(format!("{login:?}").into());
         }
         let library = read_json(&cfg.join("library.json")).ok_or("no library.json")?;
         // Under the lock too: every nile run rewrites it in place.
         let installed =
             parse_installed(&fs_err::read(cfg.join("installed.json")).unwrap_or_default());
-        if !installed.is_empty() && cached(&conn, UPDATES_MAX_AGE_SECS, now).is_none() {
+        if sync && !installed.is_empty() && cached(&conn, UPDATES_MAX_AGE_SECS, now).is_none() {
             check_updates(Some(&conn));
         }
         (library, installed)
@@ -579,9 +590,16 @@ fn check_updates(conn: Option<&Connection>) -> Option<Vec<String>> {
     Some(ids)
 }
 
-/// Forgets the last update answer after a change to the installs, so the next scan asks again.
-fn forget_updates(conn: Option<&Connection>) {
-    if let Some(Err(e)) = conn.map(|c| db::delete_info(c, UPDATES_KEY, UPDATES)) {
+/// After a change to `id`'s install: takes it out of the last update answer and makes that answer due, so the next
+/// online scan asks again while a local one keeps showing the other games' updates.
+fn forget_update(conn: Option<&Connection>, id: &str) {
+    let Some(conn) = conn else { return };
+    let Some(mut ids) = cached(conn, FOREVER, super::unix_now()) else {
+        return;
+    };
+    ids.retain(|u| u != id);
+    let json = serde_json::to_string(&ids).unwrap_or_default();
+    if let Err(e) = db::put_info(conn, UPDATES_KEY, UPDATES, &json, 0) {
         tracing::warn!("amazon updates: {e}");
     }
 }
@@ -856,7 +874,7 @@ pub fn update(
         leftover_patch(dir, start),
         installed_path(id).is_some(),
     )?;
-    forget_updates(conn);
+    forget_update(conn, id);
     Ok(())
 }
 
@@ -910,7 +928,7 @@ pub fn uninstall(conn: Option<&Connection>, id: &str) -> Result<(), Error> {
     let _nile = lock_between_downloads()?;
     let output = run_short(nile(["uninstall", id]), UNINSTALL_TIMEOUT).ok_or(msg!(nileNoReason))?;
     said(&output.stderr, "Game removed successfully")?;
-    forget_updates(conn);
+    forget_update(conn, id);
     Ok(())
 }
 
@@ -924,7 +942,7 @@ pub fn import(conn: Option<&Connection>, id: &str, path: &Path) -> Result<(), Er
     let output = run_short(nile(job_args("import", "--path", path, id)), IMPORT_TIMEOUT)
         .ok_or(msg!(cantReachAmazon))?;
     said(&output.stderr, "[IMPORT]:\t Imported ")?;
-    forget_updates(conn);
+    forget_update(conn, id);
     Ok(())
 }
 
@@ -1845,8 +1863,14 @@ mod tests {
             cached(&conn, FOREVER, 1_001 + UPDATES_MAX_AGE_SECS),
             Some(vec!["a".to_string()])
         );
-        forget_updates(Some(&conn));
-        assert_eq!(cached(&conn, FOREVER, 1_000), None);
+        db::put_info(&conn, UPDATES_KEY, UPDATES, r#"["a","b"]"#, 1_000).unwrap();
+        forget_update(Some(&conn), "a");
+        // Due for a check, still showing the others.
+        assert_eq!(
+            cached(&conn, UPDATES_MAX_AGE_SECS, UPDATES_MAX_AGE_SECS + 1),
+            None
+        );
+        assert_eq!(cached(&conn, FOREVER, 1_000), Some(vec!["b".to_string()]));
     }
 
     #[test]

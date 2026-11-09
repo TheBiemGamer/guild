@@ -17,7 +17,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
-use super::library::{fill_twins, refresh_owned, rescan};
+use super::library::{fill_twins, refresh_owned, rescan, rescan_local};
 use super::{AppState, Res, blocking};
 use crate::amazon_login;
 use crate::cache;
@@ -197,7 +197,7 @@ pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()>
             std::path::Path::new(&path),
         )
         .map_err(Msg::from);
-        rescan(&app, true);
+        rescan_local(&app);
         result
     })
     .await
@@ -214,7 +214,7 @@ pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
         .ok_or(msg!(cantImport))?;
     blocking(move || {
         let result = epic::import(&game.external_id, &path).map_err(Msg::from);
-        rescan(&app, true);
+        rescan_local(&app);
         result
     })
     .await
@@ -226,7 +226,7 @@ pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
 pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     blocking(move || {
         let result = epic::egl_sync().map_err(Msg::from);
-        rescan(&app, true);
+        rescan_local(&app);
         result
     })
     .await
@@ -247,7 +247,7 @@ pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
             .ok_or(msg!(notInGogLibrary))?;
         let conn = cache::db::open(&state.dirs.db)?;
         gog::record_install(&conn, &id, std::path::Path::new(&path))?;
-        rescan(&app, true);
+        rescan_local(&app);
         Ok(title)
     })
     .await

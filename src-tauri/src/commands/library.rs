@@ -668,23 +668,42 @@ fn owned(state: &AppState) -> Option<Vec<Game>> {
     Some(games)
 }
 
+/// How much a rescan looks at. Each covers the ones before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Scan {
+    /// Steam's installs and the games the owner added.
+    Steam,
+    /// Also the Epic, GOG and Amazon installs, from their local files, over the owned games last scanned: after a
+    /// store job, where only installs changed.
+    Local,
+    /// Also the Epic, GOG and Amazon owned games and logins, online.
+    Online,
+}
+
 /// Scans, merges and saves; Epic, GOG and Amazon only when `online`. Runs on a blocking thread and waits for a rescan
 /// already running (`ScanTurns`). Returns whether the library changed since the call.
 pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
+    rescan_as(app, if online { Scan::Online } else { Scan::Steam })
+}
+
+/// `rescan` for `Scan::Local`.
+pub(super) fn rescan_local(app: &AppHandle) -> bool {
+    rescan_as(app, Scan::Local)
+}
+
+fn rescan_as(app: &AppHandle, kind: Scan) -> bool {
     let scans = &app.state::<AppState>().scans;
-    scans.run(scans.ask(), online, || rescan_now(app, online))
+    scans.run(scans.ask(), kind, || rescan_now(app, kind))
 }
 
 /// Rescans one at a time, so a slow older scan never overwrites a newer result. A rescan asked for while one runs
-/// waits, then skips when a scan that started after it asked (and online, if it asked for online) already ran: any
-/// number of callers waiting behind one scan make one more.
+/// waits, then skips when a scan that started after it asked, and covers its `Scan`, already ran: any number of
+/// callers waiting behind one scan make one more.
 #[derive(Default)]
 pub(super) struct ScanTurns {
     turn: Mutex<()>,
-    /// Scans started.
-    started: AtomicU64,
-    /// `started` as it was after the last online scan started.
-    online_started: AtomicU64,
+    /// By `Scan`: the scans started as counted after the last scan that covers it started. `Steam`'s counts all.
+    started: [AtomicU64; 3],
     /// Scans that changed the library.
     changes: AtomicU64,
 }
@@ -693,24 +712,19 @@ impl ScanTurns {
     /// The scans started and changes made so far, read without waiting.
     fn ask(&self) -> (u64, u64) {
         (
-            self.started.load(Ordering::SeqCst),
+            self.started[Scan::Steam as usize].load(Ordering::SeqCst),
             self.changes.load(Ordering::SeqCst),
         )
     }
 
     /// Runs `scan` (which returns whether it changed the library) in turn, unless a scan started after `asked`
     /// covered it. Returns whether the library changed since `asked`.
-    fn run(&self, asked: (u64, u64), online: bool, scan: impl FnOnce() -> bool) -> bool {
+    fn run(&self, asked: (u64, u64), kind: Scan, scan: impl FnOnce() -> bool) -> bool {
         let _turn = self.turn.lock().unwrap_or_else(|e| e.into_inner());
-        let latest = if online {
-            &self.online_started
-        } else {
-            &self.started
-        };
-        if latest.load(Ordering::SeqCst) <= asked.0 {
-            let started = self.started.fetch_add(1, Ordering::SeqCst) + 1;
-            if online {
-                self.online_started.store(started, Ordering::SeqCst);
+        if self.started[kind as usize].load(Ordering::SeqCst) <= asked.0 {
+            let started = self.started[Scan::Steam as usize].fetch_add(1, Ordering::SeqCst) + 1;
+            for covered in &self.started[1..=kind as usize] {
+                covered.store(started, Ordering::SeqCst);
             }
             if scan() {
                 self.changes.fetch_add(1, Ordering::SeqCst);
@@ -720,10 +734,17 @@ impl ScanTurns {
     }
 }
 
-fn rescan_now(app: &AppHandle, online: bool) -> bool {
+fn rescan_now(app: &AppHandle, kind: Scan) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
-    let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
+    let cached = (kind == Scan::Local).then(|| state.lock().games.clone());
+    let (results, logins) = scan(
+        kind,
+        owned.as_deref(),
+        cached.as_deref(),
+        &state.dirs,
+        &state.http,
+    );
     let signed_out = logins.map(|(e, g, a)| {
         signed_out(
             &state,
@@ -807,9 +828,11 @@ fn signed_out(state: &AppState, logged_in: [bool; 3]) -> [bool; 3] {
     flags
 }
 
+/// `cached` (the library as it is) is needed for `Scan::Local` only.
 fn scan(
-    online: bool,
+    kind: Scan,
     owned: Option<&[Game]>,
+    cached: Option<&[Game]>,
     dirs: &cache::Dirs,
     http: &reqwest::Client,
 ) -> (ScanResults, Option<(StoreLogin, StoreLogin, StoreLogin)>) {
@@ -821,8 +844,30 @@ fn scan(
         });
     let custom = crate::library::custom::list(dirs).map_err(|e| ScanError::Shown(e.into()));
     let mut results = vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)];
-    if !online {
-        return (results, None);
+    match (kind, cached) {
+        (Scan::Steam, _) | (Scan::Local, None) => return (results, None),
+        (Scan::Local, Some(cached)) => {
+            let of = |p: ProviderKind| -> Vec<Game> {
+                cached.iter().filter(|g| g.provider == p).cloned().collect()
+            };
+            let quiet = |e: crate::library::Error| ScanError::Quiet(e.into());
+            results.extend([
+                (
+                    ProviderKind::Epic,
+                    epic::local_games(of(ProviderKind::Epic)).map_err(quiet),
+                ),
+                (
+                    ProviderKind::Gog,
+                    gog::local_games(http, dirs, of(ProviderKind::Gog)).map_err(quiet),
+                ),
+                (
+                    ProviderKind::Amazon,
+                    amazon::local_games(dirs).map_err(quiet),
+                ),
+            ]);
+            return (results, None);
+        }
+        (Scan::Online, _) => {}
     }
     let login = epic::login_state();
     let games = epic_result(login, || epic::list_games().map_err(Msg::from));
@@ -1225,20 +1270,20 @@ mod tests {
         let turns = ScanTurns::default();
         let runs = Cell::new(0);
         let mut waiting = Vec::new();
-        turns.run(turns.ask(), false, || {
+        turns.run(turns.ask(), Scan::Steam, || {
             runs.set(runs.get() + 1);
             waiting.extend([
-                (turns.ask(), false),
-                (turns.ask(), false),
-                (turns.ask(), true),
-                (turns.ask(), true),
+                (turns.ask(), Scan::Steam),
+                (turns.ask(), Scan::Steam),
+                (turns.ask(), Scan::Online),
+                (turns.ask(), Scan::Online),
             ]);
             true
         });
         let changed: Vec<bool> = waiting
             .into_iter()
-            .map(|(asked, online)| {
-                turns.run(asked, online, || {
+            .map(|(asked, kind)| {
+                turns.run(asked, kind, || {
                     runs.set(runs.get() + 1);
                     false
                 })
@@ -1250,14 +1295,23 @@ mod tests {
         assert_eq!(changed, [true; 4]);
         // An online scan covers an offline ask made before it started.
         let asked = turns.ask();
-        turns.run(turns.ask(), true, || false);
-        turns.run(asked, false, || panic!("covered by the online scan"));
+        turns.run(turns.ask(), Scan::Online, || false);
+        turns.run(asked, Scan::Steam, || panic!("covered by the online scan"));
+        turns.run(asked, Scan::Local, || panic!("covered by the online scan"));
+        // A local scan covers a Steam ask, not an online one.
+        let asked = turns.ask();
+        turns.run(turns.ask(), Scan::Local, || false);
+        turns.run(asked, Scan::Steam, || panic!("covered by the local scan"));
+        turns.run(asked, Scan::Online, || {
+            runs.set(runs.get() + 1);
+            false
+        });
         // A new ask after everything finished runs.
-        assert!(!turns.run(turns.ask(), false, || {
+        assert!(!turns.run(turns.ask(), Scan::Steam, || {
             runs.set(runs.get() + 1);
             false
         }));
-        assert_eq!(runs.get(), 4);
+        assert_eq!(runs.get(), 5);
     }
 
     #[test]

@@ -243,15 +243,7 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
     let conn = db::open(&dirs.db)?;
     let now = super::unix_now();
     let installs = db::gog_installs(&conn)?;
-    let installed: Vec<u64> = installs
-        .iter()
-        .filter_map(|(key, dir)| {
-            key.strip_prefix("gog-")?
-                .parse()
-                .ok()
-                .filter(|&id| has_info(dir, id))
-        })
-        .collect();
+    let installed = installed_ids(&installs);
     let (owned, products, latest, saves) = tauri::async_runtime::block_on(async {
         let owned = owned_ids(
             &get_json(
@@ -304,6 +296,70 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
         g.cloud_saves = g.installed && g.external_id.parse().is_ok_and(|id| saves.contains(&id));
     }
     Ok(games)
+}
+
+/// The cached GOG games with their install state read again from `gog_installs` and the install folders, for a
+/// rescan after a job. Asks GOG nothing but the latest build and save locations of a game none are cached for (one
+/// just installed). Blocks: call from a blocking thread.
+pub fn local_games(
+    http: &reqwest::Client,
+    dirs: &Dirs,
+    cached: Vec<Game>,
+) -> Result<Vec<Game>, Error> {
+    let conn = db::open(&dirs.db)?;
+    let now = super::unix_now();
+    let installs = db::gog_installs(&conn)?;
+    let installed = installed_ids(&installs);
+    let (latest, saves) = tauri::async_runtime::block_on(async {
+        let latest = latest_builds(http, &conn, &installed, now).await;
+        (
+            latest,
+            with_cloud_saves(http, &conn, &installs, &installed, now).await,
+        )
+    });
+    Ok(cached
+        .into_iter()
+        .map(|mut g| {
+            mark_installed(&mut g, &installs, &latest);
+            g.cloud_saves =
+                g.installed && g.external_id.parse().is_ok_and(|id| saves.contains(&id));
+            g
+        })
+        .collect())
+}
+
+/// The ids in `installs` whose folder holds their game.
+fn installed_ids(installs: &HashMap<String, PathBuf>) -> Vec<u64> {
+    installs
+        .iter()
+        .filter_map(|(key, dir)| {
+            key.strip_prefix("gog-")?
+                .parse()
+                .ok()
+                .filter(|&id| has_info(dir, id))
+        })
+        .collect()
+}
+
+/// Marks `g` installed when `installs` has a folder for it that holds its `goggame-<id>.info`, and so each of its
+/// DLC. An installed game has an update when its folder's build isn't the `latest` one.
+fn mark_installed(
+    g: &mut Game,
+    installs: &HashMap<String, PathBuf>,
+    latest: &HashMap<u64, String>,
+) {
+    let id = g.external_id.parse::<u64>().ok();
+    let dir = id.and_then(|id| installs.get(&g.key()).filter(|dir| has_info(dir, id)));
+    for d in &mut g.dlc {
+        d.installed = dir.is_some_and(|dir| has_info(dir, &d.id));
+    }
+    g.update_available = dir
+        .zip(id.and_then(|id| latest.get(&id)))
+        .is_some_and(|(dir, build)| {
+            installed_build(dir, &g.external_id).is_some_and(|local| local != *build)
+        });
+    g.installed = dir.is_some();
+    g.install_dir = dir.cloned();
 }
 
 /// The newest public build of each installed game (GOG's builds list needs no login), cached 6 h and asked one game
@@ -402,9 +458,8 @@ fn trim(p: &Value) -> Value {
     })
 }
 
-/// Owned products that are games (packs and DLC are left out), by trimmed product (`trim`). A game is installed
-/// when it has an install folder that holds its `goggame-<id>.info`; so is each owned DLC. An installed game has an
-/// update when its folder's build isn't the `latest` one. `covers` are GamesDB's portrait covers by key; without
+/// Owned products that are games (packs and DLC are left out), by trimmed product (`trim`), marked installed by
+/// `mark_installed`. `covers` are GamesDB's portrait covers by key; without
 /// one the grid shows the landscape logo art.
 fn games(
     owned: &[u64],
@@ -426,7 +481,6 @@ fn games(
         .filter_map(|&id| {
             let p = products.get(&id).filter(|p| p["game_type"] == "game")?;
             let key = key(id);
-            let dir = installs.get(&key).filter(|dir| has_info(dir, id));
             // GOG's image URLs are protocol-relative.
             let image = |field: &str| Image {
                 path: None,
@@ -447,16 +501,16 @@ fn games(
                         .get(&d)
                         .and_then(title)
                         .unwrap_or_else(|| d.to_string()),
-                    installed: dir.is_some_and(|dir| has_info(dir, d)),
+                    installed: false,
                 })
                 .collect();
             dlc.sort_by(|a, b| a.title.cmp(&b.title));
-            Some(Game {
+            let mut game = Game {
                 provider: ProviderKind::Gog,
                 external_id: id.to_string(),
                 title: title(p)?,
-                installed: dir.is_some(),
-                install_dir: dir.cloned(),
+                installed: false,
+                install_dir: None,
                 // Playtime comes from `epic_playtime::merge`, cloud saves from `list`.
                 // shortcut: the size on disk isn't measured.
                 playtime_minutes: None,
@@ -471,11 +525,11 @@ fn games(
                     hero: image("background"),
                 },
                 dlc,
-                update_available: dir.zip(latest.get(&id)).is_some_and(|(dir, build)| {
-                    installed_build(dir, &id.to_string()).is_some_and(|local| local != *build)
-                }),
+                update_available: false,
                 cloud_saves: false,
-            })
+            };
+            mark_installed(&mut game, installs, latest);
+            Some(game)
         })
         .collect()
 }
