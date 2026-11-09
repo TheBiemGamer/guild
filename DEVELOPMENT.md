@@ -4,12 +4,18 @@ Guild is built with Tauri 2, Svelte 5 + TypeScript, and Rust.
 
 ## Build from source
 
-You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) stable (edition 2024), and the [Tauri prerequisites for Windows](https://tauri.app/start/prerequisites/) (WebView2 and the MSVC build tools).
+You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) stable (edition 2024), and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS. On Windows that is WebView2 and the MSVC build tools. On Linux it is WebKitGTK 4.1, the AppIndicator library and librsvg; on Debian or Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev build-essential
+```
+
+On Arch: `webkit2gtk-4.1 libayatana-appindicator librsvg xdotool base-devel`. At runtime Linux also needs `python3` (the Linux builds of Legendary and gogdl run on it), `xdg-open`, and a Secret Service provider such as GNOME Keyring or KWallet for the saved secrets. Running Windows games through Wine isn't supported yet.
 
 ```bash
 npm install
 npm run tauri dev                       # run in development
-npm run tauri build -- --no-bundle      # release exe: src-tauri/target/release/Guild.exe
+npm run tauri build -- --no-bundle      # release build: src-tauri/target/release/Guild.exe (Guild on Linux)
 npm run tauri build                     # installer (needs the signing key, see Releasing)
 ```
 

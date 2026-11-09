@@ -1,6 +1,6 @@
 # Guild
 
-Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libraries. Built with Tauri 2, Svelte 5 + TypeScript, and Rust (`src-tauri/src`). Epic goes through the Legendary CLI, GOG through gogdl, Amazon through Nile; Steam through local files and steam-vent.
+Guild is a launcher for the Steam, Epic, GOG and Amazon Games libraries, for Windows and Linux. On Linux it runs the store tools' Linux builds; running Windows games through Wine is a later phase. Built with Tauri 2, Svelte 5 + TypeScript, and Rust (`src-tauri/src`). Epic goes through the Legendary CLI, GOG through gogdl, Amazon through Nile; Steam through local files and steam-vent.
 
 ## Commands
 
@@ -18,7 +18,7 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 
 ## Rules that aren't obvious from the code
 
-- **Secrets** live only in Windows Credential Manager (service `cloud.biem.guild`): the Steam refresh token, the IGDB secret and the SteamGridDB API key.
+- **Secrets** live only in the OS keyring (Windows Credential Manager, or the Secret Service on Linux; service `cloud.biem.guild`): the Steam refresh token, the IGDB secret and the SteamGridDB API key.
   - Never put them in SQLite, files, logs, error strings or `Debug` output, and never send them to the frontend.
   - Steam passwords and Steam Guard codes are never stored.
 - **The database** file is `library.sqlite`; never change the file name. Schema changes are new migration steps at the end of `STEPS` in `cache/db.rs` (`PRAGMA user_version` counts the ones run); never edit a step that shipped.
@@ -34,8 +34,8 @@ Guild is a Windows-only launcher for the Steam, Epic, GOG and Amazon Games libra
 - **Commands and their types** reach the UI through the generated `src/lib/bindings.ts` (tauri-specta, `bindings()` in `main.rs`), never hand-written `invoke` calls or types; run `cargo test bindings` after changing them.
 - **User-visible backend text** is message codes (`msg!` in `src-tauri/src/msg.rs`), worded under `msg.<code>` in `src/lib/i18n/en.json` (and the other language files) and rendered by `src/lib/messages.ts`; never English sentences in Rust errors or statuses. Raw OS, SQLite or tool errors go through as `Msg::system`.
 - **Logging:** app code logs through the `tracing` macros (`info!`, `warn!` for failures, `error!` for lost data or a broken app); `src-tauri/src/log.rs` writes them to `logs/launcher.log` in the local data folder. Never `eprintln!`/`println!`, except the stdout lines the scroll benchmark reads. No `#[instrument]` on functions that take secrets. The log rule for secrets above applies.
-- **Store tools** (Legendary, gogdl, Nile) are pinned in `src-tauri/src/tools.rs` and SHA-256-checked before use; bump one by changing its version, URL and hash together.
-- **New OS-specific code** goes behind `src-tauri/src/platform.rs` with `#[cfg(windows)]`. Linux may come later.
+- **Store tools** (Legendary, gogdl, Nile) are pinned per OS in `src-tauri/src/tools.rs` and SHA-256-checked before use; bump one by changing its version and each OS's URL and hash together.
+- **New OS-specific code** goes behind `src-tauri/src/platform.rs`, with a `#[cfg(windows)]` and a `#[cfg(target_os = "linux")]` version of each function. Windows behavior must not change for Linux work.
 - **UI** follows `DESIGN.md` (tokens, components, motion). Update it whenever the UI changes.
 - **UI text** only through `t()` with a key in `src/lib/i18n/en.json` (backend codes as `msg.<code>`), never hard-coded.
 - **Dependencies:** ask the owner before adding a crate or npm package.
