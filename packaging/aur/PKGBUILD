@@ -1,13 +1,15 @@
 # Repackages the .deb from the GitHub release. Before pushing to the AUR, set pkgver, then run
 # updpkgsums and makepkg --printsrcinfo > .SRCINFO.
 pkgname=guild-bin
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Launcher for your Steam, Epic, GOG and Amazon Games libraries'
 arch=('x86_64')
 url='https://github.com/TheBiemGamer/guild'
 license=('GPL-3.0-or-later')
-depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'python' 'xdg-utils')
+optdepends=('gnome-keyring: store logins and API keys (or another Secret Service provider such as KWallet)'
+            'umu-launcher: run Windows games (Guild can also download it)')
 provides=('guild')
 conflicts=('guild')
 source=("$url/releases/download/v$pkgver/Guild_${pkgver}_amd64.deb")
