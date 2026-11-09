@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use super::library::rescan;
+use super::library::rescan_local;
 use super::{
     AppState, Process, Res, Shared, Watch, allow, blocking, open_db, queue_view, unix_now,
 };
@@ -395,7 +395,7 @@ fn act_blocking(
     }
     if game.provider == ProviderKind::Gog {
         let result = act_gog(&state, action, game, dlc, dest);
-        rescan(app, true);
+        rescan_local(app);
         return result
             .map(|()| None)
             .map_err(|e| store_error(ProviderKind::Gog, e));
@@ -403,7 +403,7 @@ fn act_blocking(
     if game.provider == ProviderKind::Amazon {
         let result = act_amazon(&state, action, game, dest);
         if !matches!(action, Action::Play | Action::PlayOutdated) {
-            rescan(app, true);
+            rescan_local(app);
         }
         return result
             .map(|()| None)
@@ -465,7 +465,7 @@ fn act_blocking(
         Action::Install | Action::Update | Action::Verify => unreachable!("queued above"),
     };
     if !matches!(action, Action::Play | Action::PlayOutdated) {
-        rescan(app, true);
+        rescan_local(app);
     }
     result
         .map(|()| None)
@@ -748,12 +748,12 @@ fn run_queue(app: &AppHandle) {
         let (toast, repaired) = finish_job(&mut s, &key, result, store);
         save_queue(&state, &s.queue);
         drop(s);
-        // In the background: the next job need not wait for a full online scan. Only that scan shows a store game
-        // as installed, so the finished job's progress and its toast wait for it.
+        // In the background: the next job need not wait for the scan. Only that scan shows a store game as
+        // installed, so the finished job's progress and its toast wait for it. Local: a job changes installs only.
         let scan = app.clone();
         let action = job.action;
         tauri::async_runtime::spawn_blocking(move || {
-            let changed = rescan(&scan, true);
+            let changed = rescan_local(&scan);
             let state = scan.state::<AppState>();
             let mut s = state.lock();
             s.library_changed |= changed;
