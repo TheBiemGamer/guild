@@ -877,7 +877,7 @@
         <h3>{t('settings.section.general')}</h3>
         <h4>{t('settings.group.startup')}</h4>
         <div class="group">
-          {@render switchRow('power', 'start_with_windows', view.startWithWindows, t('settings.startup'))}
+          {@render switchRow('power', 'start_with_windows', view.startWithWindows, view.linux ? t('settings.startupLinux') : t('settings.startup'))}
           {@render switchRow('tray', 'close_to_tray', view.closeToTray, t('settings.tray'), t('settings.trayHint'))}
           {@render switchRow('bell', 'notify_downloads', view.notifyDownloads, t('settings.notify'))}
         </div>

@@ -536,6 +536,8 @@ export type SettingsView = {
 	gogCloudSaves: boolean,
 	/**  Read from the autostart entry itself, so it can't drift from what Windows runs. */
 	startWithWindows: boolean,
+	/**  Picks the Linux wording where the Windows one names Windows. */
+	linux: boolean,
 	closeToTray: boolean,
 	notifyDownloads: boolean,
 	appVersion: string,

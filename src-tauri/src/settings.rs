@@ -198,11 +198,17 @@ fn entry(user: &str) -> Result<keyring_core::Entry, Msg> {
         keyring_core::set_default_store(store);
         Ok(())
     });
-    STORE
-        .clone()
-        .map_err(|e| msg!(credentialManager, detail = e))?;
-    keyring_core::Entry::new(SERVICE, user)
-        .map_err(|e| msg!(credentialManager, detail = e.to_string()))
+    STORE.clone().map_err(keyring_error)?;
+    keyring_core::Entry::new(SERVICE, user).map_err(|e| keyring_error(e.to_string()))
+}
+
+/// A keyring failure, named for the OS's keyring.
+fn keyring_error(detail: String) -> Msg {
+    if cfg!(windows) {
+        msg!(credentialManager, detail = detail)
+    } else {
+        msg!(secretService, detail = detail)
+    }
 }
 
 fn read(user: &str) -> Option<String> {
@@ -224,7 +230,7 @@ fn write(user: &str, value: Option<&str>) -> Result<(), Msg> {
     };
     match result {
         Err(keyring_core::Error::NoEntry) if value.is_none() => Ok(()),
-        other => other.map_err(|e| msg!(credentialManager, detail = e.to_string())),
+        other => other.map_err(|e| keyring_error(e.to_string())),
     }
 }
 
