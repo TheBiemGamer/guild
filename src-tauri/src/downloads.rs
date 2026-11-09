@@ -28,6 +28,15 @@ pub struct Job {
     /// Install: the base folder chosen when it was queued (GOG always has one); `None` is Legendary's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dest: Option<String>,
+    /// Install: just these of the owned DLC, with `with_dlc` off. Epic installs the game without DLC, then each of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dlcs: Option<Vec<String>>,
+    /// GOG install: the language; `None` picks one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
+    /// GOG install on Linux: the Windows build where a native one exists.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub windows: bool,
 }
 
 impl Job {
@@ -38,6 +47,9 @@ impl Job {
             dlc: None,
             with_dlc: None,
             dest: None,
+            dlcs: None,
+            lang: None,
+            windows: false,
         }
     }
 }
@@ -284,7 +296,13 @@ mod tests {
         });
         q.push(Job {
             with_dlc: Some(false),
+            dlcs: Some(vec!["HatDlc".into()]),
             ..Job::new("epic-c", Install)
+        });
+        q.push(Job {
+            lang: Some("de-DE".into()),
+            windows: true,
+            ..Job::new("gog-1", Install)
         });
         q.push(Job::new("epic-d", Verify));
         q.pause();

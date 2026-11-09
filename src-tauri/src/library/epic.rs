@@ -476,9 +476,14 @@ pub fn info_json(game: &Game) -> Result<Value, Error> {
     json(&["info", &game.external_id, "--json"])
 }
 
-/// Bytes to download, from `manifest.download_size` of `info_json` (verified on a real capture).
-pub fn download_size_from_info(info: &Value) -> Option<u64> {
-    info["manifest"]["download_size"].as_u64()
+/// Bytes to download and on disk, from `manifest.download_size` and `disk_size` of `info_json` (verified on a real
+/// capture). The game alone: each DLC has a manifest of its own.
+pub fn sizes_from_info(info: &Value) -> (Option<u64>, Option<u64>) {
+    let manifest = &info["manifest"];
+    (
+        manifest["download_size"].as_u64(),
+        manifest["disk_size"].as_u64(),
+    )
 }
 
 /// `legendary list --json`: every owned game with its Epic catalog item (`metadata`).
@@ -1276,23 +1281,22 @@ mod tests {
     }
 
     #[test]
-    fn download_size_from_info_reads_the_fixture() {
-        // Captured from `legendary info <AppName> --json` (A Short Hike); the size is `manifest.download_size`.
+    fn sizes_from_info_read_the_fixture() {
+        // Captured from `legendary info <AppName> --json` (A Short Hike).
         assert_eq!(
-            download_size_from_info(&fixture("info.json")),
-            Some(224_976_506)
+            sizes_from_info(&fixture("info.json")),
+            (Some(224_976_506), Some(323_783_140))
         );
     }
 
     #[test]
-    fn download_size_from_info_handles_missing_fields() {
-        assert_eq!(download_size_from_info(&serde_json::json!({})), None);
+    fn sizes_from_info_handle_missing_fields() {
+        assert_eq!(sizes_from_info(&serde_json::json!({})), (None, None));
         assert_eq!(
-            download_size_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })),
-            None
+            sizes_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })),
+            (None, None)
         );
     }
-
     #[test]
     fn junk_json_gives_no_games() {
         assert!(games(&Value::Null, &Value::Null).is_empty());

@@ -789,6 +789,84 @@ fn pretty_name(os_release: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
+/// Free and total bytes of the drive a folder is on. A folder that doesn't exist yet (an install creates it) is
+/// measured at its nearest existing parent. `None` when no part of the path exists or the OS can't tell.
+pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
+    let dir = path.ancestors().find(|p| p.is_dir())?;
+    space_of(dir)
+}
+
+#[cfg(windows)]
+fn space_of(dir: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
+    let (mut free, mut total) = (0u64, 0u64);
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the outputs are plain numbers it fills in.
+    let ok =
+        unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, std::ptr::null_mut()) };
+    (ok != 0).then_some((free, total))
+}
+
+#[cfg(target_os = "linux")]
+fn space_of(dir: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `path` is NUL-terminated and outlives the call; `stat` is a plain struct the call fills in.
+    let stat = unsafe {
+        let mut stat: libc::statvfs = std::mem::zeroed();
+        (libc::statvfs(path.as_ptr(), &mut stat) == 0).then_some(stat)
+    }?;
+    let unit = stat.f_frsize as u64;
+    Some((stat.f_bavail as u64 * unit, stat.f_blocks as u64 * unit))
+}
+
+/// The roots of the fixed drives (`C:\`, `D:\`), for the install panel's folder menu.
+#[cfg(windows)]
+pub fn drives() -> Vec<std::path::PathBuf> {
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+    const DRIVE_FIXED: u32 = 3;
+    // SAFETY: takes nothing and returns a bit per drive letter.
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u8)
+        .filter(|i| mask & (1 << i) != 0)
+        .map(|i| format!("{}:\\", (b'A' + i) as char))
+        .filter(|root| {
+            let wide: Vec<u16> = root.encode_utf16().chain([0]).collect();
+            // SAFETY: `wide` is NUL-terminated and outlives the call.
+            unsafe { GetDriveTypeW(wide.as_ptr()) == DRIVE_FIXED }
+        })
+        .map(std::path::PathBuf::from)
+        .collect()
+}
+
+/// Where other drives are mounted (`/mnt`, `/media`, `/run/media`), for the install panel's folder menu; the home
+/// folder's drive is the default folder's already.
+#[cfg(target_os = "linux")]
+pub fn drives() -> Vec<std::path::PathBuf> {
+    mount_points(&std::fs::read_to_string("/proc/self/mounts").unwrap_or_default())
+}
+
+#[cfg(target_os = "linux")]
+fn mount_points(mounts: &str) -> Vec<std::path::PathBuf> {
+    let mut points: Vec<std::path::PathBuf> = mounts
+        .lines()
+        .filter_map(|l| {
+            let mut fields = l.split(' ');
+            let device = fields.next()?;
+            // Spaces in a mount point are written `\040`.
+            let point = fields.next()?.replace("\\040", " ");
+            let other = ["/mnt/", "/media/", "/run/media/"]
+                .iter()
+                .any(|p| point.starts_with(p));
+            (device.starts_with("/dev/") && other).then(|| point.into())
+        })
+        .collect();
+    points.sort();
+    points.dedup();
+    points
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,6 +975,31 @@ mod tests {
             Some("CachyOS Linux")
         );
         assert_eq!(pretty_name("NAME=Arch\n"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn other_drives_are_the_mounted_devices_under_mnt_and_media() {
+        let mounts = "/dev/nvme0n1p2 / btrfs rw 0 0\n\
+            /dev/nvme0n1p2 /home btrfs rw 0 0\n\
+            proc /proc proc rw 0 0\n\
+            /dev/sda1 /run/media/me/Big\\040Disk ext4 rw 0 0\n\
+            /dev/sdb1 /mnt/games ext4 rw 0 0\n\
+            tmpfs /mnt/ram tmpfs rw 0 0\n";
+        assert_eq!(
+            mount_points(mounts),
+            [
+                std::path::PathBuf::from("/mnt/games"),
+                "/run/media/me/Big Disk".into()
+            ]
+        );
+    }
+
+    #[test]
+    fn disk_space_measures_a_folder_that_does_not_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let (free, total) = disk_space(&dir.path().join("Games/Not yet")).unwrap();
+        assert!(total > 0 && free <= total);
     }
 
     #[cfg(target_os = "linux")]

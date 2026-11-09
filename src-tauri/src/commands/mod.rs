@@ -3,6 +3,7 @@
 
 pub mod custom;
 pub mod game;
+pub mod install;
 pub mod library;
 pub mod lists;
 pub mod settings;

@@ -599,6 +599,14 @@ fn folder_name(library: &Value, id: &str) -> String {
     if name.is_empty() { id.to_owned() } else { name }
 }
 
+/// The folder an install of the game gets inside its base folder (`folder_name`), from nile's library.
+pub fn install_folder(id: &str) -> String {
+    folder_name(
+        &read_json(&cfg().join("library.json")).unwrap_or(Value::Null),
+        id,
+    )
+}
+
 /// The folder `installed.json` records for the game, when it exists. Callers hold `NILE`.
 fn installed_path(id: &str) -> Option<PathBuf> {
     let mut installed =
@@ -796,10 +804,7 @@ pub fn install(
 ) -> Result<PathBuf, Error> {
     ensure_login()?;
     fs_err::create_dir_all(base)?;
-    let folder = base.join(folder_name(
-        &read_json(&cfg().join("library.json")).unwrap_or(Value::Null),
-        id,
-    ));
+    let folder = base.join(install_folder(id));
     let _job = Downloading::start();
     let start = SystemTime::now();
     let run = run(

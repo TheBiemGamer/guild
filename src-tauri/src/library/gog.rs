@@ -526,6 +526,8 @@ pub fn account_name(conn: &rusqlite::Connection) -> Option<String> {
 
 /// `info` kind of `gogdl info`'s answer for a game (sizes, languages, DLC, folder name), kept a week.
 const INSTALL_INFO: &str = "gog-install-info";
+/// The same for the Windows build of a game whose default here is its native Linux build.
+const WINDOWS_INFO: &str = "gog-install-info-windows";
 const INSTALL_INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 /// `game_prefs` name of a game's cloud save timestamps: `{location name: timestamp}`. Forgotten with the install.
 const SAVE_TS: &str = "gog_save_ts";
@@ -591,32 +593,51 @@ fn ensure_login() -> Result<(), Error> {
     }
 }
 
-/// `en-US` when the game has it, else the first of its languages in order.
-fn pick_lang(info: &Value) -> String {
-    let mut langs: Vec<&str> = info["languages"]
+/// The game's languages in order.
+pub fn languages(info: &Value) -> Vec<String> {
+    let mut langs: Vec<String> = info["languages"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
+        .map(str::to_owned)
         .collect();
     langs.sort_unstable();
-    if langs.contains(&DEFAULT_LANG) {
+    langs
+}
+
+/// `en-US` when the game has it, else the first of its languages in order.
+pub fn pick_lang(info: &Value) -> String {
+    let langs = languages(info);
+    if langs.iter().any(|l| l == DEFAULT_LANG) {
         DEFAULT_LANG
     } else {
-        langs.first().copied().unwrap_or(DEFAULT_LANG)
+        langs.first().map_or(DEFAULT_LANG, String::as_str)
     }
     .to_owned()
 }
 
 /// `download_size` of a `size` map: the files every language shares plus `lang`'s.
 fn size_of(size: &Value, lang: &str) -> Option<u64> {
-    match (
-        size["*"]["download_size"].as_u64(),
-        size[lang]["download_size"].as_u64(),
-    ) {
+    sizes(size, lang).0
+}
+
+/// Download and disk bytes of a `size` map (`info["size"]`, or a DLC's): the files every language shares plus `lang`'s.
+pub fn sizes(size: &Value, lang: &str) -> (Option<u64>, Option<u64>) {
+    let field = |name: &str| match (size["*"][name].as_u64(), size[lang][name].as_u64()) {
         (None, None) => None,
         (all, own) => Some(all.unwrap_or(0) + own.unwrap_or(0)),
-    }
+    };
+    (field("download_size"), field("disk_size"))
+}
+
+/// A DLC's `size` map in `info`, by its id.
+pub fn dlc_size<'a>(info: &'a Value, id: &str) -> Option<&'a Value> {
+    info["dlcs"]
+        .as_array()?
+        .iter()
+        .find(|d| id_text(&d["id"]).as_deref() == Some(id))
+        .map(|d| &d["size"])
 }
 
 /// Bytes an install downloads: the game, plus the DLC among `dlcs` (an install takes the owned DLC by default).
@@ -634,19 +655,33 @@ pub fn download_size(info: &Value, dlcs: &[String]) -> Option<u64> {
 
 /// `gogdl info` for a game, from the cache while under a week old. `None` when gogdl couldn't tell (logged).
 pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
+    cached_info(conn, id, INSTALL_INFO, cfg!(target_os = "linux"))
+}
+
+/// `gogdl info` for the build an install takes: the default one (`install_info`), or Windows (`windows`) when the
+/// default is the native Linux build.
+pub fn build_info(conn: Option<&Connection>, id: &str, windows: bool) -> Option<Value> {
+    let info = install_info(conn, id)?;
+    if windows && info["os"] == "linux" {
+        // shortcut: assumes a game with a Linux build has a Windows one too (GOG sells none without); its info is None otherwise.
+        cached_info(conn, id, WINDOWS_INFO, false)
+    } else {
+        Some(info)
+    }
+}
+
+fn cached_info(conn: Option<&Connection>, id: &str, kind: &str, linux: bool) -> Option<Value> {
     let key = ProviderKind::Gog.key(id);
     let json = crate::info::cached_or_run_tool(
         conn,
         &key,
-        INSTALL_INFO,
+        kind,
         INSTALL_INFO_MAX_AGE_SECS,
         super::unix_now(),
         || {
             // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
             _ = login();
-            if cfg!(target_os = "linux")
-                && let Some(info) = linux_info(id)
-            {
+            if linux && let Some(info) = linux_info(id) {
                 return Some(info.to_string());
             }
             let output = crate::platform::tool_output(&mut gogdl(["info", id, "--os", "windows"]))
@@ -921,34 +956,33 @@ fn outcome(run: &Run, done: bool) -> Result<(), Error> {
     Err(last_error(&run.log, msg!(gogdlNoReason)).into())
 }
 
-/// Downloads a game into a folder named after it inside `base`, with its owned DLC or none. Returns that folder.
+/// Downloads a game into a folder named after it inside `base`, with `dlcs`, in `lang` (`None`: `pick_lang`), as the
+/// Windows build (`windows`) or the default one (`build_info`). Returns that folder.
 pub fn install(
     conn: Option<&Connection>,
     id: &str,
     base: &Path,
-    with_dlc: bool,
+    dlcs: &Dlcs,
+    lang: Option<&str>,
+    windows: bool,
     on_event: impl FnMut(InstallEvent),
 ) -> Result<PathBuf, Error> {
     ensure_login()?;
-    let info = install_info(conn, id).ok_or(msg!(cantReachGog))?;
+    let info = build_info(conn, id, windows).ok_or(msg!(cantReachGog))?;
     let folder = info["folder_name"]
         .as_str()
         .filter(|f| !f.is_empty())
         .ok_or(msg!(gogNoFolderName))?;
     fs_err::create_dir_all(base)?;
-    let dlcs = if with_dlc {
-        Dlcs::All
-    } else {
-        Dlcs::Only(Vec::new())
-    };
+    let lang = lang.map_or_else(|| pick_lang(&info), str::to_owned);
     let run = run(
         job_args(
             "download",
             id,
             info["os"].as_str().unwrap_or("windows"),
             base,
-            &pick_lang(&info),
-            &dlcs,
+            &lang,
+            dlcs,
         ),
         ProgressAction::Install,
         on_event,

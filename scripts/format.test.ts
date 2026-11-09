@@ -63,6 +63,7 @@ test('sizes: kilobytes rounded up, whole megabytes, one decimal of a gigabyte', 
   assert.equal(sizeLabel(812 * 2 ** 20 + 5), '812 MB')
   assert.equal(sizeLabel(GiB), '1.0 GB')
   assert.equal(sizeLabel((27_300 * GiB) / 1000), '27.3 GB')
+  assert.equal(sizeLabel(1100 * GiB), '1.1 TB')
 })
 
 test('playtime tile', () => {

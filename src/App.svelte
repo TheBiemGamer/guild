@@ -43,7 +43,7 @@
   import Grid from './lib/Grid.svelte'
   import Detail from './lib/Detail.svelte'
   import Settings from './lib/Settings.svelte'
-  import InstallPopup from './lib/InstallPopup.svelte'
+  import InstallPanel from './lib/InstallPanel.svelte'
   import GameMenu from './lib/GameMenu.svelte'
   import AddGame from './lib/AddGame.svelte'
   import NotesPopover, { installedNotes } from './lib/NotesPopover.svelte'
@@ -186,19 +186,14 @@
     savedSort = now
   })
 
-  /** The Epic, GOG or Amazon copy whose install is being confirmed, the rectangle the popup opens beside, and what installs it. */
-  let confirming = $state<{ game: { key: string; title: string }; anchor: DOMRect; go: (withDlc: boolean) => void } | null>(null)
+  /** The Epic, GOG or Amazon copy whose install panel is open, and the cover it opens beside. */
+  let confirming = $state<{ game: { key: string; title: string }; anchor: DOMRect } | null>(null)
 
-  /** Steam installs in its own dialog; the other stores' copies ask here first, with size and folder. */
-  function confirmInstall(key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) {
-    if (key.startsWith('epic-') || key.startsWith('gog-') || key.startsWith('amazon-')) confirming = { game: { key, title }, anchor, go }
-    else go(true)
-  }
-
-  /** `key` is the card's chosen copy. */
+  /** `key` is the card's chosen copy. Steam installs in its own dialog; the other stores' copies ask in the install panel. */
   function install(key: string, anchor: DOMRect) {
     const title = lib.games.find((g) => g.chosen === key)?.title ?? ''
-    confirmInstall(key, title, anchor, (withDlc) => act('install', key, { withDlc }))
+    if (/^(epic|gog|amazon)-/.test(key)) confirming = { game: { key, title }, anchor }
+    else act('install', key)
   }
 
   /** A Play from a card that stopped at a cloud save conflict; the game page asks, in its hero. */
@@ -563,19 +558,14 @@
   {#if confirming}
     <!-- A fresh popup per game, so a late size never lands on another game. -->
     {#key confirming.game.key}
-      <InstallPopup
+      <InstallPanel
         game={confirming.game}
         anchor={confirming.anchor}
-        folder={confirming.game.key.startsWith('gog-')
-          ? settings?.gogInstallDir
-          : confirming.game.key.startsWith('amazon-')
-            ? settings?.amazonInstallDir
-            : settings?.epicInstallDir}
         oncancel={() => (confirming = null)}
-        onconfirm={(withDlc) => {
-          const { go } = confirming!
+        onconfirm={(choice) => {
+          const { key } = confirming!.game
           confirming = null
-          go(withDlc)
+          act('install', key, { choice })
         }}
       />
     {/key}
@@ -685,7 +675,6 @@
         onerror={(m) => (error = m)}
         onchanged={reload}
         ontint={(url) => (tint = url)}
-        onconfirminstall={confirmInstall}
         onedit={openAddGame}
         conflict={saveConflict}
       />
