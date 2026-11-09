@@ -286,6 +286,24 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
     Ok(())
 }
 
+/// Linux: downloads umu-launcher (`umu`) or GE-Proton's newest release (`proton`) in the background, sending each new
+/// whole percent. One of each at a time.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_runner(part: String, on_percent: Channel<u8>) -> Res<()> {
+    crate::platform::install_runner(&part, |percent| {
+        let _ = on_percent.send(percent);
+    })
+    .await
+}
+
+/// The Proton builds a game's launch options may pick, newest first; none on Windows.
+#[tauri::command]
+#[specta::specta]
+pub async fn protons() -> Vec<String> {
+    blocking(crate::platform::protons).await
+}
+
 /// The owned-games login, separate from the local install.
 #[derive(Serialize, specta::Type)]
 pub struct SteamLibrary {
@@ -335,6 +353,8 @@ pub struct SettingsView {
     notify_downloads: bool,
     app_version: String,
     tools: Vec<tools::ToolView>,
+    /// Linux: what Windows games run with; `None` on Windows.
+    runner: Option<crate::platform::RunnerView>,
     cache_bytes: u64,
 }
 
@@ -404,6 +424,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
             tools: tools::view(),
+            runner: crate::platform::runner(),
             cache_bytes,
         })
     })
@@ -1044,6 +1065,7 @@ mod tests {
             notify_downloads: true,
             app_version: env!("CARGO_PKG_VERSION").into(),
             tools: Vec::new(),
+            runner: None,
             cache_bytes: 1 << 20,
         };
         insta::assert_json_snapshot!(view, { ".appVersion" => "[version]", ".epicInstallDir" => "[path]" });

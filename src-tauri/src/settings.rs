@@ -22,6 +22,8 @@ pub const START_WITH_WINDOWS: &str = "start_with_windows";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const GOG_INSTALL_DIR: &str = "gog_install_dir";
 pub const AMAZON_INSTALL_DIR: &str = "amazon_install_dir";
+/// Linux: the Proton build Windows games run with, by folder name (`wine`); none is the newest found.
+pub const PROTON: &str = "proton";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
 /// The library's sort, as the toolbar last left it (serde names: `mostPlayed`, `longestToBeat`). It sets
 /// the grouping too. An old `library_group` row is left alone and ignored.
@@ -87,7 +89,7 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
             Some(dir) if !Path::new(dir).is_dir() => Err(msg!(notExistingFolder, path = dir)),
             _ => Ok(()),
         },
-        IGDB_CLIENT_ID => Ok(()),
+        IGDB_CLIENT_ID | PROTON => Ok(()),
         LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => {
             Err(msg!(unknownSort, value = format!("{value:?}")))
         }

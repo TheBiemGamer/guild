@@ -30,6 +30,8 @@ mod steamgriddb;
 mod tools;
 mod tray;
 mod view;
+#[cfg(target_os = "linux")]
+mod wine;
 
 use tauri::Manager;
 
@@ -144,6 +146,8 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
             commands::settings::amazon_log_in,
             commands::settings::amazon_log_out,
             commands::settings::install_tool,
+            commands::settings::install_runner,
+            commands::settings::protons,
             commands::settings::settings_view,
             commands::settings::update_setting,
             commands::settings::set_igdb_secret,

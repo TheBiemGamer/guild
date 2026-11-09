@@ -540,5 +540,14 @@
   "common.dismiss": "Dismiss",
   "msg.unknownLanguage": "Unknown language: {value}",
   "dialog.programs": "Programs",
-  "dialog.images": "Images"
+  "dialog.images": "Images",
+  "msg.noUmu": "umu-launcher is missing. Install it in Settings, under Windows games.",
+  "msg.noProton": "No Proton build found. Install GE-Proton in Settings, under Windows games.",
+  "settings.group.windowsGames": "Windows games",
+  "settings.umuMissing": "Not found",
+  "settings.proton": "Proton",
+  "settings.protonMissing": "None found",
+  "settings.protonNewest": "Newest ({name})",
+  "settings.protonNow": "Proton: {name}",
+  "detail.protonHint": "Windows games run through it"
 }

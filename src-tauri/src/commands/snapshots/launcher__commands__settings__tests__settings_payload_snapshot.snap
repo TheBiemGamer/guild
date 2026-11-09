@@ -32,5 +32,6 @@ expression: view
   "notifyDownloads": true,
   "appVersion": "[version]",
   "tools": [],
+  "runner": null,
   "cacheBytes": 1048576
 }

@@ -115,10 +115,12 @@ fn command(c: &CustomGame) -> Command {
     command
 }
 
-/// Starts the program and returns its process, to watch. Doesn't wait for it.
+/// Starts the program and returns its process, to watch. Doesn't wait for it. On Linux the .exe runs through the
+/// runner (`platform::windows_game`) with the Proton build chosen in Settings.
 pub fn launch(c: &CustomGame) -> Result<std::process::Child, Error> {
     check_exe(&c.exe).map_err(|_| missing(&c.name))?;
-    Ok(command(c).spawn()?)
+    let key = ProviderKind::Custom.key(&c.id);
+    Ok(crate::platform::windows_game(command(c), &key, None)?.spawn()?)
 }
 
 #[cfg(test)]
@@ -159,7 +161,7 @@ mod tests {
         }
     }
 
-    // Windows paths; games on Linux run through Wine, a later phase.
+    // Windows paths.
     #[cfg(windows)]
     #[test]
     fn launch_runs_the_exe_in_its_folder_with_split_args() {

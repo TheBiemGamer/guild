@@ -163,6 +163,13 @@ export const commands = {
 	 *  login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.
 	 */
 	installTool: (name: string, onPercent: Channel<number>) => __TAURI_INVOKE<null>("install_tool", { name, onPercent }),
+	/**
+	 *  Linux: downloads umu-launcher (`umu`) or GE-Proton's newest release (`proton`) in the background, sending each new
+	 *  whole percent. One of each at a time.
+	 */
+	installRunner: (part: string, onPercent: Channel<number>) => __TAURI_INVOKE<null>("install_runner", { part, onPercent }),
+	/**  The Proton builds a game's launch options may pick, newest first; none on Windows. */
+	protons: () => __TAURI_INVOKE<string[]>("protons"),
 	settingsView: () => __TAURI_INVOKE<SettingsView>("settings_view"),
 	/**  Sets one plain setting (`None` resets it). The IGDB secret goes through `set_igdb_secret`. */
 	updateSetting: (name: string, value: string | null) => __TAURI_INVOKE<null>("update_setting", { name, value }),
@@ -391,6 +398,8 @@ export type LaunchOptions = {
 	offline?: boolean,
 	skipVersionCheck?: boolean,
 	exe?: string | null,
+	/**  Linux: the Proton build this game runs with, by folder name; none follows Settings. */
+	proton?: string | null,
 };
 
 export type Library = {
@@ -485,6 +494,16 @@ export type QueuedView = {
 	title: string,
 };
 
+/**
+ *  Windows games on Linux, for Settings: whether umu-launcher is found, the Proton builds found (newest first) and
+ *  the one chosen in Settings (none is the newest).
+ */
+export type RunnerView = {
+	umu: boolean,
+	protons: string[],
+	proton: string | null,
+};
+
 export type SavesView = {
 	/**  The game's own choice; `None` follows the setting. */
 	choice: boolean | null,
@@ -540,6 +559,8 @@ export type SettingsView = {
 	notifyDownloads: boolean,
 	appVersion: string,
 	tools: ToolView[],
+	/**  Linux: what Windows games run with; `None` on Windows. */
+	runner: RunnerView | null,
 	cacheBytes: number,
 };
 

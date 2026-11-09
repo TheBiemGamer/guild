@@ -540,5 +540,14 @@
   "common.dismiss": "Sluiten",
   "msg.unknownLanguage": "Onbekende taal: {value}",
   "dialog.programs": "Programma's",
-  "dialog.images": "Afbeeldingen"
+  "dialog.images": "Afbeeldingen",
+  "msg.noUmu": "umu-launcher ontbreekt. Installeer het in Instellingen, onder Windows-games.",
+  "msg.noProton": "Geen Proton-versie gevonden. Installeer GE-Proton in Instellingen, onder Windows-games.",
+  "settings.group.windowsGames": "Windows-games",
+  "settings.umuMissing": "Niet gevonden",
+  "settings.proton": "Proton",
+  "settings.protonMissing": "Geen gevonden",
+  "settings.protonNewest": "Nieuwste ({name})",
+  "settings.protonNow": "Proton: {name}",
+  "detail.protonHint": "Windows-games draaien ermee"
 }

@@ -1,5 +1,5 @@
-//! OS-specific calls, for Windows and Linux. Linux runs the store tools' Linux builds; Windows games through Wine
-//! come later.
+//! OS-specific calls, for Windows and Linux. Linux runs the store tools' Linux builds, and Windows games through
+//! umu-launcher and Proton (`wine`).
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -397,21 +397,111 @@ pub fn ui_language() -> &'static str {
 }
 
 /// The folder a GOG save location's `<?NAME?>` variable stands for; `None` for one it doesn't know. `install` is
-/// the game's install folder.
-// shortcut: on Linux, Windows games keep saves inside their Wine prefix; the Wine phase maps these there.
-pub fn gog_folder(name: &str, install: &std::path::Path) -> Option<std::path::PathBuf> {
+/// the game's install folder; `key` its copy key, for the Wine prefix on Linux.
+#[cfg(windows)]
+pub fn gog_folder(name: &str, install: &std::path::Path, _key: &str) -> Option<std::path::PathBuf> {
     let base = directories::BaseDirs::new()?;
     Some(match name {
         "INSTALL" => install.to_path_buf(),
-        #[cfg(windows)]
         "SAVED_GAMES" => base.home_dir().join("Saved Games"),
         "APPLICATION_DATA_LOCAL" => base.data_local_dir().to_path_buf(),
-        #[cfg(windows)]
         "APPLICATION_DATA_LOCAL_LOW" => base.home_dir().join("AppData").join("LocalLow"),
         "APPLICATION_DATA_ROAMING" => base.data_dir().to_path_buf(),
         "DOCUMENTS" => directories::UserDirs::new()?.document_dir()?.to_path_buf(),
         _ => return None,
     })
+}
+
+/// The folder a GOG save location's `<?NAME?>` variable stands for: a Windows game keeps its saves in its Wine prefix.
+#[cfg(target_os = "linux")]
+pub fn gog_folder(name: &str, install: &std::path::Path, key: &str) -> Option<std::path::PathBuf> {
+    match name {
+        "INSTALL" => Some(install.to_path_buf()),
+        _ => crate::wine::windows_folder(&crate::wine::prefix(key)?, name),
+    }
+}
+
+/// Windows games on Linux, for Settings: whether umu-launcher is found, the Proton builds found (newest first) and
+/// the one chosen in Settings (none is the newest).
+#[derive(serde::Serialize, specta::Type)]
+#[cfg_attr(windows, allow(dead_code))]
+pub struct RunnerView {
+    pub umu: bool,
+    pub protons: Vec<String>,
+    pub proton: Option<String>,
+}
+
+/// Windows has no runner to set up.
+#[cfg(windows)]
+pub fn runner() -> Option<RunnerView> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn runner() -> Option<RunnerView> {
+    Some(crate::wine::view())
+}
+
+/// The Proton builds a game may pick, by name; none on Windows.
+#[cfg(windows)]
+pub fn protons() -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub fn protons() -> Vec<String> {
+    crate::wine::proton_names()
+}
+
+/// A Windows game's program as it runs: as is on Windows. `key` is its copy key, `proton` its own Proton choice.
+#[cfg(windows)]
+pub fn windows_game(
+    game: std::process::Command,
+    _key: &str,
+    _proton: Option<&str>,
+) -> Result<std::process::Command, crate::msg::Msg> {
+    Ok(game)
+}
+
+/// A Windows game's program as it runs: through umu-launcher and Proton, in the copy's own Wine prefix.
+#[cfg(target_os = "linux")]
+pub fn windows_game(
+    game: std::process::Command,
+    key: &str,
+    proton: Option<&str>,
+) -> Result<std::process::Command, crate::msg::Msg> {
+    crate::wine::wrap(game, key, proton)
+}
+
+/// Points a store tool at a Windows game's Wine prefix (`WINEPREFIX`), where its saves are, setting the prefix up
+/// first; nothing on Windows.
+#[cfg(windows)]
+pub fn in_prefix(_command: &mut std::process::Command, _key: &str) {}
+
+#[cfg(target_os = "linux")]
+pub fn in_prefix(command: &mut std::process::Command, key: &str) {
+    crate::wine::ready_prefix(key);
+    if let Some(prefix) = crate::wine::prefix(key) {
+        command.env("WINEPREFIX", prefix);
+    }
+}
+
+/// Downloads umu-launcher (`umu`) or GE-Proton (`proton`); Windows needs neither.
+#[cfg(windows)]
+pub async fn install_runner(
+    _part: &str,
+    _on_percent: impl FnMut(u8),
+) -> Result<(), crate::msg::Msg> {
+    Err(msg!(unknownTool))
+}
+
+#[cfg(target_os = "linux")]
+pub async fn install_runner(part: &str, on_percent: impl FnMut(u8)) -> Result<(), crate::msg::Msg> {
+    match part {
+        "umu" => crate::wine::install_umu(on_percent).await,
+        "proton" => crate::wine::install_ge_proton(on_percent).await,
+        _ => Err(msg!(unknownTool)),
+    }
 }
 
 #[cfg(windows)]

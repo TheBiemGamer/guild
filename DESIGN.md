@@ -218,8 +218,8 @@ No UI text below 11px. Counts and numbers use tabular figures.
   | Title            | none                                                                      |
 
 - **Toolbar,** left to right: search, store selector, Installed, active filter chips, Filters, spacer, Sort, Update (only when one is ready), Downloads (only while something downloads), Add a game, Settings. No sidebar.
-- **Settings:** a modal panel, max 760px wide, with a 190px section list on the left (stacked under 640px). Sections: Accounts, General, Services, About. Each section is a title, then Label headings over one rounded `glass` group per heading, its rows split by `glass-line` rules. Never a box per row.
-- **Game page:** covers the content area while the library stays mounted underneath, so its scroll position survives. A column up to 1360px: the 300px hero, a tab row (Overview, DLC, Saves, Launch options, Installation), then three fact tiles and an About / Details grid (1.7fr / 1fr).
+- **Settings:** a modal panel, max 760px wide, with a 190px section list on the left (stacked under 640px). Sections: Accounts, General, Services, About. Each section is a title, then Label headings over one rounded `glass` group per heading, its rows split by `glass-line` rules. Never a box per row. On Linux, General ends with a Windows games group: umu-launcher, with an Install button only while it is missing, and Proton, with an Install GE-Proton button while none is found, else a menu chip for the default build (Newest first). Windows never shows the group.
+- **Game page:** covers the content area while the library stays mounted underneath, so its scroll position survives. A column up to 1360px: the 300px hero, a tab row (Overview, DLC, Saves, Launch options, Installation); on Linux, Launch options adds a Proton menu chip (Default follows Settings), then three fact tiles and an About / Details grid (1.7fr / 1fr).
 
 ## Elevation and shapes
 

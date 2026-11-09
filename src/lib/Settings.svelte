@@ -73,6 +73,8 @@
     globe: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
     disk: 'M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM7 15h.01M11 15h6',
     file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+    window: 'M4 5h16v14H4zM4 9h16M7 7h.01M10 7h.01',
+    layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
   }
   type Icon = keyof typeof icons
   let active = $state<string>(sections[0])
@@ -132,6 +134,33 @@
   let nileJob = $state<{ percent: number | null } | null>(null)
   let nileError = $state('')
   const nile = $derived(view.tools.find((t) => t.name === 'nile'))
+  /** Linux: umu-launcher's or GE-Proton's download while it runs, like Legendary's. */
+  let umuJob = $state<{ percent: number | null } | null>(null)
+  let protonJob = $state<{ percent: number | null } | null>(null)
+  let runnerError = $state('')
+  /** The default Proton build: '' is the newest found, which `protons` lists first. */
+  const protonChoices = $derived(
+    view.runner
+      ? [{ value: '', label: t('settings.protonNewest', { name: view.runner.protons[0] ?? '' }) }, ...view.runner.protons.map((p) => ({ value: p, label: p }))]
+      : [],
+  )
+  const protonName = $derived(protonChoices.find((c) => c.value === (view.runner?.proton ?? ''))?.label ?? protonChoices[0]?.label ?? '')
+  let protonOpen = $state(false)
+  let protonButton = $state<HTMLButtonElement>()
+
+  async function installRunner(part: 'umu' | 'proton') {
+    runnerError = ''
+    const set = (job: { percent: number | null } | null) => (part === 'umu' ? (umuJob = job) : (protonJob = job))
+    set({ percent: null })
+    try {
+      await api.installRunner(part, (percent) => set({ percent }))
+    } catch (e) {
+      runnerError = api.message(e)
+    }
+    set(null)
+    await onchange()
+  }
+
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -916,6 +945,63 @@
             </div>
           </div>
         </div>
+        {#if view.runner}
+          <h4>{t('settings.group.windowsGames')}</h4>
+          <div class="group">
+            <div class="r">
+              {@render tile('window')}
+              <div class="what">
+                umu-launcher
+                {#if !view.runner.umu}<small class="problem">{t('settings.umuMissing')}</small>{/if}
+              </div>
+              {#if !view.runner.umu}
+                <button class="btn" disabled={umuJob !== null} aria-live="polite" onclick={() => installRunner('umu')}>
+                  {umuJob ? jobLabel('install', umuJob) : t('settings.installTool', { tool: 'umu-launcher' })}
+                </button>
+              {/if}
+            </div>
+            <div class="r">
+              {@render tile('layers')}
+              <div class="what">
+                {t('settings.proton')}
+                {#if view.runner.protons.length === 0}<small class="problem">{t('settings.protonMissing')}</small>{/if}
+              </div>
+              {#if view.runner.protons.length === 0}
+                <button class="btn" disabled={protonJob !== null} aria-live="polite" onclick={() => installRunner('proton')}>
+                  {protonJob ? jobLabel('install', protonJob) : t('settings.installTool', { tool: 'GE-Proton' })}
+                </button>
+              {:else}
+                <div class="choice">
+                  <button
+                    class="btn opt"
+                    class:open={protonOpen}
+                    bind:this={protonButton}
+                    aria-haspopup="menu"
+                    aria-expanded={protonOpen}
+                    aria-label={t('settings.protonNow', { name: protonName })}
+                    onclick={() => (protonOpen = !protonOpen)}
+                  >
+                    {protonName}
+                    {@render chevron()}
+                  </button>
+                  {#if protonOpen}
+                    <ChoiceMenu
+                      bind:value={() => view.runner?.proton ?? '', (v) => change(() => commands.updateSetting('proton', v || null))}
+                      options={protonChoices}
+                      label={t('settings.proton')}
+                      anchor={protonButton}
+                      onclose={(refocus) => {
+                        protonOpen = false
+                        if (refocus) protonButton?.focus()
+                      }}
+                    />
+                  {/if}
+                </div>
+              {/if}
+            </div>
+            {#if runnerError}<p class="note" role="status" title={runnerError}>{runnerError}</p>{/if}
+          </div>
+        {/if}
       </section>
 
       <section id={id('services')}>

@@ -111,6 +111,13 @@ export function installTool(name: ToolView['name'], onPercent: (percent: number)
   channel.onmessage = onPercent
   return commands.installTool(name, channel)
 }
+
+/** Linux: downloads umu-launcher or GE-Proton, reporting each new whole percent. */
+export function installRunner(part: 'umu' | 'proton', onPercent: (percent: number) => void) {
+  const channel = new Channel<number>()
+  channel.onmessage = onPercent
+  return commands.installRunner(part, channel)
+}
 /** The system folder picker; null when it was closed without picking. */
 export async function pickFolder(): Promise<string | null> {
   const path = await open({ directory: true })

@@ -25,6 +25,9 @@ pub struct Dirs {
     pub gog: PathBuf,
     /// Nile's config folder (`library::amazon`).
     pub amazon: PathBuf,
+    /// One Wine prefix per Windows game (`wine`). They hold the games' saves, so they are owner data.
+    #[cfg(target_os = "linux")]
+    pub prefixes: PathBuf,
 }
 
 /// `%LOCALAPPDATA%`.
@@ -55,6 +58,8 @@ impl Dirs {
             tools: data.join("tools"),
             gog: data.join("gog"),
             amazon: data.join("amazon"),
+            #[cfg(target_os = "linux")]
+            prefixes: data.join("prefixes"),
         }
     }
 }

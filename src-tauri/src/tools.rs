@@ -195,11 +195,11 @@ pub fn view() -> Vec<ToolView> {
 
 static INSTALLING: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
 
-/// Marks a tool as installing until dropped.
-struct Installing(&'static str);
+/// Marks a tool (or `wine`'s umu-launcher or Proton) as installing until dropped.
+pub(crate) struct Installing(&'static str);
 
 impl Installing {
-    fn start(name: &'static str) -> Option<Self> {
+    pub(crate) fn start(name: &'static str) -> Option<Self> {
         let mut busy = INSTALLING.lock().unwrap_or_else(|e| e.into_inner());
         // Lazily: a guard built and dropped here would deadlock on this lock and free the running install.
         busy.get_or_insert_default()
@@ -231,7 +231,8 @@ pub async fn install(
         .ok_or_else(|| msg!(toolAlreadyInstalling, tool = tool.title))?;
     let dest = tool.managed(root());
     let part = dest.with_extension("exe.part");
-    let digest = match download(http, tool, &part, on_percent).await {
+    let digest = match download::<Sha256>(http, tool.url, DOWNLOAD_TIMEOUT, &part, on_percent).await
+    {
         Ok(digest) => digest,
         Err(e) => {
             tracing::warn!("install {}: {e}", tool.name);
@@ -250,23 +251,24 @@ pub async fn install(
     Ok(())
 }
 
-/// Streams `tool.url` into `part` and returns its SHA-256 in hex.
-async fn download(
+/// Streams `url` into `part` and returns its hash `D` (SHA-256 for the tools) in hex.
+pub(crate) async fn download<D: Digest>(
     http: &reqwest::Client,
-    tool: &Tool,
+    url: &str,
+    timeout: Duration,
     part: &Path,
     mut on_percent: impl FnMut(u8),
 ) -> Result<String, crate::library::Error> {
     let mut response = http
-        .get(tool.url)
-        .timeout(DOWNLOAD_TIMEOUT)
+        .get(url)
+        .timeout(timeout)
         .send()
         .await?
         .error_for_status()?;
     let total = response.content_length().filter(|&n| n > 0);
     fs::create_dir_all(part.parent().expect("a tool path has a folder"))?;
     let mut file = File::create(part)?;
-    let mut hasher = Sha256::new();
+    let mut hasher = D::new();
     let (mut done, mut shown) = (0u64, None);
     while let Some(chunk) = response.chunk().await? {
         hasher.update(&chunk);
@@ -291,11 +293,11 @@ pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Res
         tool.managed(root).with_extension("exe.part"),
         tool.managed(root),
     );
-    let digest = download(http, tool, &part, |_| {}).await?;
+    let digest = download::<Sha256>(http, tool.url, DOWNLOAD_TIMEOUT, &part, |_| {}).await?;
     place(&part, &dest, &digest, tool.sha256)
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -444,7 +446,9 @@ mod tests {
         tauri::async_runtime::block_on(async {
             for tool in ALL {
                 let part = tool.managed(dir).with_extension("exe.part");
-                let digest = download(&http, tool, &part, |_| {}).await.unwrap();
+                let digest = download::<Sha256>(&http, tool.url, DOWNLOAD_TIMEOUT, &part, |_| {})
+                    .await
+                    .unwrap();
                 let dest = tool.managed(dir);
                 place(&part, &dest, &digest, tool.sha256).unwrap();
                 let output = Command::new(&dest).arg("--version").output().unwrap();

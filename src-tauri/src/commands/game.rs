@@ -413,24 +413,28 @@ fn act_blocking(
                 Err(conflict) => return Ok(Some(conflict)),
             };
             let options = checked_launch_options(open_db(&state).as_ref(), game)?;
-            epic::launch(&game.external_id, &options, action == Action::PlayOutdated).map(|()| {
+            epic::launch(&game.external_id, &options, action == Action::PlayOutdated).map(|child| {
                 record_play(&state, &key);
+                // Linux starts the game itself; on Windows Legendary did, so it is found by its exe name.
                 // The game started either way; without its exe name it just isn't shown as running.
                 // shortcut: unwatched, its saves aren't uploaded either; the next Play asks about the newer local save.
-                let alternative = options
-                    .exe
-                    .as_deref()
-                    .and_then(|e| std::path::Path::new(e).file_name());
-                let exe = match alternative {
-                    Some(name) => Some(name.to_string_lossy().into_owned()),
-                    None => epic::executable(game).unwrap_or_else(|e| {
-                        tracing::warn!("legendary list-installed {key}: {e}");
-                        None
-                    }),
-                };
-                state.lock().watch = exe.map(|exe| Watch {
+                let process = child.map(Process::Ours).or_else(|| {
+                    let alternative = options
+                        .exe
+                        .as_deref()
+                        .and_then(|e| std::path::Path::new(e).file_name());
+                    let exe = match alternative {
+                        Some(name) => Some(name.to_string_lossy().into_owned()),
+                        None => epic::executable(game).unwrap_or_else(|e| {
+                            tracing::warn!("legendary list-installed {key}: {e}");
+                            None
+                        }),
+                    };
+                    exe.map(Process::Named)
+                });
+                state.lock().watch = process.map(|process| Watch {
                     key: key.clone(),
-                    process: Process::Named(exe),
+                    process,
                     since: Instant::now(),
                     seen: false,
                     upload,
@@ -2173,6 +2177,7 @@ mod tests {
             offline: true,
             skip_version_check: false,
             exe: Some(r"bin\game.exe".into()),
+            proton: Some("GE-Proton11-12".into()),
         };
         store_launch_options(&conn, "epic-A", &options).unwrap();
         assert_eq!(launch_options_of(&conn, "epic-A"), options);
@@ -2182,7 +2187,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             json,
-            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe"}"#
+            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe","proton":"GE-Proton11-12"}"#
         );
         store_launch_options(&conn, "epic-A", &LaunchOptions::default()).unwrap();
         assert_eq!(

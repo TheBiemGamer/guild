@@ -60,6 +60,7 @@
   import PlayButton from './PlayButton.svelte'
   import GameMenu from './GameMenu.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
+  import ChoiceMenu from './ChoiceMenu.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
   import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
 
@@ -273,6 +274,11 @@
     argsSaved = false
     if (!key) return
     let alive = true
+    // Linux only: Windows has no Proton builds, so the row stays hidden there.
+    commands.protons().then(
+      (p) => alive && (protons = p),
+      () => {},
+    )
     commands.launchOptions(key).then(
       (o) => {
         if (!alive) return
@@ -285,6 +291,13 @@
       alive = false
     }
   })
+
+  /** Linux: the Proton builds a game may pick, newest first; '' follows Settings. */
+  let protons = $state<string[]>([])
+  const protonChoices = $derived([{ value: '', label: t('detail.default') }, ...protons.map((p) => ({ value: p, label: p }))])
+  const protonLabel = $derived(protonChoices.find((c) => c.value === (launch?.proton ?? ''))?.label ?? t('detail.default'))
+  let protonOpen = $state(false)
+  let protonChip = $state<HTMLButtonElement>()
 
   /** Saves a change to the launch options; true when it was stored. */
   async function setLaunch(change: Partial<LaunchOptions>) {
@@ -739,6 +752,33 @@
                 <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
                 {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
               </div>
+              {#if protons.length}
+                <div class="row">
+                  <div class="what">{t('settings.proton')}<small>{t('detail.protonHint')}</small></div>
+                  <div class="choice">
+                    <button
+                      class="chip"
+                      bind:this={protonChip}
+                      aria-haspopup="menu"
+                      aria-expanded={protonOpen}
+                      aria-label={t('settings.protonNow', { name: protonLabel })}
+                      onclick={() => (protonOpen = !protonOpen)}>{protonLabel}</button
+                    >
+                    {#if protonOpen}
+                      <ChoiceMenu
+                        bind:value={() => launch?.proton ?? '', (v) => setLaunch({ proton: v || null })}
+                        options={protonChoices}
+                        label={t('settings.proton')}
+                        anchor={protonChip}
+                        onclose={(refocus) => {
+                          protonOpen = false
+                          if (refocus) protonChip?.focus()
+                        }}
+                      />
+                    {/if}
+                  </div>
+                </div>
+              {/if}
             {/if}
           </section>
         {:else if current === 'installation'}
@@ -1272,6 +1312,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+
+  .choice {
+    position: relative;
   }
 
   .chip {

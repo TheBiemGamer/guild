@@ -42,6 +42,8 @@ pub struct LaunchOptions {
     pub offline: bool,
     pub skip_version_check: bool,
     pub exe: Option<String>,
+    /// Linux: the Proton build this game runs with, by folder name; none follows Settings.
+    pub proton: Option<String>,
 }
 
 /// Splits typed arguments on whitespace; double quotes group. No shell, no variables.
