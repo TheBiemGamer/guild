@@ -6,7 +6,7 @@
 
 web
 
-A Tauri 2 desktop app for Windows 10 and 11. The UI is a webview with its own visual system, not native Windows controls. It also builds and runs on Linux, with Steam and the store tools; running Windows games there through Wine comes later.
+A Tauri 2 desktop app for Windows 10 and 11. The UI is a webview with its own visual system, not native Windows controls. It also builds and runs on Linux, with Steam and the store tools; Windows games run there through umu-launcher and Proton.
 
 ## Users
 

@@ -10,7 +10,7 @@ You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) st
 sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev build-essential
 ```
 
-On Arch: `webkit2gtk-4.1 libayatana-appindicator librsvg xdotool base-devel`. At runtime Linux also needs `python3` (the Linux builds of Legendary and gogdl run on it), `xdg-open`, and a Secret Service provider such as GNOME Keyring or KWallet for the saved secrets. Running Windows games through Wine isn't supported yet.
+On Arch: `webkit2gtk-4.1 libayatana-appindicator librsvg xdotool base-devel`. At runtime Linux also needs `python3` (the Linux builds of Legendary and gogdl run on it), `xdg-open`, and a Secret Service provider such as GNOME Keyring or KWallet for the saved secrets. Windows games run through `umu-run` (from PATH, or downloaded in Settings) and a Proton build: GE-Proton in Steam's `compatibilitytools.d`, Steam's own Proton, or GE-Proton downloaded in Settings. Each game gets its own Wine prefix under `<data>/prefixes/<copy key>`; uninstalling a game keeps it, since its saves live there. The pinned umu-launcher version and hash are in `src-tauri/src/wine.rs`.
 
 ```bash
 npm install
