@@ -1117,7 +1117,8 @@ fn check_sdk(cfg: &Path) {
     }
 }
 
-/// Starts an installed game without waiting for it. Returns its process, to watch.
+/// Starts an installed game without waiting for it. Returns its process, to watch. A Windows game on Linux runs
+/// through the runner (`platform::windows_game`).
 pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::process::Child, Error> {
     let fuel = read_fuel(dir)
         .as_ref()
@@ -1136,6 +1137,12 @@ pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::proc
         entitlement(&library, id),
         current_user(&cfg).as_ref(),
     ));
+    // On Linux through the runner; the SDK paths stay Linux paths there, as Nile's own launch leaves them.
+    let mut command = crate::platform::windows_game(
+        command,
+        &ProviderKind::Amazon.key(id),
+        options.proton.as_deref(),
+    )?;
     Ok(command.spawn()?)
 }
 
@@ -1153,9 +1160,13 @@ mod tests {
     }
 
     fn output(code: u32, stderr: &[u8]) -> Output {
-        use std::os::windows::process::ExitStatusExt;
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(code);
+        // A Unix wait status holds the exit code in its second byte.
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw((code as i32) << 8);
         Output {
-            status: std::process::ExitStatus::from_raw(code),
+            status,
             stdout: Vec::new(),
             stderr: stderr.to_vec(),
         }
@@ -1688,6 +1699,8 @@ mod tests {
         );
     }
 
+    // Windows paths.
+    #[cfg(windows)]
     #[test]
     fn play_runs_main_with_the_fuel_variables() {
         let fuel = Fuel {

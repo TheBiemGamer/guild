@@ -4,13 +4,19 @@ Guild is built with Tauri 2, Svelte 5 + TypeScript, and Rust.
 
 ## Build from source
 
-You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) stable (edition 2024), and the [Tauri prerequisites for Windows](https://tauri.app/start/prerequisites/) (WebView2 and the MSVC build tools).
+You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) stable (edition 2024), and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS. On Windows that is WebView2 and the MSVC build tools. On Linux it is WebKitGTK 4.1, the AppIndicator library and librsvg; on Debian or Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential
+```
+
+On Arch: `webkit2gtk-4.1 libayatana-appindicator librsvg xdotool base-devel`. At runtime Linux also needs `python3` (the Linux builds of Legendary and gogdl run on it), `xdg-open`, and a Secret Service provider such as GNOME Keyring or KWallet for the saved secrets. Windows games run through `umu-run` (from PATH, or downloaded in Settings) and a Proton build: GE-Proton in Steam's `compatibilitytools.d`, Steam's own Proton, or GE-Proton and Proton-CachyOS installed from Settings → Wine. Each game gets its own Wine prefix under `<data>/prefixes/<copy key>`; uninstalling a game keeps it unless the owner ticks the option to remove it, since its saves live there. Settings → Wine lists and removes prefixes. The pinned umu-launcher version and hash are in `src-tauri/src/wine.rs`.
 
 ```bash
 npm install
 npm run tauri dev                       # run in development
-npm run tauri build -- --no-bundle      # release exe: src-tauri/target/release/Guild.exe
-npm run tauri build                     # installer (needs the signing key, see Releasing)
+npm run tauri build -- --no-bundle      # release build: src-tauri/target/release/Guild.exe (Guild on Linux)
+npm run tauri build                     # installer on Windows, AppImage and .deb on Linux (needs the signing key, see Releasing)
 ```
 
 ## Checks
@@ -79,7 +85,7 @@ The database is `library.sqlite`. Schema changes are new migration steps in `src
 
 ## Releasing
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the NSIS installer, signs it for the updater and publishes a GitHub release with `latest.json`. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the Windows NSIS installer and the Linux AppImage and `.deb` (on Ubuntu 22.04, so the AppImage runs on older glibc), signs the installer and the AppImage for the updater, and publishes a GitHub release with `latest.json`. A last job writes `latest.json` with both the `windows-x86_64` and `linux-x86_64-appimage` entries. The `.deb` doesn't auto-update: its update check finds no entry for it. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.
 
 ### One-time setup
 
@@ -103,6 +109,8 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, bui
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
+
+For the AUR package, set `pkgver` in `packaging/aur/PKGBUILD` once the release is out, run `updpkgsums` and `makepkg --printsrcinfo > .SRCINFO` there, and push both files to the `guild-bin` AUR repository.
 
 The workflow stops if the tag, `package.json` and `Cargo.toml` versions differ, or if `CHANGELOG.md` has no section for the version.
 

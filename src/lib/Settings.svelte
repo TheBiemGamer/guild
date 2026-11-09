@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
   import * as api from './api'
-  import { commands, type SettingsView, type UpdateInfo } from './bindings'
+  import { commands, type PrefixView, type ProtonKind, type ReleaseView, type SettingsView, type UpdateInfo } from './bindings'
   import { sizeLabel } from './format'
   import StoreIcon from './StoreIcon.svelte'
   import SteamLogin from './SteamLogin.svelte'
@@ -57,7 +57,9 @@
   // Simple Icons ship one path per logo, like StoreIcon reads them.
   const igdbPath = /\sd="([^"]+)"/.exec(igdbSvg)?.[1] ?? ''
   /** Section ids; `settings.section.<id>` names them. */
-  const sections = ['accounts', 'general', 'services', 'about'] as const
+  const sections = $derived(
+    view.runner ? (['accounts', 'general', 'wine', 'services', 'about'] as const) : (['accounts', 'general', 'services', 'about'] as const),
+  )
   /** 24px stroke icons, one path each: the section list and the row tiles. */
   const icons = {
     accounts: 'M8 8a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6',
@@ -73,9 +75,13 @@
     globe: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
     disk: 'M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM7 15h.01M11 15h6',
     file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+    wine: 'M8 3h8l-.5 6a3.5 3.5 0 0 1-7 0zM12 12.5V20M8.5 21h7',
+    window: 'M4 5h16v14H4zM4 9h16M7 7h.01M10 7h.01',
+    download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+    layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
   }
   type Icon = keyof typeof icons
-  let active = $state<string>(sections[0])
+  let active = $state<string>('accounts')
   let main: HTMLElement
   let closeButton: HTMLButtonElement
 
@@ -132,6 +138,84 @@
   let nileJob = $state<{ percent: number | null } | null>(null)
   let nileError = $state('')
   const nile = $derived(view.tools.find((t) => t.name === 'nile'))
+  /** Linux, the Wine section: umu-launcher's download while it runs, like Legendary's. */
+  let umuJob = $state<{ percent: number | null } | null>(null)
+  let wineError = $state('')
+  /** The Proton source whose releases are open, and what asking GitHub for them gave. */
+  let releasesKind = $state<ProtonKind | null>(null)
+  let releases = $state<ReleaseView[] | null>(null)
+  let releasesState = $state<'loading' | 'failed' | 'done'>('done')
+  /** One Proton build installs at a time: the release, with its percent once known. */
+  let protonJob = $state<{ tag: string; percent: number | null } | null>(null)
+  let removingProton = $state<string | null>(null)
+  let confirmProton = $state<string | null>(null)
+  let prefixes = $state<PrefixView[]>([])
+  /** Prefix sizes by copy key; they arrive after the list. */
+  let prefixSizes = $state<Record<string, number>>({})
+  let confirmPrefix = $state<string | null>(null)
+  /** The build games run with when they choose none: the one set as default, else the newest found. */
+  const defaultProton = $derived(
+    view.runner ? (view.runner.protons.find((p) => p.name === view.runner!.proton)?.name ?? view.runner.protons[0]?.name ?? null) : null,
+  )
+
+  async function installUmu() {
+    wineError = ''
+    umuJob = { percent: null }
+    try {
+      await api.installUmu((percent) => (umuJob = { percent }))
+    } catch (e) {
+      wineError = api.message(e)
+    }
+    umuJob = null
+    await onchange()
+  }
+
+  async function loadReleases(kind: ProtonKind) {
+    releasesState = 'loading'
+    const found = await commands.protonReleases(kind).catch(() => null)
+    if (releasesKind !== kind) return
+    releases = found
+    releasesState = found ? 'done' : 'failed'
+  }
+
+  function toggleReleases(kind: ProtonKind) {
+    releasesKind = releasesKind === kind ? null : kind
+    releases = null
+    if (releasesKind) loadReleases(releasesKind)
+  }
+
+  async function installProton(kind: ProtonKind, tag: string) {
+    wineError = ''
+    protonJob = { tag, percent: null }
+    try {
+      await api.installProton(kind, tag, (percent) => (protonJob = { tag, percent }))
+    } catch (e) {
+      wineError = api.message(e)
+    }
+    protonJob = null
+    await onchange()
+    if (releasesKind === kind) loadReleases(kind)
+  }
+
+  async function removeProton(name: string) {
+    confirmProton = null
+    removingProton = name
+    await change(() => commands.removeProton(name))
+    removingProton = null
+  }
+
+  async function loadPrefixes() {
+    prefixes = await commands.winePrefixes()
+    const sizes = await commands.prefixSizes()
+    prefixSizes = Object.fromEntries(sizes.map((s) => [s.key, s.bytes]))
+  }
+
+  async function removePrefix(key: string) {
+    confirmPrefix = null
+    await change(() => commands.removePrefix(key))
+    await loadPrefixes()
+  }
+
   /** Re-rendered every 30 s so "2 minutes ago" stays honest. */
   let now = $state(Date.now())
 
@@ -518,6 +602,7 @@
   onMount(() => {
     closeButton.focus()
     if (section) go(section)
+    if (view.runner) loadPrefixes()
     const tick = setInterval(() => (now = Date.now()), 30_000)
     return () => clearInterval(tick)
   })
@@ -877,7 +962,7 @@
         <h3>{t('settings.section.general')}</h3>
         <h4>{t('settings.group.startup')}</h4>
         <div class="group">
-          {@render switchRow('power', 'start_with_windows', view.startWithWindows, t('settings.startup'))}
+          {@render switchRow('power', 'start_with_windows', view.startWithWindows, view.linux ? t('settings.startupLinux') : t('settings.startup'))}
           {@render switchRow('tray', 'close_to_tray', view.closeToTray, t('settings.tray'), t('settings.trayHint'))}
           {@render switchRow('bell', 'notify_downloads', view.notifyDownloads, t('settings.notify'))}
         </div>
@@ -917,6 +1002,142 @@
           </div>
         </div>
       </section>
+
+      {#if view.runner}
+        <section id={id('wine')}>
+          <h3>{t('settings.section.wine')}</h3>
+          <div class="group">
+            <div class="r">
+              {@render tile('window')}
+              <div class="what">
+                umu-launcher
+                {#if !view.runner.umu}<small class="problem">{t('settings.umuMissing')}</small>{/if}
+              </div>
+              {#if !view.runner.umu}
+                <button class="btn" disabled={umuJob !== null} aria-live="polite" onclick={installUmu}>
+                  {umuJob ? jobLabel('install', umuJob) : t('settings.installTool', { tool: 'umu-launcher' })}
+                </button>
+              {/if}
+            </div>
+          </div>
+
+          <h4>{t('settings.group.proton')}</h4>
+          <div class="group">
+            {#each view.runner.protons as p (p.name)}
+              <div class="r">
+                {@render tile('layers')}
+                <div class="what">
+                  {p.name}
+                  {#if confirmProton === p.name}<small class="problem">{t('settings.removeProtonAsk')}</small>
+                  {:else if p.name === defaultProton || !p.removable}<small
+                      >{[p.name === defaultProton ? t('settings.protonDefault') : '', p.removable ? '' : t('settings.fromSteam')]
+                        .filter(Boolean)
+                        .join(' · ')}</small
+                    >{/if}
+                </div>
+                {#if confirmProton === p.name}
+                  <button class="btn danger" onclick={() => removeProton(p.name)}>{t('menu.remove')}</button>
+                  <button class="btn" onclick={() => (confirmProton = null)}>{t('common.cancel')}</button>
+                {:else}
+                  {#if p.name !== defaultProton}
+                    <button class="btn" disabled={busy} onclick={() => change(() => commands.updateSetting('proton', p.name))}
+                      >{t('settings.makeDefault')}</button
+                    >
+                  {:else if view.runner.proton}
+                    <button class="btn" disabled={busy} onclick={() => change(() => commands.updateSetting('proton', null))}>{t('settings.useNewest')}</button>
+                  {/if}
+                  {#if p.removable}
+                    <button class="btn danger" disabled={removingProton !== null} onclick={() => (confirmProton = p.name)}>
+                      {removingProton === p.name ? t('settings.removing') : t('menu.remove')}
+                    </button>
+                  {/if}
+                {/if}
+              </div>
+            {:else}
+              <div class="r">
+                {@render tile('layers')}
+                <div class="what">{t('settings.proton')}<small class="problem">{t('settings.protonMissing')}</small></div>
+              </div>
+            {/each}
+            <div class="r">
+              {@render tile('download')}
+              <div class="what">{t('settings.installProton')}</div>
+              {#each [['geProton', 'GE-Proton'], ['protonCachyos', 'Proton-CachyOS']] as const as [kind, name] (kind)}
+                <button
+                  class="btn opt"
+                  class:open={releasesKind === kind}
+                  aria-expanded={releasesKind === kind}
+                  aria-controls="proton-releases"
+                  onclick={() => toggleReleases(kind)}
+                >
+                  {name}
+                  {@render chevron()}
+                </button>
+              {/each}
+            </div>
+            {#if releasesKind}
+              {@const kind = releasesKind}
+              <div class="opts" id="proton-releases">
+                {#if releasesState === 'loading'}
+                  <p class="note" role="status">{t('settings.releasesLoading')}</p>
+                {:else if releasesState === 'failed'}
+                  <p class="note" role="status">{t('settings.releasesFailed')}</p>
+                {:else if releases?.length === 0}
+                  <p class="note" role="status">{t('settings.releasesNone')}</p>
+                {:else}
+                  {#each releases ?? [] as r (r.tag)}
+                    <div class="row">
+                      <div>{r.name}</div>
+                      {#if r.installed}
+                        <small class="ok">{t('play.installed')}</small>
+                      {:else}
+                        <button class="btn" disabled={protonJob !== null} aria-live="polite" onclick={() => installProton(kind, r.tag)}>
+                          {protonJob?.tag === r.tag ? jobLabel('install', protonJob) : t('common.install')}
+                        </button>
+                      {/if}
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+            {#if wineError}<p class="note" role="status" title={wineError}>{wineError}</p>{/if}
+          </div>
+
+          <h4>{t('settings.group.prefixes')}</h4>
+          <div class="group">
+            {#each prefixes as p (p.key)}
+              <div class="r">
+                {@render tile('window')}
+                <div class="what">
+                  {p.title ?? p.key}
+                  {#if confirmPrefix === p.key}<small class="problem">{t('settings.removePrefixAsk')}</small>
+                  {:else if prefixSizes[p.key] !== undefined}<small>{sizeLabel(prefixSizes[p.key])}</small>{/if}
+                </div>
+                {#if confirmPrefix === p.key}
+                  <button class="btn danger" disabled={busy} onclick={() => removePrefix(p.key)}>{t('menu.remove')}</button>
+                  <button class="btn" onclick={() => (confirmPrefix = null)}>{t('common.cancel')}</button>
+                {:else}
+                  <button class="btn" onclick={() => run(() => commands.openPrefix(p.key))}>{t('settings.openFolder')}</button>
+                  <button class="btn" onclick={() => run(() => commands.runInPrefix(p.key, 'winecfg'))}>winecfg</button>
+                  <button
+                    class="btn"
+                    disabled={!view.runner.winetricks}
+                    title={view.runner.winetricks ? undefined : t('settings.noWinetricks')}
+                    onclick={() => run(() => commands.runInPrefix(p.key, 'winetricks'))}>winetricks</button
+                  >
+                  <button class="btn danger" onclick={() => (confirmPrefix = p.key)}>{t('menu.remove')}</button>
+                {/if}
+              </div>
+            {:else}
+              <div class="r">
+                {@render tile('window')}
+                <div class="what"><small>{t('settings.noPrefixes')}</small></div>
+              </div>
+            {/each}
+            {#if !view.runner.winetricks && prefixes.length > 0}<p class="note">{t('settings.noWinetricks')}</p>{/if}
+          </div>
+        </section>
+      {/if}
 
       <section id={id('services')}>
         <h3>{t('settings.section.services')}</h3>

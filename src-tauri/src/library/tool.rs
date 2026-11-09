@@ -2,7 +2,7 @@
 //! their processes are run and their logs read.
 
 use std::io::{Read, Write};
-use std::path::{Component, Path, Prefix};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,8 @@ pub struct LaunchOptions {
     pub offline: bool,
     pub skip_version_check: bool,
     pub exe: Option<String>,
+    /// Linux: the Proton build this game runs with, by folder name; none follows Settings.
+    pub proton: Option<String>,
 }
 
 /// Splits typed arguments on whitespace; double quotes group. No shell, no variables.
@@ -146,7 +148,9 @@ pub fn run_with_timeout(
 
 /// Whether two paths are on the same drive (or network share).
 // shortcut: compares path prefixes only; a folder mounted from another disk counts as the same drive.
+#[cfg(windows)]
 pub fn same_drive(a: &Path, b: &Path) -> bool {
+    use std::path::{Component, Prefix};
     let volume = |path: &Path| match path.components().next()? {
         Component::Prefix(p) => Some(match p.kind() {
             Prefix::Disk(d) | Prefix::VerbatimDisk(d) => d.to_ascii_uppercase().to_string(),
@@ -155,6 +159,18 @@ pub fn same_drive(a: &Path, b: &Path) -> bool {
         _ => None,
     };
     volume(a) == volume(b)
+}
+
+/// Whether two paths are on the same filesystem, by the device of each one's nearest existing folder.
+#[cfg(unix)]
+pub fn same_drive(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let device = |path: &Path| {
+        path.ancestors()
+            .find_map(|p| std::fs::metadata(p).ok())
+            .map(|m| m.dev())
+    };
+    device(a) == device(b)
 }
 
 /// `[cli] ERROR: …` or `[cli] CRITICAL: …` (`logger.fatal`).
@@ -212,13 +228,21 @@ mod tests {
     #[test]
     fn sync_run_gives_up_after_its_timeout() {
         let cmd = |script: &str| {
-            let mut command = Command::new("cmd");
-            crate::platform::no_window(command.args(["/C", script]));
+            #[cfg(windows)]
+            let (shell, flag) = ("cmd", "/C");
+            #[cfg(unix)]
+            let (shell, flag) = ("sh", "-c");
+            let mut command = Command::new(shell);
+            crate::platform::no_window(command.args([flag, script]));
             command
         };
         let started = Instant::now();
         let stalled = run_with_timeout(
-            cmd("ping -n 30 127.0.0.1 >nul"),
+            cmd(if cfg!(windows) {
+                "ping -n 30 127.0.0.1 >nul"
+            } else {
+                "sleep 30"
+            }),
             b"\n",
             Duration::from_millis(300),
         )
@@ -226,7 +250,11 @@ mod tests {
         assert_eq!(stalled, None);
         assert!(started.elapsed() < Duration::from_secs(10));
         let done = run_with_timeout(
-            cmd("echo out& echo hi 1>&2"),
+            cmd(if cfg!(windows) {
+                "echo out& echo hi 1>&2"
+            } else {
+                "echo out; echo hi 1>&2"
+            }),
             b"\n",
             Duration::from_secs(10),
         )
@@ -240,6 +268,15 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn same_drive_compares_filesystems() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(same_drive(tmp.path(), &tmp.path().join("not/made/yet")));
+        assert!(!same_drive(tmp.path(), Path::new("/proc")));
+    }
+
+    #[cfg(windows)]
     #[test]
     fn same_drive_compares_volumes() {
         assert!(same_drive(

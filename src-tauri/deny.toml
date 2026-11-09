@@ -1,6 +1,6 @@
 # cargo-deny: run `cargo deny check` from src-tauri/.
 [graph]
-targets = ["x86_64-pc-windows-msvc"]
+targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 unmaintained = "workspace"

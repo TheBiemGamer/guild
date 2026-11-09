@@ -1,6 +1,7 @@
 //! The store tools (Legendary, gogdl, Nile), installed on request into `<local data>/tools/<name>/`.
 //! Each is one pinned GitHub release asset; a download whose SHA-256 differs from the compiled-in hash is
-//! deleted before anything runs it. Bump a tool by changing its version, URL and hash together.
+//! deleted before anything runs it. Bump a tool by changing its version, URL and hash together, for each OS.
+//! The Linux builds of Legendary and gogdl are Python zipapps that run on the system's `python3`.
 
 use fs_err::{self as fs, File};
 use std::collections::{HashMap, HashSet};
@@ -32,19 +33,40 @@ pub const LEGENDARY: Tool = Tool {
     name: "legendary",
     title: "Legendary",
     version: "0.21.1",
+    #[cfg(windows)]
     url: "https://github.com/derrod/legendary/releases/download/0.21.1/legendary_windows_x64.exe",
+    #[cfg(windows)]
     sha256: "6be77857dc0a6dd33ea7442ce8b5291944ec6da53757f81ca95b57ce794baf5b",
+    #[cfg(windows)]
     exe: "legendary.exe",
+    #[cfg(windows)]
     local: Some(r"Programs\legendary"),
+    #[cfg(target_os = "linux")]
+    url: "https://github.com/derrod/legendary/releases/download/0.21.1/legendary_linux_x64",
+    #[cfg(target_os = "linux")]
+    sha256: "dbed33bbe96031e65858233e4badf0a1d401bb6cb0cc995d1237cf3a0c826a45",
+    #[cfg(target_os = "linux")]
+    exe: "legendary",
+    #[cfg(target_os = "linux")]
+    local: None,
 };
 
 pub const GOGDL: Tool = Tool {
     name: "gogdl",
     title: "gogdl",
     version: "1.4.0",
+    #[cfg(windows)]
     url: "https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.4.0/gogdl_windows_x86_64.exe",
+    #[cfg(windows)]
     sha256: "291b653e6dbf7a394a3342ed0ebcea2cbc83e5f66d030777d65ccdd60d18ab02",
+    #[cfg(windows)]
     exe: "gogdl.exe",
+    #[cfg(target_os = "linux")]
+    url: "https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.4.0/gogdl_linux_x86_64",
+    #[cfg(target_os = "linux")]
+    sha256: "2aa2b59c83d3bfbe7b60ead91c6297b263b5d1e6c233a04b7409bafe26738f02",
+    #[cfg(target_os = "linux")]
+    exe: "gogdl",
     local: None,
 };
 
@@ -52,9 +74,18 @@ pub const NILE: Tool = Tool {
     name: "nile",
     title: "Nile",
     version: "1.2.0",
+    #[cfg(windows)]
     url: "https://github.com/imLinguin/nile/releases/download/v1.2.0/nile_windows_x86_64.exe",
+    #[cfg(windows)]
     sha256: "6531790c59f78cea4a8743bf0582d5afda7fb887f5c143391d7339ad0f42ab88",
+    #[cfg(windows)]
     exe: "nile.exe",
+    #[cfg(target_os = "linux")]
+    url: "https://github.com/imLinguin/nile/releases/download/v1.2.0/nile_linux_x86_64",
+    #[cfg(target_os = "linux")]
+    sha256: "d73519514df9d52c50c6feec629373cc3a0d9504e087b6c7372a8ca8a95e7bfe",
+    #[cfg(target_os = "linux")]
+    exe: "nile",
     local: None,
 };
 
@@ -164,11 +195,11 @@ pub fn view() -> Vec<ToolView> {
 
 static INSTALLING: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
 
-/// Marks a tool as installing until dropped.
-struct Installing(&'static str);
+/// Marks a tool (or `wine`'s umu-launcher or Proton) as installing until dropped.
+pub(crate) struct Installing(&'static str);
 
 impl Installing {
-    fn start(name: &'static str) -> Option<Self> {
+    pub(crate) fn start(name: &'static str) -> Option<Self> {
         let mut busy = INSTALLING.lock().unwrap_or_else(|e| e.into_inner());
         // Lazily: a guard built and dropped here would deadlock on this lock and free the running install.
         busy.get_or_insert_default()
@@ -200,7 +231,8 @@ pub async fn install(
         .ok_or_else(|| msg!(toolAlreadyInstalling, tool = tool.title))?;
     let dest = tool.managed(root());
     let part = dest.with_extension("exe.part");
-    let digest = match download(http, tool, &part, on_percent).await {
+    let digest = match download::<Sha256>(http, tool.url, DOWNLOAD_TIMEOUT, &part, on_percent).await
+    {
         Ok(digest) => digest,
         Err(e) => {
             tracing::warn!("install {}: {e}", tool.name);
@@ -219,23 +251,24 @@ pub async fn install(
     Ok(())
 }
 
-/// Streams `tool.url` into `part` and returns its SHA-256 in hex.
-async fn download(
+/// Streams `url` into `part` and returns its hash `D` (SHA-256 for the tools) in hex.
+pub(crate) async fn download<D: Digest>(
     http: &reqwest::Client,
-    tool: &Tool,
+    url: &str,
+    timeout: Duration,
     part: &Path,
     mut on_percent: impl FnMut(u8),
 ) -> Result<String, crate::library::Error> {
     let mut response = http
-        .get(tool.url)
-        .timeout(DOWNLOAD_TIMEOUT)
+        .get(url)
+        .timeout(timeout)
         .send()
         .await?
         .error_for_status()?;
     let total = response.content_length().filter(|&n| n > 0);
     fs::create_dir_all(part.parent().expect("a tool path has a folder"))?;
     let mut file = File::create(part)?;
-    let mut hasher = Sha256::new();
+    let mut hasher = D::new();
     let (mut done, mut shown) = (0u64, None);
     while let Some(chunk) = response.chunk().await? {
         hasher.update(&chunk);
@@ -260,11 +293,11 @@ pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Res
         tool.managed(root).with_extension("exe.part"),
         tool.managed(root),
     );
-    let digest = download(http, tool, &part, |_| {}).await?;
+    let digest = download::<Sha256>(http, tool.url, DOWNLOAD_TIMEOUT, &part, |_| {}).await?;
     place(&part, &dest, &digest, tool.sha256)
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -274,12 +307,21 @@ fn place(part: &Path, dest: &Path, digest: &str, expected: &str) -> Result<(), M
         let _ = fs::remove_file(part);
         return Err(msg!(downloadMismatch));
     }
-    fs::rename(part, dest).map_err(|e| {
-        let _ = fs::remove_file(part);
-        tracing::warn!("install {}: {e}", dest.display());
-        // Windows refuses to replace a program that is running.
-        msg!(cantReplaceTool)
-    })
+    #[cfg(unix)]
+    let made_runnable = {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(part, std::fs::Permissions::from_mode(0o755))
+    };
+    #[cfg(not(unix))]
+    let made_runnable = Ok(());
+    made_runnable
+        .and_then(|()| fs::rename(part, dest))
+        .map_err(|e| {
+            let _ = fs::remove_file(part);
+            tracing::warn!("install {}: {e}", dest.display());
+            // Windows refuses to replace a program that is running.
+            msg!(cantReplaceTool)
+        })
 }
 
 #[cfg(test)]
@@ -350,16 +392,19 @@ mod tests {
         );
         assert_eq!(GOGDL.locate(&root, Some(&local)), PathBuf::from("gogdl"));
 
-        let owners = local
-            .join("Programs")
-            .join("legendary")
-            .join("legendary.exe");
-        fs::create_dir_all(owners.parent().unwrap()).unwrap();
-        fs::write(&owners, "").unwrap();
-        assert_eq!(LEGENDARY.locate(&root, Some(&local)), owners);
-        assert_eq!(LEGENDARY.locate(&root, None), PathBuf::from("legendary"));
+        #[cfg(windows)]
+        {
+            let owners = local
+                .join("Programs")
+                .join("legendary")
+                .join("legendary.exe");
+            fs::create_dir_all(owners.parent().unwrap()).unwrap();
+            fs::write(&owners, "").unwrap();
+            assert_eq!(LEGENDARY.locate(&root, Some(&local)), owners);
+            assert_eq!(LEGENDARY.locate(&root, None), PathBuf::from("legendary"));
+        }
 
-        let ours = root.join("legendary").join("legendary.exe");
+        let ours = root.join("legendary").join(LEGENDARY.exe);
         fs::create_dir_all(ours.parent().unwrap()).unwrap();
         fs::write(&ours, "").unwrap();
         assert_eq!(LEGENDARY.locate(&root, Some(&local)), ours);
@@ -401,7 +446,9 @@ mod tests {
         tauri::async_runtime::block_on(async {
             for tool in ALL {
                 let part = tool.managed(dir).with_extension("exe.part");
-                let digest = download(&http, tool, &part, |_| {}).await.unwrap();
+                let digest = download::<Sha256>(&http, tool.url, DOWNLOAD_TIMEOUT, &part, |_| {})
+                    .await
+                    .unwrap();
                 let dest = tool.managed(dir);
                 place(&part, &dest, &digest, tool.sha256).unwrap();
                 let output = Command::new(&dest).arg("--version").output().unwrap();

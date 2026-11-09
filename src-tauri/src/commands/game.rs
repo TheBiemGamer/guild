@@ -413,24 +413,28 @@ fn act_blocking(
                 Err(conflict) => return Ok(Some(conflict)),
             };
             let options = checked_launch_options(open_db(&state).as_ref(), game)?;
-            epic::launch(&game.external_id, &options, action == Action::PlayOutdated).map(|()| {
+            epic::launch(&game.external_id, &options, action == Action::PlayOutdated).map(|child| {
                 record_play(&state, &key);
+                // Linux starts the game itself; on Windows Legendary did, so it is found by its exe name.
                 // The game started either way; without its exe name it just isn't shown as running.
                 // shortcut: unwatched, its saves aren't uploaded either; the next Play asks about the newer local save.
-                let alternative = options
-                    .exe
-                    .as_deref()
-                    .and_then(|e| std::path::Path::new(e).file_name());
-                let exe = match alternative {
-                    Some(name) => Some(name.to_string_lossy().into_owned()),
-                    None => epic::executable(game).unwrap_or_else(|e| {
-                        tracing::warn!("legendary list-installed {key}: {e}");
-                        None
-                    }),
-                };
-                state.lock().watch = exe.map(|exe| Watch {
+                let process = child.map(Process::Ours).or_else(|| {
+                    let alternative = options
+                        .exe
+                        .as_deref()
+                        .and_then(|e| std::path::Path::new(e).file_name());
+                    let exe = match alternative {
+                        Some(name) => Some(name.to_string_lossy().into_owned()),
+                        None => epic::executable(game).unwrap_or_else(|e| {
+                            tracing::warn!("legendary list-installed {key}: {e}");
+                            None
+                        }),
+                    };
+                    exe.map(Process::Named)
+                });
+                state.lock().watch = process.map(|process| Watch {
                     key: key.clone(),
-                    process: Process::Named(exe),
+                    process,
                     since: Instant::now(),
                     seen: false,
                     upload,
@@ -577,7 +581,8 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
             let row =
                 cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
-            crate::library::custom::launch(&row).map(|child| {
+            let proton = launch_options_of(&conn, &game.key()).proton;
+            crate::library::custom::launch(&row, proton.as_deref()).map(|child| {
                 record_play(state, &key);
                 state.lock().watch = Some(Watch {
                     key,
@@ -723,24 +728,30 @@ fn run_queue(app: &AppHandle) {
         if paused {
             continue;
         }
-        // In the background: the next job need not wait for a full online scan. The poll after it shows the change.
-        let scan = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            if rescan(&scan, true) {
-                scan.state::<AppState>().lock().library_changed = true;
-            }
-        });
         let mut s = state.lock();
         let (toast, repaired) = finish_job(&mut s, &key, result, store);
         save_queue(&state, &s.queue);
         drop(s);
-        if let Some(title) = toast {
+        // In the background: the next job need not wait for a full online scan. Only that scan shows a store game
+        // as installed, so the finished job's progress and its toast wait for it.
+        let scan = app.clone();
+        let action = job.action;
+        tauri::async_runtime::spawn_blocking(move || {
+            let changed = rescan(&scan, true);
+            let state = scan.state::<AppState>();
+            let mut s = state.lock();
+            s.library_changed |= changed;
+            let Some(title) = toast else { return };
+            if !s.queue.jobs.iter().any(|j| j.key == key) {
+                s.progress.remove(&key);
+            }
+            drop(s);
             super::notify_done(
-                app,
+                &scan,
                 &title,
-                crate::downloads::done_message(job.action, repaired),
+                crate::downloads::done_message(action, repaired),
             );
-        }
+        });
     }
 }
 
@@ -761,7 +772,7 @@ fn finish_job(
     // A verify that found bad files ends reporting the repair.
     let repaired = s
         .progress
-        .remove(key)
+        .get(key)
         .is_some_and(|p| p.action == ProgressAction::Repair);
     // A cancelled job fails by design; don't report it.
     let cancelled = s.cancelled.remove(key);
@@ -773,6 +784,11 @@ fn finish_job(
                 .map(|g| g.title.clone())
         })
         .flatten();
+    // A job with a toast keeps its progress until the rescan after it (`run_queue`), so the card never shows
+    // Install between the download ending and the game showing as installed.
+    if toast.is_none() {
+        s.progress.remove(key);
+    }
     let outcome = if cancelled {
         Ok(())
     } else {
@@ -869,7 +885,7 @@ fn run_amazon_job(
 /// GOG and Amazon use only the arguments and the alternative executable.
 const LAUNCH_OPTIONS: &str = "launch_options";
 
-fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
+pub(super) fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
     let json = cache::db::pref(conn, key, LAUNCH_OPTIONS).ok().flatten();
     json.and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default()
@@ -897,13 +913,35 @@ fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchO
     Ok(options)
 }
 
-/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own).
+/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own), or a game the
+/// owner added, which only has its Proton choice (Linux).
 fn has_launch_options(g: &Game) -> bool {
     g.installed
         && matches!(
             g.provider,
-            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Custom
         )
+}
+
+/// The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
+/// of a GOG game, which runs without one.
+#[tauri::command]
+#[specta::specta]
+pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
+    let game = app.state::<AppState>().game(&key);
+    blocking(move || {
+        let native = game
+            .as_ref()
+            .filter(|g| g.provider == ProviderKind::Gog)
+            .and_then(installed_dir)
+            .is_some_and(|dir| gog::native(dir));
+        if native {
+            Vec::new()
+        } else {
+            crate::platform::protons()
+        }
+    })
+    .await
 }
 
 /// The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others.
@@ -930,6 +968,13 @@ pub async fn set_launch_options(
         .game(&key)
         .filter(has_launch_options)
         .ok_or(msg!(noLaunchOptionsHere))?;
+    if game.provider == ProviderKind::Custom {
+        // An added game keeps its program and arguments itself.
+        options = LaunchOptions {
+            proton: options.proton,
+            ..LaunchOptions::default()
+        };
+    }
     blocking(move || {
         if let Some(exe) = &options.exe {
             let dir = installed_dir(&game).ok_or(msg!(noInstallFolder))?;
@@ -2114,6 +2159,34 @@ mod tests {
         assert_eq!(s.queue.next().map(|j| j.key.as_str()), Some("epic-b"));
     }
 
+    #[test]
+    fn a_done_job_keeps_its_progress_for_the_rescan_and_a_failed_one_drops_it() {
+        let (mut s, _rxs) = running(&["epic-a", "epic-b"]);
+        for id in ["a", "b"] {
+            s.games.push(Game {
+                provider: ProviderKind::Epic,
+                external_id: id.into(),
+                ..game("June", false, None, None)
+            });
+        }
+        let progress = crate::library::Progress {
+            fraction: 1.0,
+            action: ProgressAction::Install,
+            done_bytes: None,
+            total_bytes: None,
+            secs_left: None,
+            done_files: None,
+            total_files: None,
+        };
+        s.progress.insert("epic-a".into(), progress.clone());
+        s.progress.insert("epic-b".into(), progress);
+        let (toast, _) = finish_job(&mut s, "epic-a", Ok(()), ProviderKind::Epic);
+        assert_eq!(toast.as_deref(), Some("June"));
+        assert!(s.progress.contains_key("epic-a"));
+        finish_job(&mut s, "epic-b", failed(), ProviderKind::Epic);
+        assert!(!s.progress.contains_key("epic-b"));
+    }
+
     fn watch(key: &str, upload: Option<SaveSync>) -> Watch {
         Watch {
             key: key.into(),
@@ -2173,6 +2246,7 @@ mod tests {
             offline: true,
             skip_version_check: false,
             exe: Some(r"bin\game.exe".into()),
+            proton: Some("GE-Proton11-12".into()),
         };
         store_launch_options(&conn, "epic-A", &options).unwrap();
         assert_eq!(launch_options_of(&conn, "epic-A"), options);
@@ -2182,7 +2256,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             json,
-            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe"}"#
+            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe","proton":"GE-Proton11-12"}"#
         );
         store_launch_options(&conn, "epic-A", &LaunchOptions::default()).unwrap();
         assert_eq!(

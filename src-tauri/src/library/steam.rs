@@ -10,24 +10,29 @@ use steamlocate::app::StateFlag;
 use steamlocate::{App, Library, SteamDir};
 
 use super::{Art, Error, Game, Progress, ProgressAction, ProviderKind};
+use crate::platform::steam_pid;
 use crate::steam_owned::OwnedGame;
 
 /// Playtime in minutes and last played time, per app id.
 type PlayStats = HashMap<u32, (Option<u64>, Option<SystemTime>)>;
 
-/// Shared redistributables Steam installs next to games.
-// shortcut: hard-coded; filtering tools/SDKs properly needs the app "type" from appinfo.vdf, do that when they show up.
+/// Shared redistributables Steam installs next to games: hidden when appinfo.vdf can't say an app's type.
 const NOT_GAMES: &[u32] = &[228980];
+
+/// App types (`common.type` in appinfo.vdf, lowercased) that aren't games: Proton, the Steam Linux Runtime, SteamVR
+/// and the redistributables are `tool`, launch configs `config`.
+const NOT_GAME_TYPES: &[&str] = &["tool", "config"];
 
 const CDN: &str = "https://shared.steamstatic.com/store_item_assets/steam/apps";
 
 pub fn list_games() -> Result<Vec<Game>, Error> {
     let steam = SteamDir::locate()?;
     let librarycache = steam.path().join("appcache").join("librarycache");
+    let types = app_types(&steam.path().join("appcache").join("appinfo.vdf"));
     let mut games = Vec::new();
     for library in steam.libraries()? {
         match library {
-            Ok(library) => games.extend(library_games(&library, &librarycache)),
+            Ok(library) => games.extend(library_games(&library, &librarycache, types.as_ref())),
             // e.g. a library on an unplugged drive; the others still load.
             Err(e) => tracing::warn!("steam library: {e}"),
         }
@@ -60,10 +65,7 @@ pub fn uninstall(game: &Game) -> Result<(), Error> {
 }
 
 pub fn running_game() -> Option<String> {
-    let id = running_id(crate::platform::user_registry_u32(
-        r"Software\Valve\Steam",
-        "RunningAppID",
-    ))?;
+    let id = running_id(crate::platform::steam_running_app())?;
     // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
     // trust it while the Steam process it was written by is still alive.
     steam_alive(steam_pid()?).then_some(id)
@@ -78,10 +80,6 @@ pub fn download_progress(game: &Game) -> Option<Progress> {
     let writes = pid.and_then(crate::platform::process_bytes_written);
     let mut anchors = ANCHORS.lock().unwrap_or_else(|e| e.into_inner());
     progress(&app, &mut anchors, pid.zip(writes), Instant::now())
-}
-/// The Steam client's pid, as Steam last wrote it.
-fn steam_pid() -> Option<u32> {
-    crate::platform::user_registry_u32(r"Software\Valve\Steam\ActiveProcess", "pid").ok()
 }
 
 /// Steam rewrites an appmanifest only when a download pauses or ends, so its byte counters stand still
@@ -316,21 +314,153 @@ pub(crate) fn child<'a>(value: &'a Value<'a>, key: &str) -> Option<&'a Value<'a>
         .first()
 }
 
+/// Every app's type from Steam's binary app info cache, or `None` when it can't be read.
+fn app_types(appinfo: &Path) -> Option<HashMap<u32, String>> {
+    let types = parse_app_types(&std::fs::read(appinfo).ok()?);
+    if types.is_none() {
+        tracing::warn!("steam appinfo.vdf: unknown format");
+    }
+    types
+}
+
+/// `appinfo.common.type` per app from binary appinfo.vdf version 29 (Steam's since 2024), which keeps keys in a
+/// string table at the end of the file. Each app is its id, its size, a 60-byte header and a binary key-value tree.
+fn parse_app_types(data: &[u8]) -> Option<HashMap<u32, String>> {
+    let mut r = Reader { data, pos: 0 };
+    if r.u32()? != 0x0756_4429 {
+        return None;
+    }
+    r.take(4)?; // universe
+    let mut table = Reader {
+        data,
+        pos: usize::try_from(r.u64()?).ok()?,
+    };
+    let count = table.u32()?;
+    let strings = (0..count)
+        .map(|_| table.cstr())
+        .collect::<Option<Vec<_>>>()?;
+    let mut types = HashMap::new();
+    loop {
+        let app = r.u32()?;
+        if app == 0 {
+            return Some(types);
+        }
+        let size = r.u32()? as usize;
+        let end = r.pos.checked_add(size)?;
+        let mut entry = Reader {
+            data: data.get(..end)?,
+            pos: r.pos + 60,
+        };
+        let path = ["appinfo", "common", "type"];
+        if let Some(kind) = entry.find(&strings, &path) {
+            types.insert(app, String::from_utf8_lossy(kind).to_ascii_lowercase());
+        }
+        r.pos = end;
+    }
+}
+
+/// A bounds-checked cursor over binary appinfo.vdf.
+struct Reader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+        let bytes = self.data.get(self.pos..self.pos.checked_add(n)?)?;
+        self.pos += n;
+        Some(bytes)
+    }
+
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+
+    /// A NUL-terminated string, without the NUL.
+    fn cstr(&mut self) -> Option<&'a [u8]> {
+        let len = self.data.get(self.pos..)?.iter().position(|&b| b == 0)?;
+        let s = self.take(len)?;
+        self.pos += 1;
+        Some(s)
+    }
+
+    /// A key: an index into the string table.
+    fn key(&mut self, strings: &[&'a [u8]]) -> Option<&'a [u8]> {
+        strings.get(self.u32()? as usize).copied()
+    }
+
+    /// The string at `path` (keys ignoring case) in the object the cursor is in; `None` when it isn't there.
+    fn find(&mut self, strings: &[&'a [u8]], path: &[&str]) -> Option<&'a [u8]> {
+        loop {
+            let kind = *self.take(1)?.first()?;
+            if kind == END {
+                return None;
+            }
+            let hit = self.key(strings)?.eq_ignore_ascii_case(path[0].as_bytes());
+            match kind {
+                OBJECT if hit && path.len() > 1 => return self.find(strings, &path[1..]),
+                STRING if hit && path.len() == 1 => return self.cstr(),
+                _ => self.skip(kind, strings)?,
+            }
+        }
+    }
+
+    /// Steps over one value of type `kind`.
+    fn skip(&mut self, kind: u8, strings: &[&'a [u8]]) -> Option<()> {
+        match kind {
+            OBJECT => loop {
+                let kind = *self.take(1)?.first()?;
+                if kind == END {
+                    return Some(());
+                }
+                self.key(strings)?;
+                self.skip(kind, strings)?;
+            },
+            STRING => self.cstr().map(drop),
+            // int32, float32, pointer, color
+            2 | 3 | 4 | 6 => self.take(4).map(drop),
+            // uint64, int64
+            7 | 10 => self.take(8).map(drop),
+            _ => None,
+        }
+    }
+}
+
+const OBJECT: u8 = 0;
+const STRING: u8 = 1;
+const END: u8 = 8;
+
 /// Steam writes 0 when nothing runs; a missing key means Steam was never installed for this user.
 fn running_id(raw: std::io::Result<u32>) -> Option<String> {
     raw.ok().filter(|&id| id != 0).map(|id| id.to_string())
 }
 
-/// Whether `pid` is a live steam.exe (the name check guards against a reused pid).
+/// Whether `pid` is a live Steam client (the name check guards against a reused pid).
 fn steam_alive(pid: u32) -> bool {
-    crate::platform::process_listed(&format!("PID eq {pid}"), "steam.exe")
+    crate::platform::pid_is(pid, if cfg!(windows) { "steam.exe" } else { "steam" })
 }
 
-fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
+/// Whether an installed app is a game, by its appinfo type, else by `NOT_GAMES`.
+fn is_game(app_id: u32, types: Option<&HashMap<u32, String>>) -> bool {
+    match types.and_then(|t| t.get(&app_id)) {
+        Some(kind) => !NOT_GAME_TYPES.contains(&kind.as_str()),
+        None => !NOT_GAMES.contains(&app_id),
+    }
+}
+
+fn library_games(
+    library: &Library,
+    librarycache: &Path,
+    types: Option<&HashMap<u32, String>>,
+) -> Vec<Game> {
     library
         .apps()
         .filter_map(|app| match app {
-            Ok(app) if NOT_GAMES.contains(&app.app_id) => None,
+            Ok(app) if !is_game(app.app_id, types) => None,
             Ok(app) => Some(to_game(library, &app, librarycache)),
             Err(e) => {
                 tracing::warn!("steam manifest: {e}");
@@ -426,7 +556,7 @@ mod tests {
 
     fn games() -> Vec<Game> {
         let library = Library::from_dir(&fixtures()).unwrap();
-        let mut games = library_games(&library, &fixtures().join("appcache/librarycache"));
+        let mut games = library_games(&library, &fixtures().join("appcache/librarycache"), None);
         games.sort_by(|a, b| a.external_id.cmp(&b.external_id));
         games
     }
@@ -518,6 +648,81 @@ mod tests {
         let ids: Vec<_> = games().iter().map(|g| g.external_id.clone()).collect();
         // 228980 is the redistributables package, 40 is an unparseable manifest.
         assert_eq!(ids, ["10", "20", "30"]);
+    }
+
+    /// A v29 appinfo.vdf: app 10 a game, 20 a tool, 30 with no type; `int32` and `uint64` values to step over.
+    fn appinfo_v29() -> Vec<u8> {
+        let strings: [&[u8]; 5] = [b"appinfo", b"appid", b"common", b"type", b"size"];
+        let key = |i: u32| i.to_le_bytes().to_vec();
+        let app = |id: u32, kind: Option<&str>| {
+            let mut kv = vec![OBJECT];
+            kv.extend(key(0));
+            kv.push(2);
+            kv.extend(key(1));
+            kv.extend(id.to_le_bytes());
+            kv.push(OBJECT);
+            kv.extend(key(2));
+            kv.push(7);
+            kv.extend(key(4));
+            kv.extend(9u64.to_le_bytes());
+            if let Some(kind) = kind {
+                kv.push(STRING);
+                kv.extend(key(3));
+                kv.extend(kind.as_bytes());
+                kv.push(0);
+            }
+            kv.extend([END, END, END]);
+            let mut entry = id.to_le_bytes().to_vec();
+            entry.extend(((60 + kv.len()) as u32).to_le_bytes());
+            entry.extend([0; 60]);
+            entry.extend(kv);
+            entry
+        };
+        let mut body: Vec<u8> =
+            [app(10, Some("Game")), app(20, Some("Tool")), app(30, None)].concat();
+        body.extend(0u32.to_le_bytes());
+        let mut file = 0x0756_4429u32.to_le_bytes().to_vec();
+        file.extend(1u32.to_le_bytes());
+        file.extend(((16 + body.len()) as u64).to_le_bytes());
+        file.extend(body);
+        file.extend((strings.len() as u32).to_le_bytes());
+        for s in strings {
+            file.extend(s);
+            file.push(0);
+        }
+        file
+    }
+
+    #[test]
+    fn reads_app_types_from_appinfo() {
+        let types = parse_app_types(&appinfo_v29()).unwrap();
+        assert_eq!(types.get(&10).map(String::as_str), Some("game"));
+        assert_eq!(types.get(&20).map(String::as_str), Some("tool"));
+        assert_eq!(types.get(&30), None);
+        assert!(is_game(10, Some(&types)));
+        assert!(!is_game(20, Some(&types)));
+        // No type: the hard-coded list decides.
+        assert!(is_game(30, Some(&types)));
+        assert!(!is_game(228_980, Some(&types)));
+        assert!(!is_game(228_980, None));
+    }
+
+    #[test]
+    fn broken_appinfo_gives_no_types() {
+        let file = appinfo_v29();
+        assert_eq!(parse_app_types(&file[..40]), None);
+        assert_eq!(parse_app_types(b"not appinfo"), None);
+        assert_eq!(parse_app_types(&[]), None);
+    }
+
+    /// Real-world check against the local appinfo.vdf: `cargo test -- --ignored`.
+    #[test]
+    #[ignore = "needs a local Steam install"]
+    fn real_appinfo_parses() {
+        let steam = SteamDir::locate().unwrap();
+        let types = app_types(&steam.path().join("appcache/appinfo.vdf")).unwrap();
+        assert_eq!(types.get(&228_980).map(String::as_str), Some("tool"));
+        assert!(types.values().any(|t| t == "game"));
     }
 
     #[test]

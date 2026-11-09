@@ -331,10 +331,14 @@ pub struct SettingsView {
     gog_cloud_saves: bool,
     /// Read from the autostart entry itself, so it can't drift from what Windows runs.
     start_with_windows: bool,
+    /// Picks the Linux wording where the Windows one names Windows.
+    linux: bool,
     close_to_tray: bool,
     notify_downloads: bool,
     app_version: String,
     tools: Vec<tools::ToolView>,
+    /// Linux: what Windows games run with; `None` on Windows.
+    runner: Option<crate::platform::RunnerView>,
     cache_bytes: u64,
 }
 
@@ -400,10 +404,12 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             cloud_saves: saved.cloud_saves,
             gog_cloud_saves: saved.gog_cloud_saves,
             start_with_windows: app.autolaunch().is_enabled().unwrap_or(false),
+            linux: cfg!(target_os = "linux"),
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
             tools: tools::view(),
+            runner: crate::platform::runner(),
             cache_bytes,
         })
     })
@@ -411,7 +417,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
 }
 
 /// Total size of the files under `dir`; a missing folder counts as empty.
-fn dir_size(dir: &std::path::Path) -> u64 {
+pub(super) fn dir_size(dir: &std::path::Path) -> u64 {
     fs_err::read_dir(dir)
         .into_iter()
         .flatten()
@@ -437,7 +443,13 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
             } else {
                 autostart.disable()
             };
-            return done.map_err(|e| msg!(cantChangeStartup, detail = e.to_string()));
+            return done.map_err(|e| {
+                if cfg!(windows) {
+                    msg!(cantChangeStartup, detail = e.to_string())
+                } else {
+                    msg!(cantChangeAutostart, detail = e.to_string())
+                }
+            });
         }
         let state = app.state::<AppState>();
         let conn = cache::db::open(&state.dirs.db)?;
@@ -547,7 +559,7 @@ pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
 pub fn report_problem(app: AppHandle) -> Res<()> {
     use crate::library::percent_encode;
     let version = app.package_info().version.to_string();
-    let os = crate::platform::windows_version();
+    let os = crate::platform::os_version();
     let url = format!(
         "https://github.com/TheBiemGamer/guild/issues/new?template=bug_report.yml&version={}&os={}",
         percent_encode(&version),
@@ -1040,10 +1052,12 @@ mod tests {
             cloud_saves: true,
             gog_cloud_saves: false,
             start_with_windows: false,
+            linux: false,
             close_to_tray: true,
             notify_downloads: true,
             app_version: env!("CARGO_PKG_VERSION").into(),
             tools: Vec::new(),
+            runner: None,
             cache_bytes: 1 << 20,
         };
         insta::assert_json_snapshot!(view, { ".appVersion" => "[version]", ".epicInstallDir" => "[path]" });

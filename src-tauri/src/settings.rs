@@ -22,6 +22,8 @@ pub const START_WITH_WINDOWS: &str = "start_with_windows";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const GOG_INSTALL_DIR: &str = "gog_install_dir";
 pub const AMAZON_INSTALL_DIR: &str = "amazon_install_dir";
+/// Linux: the Proton build Windows games run with, by folder name (`wine`); none is the newest found.
+pub const PROTON: &str = "proton";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
 /// The library's sort, as the toolbar last left it (serde names: `mostPlayed`, `longestToBeat`). It sets
 /// the grouping too. An old `library_group` row is left alone and ignored.
@@ -87,7 +89,7 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
             Some(dir) if !Path::new(dir).is_dir() => Err(msg!(notExistingFolder, path = dir)),
             _ => Ok(()),
         },
-        IGDB_CLIENT_ID => Ok(()),
+        IGDB_CLIENT_ID | PROTON => Ok(()),
         LIBRARY_SORT if value.is_some_and(|v| Sort::parse(v).is_none()) => {
             Err(msg!(unknownSort, value = format!("{value:?}")))
         }
@@ -177,7 +179,7 @@ pub fn set_steam_token(value: Option<&str>) -> Result<(), Msg> {
 
 /// Moves the secrets saved under the name before the rename (`migrate::secrets`).
 pub fn move_secrets() {
-    // `entry` registers Credential Manager as the default store first.
+    // `entry` registers the OS store as the default store first.
     if entry(SECRET_USER).is_ok() {
         crate::migrate::secrets(
             keyring_core::Entry::new,
@@ -187,18 +189,28 @@ pub fn move_secrets() {
     }
 }
 
-/// Windows Credential Manager, registered once as keyring-core's default store.
+/// Windows Credential Manager, or the Secret Service (GNOME Keyring, KWallet) on Linux, registered once as
+/// keyring-core's default store.
 fn entry(user: &str) -> Result<keyring_core::Entry, Msg> {
     static STORE: std::sync::LazyLock<Result<(), String>> = std::sync::LazyLock::new(|| {
+        #[cfg(windows)]
         let store = windows_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
+        #[cfg(target_os = "linux")]
+        let store = zbus_secret_service_keyring_store::Store::new().map_err(|e| e.to_string())?;
         keyring_core::set_default_store(store);
         Ok(())
     });
-    STORE
-        .clone()
-        .map_err(|e| msg!(credentialManager, detail = e))?;
-    keyring_core::Entry::new(SERVICE, user)
-        .map_err(|e| msg!(credentialManager, detail = e.to_string()))
+    STORE.clone().map_err(keyring_error)?;
+    keyring_core::Entry::new(SERVICE, user).map_err(|e| keyring_error(e.to_string()))
+}
+
+/// A keyring failure, named for the OS's keyring.
+fn keyring_error(detail: String) -> Msg {
+    if cfg!(windows) {
+        msg!(credentialManager, detail = detail)
+    } else {
+        msg!(secretService, detail = detail)
+    }
 }
 
 fn read(user: &str) -> Option<String> {
@@ -220,7 +232,7 @@ fn write(user: &str, value: Option<&str>) -> Result<(), Msg> {
     };
     match result {
         Err(keyring_core::Error::NoEntry) if value.is_none() => Ok(()),
-        other => other.map_err(|e| msg!(credentialManager, detail = e.to_string())),
+        other => other.map_err(|e| keyring_error(e.to_string())),
     }
 }
 

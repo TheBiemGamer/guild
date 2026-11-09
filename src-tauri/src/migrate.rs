@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 /// The local folder's name, under `%LOCALAPPDATA%`. The installer puts the exe in the same folder.
-const FOLDER: &str = "Guild";
+pub const FOLDER: &str = "Guild";
 const OLD_FOLDER: &str = "launcher";
 const OLD_SERVICE: &str = "dev.noah.gamelauncher";
 /// The Run entry's name: tauri-plugin-autostart names it after `productName`.
@@ -106,7 +106,6 @@ pub fn secrets(
 }
 
 /// Moves Start with Windows from the old Run entry to this exe, keeping it off when Task Manager turned it off.
-#[cfg(windows)]
 pub fn autostart(app: &tauri::AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
     let Some(on) = crate::platform::autostart(OLD_AUTOSTART) else {

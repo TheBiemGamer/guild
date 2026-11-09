@@ -546,7 +546,21 @@ pub fn default_base() -> Option<PathBuf> {
 }
 
 fn has_info(dir: &Path, id: impl std::fmt::Display) -> bool {
-    dir.join(format!("goggame-{id}.info")).is_file()
+    dir.join(format!("goggame-{id}.info")).is_file() || native(dir)
+}
+
+/// Whether a folder holds a native Linux build: gogdl unpacks GOG's Linux installer with its `start.sh` (from its
+/// `dl/managers/linux.py`) and keeps its own manifest there, and its `launch` runs that script. Never on Windows.
+pub fn native(dir: &Path) -> bool {
+    cfg!(target_os = "linux")
+        && dir.join("start.sh").is_file()
+        && dir.join(".gogdl-linux-manifest").is_file()
+}
+
+/// The build gogdl downloads, updates and repairs: a folder's own, else Windows (and Linux when GOG offers a native
+/// build, `install_info`'s `os`).
+fn build_os(dir: &Path) -> &'static str {
+    if native(dir) { "linux" } else { "windows" }
 }
 
 /// Where gogdl keeps a game's manifest, which `repair` needs; an imported game has none.
@@ -630,6 +644,11 @@ pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
         || {
             // A fresh login first, so gogdl doesn't refresh it itself (a game with DLC asks GOG what is owned).
             _ = login();
+            if cfg!(target_os = "linux")
+                && let Some(info) = linux_info(id)
+            {
+                return Some(info.to_string());
+            }
             let output = crate::platform::tool_output(&mut gogdl(["info", id, "--os", "windows"]))
                 .inspect_err(|e| tracing::warn!("gogdl info {id}: {e}"))
                 .ok()?;
@@ -648,6 +667,21 @@ pub fn install_info(conn: Option<&Connection>, id: &str) -> Option<Value> {
         },
     )?;
     serde_json::from_str(&json).ok()
+}
+
+/// `gogdl info --os linux` for a game GOG sells a Linux installer of, in the shape of the Windows answer plus
+/// `"os": "linux"`. Its Linux answer (`dl/managers/linux.py`) has `download_size` and `disk_size` at the top and no
+/// language sizes; `None` when the game has no Linux build (gogdl then fails).
+fn linux_info(id: &str) -> Option<Value> {
+    let output = crate::platform::tool_output(&mut gogdl(["info", id, "--os", "linux"])).ok()?;
+    linux_shape(json_line(&output.stdout)?)
+}
+
+fn linux_shape(mut info: Value) -> Option<Value> {
+    let size = json!({"*": {"download_size": info["download_size"].as_u64()?, "disk_size": info["disk_size"]}});
+    info["size"] = size;
+    info["os"] = json!("linux");
+    Some(info)
 }
 
 /// The build in an install folder: `buildId` of its `goggame-<id>.info`, else of its `goggame-<id>.id`.
@@ -693,12 +727,12 @@ fn local(dir: &Path, id: &str) -> Local {
 
 /// gogdl's `download`, `update` or `repair` arguments. `download` puts the game in a folder named after it inside
 /// `path`; `update` and `repair` take the game's own folder.
-fn job_args(verb: &str, id: &str, path: &Path, lang: &str, dlcs: &Dlcs) -> Vec<OsString> {
+fn job_args(verb: &str, id: &str, os: &str, path: &Path, lang: &str, dlcs: &Dlcs) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![
         verb.into(),
         id.into(),
         "--platform".into(),
-        "windows".into(),
+        os.into(),
         "--path".into(),
     ];
     args.extend([
@@ -908,7 +942,14 @@ pub fn install(
         Dlcs::Only(Vec::new())
     };
     let run = run(
-        job_args("download", id, base, &pick_lang(&info), &dlcs),
+        job_args(
+            "download",
+            id,
+            info["os"].as_str().unwrap_or("windows"),
+            base,
+            &pick_lang(&info),
+            &dlcs,
+        ),
         ProgressAction::Install,
         on_event,
     )?;
@@ -929,7 +970,7 @@ fn update_to(
 ) -> Result<(), Error> {
     ensure_login()?;
     let run = run(
-        job_args("update", id, dir, lang, &Dlcs::Only(dlcs)),
+        job_args("update", id, build_os(dir), dir, lang, &Dlcs::Only(dlcs)),
         action,
         on_event,
     )?;
@@ -965,13 +1006,13 @@ pub fn change_dlc(
 
 /// Checks an installed game's files against its manifest and downloads the bad or missing ones.
 pub fn verify(id: &str, dir: &Path, on_event: impl FnMut(InstallEvent)) -> Result<(), Error> {
-    if !manifest(id).is_file() {
+    if !manifest(id).is_file() && !native(dir) {
         return Err(msg!(gogNoManifest).into());
     }
     ensure_login()?;
     let Local { lang, dlcs } = local(dir, id);
     let run = run(
-        job_args("repair", id, dir, &lang, &Dlcs::Only(dlcs)),
+        job_args("repair", id, build_os(dir), dir, &lang, &Dlcs::Only(dlcs)),
         ProgressAction::Verify,
         on_event,
     )?;
@@ -1101,16 +1142,41 @@ fn launch_command(dir: &Path, task: &Task, options: &LaunchOptions) -> Command {
     command
 }
 
-/// Starts an installed game without waiting for it. Returns its process, to watch.
+/// A native Linux build runs its `start.sh`, or the alternative executable, in its folder, with the extra arguments.
+fn native_command(dir: &Path, options: &LaunchOptions) -> Command {
+    let exe = options
+        .exe
+        .as_deref()
+        .map_or_else(|| dir.join("start.sh"), |exe| inside(dir, exe));
+    let mut command = Command::new(exe);
+    command.args(split_args(&options.args)).current_dir(dir);
+    command
+}
+
+/// Starts an installed game without waiting for it. Returns its process, to watch. A Windows build on Linux runs
+/// through the runner (`platform::windows_game`).
 pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::process::Child, Error> {
-    let info =
-        read_json(&dir.join(format!("goggame-{id}.info"))).ok_or(msg!(gameFilesMissingVerify))?;
-    let task = play_task(&info).ok_or(msg!(gogNoPlayTask))?;
-    let mut command = launch_command(dir, &task, options);
+    let command = if native(dir) {
+        native_command(dir, options)
+    } else {
+        let info = read_json(&dir.join(format!("goggame-{id}.info")))
+            .ok_or(msg!(gameFilesMissingVerify))?;
+        let task = play_task(&info).ok_or(msg!(gogNoPlayTask))?;
+        launch_command(dir, &task, options)
+    };
     let exe = PathBuf::from(command.get_program());
     if !exe.is_file() {
         return Err(msg!(gameProgramMissing, path = exe.display().to_string()).into());
     }
+    let mut command = if native(dir) {
+        command
+    } else {
+        crate::platform::windows_game(
+            command,
+            &ProviderKind::Gog.key(id),
+            options.proton.as_deref(),
+        )?
+    };
     Ok(command.spawn()?)
 }
 
@@ -1230,31 +1296,40 @@ fn save_locations(config: &Value) -> Value {
     Value::Array(storage["locations"].as_array().cloned().unwrap_or_default())
 }
 
-/// A save location with its `<?NAME?>` variables resolved (`platform::gog_folder`); `None` when one is unknown.
-fn resolve(location: &str, install: &Path) -> Option<PathBuf> {
+/// A save location with its `<?NAME?>` variables resolved (`platform::gog_folder`, `game` the copy key); `None` when one
+/// is unknown.
+fn resolve(location: &str, install: &Path, game: &str) -> Option<PathBuf> {
     let mut path = String::new();
     let mut rest = location;
     while let Some(start) = rest.find("<?") {
         let end = start + rest[start..].find("?>")?;
         path.push_str(&rest[..start]);
         path.push_str(
-            &crate::platform::gog_folder(&rest[start + 2..end], install)?.to_string_lossy(),
+            &crate::platform::gog_folder(&rest[start + 2..end], install, game)?.to_string_lossy(),
         );
         rest = &rest[end + 2..];
     }
     path.push_str(rest);
-    // The remote config doubles its backslashes.
+    // The remote config doubles its backslashes. A Unix path keeps its leading `/`.
+    let root = if cfg!(unix) && path.starts_with('/') {
+        "/"
+    } else {
+        ""
+    };
+    let parts: Vec<_> = path.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
     Some(PathBuf::from(
-        path.split(['/', '\\'])
-            .filter(|p| !p.is_empty())
-            .collect::<Vec<_>>()
-            .join("\\"),
+        root.to_owned() + &parts.join(std::path::MAIN_SEPARATOR_STR),
     ))
 }
 
 /// Each save location's name and folder. No locations means Galaxy's default folder for the game's client id. A
 /// location with a variable this app doesn't know is left out, quietly.
-fn save_folders(locations: &Value, client: &str, install: &Path) -> Vec<(String, PathBuf)> {
+fn save_folders(
+    locations: &Value,
+    client: &str,
+    install: &Path,
+    game: &str,
+) -> Vec<(String, PathBuf)> {
     let default = [json!({
         "name": "__default",
         "location": format!("<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/{client}/Storage/Shared/Files"),
@@ -1266,7 +1341,7 @@ fn save_folders(locations: &Value, client: &str, install: &Path) -> Vec<(String,
     list.iter()
         .filter_map(|l| {
             let (name, location) = (l["name"].as_str()?, l["location"].as_str()?);
-            let folder = resolve(location, install);
+            let folder = resolve(location, install, game);
             if folder.is_none() {
                 tracing::warn!("gog saves: unknown folder in {location}");
             }
@@ -1369,7 +1444,7 @@ pub fn sync_saves(conn: Option<&Connection>, id: &str, dir: &Path, sync: SaveSyn
     let locations = cached
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or(Value::Null);
-    let folders = save_folders(&locations, &client, dir);
+    let folders = save_folders(&locations, &client, dir, &key);
     if folders.is_empty() {
         return SyncOutcome::Failed(msg!(noSaveFolder));
     }
@@ -1679,6 +1754,7 @@ mod tests {
         let args = strings(&job_args(
             "download",
             "1425609977",
+            "windows",
             Path::new(r"C:\Games"),
             "en-US",
             &Dlcs::All,
@@ -1699,18 +1775,24 @@ mod tests {
                 "--with-dlcs"
             ]
         );
-        assert!(support.ends_with(r"gog\support\1425609977"), "{support}");
+        assert!(
+            Path::new(&support).ends_with(Path::new("gog").join("support").join("1425609977")),
+            "{support}"
+        );
         let none = strings(&job_args(
             "download",
             "1",
+            "linux",
             Path::new(r"C:\Games"),
             "de-DE",
             &Dlcs::Only(vec![]),
         ));
+        assert_eq!(none[3], "linux");
         assert_eq!(none[8..], ["--lang", "de-DE", "--skip-dlcs"]);
         let update = strings(&job_args(
             "update",
             "1",
+            "windows",
             Path::new(r"C:\Games\A"),
             "en-US",
             &Dlcs::Only(vec!["2".into(), "3".into()]),
@@ -1724,6 +1806,7 @@ mod tests {
         let repair = strings(&job_args(
             "repair",
             "1",
+            "windows",
             Path::new(r"C:\Games\A"),
             "en-US",
             &Dlcs::Only(vec![]),
@@ -1736,6 +1819,7 @@ mod tests {
         let command = gogdl(job_args(
             "download",
             "1",
+            "windows",
             Path::new(r"C:\Games"),
             "en-US",
             &Dlcs::All,
@@ -2109,6 +2193,8 @@ mod tests {
         assert!(to.is_dir());
     }
 
+    // Windows paths.
+    #[cfg(windows)]
     #[test]
     fn play_starts_the_primary_task() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2177,12 +2263,75 @@ mod tests {
         assert!(launch("1", dir, &LaunchOptions::default()).is_err());
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn save_locations_resolve_inside_the_wine_prefix() {
+        let install = Path::new("/games/June");
+        let user = crate::wine::prefix("gog-1425609977")
+            .unwrap()
+            .join("drive_c/users/steamuser");
+        let locations = save_locations(&fixture("remote-config-1425609977.json"));
+        assert_eq!(
+            save_folders(&locations, "1", install, "gog-1425609977"),
+            [(
+                "saves".to_string(),
+                user.join("AppData/LocalLow/Ovosonico/Last Day of June")
+            )]
+        );
+        assert_eq!(
+            resolve("<?INSTALL?>\\saves", install, "gog-1425609977"),
+            Some(PathBuf::from("/games/June/saves"))
+        );
+        assert_eq!(
+            save_folders(&json!([]), "5", install, "gog-1425609977"),
+            [(
+                "__default".to_string(),
+                user.join("AppData/Local/GOG.com/Galaxy/Applications/5/Storage/Shared/Files")
+            )]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_linux_builds_run_start_sh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert_eq!(build_os(dir), "windows");
+        std::fs::write(dir.join("start.sh"), "").unwrap();
+        assert!(!native(dir), "a start.sh alone is not gogdl's install");
+        std::fs::write(dir.join(".gogdl-linux-manifest"), "{}").unwrap();
+        assert!(native(dir) && has_info(dir, 1) && build_os(dir) == "linux");
+        let options = LaunchOptions {
+            args: "-windowed".into(),
+            ..LaunchOptions::default()
+        };
+        let command = native_command(dir, &options);
+        assert_eq!(command.get_program(), dir.join("start.sh"));
+        assert_eq!(command.get_current_dir(), Some(dir));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["-windowed"]);
+        let alt = LaunchOptions {
+            exe: Some("game/bin/run".into()),
+            ..options
+        };
+        assert_eq!(
+            native_command(dir, &alt).get_program(),
+            dir.join("game/bin/run")
+        );
+        // gogdl's Linux answer, shaped like the Windows one.
+        let info = linux_shape(json!({"download_size": 7, "disk_size": 9, "folder_name": "June", "languages": ["en-US"], "dlcs": []})).unwrap();
+        assert_eq!(info["os"], "linux");
+        assert_eq!(download_size(&info, &[]), Some(7));
+        assert_eq!(linux_shape(json!({"error": true})), None);
+    }
+
+    // Windows paths.
+    #[cfg(windows)]
     #[test]
     fn save_locations_resolve_their_folder_variables() {
         let install = Path::new(r"C:\Games\June");
         let low = std::env::var("USERPROFILE").unwrap() + r"\AppData\LocalLow";
         let locations = save_locations(&fixture("remote-config-1425609977.json"));
-        let folders = save_folders(&locations, "1", install);
+        let folders = save_folders(&locations, "1", install, "gog-1");
         // The remote config doubles its backslashes; the folder has single ones.
         assert_eq!(
             folders,
@@ -2192,25 +2341,25 @@ mod tests {
             )]
         );
         assert_eq!(
-            resolve("<?INSTALL?>/saves", install),
+            resolve("<?INSTALL?>/saves", install, "gog-1"),
             Some(PathBuf::from(r"C:\Games\June\saves"))
         );
         let local = std::env::var("LOCALAPPDATA").unwrap();
         assert_eq!(
-            resolve("<?APPLICATION_DATA_LOCAL?>", install),
+            resolve("<?APPLICATION_DATA_LOCAL?>", install, "gog-1"),
             Some(PathBuf::from(&local))
         );
         // An unknown variable, or one left open, leaves that location out.
-        assert_eq!(resolve("<?STEAM_CLOUD?>/x", install), None);
-        assert_eq!(resolve("<?INSTALL", install), None);
+        assert_eq!(resolve("<?STEAM_CLOUD?>/x", install, "gog-1"), None);
+        assert_eq!(resolve("<?INSTALL", install, "gog-1"), None);
         let mixed = json!([{"name": "a", "location": "<?NOPE?>\\x"}, {"name": "b", "location": "<?INSTALL?>\\b"}]);
         assert_eq!(
-            save_folders(&mixed, "1", install),
+            save_folders(&mixed, "1", install, "gog-1"),
             [("b".to_string(), PathBuf::from(r"C:\Games\June\b"))]
         );
         // No locations: Galaxy's default folder for the client id.
         assert_eq!(
-            save_folders(&json!([]), "5", install),
+            save_folders(&json!([]), "5", install, "gog-1"),
             [(
                 "__default".to_string(),
                 PathBuf::from(format!(
@@ -2345,7 +2494,9 @@ mod tests {
     fn real_gogdl_info_without_login() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        let exe = root.join("gogdl").join("gogdl.exe");
+        let exe = root
+            .join("gogdl")
+            .join(if cfg!(windows) { "gogdl.exe" } else { "gogdl" });
         let http = reqwest::Client::new();
         tauri::async_runtime::block_on(crate::tools::install_to(&http, &tools::GOGDL, root))
             .unwrap();

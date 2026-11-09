@@ -10,6 +10,7 @@
     index,
     stat = null,
     running,
+    settingUp = false,
     progress,
     queued,
     onopen,
@@ -26,6 +27,8 @@
     /** Which hours the bottom-left badge shows; it takes Install's place on a game that isn't installed. */
     stat?: 'playtime' | 'ttb' | null
     running: boolean
+    /** Running, but its first launch on Linux still sets up. */
+    settingUp?: boolean
     progress: Progress | undefined
     /** Where this game is in the download queue; null when it isn't. */
     queued: QueueState | null
@@ -148,7 +151,7 @@
   </span>
 
   {#if running}
-    <span class="badge" id={statusId}>{t('play.playing')}</span>
+    <span class="badge" id={statusId}>{settingUp ? t('busy.settingUp') : t('play.playing')}</span>
   {:else if waiting}
     <span class="chip" id={statusId}>{waiting.state === 'paused' ? t('downloads.paused') : t('card.queued')}</span>
   {:else if progress}

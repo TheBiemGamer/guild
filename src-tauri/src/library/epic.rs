@@ -66,17 +66,63 @@ pub fn override_exe(install_dir: &Path, exe: &str) -> Result<String, Error> {
     }
 }
 
-/// Starts a game and waits for Legendary. `skip_version_check` starts an out-of-date game anyway.
+/// Starts a game. `skip_version_check` starts an out-of-date game anyway. On Windows Legendary starts it and is waited
+/// for, and nothing is returned: the game isn't our process. On Linux Legendary only describes the launch (`--json`)
+/// and the game starts here through the runner (`platform::windows_game`), so its process is returned, to watch.
 pub fn launch(
     app_name: &str,
     options: &LaunchOptions,
     skip_version_check: bool,
-) -> Result<(), Error> {
-    let mut command = Command::new(legendary_exe());
-    command.args(launch_args(app_name, options, skip_version_check));
-    crate::platform::no_window(&mut command);
-    // Not `run`: outside the store tools' job, which would end the game Legendary starts when the app closes.
-    checked(&command.output()?)
+) -> Result<Option<std::process::Child>, Error> {
+    let mut args = launch_args(app_name, options, skip_version_check);
+    if cfg!(windows) {
+        let mut command = Command::new(legendary_exe());
+        command.args(args);
+        crate::platform::no_window(&mut command);
+        // Not `run`: outside the store tools' job, which would end the game Legendary starts when the app closes.
+        checked(&command.output()?)?;
+        return Ok(None);
+    }
+    // Before the game's own arguments, which Legendary passes on.
+    args.splice(2..2, ["--no-wine".to_string(), "--json".to_string()]);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let game = launch_command(&json(&args)?).ok_or(msg!(legendaryNoReason))?;
+    let mut game = crate::platform::windows_game(
+        game,
+        &ProviderKind::Epic.key(app_name),
+        options.proton.as_deref(),
+    )?;
+    Ok(Some(game.spawn()?))
+}
+
+/// The program `legendary launch --json` describes (`LaunchParameters` in Legendary 0.21's `models/game.py`, run as
+/// its `cli.py` does): the executable in the game folder, then the game's, the owner's and Epic's arguments, in its
+/// working folder with its variables.
+// shortcut: a `pre_launch_command` (only set by hand in Legendary's config) doesn't run.
+fn launch_command(params: &Value) -> Option<Command> {
+    let text = |k: &str| params[k].as_str();
+    let list = |k: &str| {
+        params[k]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+    };
+    let mut command =
+        Command::new(Path::new(text("game_directory")?).join(text("game_executable")?));
+    command
+        .args(list("game_parameters"))
+        .args(list("user_parameters"))
+        .args(list("egl_parameters"));
+    if let Some(dir) = text("working_directory").filter(|d| !d.is_empty()) {
+        command.current_dir(dir);
+    }
+    for (name, value) in params["environment"].as_object().into_iter().flatten() {
+        if let Some(value) = value.as_str() {
+            command.env(name, value);
+        }
+    }
+    Some(command)
 }
 
 /// Flags from `legendary sync-saves --help` (0.21.1).
@@ -103,11 +149,10 @@ pub(super) const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Runs `legendary sync-saves` for one installed game. Never fails: a failure is an outcome.
 pub fn sync_saves(app_name: &str, sync: SaveSync) -> SyncOutcome {
-    match run_with_timeout(
-        legendary(&sync_args(app_name, sync)),
-        SYNC_ANSWERS,
-        SYNC_TIMEOUT,
-    ) {
+    let mut command = legendary(&sync_args(app_name, sync));
+    // On Linux Legendary finds the save folder inside the prefix that WINEPREFIX names.
+    crate::platform::in_prefix(&mut command, &ProviderKind::Epic.key(app_name));
+    match run_with_timeout(command, SYNC_ANSWERS, SYNC_TIMEOUT) {
         Ok(Some(o)) => parse_sync(o.status.success(), &String::from_utf8_lossy(&o.stderr)),
         Ok(None) => SyncOutcome::Failed(msg!(savesTimedOut)),
         Err(e) => SyncOutcome::Failed(Msg::system(e)),
@@ -168,6 +213,10 @@ pub fn install(
     on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
     let mut command = legendary(&["-y", "install", app_name, "--skip-sdl"]);
+    if cfg!(target_os = "linux") {
+        // Epic sells Windows builds; Linux runs them through the runner.
+        command.args(["--platform", "Windows"]);
+    }
     if let Some(with_dlc) = with_dlc {
         command.arg(if with_dlc {
             "--with-dlcs"
@@ -455,7 +504,7 @@ pub fn executable(game: &Game) -> Result<Option<String>, Error> {
 /// Whether a process named `exe` runs.
 // shortcut: games whose executable is a bootstrapper that hands off to another exe stop counting as running early.
 pub fn is_running(exe: &str) -> bool {
-    crate::platform::process_listed(&format!("IMAGENAME eq {exe}"), exe)
+    crate::platform::image_running(exe)
 }
 
 pub fn login_state() -> StoreLogin {
@@ -709,6 +758,7 @@ mod tests {
             offline: true,
             skip_version_check: true,
             exe: Some(r"bin\game.exe".into()),
+            proton: None,
         };
         assert_eq!(
             launch_args("Fn", &all, false),
@@ -736,6 +786,8 @@ mod tests {
         );
     }
 
+    // Windows paths.
+    #[cfg(windows)]
     #[test]
     fn override_exe_must_be_inside_install_dir() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1130,6 +1182,8 @@ mod tests {
         );
     }
 
+    // Windows paths.
+    #[cfg(windows)]
     #[test]
     fn moves_stay_on_the_same_drive() {
         // Refused before Legendary runs, so no process starts.
@@ -1248,9 +1302,12 @@ mod tests {
 
     #[test]
     fn failure_reports_the_last_stderr_line() {
-        use std::os::windows::process::ExitStatusExt;
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(1);
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw(1 << 8);
         let output = std::process::Output {
-            status: std::process::ExitStatus::from_raw(1),
+            status,
             stdout: Vec::new(),
             stderr: b"[cli] INFO: Logging in...\n[cli] ERROR: Login failed, cannot continue!\n\n"
                 .to_vec(),
@@ -1259,7 +1316,11 @@ mod tests {
             failure(&output),
             msg!(
                 legendaryFailed,
-                status = "exit code: 1",
+                status = if cfg!(windows) {
+                    "exit code: 1"
+                } else {
+                    "exit status: 1"
+                },
                 detail = "[cli] ERROR: Login failed, cannot continue!"
             )
         );

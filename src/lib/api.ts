@@ -14,6 +14,7 @@ import {
   type Featured,
   type GridCover,
   type Keep,
+  type ProtonKind,
   type QueuedAction,
   type QueueView,
   type Sort,
@@ -110,6 +111,20 @@ export function installTool(name: ToolView['name'], onPercent: (percent: number)
   const channel = new Channel<number>()
   channel.onmessage = onPercent
   return commands.installTool(name, channel)
+}
+
+/** Linux: downloads umu-launcher, reporting each new whole percent. */
+export function installUmu(onPercent: (percent: number) => void) {
+  const channel = new Channel<number>()
+  channel.onmessage = onPercent
+  return commands.installUmu(channel)
+}
+
+/** Linux: downloads one Proton release, reporting each new whole percent. */
+export function installProton(kind: ProtonKind, tag: string, onPercent: (percent: number) => void) {
+  const channel = new Channel<number>()
+  channel.onmessage = onPercent
+  return commands.installProton(kind, tag, channel)
 }
 /** The system folder picker; null when it was closed without picking. */
 export async function pickFolder(): Promise<string | null> {

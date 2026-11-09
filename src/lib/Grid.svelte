@@ -11,6 +11,7 @@
     stat = null,
     resetKey,
     running,
+    settingUp = false,
     progress,
     queue,
     onopen,
@@ -33,6 +34,8 @@
     resetKey: string
     /** Copy keys, as `poll` reports them. */
     running: string | null
+    /** The running game still sets up (`poll`'s `settingUp`). */
+    settingUp?: boolean
     progress: Record<string, Progress>
     queue: QueueView
     onopen: (key: string) => void
@@ -169,6 +172,7 @@
           {index}
           {stat}
           running={running !== null && game.copyKeys.includes(running)}
+          {settingUp}
           progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
           queued={queue.jobs.length ? queueState(queue, game.copyKeys) : null}
           {onopen}

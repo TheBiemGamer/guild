@@ -28,9 +28,11 @@ expression: view
   "cloudSaves": true,
   "gogCloudSaves": false,
   "startWithWindows": false,
+  "linux": false,
   "closeToTray": true,
   "notifyDownloads": true,
   "appVersion": "[version]",
   "tools": [],
+  "runner": null,
   "cacheBytes": 1048576
 }
