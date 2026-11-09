@@ -1,7 +1,18 @@
 // node --test scripts/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collectionFilter, filterChips, filterGroups, isList, matches, removeChip, storeSegments, toggleFilter, type Filter } from '../src/lib/filters.ts'
+import {
+  collectionFilter,
+  filterChips,
+  filterGroups,
+  isList,
+  matches,
+  removeChip,
+  storeSegments,
+  titleMatches,
+  toggleFilter,
+  type Filter,
+} from '../src/lib/filters.ts'
 
 test('chips follow the popover order, one per filter that is on', () => {
   assert.deepEqual(filterChips([]), [])
@@ -154,4 +165,12 @@ test('store segments: All plus the stores in use, none for a single store', () =
   assert.deepEqual(storeSegments(['steam']), [])
   assert.deepEqual(storeSegments(['steam', 'epic']), [null, 'steam', 'epic'])
   assert.deepEqual(storeSegments(['steam', 'epic', 'gog', 'amazon']), [null, 'steam', 'epic', 'gog', 'amazon'])
+})
+
+test('import picker matches part of the title, any case', () => {
+  assert.equal(titleMatches('Hollow Knight', 'hol'), true)
+  assert.equal(titleMatches('Hollow Knight', 'KNIGHT'), true)
+  assert.equal(titleMatches('Hollow Knight', '  knight '), true)
+  assert.equal(titleMatches('Hollow Knight', 'celeste'), false)
+  assert.equal(titleMatches('Hollow Knight', ''), true)
 })

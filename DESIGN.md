@@ -243,13 +243,25 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - Focus is a 2px `focus` outline with 2px offset, everywhere. Disabled is 60% opacity. A busy button ("Downloading…", "Queued") is `aria-disabled` so it keeps focus.
 - **Chips:** 36px, `glass` fill, `glass-line` border, `text-2`. Selected (`aria-pressed`) is `glass-on`, `glass-on-line`, `text`.
   - The Settings chip carries an 8px amber dot only for a real problem: a saved login that stopped working, or a store that was set up and broke. A store never set up raises nothing.
-  - The store selector is one segmented control (`role="radiogroup"`) listing only the stores the library has games from. It is absent with one store.
+  - The store selector is one segmented control (a bits-ui `RadioGroup`) listing only the stores the library has games from. It is absent with one store. Arrows (all four), Home and End move to a segment and pick it, wrapping; one segment is the Tab stop.
   - The Downloads chip shows progress as a 2px `accent-2` ring that fills clockwise and updates per poll, never per frame.
+- **Tooltips** (`Tip.svelte`, bits-ui): `surface-2`, `glass-on-line` border, 8px radius, 12px `text`, shadow `0 8px 24px rgb(0 0 0 / .5)` (`--shadow-modal` is for dialogs). One provider in `App.svelte`: hover opens after 500ms, and a neighbour within 300ms opens at once. Keyboard focus opens at once; focus that moves without the keyboard (a dialog handing focus back, a popover focusing its first button) opens none. Fades in 120ms, not under reduced motion.
+  - Use on icon-only buttons (keep the `aria-label`) and on labelled buttons whose hint explains something else. A button that can be disabled gets a `tip-anchor` wrapper (`inline-flex`), since a disabled button fires no pointer events; the wrapper also opens on focus of the button inside. Text that shows less than the tooltip (a file name for its path) gets a plain `Tip`.
+  - Ellipsized text whose tooltip repeats it in full (paths, `.note` lines) uses `truncated`: hover only, no tab stop, and it opens only while the text is actually cut. The game card keeps its native `title`.
 - **Popovers** (Filters, Sort, Downloads, Notes, the ⋯ menu, Play with): `surface-2`, `glass-on-line` border, 12px radius, modal shadow.
-  - Keyboard (`src/lib/popover.ts`): focus moves in on open, Tab stays inside, Escape closes and returns focus, a click outside closes.
+  - Filters, Downloads, Update and Notes are bits-ui `Popover`s: focus moves in on open, Tab stays inside, Escape closes only the top one and returns focus to its button, a click outside closes, and mouse Back and Forward leave them open (`keepOnBackForward`). They follow their button, flip and shift to stay inside the window, and don't lock page scroll. Escape in the Filters rename field cancels only the rename.
+  - Sort, Language (Settings and the install panel), Proton, the install folder menu and Play with are bits-ui `DropdownMenu`s (`ChoiceMenu.svelte`, `PlayButton.svelte`): the caller's chip is the trigger, focus starts on the chosen item, arrows, Home, End and typing a letter move between items, Escape or a pick returns focus to the chip. Mouse Back and Forward leave them open (`keepOnBackForward`).
+  - The game menu (`GameMenu.svelte`) is a bits-ui `DropdownMenu` too: on the game page the ⋯ button is its trigger; a card's right-click opens the one instance in `App.svelte` at the pointer, and a grid scroll closes it. Focus starts on the first item. Right opens Add to collection, Left or Escape closes only the submenu. Menu and submenu flip and shift to stay 8px inside the window. Keys typed into the new collection's name stay in the field, and while it is open hovering does not move focus; Escape there cancels only the name.
+  - The import pickers in Settings (Epic, Amazon) are a bits-ui `Combobox` (`GamePicker.svelte`): the Settings field look, the menu look for the list, opening with the first game picked. Typing filters by part of the title and clears the pick, so Import stays disabled until a game is chosen; a query matching nothing shows one row, "No game with that name". Emptying the field brings back the full list with the first game picked. Arrows and Enter pick, Escape closes only the list, and the list sits above the Settings dialog (z-index 50). Mouse Back and Forward leave it open (`keepOnBackForward`).
+  - Bits-ui menus keep Tab inside the menu (WAI-ARIA menu pattern), and open a submenu on hover as well as Right. None lock page scroll (`preventScroll={false}`): bits-ui's lock also turns off pointer events on the page, which swallowed the first click outside, so moving from one open menu to another chip took two clicks.
   - Chosen rows carry the same check mark (`Check.svelte`).
-  - Menus use `menuitemradio` or `menuitemcheckbox`, with arrows, Home and End.
+  - Ctrl+K does nothing while the install popup, a game menu, Play with or the update notes are open, since they hold focus; Escape first, then Ctrl+K.
+  - Menus use `menuitemradio` or `menuitemcheckbox`.
   - Destructive confirms ask inline in the menu or row, and focus goes to Cancel.
+- **Dialogs** (Settings, Add a game, Steam log in): bits-ui `Dialog`s over a dimmed scrim, `surface-2` (Settings frosted), `glass-on-line` border, 18px radius, modal shadow.
+  - Focus moves in on open: Settings to its close button, Add a game to the program field, Steam log in to the account field. Tab stays inside. The dialog is `aria-modal` and the app behind it is `inert`, so screen readers and focus skip it.
+  - Escape or a click outside closes only the top layer (a menu, popover or tooltip opened inside, or Steam log in over Settings) and returns focus to what opened it. Mouse Back and Forward never close a dialog (`keepOnBackForward`), and App ignores them while one is open.
+  - Stacking: Settings and Add a game 20, the install popup and Notes 30, Steam log in 40, menus and the other popovers 50, tooltips 60.
 - **Cover card:**
   - States: installed is full color. Not installed is `saturate(0.5) brightness(0.75)` with a bottom-left glass Install chip. Running gets the green badge and ring. Installing gets a 6px progress strip. Queued and Paused get glass chips.
   - In the playtime and length sorts, a stat chip ("38 h played", "~25 h to beat") takes the same spot.
@@ -258,20 +270,20 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - On hover: lift, white ring, title, and a small Play or Install pill. The hover overlay is absent when idle, not transparent, to keep scrolling cheap.
 - **Notices:** `glass-strong`, 12px radius, with a dismiss button. Errors get a red border and `error-text` and are `role="alert"`; the others are `role="status"`.
 - **Fields:** 36px, `glass` fill, `glass-line` border, `text-3` placeholder. Saved secrets show only as a read-only "••••••••" field with "Saved", Replace and Remove; the real value never reaches the UI.
-- **Toggle:** 40×22 pill, white 18% off, `accent` on, `role="switch"`.
+- **Toggle:** 40×22 pill, white 18% off, `accent` on, a bits-ui `Switch`; Space and Enter flip it.
 - **Game page:**
   - The window tint switches to this game's art while the page is open.
   - The hero has a gradient top (`glass`) and bottom (`scrim`), the title and a meta line bottom-left, and actions bottom-right: a round ⋯ button and the large white pill.
   - A game owned in more than one store gets a split pill: the left half picks the store, the right half plays or installs. The choice isn't stored.
   - Fact tiles (Playtime, Last played, How long to beat) are all exactly two lines tall, so a late answer never changes the row height. A tile with nothing to say is absent.
   - How long to beat carries a small "IGDB" credit link; the attribution is required.
-  - Tabs with nothing for the game are hidden, but the tab row always shows.
+  - Tabs with nothing for the game are hidden, but the tab row always shows. They are bits-ui `Tabs`: Left, Right, Home and End move focus and open the tab, wrapping; the open tab is the Tab stop and the panel is not. Inactive tabs carry no `aria-controls` (bits-ui links only the open panel).
 - **Install panel** (Epic, GOG, Amazon; Steam uses its own dialog): one component, `InstallPanel.svelte`, with the same fields in the same order everywhere. In the library it floats beside the cover (380px, `surface-2`, 18px radius, modal shadow; a scroll elsewhere or a click outside closes it). On the game page it opens over the page under the Install pill, right edges aligned, without a title; nothing below moves. A click outside or Escape closes it either way.
   - A sizes line ("1.8 GB download · 3.4 GB on disk"), each part only when the store tool reports it. The sizes are cached, so a second open is complete at once.
   - Folder: the real path in monospace, a 6px bar of the drive's use with the game added (`accent`, `warn` when it doesn't fit) and "N free after install". The path is always the real target: with no install folder set, Epic's is Legendary's own (`install_dir` in its `config.ini`, else `~/Games`) plus the game's `FolderName`; GOG and Amazon use `~/Games`. Change opens a menu: the store's install folder, folders used before for it, a `Games` folder on each other drive, then Another folder…. The folder installed to becomes the store's install folder.
   - Not enough room: Install is disabled and the line reads "Needs X, Y free" in `warn`. Rust checks again before queueing.
   - DLC: a checkbox row per DLC with its size for up to 4; from 5 one All DLC (N) row that folds out the list. All start ticked.
-  - Language (GOG with more than one) is a menu row; Build (GOG on Linux with a native build) is a segmented Linux / Windows control.
+  - Language (GOG with more than one) is a menu row; Build (GOG on Linux with a native build) is a segmented Linux / Windows control, a bits-ui `RadioGroup` like the store segments.
 - **Link chips:** 28px pills with a 14px logo, `glass-hover` fill. The UI sends a link kind and Rust builds the URL.
 - **Text:**
   - Every UI string goes through `t()` from `src/lib/i18n/<lang>.json`.

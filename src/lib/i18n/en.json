@@ -493,6 +493,7 @@
   "settings.syncSaves": "Sync cloud saves",
   "settings.importInstall": "Import an existing install",
   "settings.importButton": "Import…",
+  "settings.importNoMatch": "No game with that name",
   "settings.whichGame": "Which game is in {path}?",
   "settings.importing": "Importing…",
   "settings.import": "Import",

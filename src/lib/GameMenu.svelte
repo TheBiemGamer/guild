@@ -1,17 +1,19 @@
 <script lang="ts">
-  import { onMount, tick, type Snippet } from 'svelte'
+  import { DropdownMenu } from 'bits-ui'
+  import { tick, type Snippet } from 'svelte'
   import * as api from './api'
   import type { Listed } from './api'
   import { commands, type Collection } from './bindings'
   import { t } from './i18n'
   import Check from './Check.svelte'
+  import { keepOnBackForward } from './outside'
 
   let {
     game,
     at = null,
-    anchor,
+    open = $bindable(),
+    trigger,
     label,
-    onclose,
     onchanged,
     onerror,
     onedit,
@@ -19,12 +21,12 @@
     extra,
   }: {
     game: Listed
-    /** Opens at the pointer (a card's right-click); otherwise it hangs below its parent, right-aligned. */
+    /** Opens at the pointer (a card's right-click); otherwise it hangs below `trigger`, right-aligned. */
     at?: { x: number; y: number } | null
-    /** The button that opened it: clicks on it toggle instead of closing from outside. */
-    anchor?: HTMLElement
+    open: boolean
+    /** The caller's button: spread `props` on it. */
+    trigger?: Snippet<[{ props: Record<string, unknown> }]>
     label: string
-    onclose: (refocus: boolean) => void
     /** After a change, so the library and the page reload. */
     onchanged: () => void
     onerror: (message: string) => void
@@ -32,7 +34,7 @@
     onedit?: (key: string) => void
     /** A game the owner added was removed from the library. */
     onremoved?: () => void
-    /** The page's own items, after a separator. */
+    /** The page's own items (`DropdownMenu.Item`s), after a separator. */
     extra?: Snippet
   } = $props()
 
@@ -42,6 +44,45 @@
   let removing = $state(false)
   let removeCancel = $state<HTMLButtonElement>()
   const askId = $props.id()
+
+  let content = $state<HTMLElement | null>(null)
+  let sub = $state<HTMLElement | null>(null)
+  let subTrigger = $state<HTMLButtonElement>()
+  let collections = $state<Collection[]>([])
+  let naming = $state(false)
+  let name = $state('')
+  let newButton = $state<HTMLButtonElement>()
+  /** Edit opens its dialog only once focus is back on the opener, so the dialog can return it there. */
+  let editing = false
+  /** Closed by a grid scroll: focus stays where it is. */
+  let scrolled = false
+
+  $effect(() => {
+    if (!open) return
+    scrolled = false
+    commands.collections().then(
+      (c) => (collections = c),
+      (e) => onerror(api.message(e)),
+    )
+  })
+
+  /** Focus starts on the first item, by mouse or keyboard. */
+  function focusFirst(e: Event) {
+    const first = content?.querySelector<HTMLElement>('[role^="menuitem"]')
+    if (!first) return
+    e.preventDefault()
+    first.focus()
+  }
+
+  /** bits-ui returns focus right after this runs: to the trigger, or to what had focus when it opened. */
+  function closeFocus(e: Event) {
+    if (scrolled) e.preventDefault()
+    if (editing) {
+      editing = false
+      const key = game.key
+      queueMicrotask(() => onedit?.(key))
+    }
+  }
 
   async function askRemove() {
     removing = true
@@ -54,57 +95,14 @@
     onremoved?.()
   }
 
-  function edit() {
-    onclose(true)
-    onedit?.(game.key)
-  }
-
-  let menu: HTMLDivElement
-  let sub = $state<HTMLDivElement>()
-  let trigger = $state<HTMLButtonElement>()
-  let collections = $state<Collection[]>([])
-  let subOpen = $state(false)
-  /** The submenu opens to the left when there is no room on the right. */
-  let subLeft = $state(false)
-  let naming = $state(false)
-  let name = $state('')
-  let newButton = $state<HTMLButtonElement>()
-  /** Where the menu sits when opened at the pointer, kept inside the window. */
-  let pos = $state<{ x: number; y: number } | null>(null)
-
-  onMount(() => {
-    menu.querySelector<HTMLElement>('button')?.focus()
-    if (at) {
-      const r = menu.getBoundingClientRect()
-      pos = { x: Math.max(8, Math.min(at.x, innerWidth - r.width - 8)), y: Math.max(8, Math.min(at.y, innerHeight - r.height - 8)) }
-    }
-    commands.collections().then(
-      (c) => (collections = c),
-      (e) => onerror(api.message(e)),
-    )
-  })
-
   async function change(f: () => Promise<unknown>) {
-    onclose(true)
+    open = false
     try {
       await f()
     } catch (e) {
       onerror(api.message(e))
     }
     onchanged()
-  }
-
-  async function openSub(focus: boolean) {
-    subLeft = menu.getBoundingClientRect().right + 250 > innerWidth
-    subOpen = true
-    await tick()
-    if (focus) sub?.querySelector<HTMLElement>('button')?.focus()
-  }
-
-  function closeSub() {
-    subOpen = false
-    naming = false
-    trigger?.focus()
   }
 
   async function startNaming() {
@@ -124,141 +122,179 @@
     }
   }
 
-  async function nameKeydown(e: KeyboardEvent) {
+  /** Keys typed into the name stay in the field: no typeahead, item or submenu keys. Escape (`subEscape`) and Tab go to the menu. */
+  function nameKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault()
       create()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
+    } else if (e.key !== 'Escape' && e.key !== 'Tab') {
       e.stopPropagation()
-      naming = false
-      await tick()
-      newButton?.focus()
     }
   }
 
-  /** Arrows, Home and End move within the menu that has focus; Right opens the submenu, Left and Escape close it. */
-  function onkeydown(e: KeyboardEvent) {
-    const active = document.activeElement as HTMLElement
-    if (e.key === 'Tab') return onclose(false)
-    if (active.tagName === 'INPUT') return
-    const inSub = !!sub?.contains(active)
-    const list = inSub ? sub! : menu
-    const items = Array.from(list.querySelectorAll<HTMLElement>('button')).filter((b) => b.closest('[role="menu"]') === list)
-    const here = items.indexOf(active)
-    const go = (i: number) => {
-      e.preventDefault()
-      items[(i + items.length) % items.length]?.focus()
-    }
-    if (e.key === 'ArrowDown') go(here + 1)
-    else if (e.key === 'ArrowUp') go(here - 1)
-    else if (e.key === 'Home') go(0)
-    else if (e.key === 'End') go(-1)
-    else if (e.key === 'ArrowRight' && active === trigger) {
-      e.preventDefault()
-      openSub(true)
-    } else if ((e.key === 'ArrowLeft' && inSub) || (e.key === 'Escape' && inSub)) {
-      e.preventDefault()
-      e.stopPropagation()
-      closeSub()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      onclose(true)
-    }
+  /** Escape in the submenu: while naming it only cancels the name; otherwise the submenu closes and focus goes back to its row. */
+  async function subEscape(e: KeyboardEvent) {
+    if (!naming) return subTrigger?.focus()
+    e.preventDefault()
+    naming = false
+    await tick()
+    newButton?.focus()
   }
 
-  function onpointerdown(e: PointerEvent) {
-    const target = e.target as Node
-    if (e.button > 2 || menu.contains(target) || anchor?.contains(target)) return
-    onclose(false)
+  /** While naming, hovering must not pull focus out of the field or close the submenu. Stopped on the wrappers, above every bits-ui pointer listener. */
+  function holdWhileNaming(e: PointerEvent) {
+    if (naming) e.stopPropagation()
   }
 
   /** Opened at the pointer, it would stay put while the grid scrolls the card away. */
   function onscroll(e: Event) {
-    if (at && !menu.contains(e.target as Node)) onclose(false)
+    const target = e.target as Node
+    if (!at || !open || content?.contains(target) || sub?.contains(target)) return
+    scrolled = true
+    open = false
   }
 </script>
 
-<svelte:window onpointerdowncapture={onpointerdown} onscrollcapture={onscroll} />
+<!-- No scroll lock, so the grid can still scroll and close the menu opened at the pointer. -->
+<svelte:window onscrollcapture={onscroll} />
 
-<div
-  class="menu"
-  class:at={!!at}
-  style={at ? `left: ${(pos ?? at).x}px; top: ${(pos ?? at).y}px` : undefined}
-  role="menu"
-  aria-label={label}
-  tabindex="-1"
-  bind:this={menu}
-  {onkeydown}
->
-  {#if removing}
-    <!-- Asks inline, like the Epic uninstall: a group of two menu items, named by the question. -->
-    <div role="group" aria-labelledby={askId}>
-      <p class="ask" id={askId}>{t('menu.askRemove', { title: game.title })}</p>
-      <div class="confirm">
-        <button class="danger" role="menuitem" tabindex="-1" onclick={remove}>{t('menu.remove')}</button>
-        <button role="menuitem" tabindex="-1" bind:this={removeCancel} onclick={() => onclose(true)}>{t('common.cancel')}</button>
-      </div>
-    </div>
-  {:else}
-    <button role="menuitemcheckbox" aria-checked={game.favorite} tabindex="-1" onclick={() => change(() => commands.setFavorite(game.key, !game.favorite))}>
-      {t('menu.favorite')}
-      {#if game.favorite}<Check />{/if}
-    </button>
-    <div class="subwrap">
-      <button
-        role="menuitem"
-        aria-haspopup="menu"
-        aria-expanded={subOpen}
-        tabindex="-1"
-        bind:this={trigger}
-        onclick={() => (subOpen ? closeSub() : openSub(true))}
-      >
-        {t('menu.addToCollection')}<span class="more" aria-hidden="true">›</span>
-      </button>
-      {#if subOpen}
-        <div class="menu sub" class:left={subLeft} role="menu" aria-label={t('menu.addToCollection')} tabindex="-1" bind:this={sub}>
-          {#each collections as c (c.id)}
-            {@const on = game.collections.includes(c.id)}
-            <button role="menuitemcheckbox" aria-checked={on} tabindex="-1" onclick={() => change(() => commands.setInCollection(game.key, c.id, !on))}>
-              {c.name}
-              {#if on}<Check />{/if}
-            </button>
-          {/each}
-          {#if collections.length}<div class="sep" role="separator"></div>{/if}
-          {#if naming}
-            <input aria-label={t('menu.collectionName')} placeholder={t('menu.name')} bind:value={name} onkeydown={nameKeydown} />
-          {:else}
-            <button role="menuitem" tabindex="-1" bind:this={newButton} onclick={startNaming}>{t('menu.newCollection')}</button>
-          {/if}
-        </div>
-      {/if}
-    </div>
-    <button role="menuitem" tabindex="-1" onclick={() => change(() => commands.setHidden(game.key, !game.hidden))}>
-      {game.hidden ? t('menu.show') : t('menu.hide')}
-    </button>
-    {#if custom || extra}
-      <div class="sep" role="separator"></div>
-    {/if}
-    {#if custom}
-      <button role="menuitem" tabindex="-1" onclick={edit}>{t('menu.edit')}</button>
-    {/if}
-    {#if extra}
-      {@render extra()}
-    {/if}
-    {#if custom}
-      <button role="menuitem" tabindex="-1" onclick={askRemove}>{t('menu.removeFromLibrary')}</button>
-    {/if}
+<!-- The ⋯ menu stays mounted between opens, so it starts over each time. -->
+<DropdownMenu.Root bind:open onOpenChangeComplete={(o) => !o && (removing = naming = false)}>
+  {#if trigger}
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        {@render trigger({ props })}
+      {/snippet}
+    </DropdownMenu.Trigger>
   {/if}
-</div>
+  <DropdownMenu.Portal>
+    <DropdownMenu.Content
+      bind:ref={content}
+      customAnchor={at ? { getBoundingClientRect: () => new DOMRect(at.x, at.y, 0, 0) } : null}
+      align={at ? 'start' : 'end'}
+      sideOffset={at ? 0 : 8}
+      collisionPadding={8}
+      preventScroll={false}
+      aria-label={label}
+      onInteractOutside={keepOnBackForward}
+      onOpenAutoFocus={focusFirst}
+      onCloseAutoFocus={closeFocus}
+    >
+      {#snippet child({ props, wrapperProps })}
+        <div {...wrapperProps} onpointermovecapture={holdWhileNaming} onpointerleavecapture={holdWhileNaming}>
+          <div {...props} class="menu">
+            {#if removing}
+              <!-- Asks inline, like the Epic uninstall: a group of two menu items, named by the question. -->
+              <div role="group" aria-labelledby={askId}>
+                <p class="ask" id={askId}>{t('menu.askRemove', { title: game.title })}</p>
+                <div class="confirm">
+                  <DropdownMenu.Item onSelect={remove}>
+                    {#snippet child({ props })}
+                      <button {...props} class="danger">{t('menu.remove')}</button>
+                    {/snippet}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item>
+                    {#snippet child({ props })}
+                      <button {...props} bind:this={removeCancel}>{t('common.cancel')}</button>
+                    {/snippet}
+                  </DropdownMenu.Item>
+                </div>
+              </div>
+            {:else}
+              <DropdownMenu.CheckboxItem checked={game.favorite} onCheckedChange={(on) => change(() => commands.setFavorite(game.key, on))}>
+                {#snippet child({ props })}
+                  <button {...props}>
+                    {t('menu.favorite')}
+                    {#if game.favorite}<Check />{/if}
+                  </button>
+                {/snippet}
+              </DropdownMenu.CheckboxItem>
+              <DropdownMenu.Sub onOpenChange={(o) => !o && (naming = false)}>
+                <DropdownMenu.SubTrigger>
+                  {#snippet child({ props })}
+                    <button {...props} bind:this={subTrigger}>
+                      {t('menu.addToCollection')}<span class="more" aria-hidden="true">›</span>
+                    </button>
+                  {/snippet}
+                </DropdownMenu.SubTrigger>
+                <!-- Escape closes only the submenu, as Left does (or only the name field, see subEscape). -->
+                <DropdownMenu.SubContent
+                  bind:ref={sub}
+                  sideOffset={10}
+                  alignOffset={-6}
+                  collisionPadding={8}
+                  aria-label={t('menu.addToCollection')}
+                  escapeKeydownBehavior="close"
+                  onEscapeKeydown={subEscape}
+                  onInteractOutside={keepOnBackForward}
+                >
+                  {#snippet child({ props, wrapperProps })}
+                    <div {...wrapperProps} onpointermovecapture={holdWhileNaming} onpointerleavecapture={holdWhileNaming}>
+                      <div {...props} class="menu sub">
+                        {#each collections as c (c.id)}
+                          {@const on = game.collections.includes(c.id)}
+                          <DropdownMenu.CheckboxItem checked={on} onCheckedChange={(next) => change(() => commands.setInCollection(game.key, c.id, next))}>
+                            {#snippet child({ props })}
+                              <button {...props}>
+                                {c.name}
+                                {#if on}<Check />{/if}
+                              </button>
+                            {/snippet}
+                          </DropdownMenu.CheckboxItem>
+                        {/each}
+                        {#if collections.length}<DropdownMenu.Separator class="sep" />{/if}
+                        {#if naming}
+                          <input aria-label={t('menu.collectionName')} placeholder={t('menu.name')} bind:value={name} onkeydown={nameKeydown} />
+                        {:else}
+                          <DropdownMenu.Item closeOnSelect={false} onSelect={startNaming}>
+                            {#snippet child({ props })}
+                              <button {...props} bind:this={newButton}>{t('menu.newCollection')}</button>
+                            {/snippet}
+                          </DropdownMenu.Item>
+                        {/if}
+                      </div>
+                    </div>
+                  {/snippet}
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Sub>
+              <DropdownMenu.Item onSelect={() => change(() => commands.setHidden(game.key, !game.hidden))}>
+                {#snippet child({ props })}
+                  <button {...props}>{game.hidden ? t('menu.show') : t('menu.hide')}</button>
+                {/snippet}
+              </DropdownMenu.Item>
+              {#if custom || extra}
+                <DropdownMenu.Separator class="sep" />
+              {/if}
+              {#if custom}
+                <DropdownMenu.Item onSelect={() => (editing = true)}>
+                  {#snippet child({ props })}
+                    <button {...props}>{t('menu.edit')}</button>
+                  {/snippet}
+                </DropdownMenu.Item>
+              {/if}
+              {#if extra}
+                {@render extra()}
+              {/if}
+              {#if custom}
+                <DropdownMenu.Item closeOnSelect={false} onSelect={askRemove}>
+                  {#snippet child({ props })}
+                    <button {...props}>{t('menu.removeFromLibrary')}</button>
+                  {/snippet}
+                </DropdownMenu.Item>
+              {/if}
+            {/if}
+          </div>
+        </div>
+      {/snippet}
+    </DropdownMenu.Content>
+  </DropdownMenu.Portal>
+</DropdownMenu.Root>
 
 <style>
   .menu {
-    position: absolute;
-    z-index: 5;
-    top: calc(100% + 8px);
-    right: 0;
+    /* bits-ui copies this onto its portal wrapper: above the Settings backdrop (20) and every popup (up to 40). */
+    position: relative;
+    z-index: 50;
     min-width: 240px;
     padding: 6px;
     display: grid;
@@ -268,12 +304,6 @@
     box-shadow: var(--shadow-modal);
     color: var(--text);
     text-align: left;
-  }
-
-  .menu.at {
-    position: fixed;
-    z-index: 20;
-    right: auto;
   }
 
   .menu:focus-visible {
@@ -314,24 +344,12 @@
     color: var(--text-3);
   }
 
-  .subwrap {
-    position: relative;
-  }
-
   .sub {
-    top: -6px;
-    left: calc(100% + 10px);
-    right: auto;
     max-height: 320px;
     overflow-y: auto;
   }
 
-  .sub.left {
-    left: auto;
-    right: calc(100% + 10px);
-  }
-
-  .sep {
+  .menu :global(.sep) {
     height: 1px;
     margin: 4px 6px;
     background: var(--glass-line);

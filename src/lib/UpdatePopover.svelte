@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import type { UpdateInfo } from './bindings'
   import NotesPopover from './NotesPopover.svelte'
   import { t } from './i18n'
@@ -9,8 +10,8 @@
     running,
     installing,
     error,
-    anchor,
-    onclose,
+    open = $bindable(),
+    trigger,
     oninstall,
   }: {
     update: UpdateInfo
@@ -21,17 +22,18 @@
     installing: boolean
     /** The last install's failure. */
     error: string | null
-    anchor: HTMLElement | undefined
-    onclose: (refocus: boolean) => void
+    open: boolean
+    /** The Update chip: spread `props` on it. */
+    trigger: Snippet<[{ props: Record<string, unknown> }]>
     oninstall: () => void
   } = $props()
 </script>
 
-<NotesPopover version={update.version} sub={t('update.youHave', { version: current })} notes={update.notes} {anchor} {onclose}>
+<NotesPopover version={update.version} sub={t('update.youHave', { version: current })} notes={update.notes} bind:open {trigger}>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if running}<p>{t('update.closeGame')}</p>{/if}
   <div class="foot">
-    <button class="glass" disabled={installing} onclick={() => onclose(true)}>{t('update.later')}</button>
+    <button class="glass" disabled={installing} onclick={() => (open = false)}>{t('update.later')}</button>
     <button class="pill" disabled={running} aria-disabled={installing} onclick={() => installing || oninstall()}>
       {installing ? t('update.downloading') : t('update.restart')}
     </button>

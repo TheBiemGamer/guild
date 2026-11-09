@@ -19,6 +19,7 @@
 
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import { Tooltip } from 'bits-ui'
   import * as api from './lib/api'
   import {
     commands,
@@ -161,15 +162,10 @@
     await reload()
   }
 
-  /** The game menu a card's right-click opened, at the pointer; focus goes back to what had it. */
-  let cardMenu = $state<{ game: Card; x: number; y: number; back: HTMLElement | null } | null>(null)
+  /** The game menu a card's right-click opened, at the pointer; bits-ui returns focus to what had it. */
+  let cardMenu = $state<{ game: Card; x: number; y: number } | null>(null)
   function openCardMenu(game: Card, x: number, y: number) {
-    cardMenu = { game, x, y, back: document.activeElement instanceof HTMLElement ? document.activeElement : null }
-  }
-  function closeCardMenu(refocus: boolean) {
-    const back = cardMenu?.back
-    cardMenu = null
-    if (refocus && back?.isConnected) back.focus({ preventScroll: true })
+    cardMenu = { game, x, y }
   }
 
   $effect(() => {
@@ -261,12 +257,8 @@
     settingsOpen = settings !== null
   }
 
-  /** What had focus before the Add a game dialog opened. */
-  let addOpener: HTMLElement | null = null
-
   /** Adds a game, or edits the added game `key`. */
   async function openAddGame(key?: string) {
-    addOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     if (!key) {
       adding = 'new'
       return
@@ -277,12 +269,6 @@
     } catch (e) {
       error = api.message(e)
     }
-  }
-
-  function closeAddGame(refocus: boolean) {
-    adding = null
-    if (refocus && addOpener?.isConnected) addOpener.focus({ preventScroll: true })
-    addOpener = null
   }
 
   /** After a setting changed: the panel, the tint and the banner follow, and a logout changes the library. */
@@ -419,6 +405,8 @@
     // mouseup and auxclick both arrive for one press; only mouseup acts. Settings (and the Steam log in
     // inside it) is modal: the page behind it stays put and focus stays in the dialog.
     if (e.type !== 'mouseup' || settingsOpen || popoverOpen || adding) return
+    // Nor under any other open menu or popover (the ⋯ menu, Play with, the install panel, notes).
+    if (document.querySelector('[data-dropdown-menu-content],[data-popover-content],[data-combobox-content],[data-install-panel]')) return
     const step = navStep(e.button, open, lastClosed)
     if (!step) return
     if (step.open === null) {
@@ -487,249 +475,243 @@
 
 <svelte:window onmouseup={mouseNav} onauxclick={mouseNav} />
 
-<Ambient hero={ambientHero} enabled={settings?.ambient ?? true} />
+<Tooltip.Provider delayDuration={500} skipDelayDuration={300}>
+  <Ambient hero={ambientHero} enabled={settings?.ambient ?? true} />
 
-<main>
-  <Toolbar
-    bind:query
-    bind:store
-    bind:installedOnly
-    bind:filters
-    {collections}
-    oncollections={reload}
-    bind:sort
-    bind:popoverOpen
-    {attention}
-    {progress}
-    {queue}
-    games={lib.games}
-    storesInUse={lib.stores}
-    modal={settingsOpen || adding !== null}
-    oncancel={cancelDownload}
-    onpause={() => changeQueue(commands.pauseDownloads)}
-    onresume={resumeDownloads}
-    onmove={(key, up) => changeQueue(() => commands.moveDownload(key, up))}
-    onsettings={() => openSettings()}
-    onadd={() => openAddGame()}
-    {update}
-    appVersion={settings?.appVersion ?? ''}
-    running={running !== null}
-    {installing}
-    {installError}
-    oninstall={installUpdate}
-  />
+  <!-- Screen readers and focus skip the app behind a dialog. The dialogs below are portalled to body; main
+       comes before them, so Svelte lifts inert before a closing dialog hands focus back to its opener in here. -->
+  <main inert={settingsOpen || adding !== null}>
+    <Toolbar
+      bind:query
+      bind:store
+      bind:installedOnly
+      bind:filters
+      {collections}
+      oncollections={reload}
+      bind:sort
+      bind:popoverOpen
+      {attention}
+      {progress}
+      {queue}
+      games={lib.games}
+      storesInUse={lib.stores}
+      modal={settingsOpen || adding !== null}
+      oncancel={cancelDownload}
+      onpause={() => changeQueue(commands.pauseDownloads)}
+      onresume={resumeDownloads}
+      onmove={(key, up) => changeQueue(() => commands.moveDownload(key, up))}
+      onsettings={() => openSettings()}
+      onadd={() => openAddGame()}
+      {update}
+      appVersion={settings?.appVersion ?? ''}
+      running={running !== null}
+      {installing}
+      {installError}
+      oninstall={installUpdate}
+    />
 
-  {#if updatedTo}
-    {@const notes = installedNotes(updatedTo)}
-    {@const [before, after] = around('app.updatedTo', 'version')}
-    <div class="notice" role="status">
-      <span>{before}<b>{updatedTo}</b>{after}</span>
-      {#if notes}
-        <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
-        {#if updatedNotesOpen}
-          <NotesPopover
-            version={updatedTo}
-            {notes}
-            anchor={updatedNotesButton}
-            onclose={(refocus) => {
-              updatedNotesOpen = false
-              if (refocus) updatedNotesButton?.focus()
-            }}
-          />
+    {#if updatedTo}
+      {@const notes = installedNotes(updatedTo)}
+      {@const [before, after] = around('app.updatedTo', 'version')}
+      <div class="notice" role="status">
+        <span>{before}<b>{updatedTo}</b>{after}</span>
+        {#if notes}
+          <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
+          <NotesPopover version={updatedTo} {notes} bind:open={updatedNotesOpen} anchor={updatedNotesButton} />
         {/if}
+        <button class="close" onclick={() => (updatedTo = null)} aria-label={t('common.dismiss')}>✕</button>
+      </div>
+    {/if}
+    {#if lib.epicNotice}
+      <div class="notice" role="status">
+        <span>{t('app.epicLoggedOut')}</span>
+        <button class="glass" onclick={() => openSettings()}>{t('toolbar.settings')}</button>
+        <button class="close" onclick={dismissNotice} aria-label={t('common.dismiss')}>✕</button>
+      </div>
+    {/if}
+    {#if error}
+      <div class="notice error" role="alert">
+        <span>{error}</span>
+        <button class="close" onclick={() => (error = null)} aria-label={t('common.dismiss')}>✕</button>
+      </div>
+    {/if}
+
+    {#if confirming}
+      <!-- A fresh popup per game, so a late size never lands on another game. -->
+      {#key confirming.game.key}
+        <InstallPanel
+          game={confirming.game}
+          anchor={confirming.anchor}
+          oncancel={() => (confirming = null)}
+          onconfirm={(choice) => {
+            const { key } = confirming!.game
+            confirming = null
+            act('install', key, { choice })
+          }}
+        />
+      {/key}
+    {/if}
+
+    <div class="content">
+      <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
+      <div class="library" class:away={open !== null}>
+        {#if shown.length > 0}
+          <Grid
+            games={shown}
+            sections={view.sections}
+            {stat}
+            resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
+            {running}
+            {settingUp}
+            {progress}
+            {queue}
+            onopen={openGame}
+            onplay={(key) => act('play', key)}
+            oninstall={install}
+            oncancel={cancelDownload}
+            onresume={resumeDownloads}
+            onfavorite={setFavorite}
+            onmenu={openCardMenu}
+            benchSpeed={ready ? benchSpeed : null}
+            {headerHeight}
+          >
+            {#snippet header()}
+              {#if showContinue && featured}
+                <div style="height: {BANNER_H}px; margin-bottom: 24px">
+                  <Continue
+                    {featured}
+                    running={running !== null && featured.copyKeys.includes(running)}
+                    {settingUp}
+                    onplay={(key) => act('play', key)}
+                    onopen={openGame}
+                  />
+                </div>
+              {/if}
+              {#if !view.sections}
+                <h2 class="label">
+                  {query || store || installedOnly || filters.length ? t('app.results') : t('app.library')}
+                  <span>{shown.length}</span>
+                </h2>
+              {/if}
+            {/snippet}
+          </Grid>
+        {:else if epicEmpty && lib.epic === 'noTool'}
+          <div class="empty">
+            <p>{t('app.noLegendary')}</p>
+            <small>{t('app.noLegendaryHint')}</small>
+            <div class="actions">
+              <button class="pill" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
+                {#if legendaryJob === null}{t('settings.installTool', { tool: 'Legendary' })}
+                {:else if legendaryJob.percent === null}{t('settings.job.install')}
+                {:else}{t('settings.job.installPercent', { percent: legendaryJob.percent })}{/if}
+              </button>
+            </div>
+          </div>
+        {:else if epicEmpty && lib.epic === 'loggedOut'}
+          <div class="empty">
+            <p>{t('app.epicLoggedOutEmpty')}</p>
+            <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
+          </div>
+        {:else if epicEmpty && lib.epic === 'unreachable'}
+          <div class="empty">
+            <p>{t('app.epicUnreachable')}</p>
+            <small>{t('app.epicUnreachableHint')}</small>
+          </div>
+        {:else if started && lib.total > 0}
+          <div class="empty">
+            <p>{t('app.noMatch')}</p>
+            <small>{query && filtered ? t('app.noMatchQueryFilters', { query }) : query ? t('app.noMatchQuery', { query }) : t('app.noMatchFilters')}</small>
+            <div class="actions">
+              <button class="glass" onclick={clearSearchAndFilters}>
+                {query && filtered ? t('app.clearAll') : query ? t('app.clearSearch') : t('app.clearFilters')}
+              </button>
+            </div>
+          </div>
+        {:else if started && noGames}
+          <div class="empty">
+            <p>{t('app.noGames')}</p>
+            <small>{t('app.noGamesHint')}</small>
+            <div class="actions">
+              <button class="pill" onclick={() => openSettings('accounts')}>{t('app.openSettings')}</button>
+              <button class="glass" onclick={() => openAddGame()}>{t('toolbar.addGame')}</button>
+            </div>
+          </div>
+        {:else if started}
+          <div class="empty">
+            <p>{lib.status.map(api.message).join('\n')}</p>
+          </div>
+        {/if}
+      </div>
+      {#if open}
+        <Detail
+          gameKey={open}
+          runningKey={running}
+          {settingUp}
+          progressByKey={progress}
+          {queue}
+          oncancel={cancelDownload}
+          onresume={resumeDownloads}
+          {version}
+          onback={closeGame}
+          onerror={(m) => (error = m)}
+          onchanged={reload}
+          ontint={(url) => (tint = url)}
+          onedit={openAddGame}
+          conflict={saveConflict}
+        />
       {/if}
-      <button class="close" onclick={() => (updatedTo = null)} aria-label={t('common.dismiss')}>✕</button>
     </div>
-  {/if}
-  {#if lib.epicNotice}
-    <div class="notice" role="status">
-      <span>{t('app.epicLoggedOut')}</span>
-      <button class="glass" onclick={() => openSettings()}>{t('toolbar.settings')}</button>
-      <button class="close" onclick={dismissNotice} aria-label={t('common.dismiss')}>✕</button>
-    </div>
-  {/if}
-  {#if error}
-    <div class="notice error" role="alert">
-      <span>{error}</span>
-      <button class="close" onclick={() => (error = null)} aria-label={t('common.dismiss')}>✕</button>
-    </div>
+  </main>
+
+  {#if cardMenu}
+    {#key cardMenu}
+      <GameMenu
+        game={cardMenu.game}
+        at={cardMenu}
+        bind:open={() => cardMenu !== null, (o) => !o && (cardMenu = null)}
+        label={cardMenu.game.title}
+        onchanged={reload}
+        onerror={(m) => (error = m)}
+        onedit={openAddGame}
+      />
+    {/key}
   {/if}
 
-  {#if confirming}
-    <!-- A fresh popup per game, so a late size never lands on another game. -->
-    {#key confirming.game.key}
-      <InstallPanel
-        game={confirming.game}
-        anchor={confirming.anchor}
-        oncancel={() => (confirming = null)}
-        onconfirm={(choice) => {
-          const { key } = confirming!.game
-          confirming = null
-          act('install', key, { choice })
+  {#if adding}
+    {#key adding}
+      <AddGame
+        edit={adding === 'new' ? null : adding}
+        onclose={() => (adding = null)}
+        onsaved={reload}
+        onsettings={() => {
+          adding = null
+          openSettings('services')
         }}
       />
     {/key}
   {/if}
 
-  <div class="content">
-    <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
-    <div class="library" class:away={open !== null}>
-      {#if shown.length > 0}
-        <Grid
-          games={shown}
-          sections={view.sections}
-          {stat}
-          resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
-          {running}
-          {settingUp}
-          {progress}
-          {queue}
-          onopen={openGame}
-          onplay={(key) => act('play', key)}
-          oninstall={install}
-          oncancel={cancelDownload}
-          onresume={resumeDownloads}
-          onfavorite={setFavorite}
-          onmenu={openCardMenu}
-          benchSpeed={ready ? benchSpeed : null}
-          {headerHeight}
-        >
-          {#snippet header()}
-            {#if showContinue && featured}
-              <div style="height: {BANNER_H}px; margin-bottom: 24px">
-                <Continue
-                  {featured}
-                  running={running !== null && featured.copyKeys.includes(running)}
-                  {settingUp}
-                  onplay={(key) => act('play', key)}
-                  onopen={openGame}
-                />
-              </div>
-            {/if}
-            {#if !view.sections}
-              <h2 class="label">
-                {query || store || installedOnly || filters.length ? t('app.results') : t('app.library')}
-                <span>{shown.length}</span>
-              </h2>
-            {/if}
-          {/snippet}
-        </Grid>
-      {:else if epicEmpty && lib.epic === 'noTool'}
-        <div class="empty">
-          <p>{t('app.noLegendary')}</p>
-          <small>{t('app.noLegendaryHint')}</small>
-          <div class="actions">
-            <button class="pill" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
-              {#if legendaryJob === null}{t('settings.installTool', { tool: 'Legendary' })}
-              {:else if legendaryJob.percent === null}{t('settings.job.install')}
-              {:else}{t('settings.job.installPercent', { percent: legendaryJob.percent })}{/if}
-            </button>
-          </div>
-        </div>
-      {:else if epicEmpty && lib.epic === 'loggedOut'}
-        <div class="empty">
-          <p>{t('app.epicLoggedOutEmpty')}</p>
-          <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
-        </div>
-      {:else if epicEmpty && lib.epic === 'unreachable'}
-        <div class="empty">
-          <p>{t('app.epicUnreachable')}</p>
-          <small>{t('app.epicUnreachableHint')}</small>
-        </div>
-      {:else if started && lib.total > 0}
-        <div class="empty">
-          <p>{t('app.noMatch')}</p>
-          <small>{query && filtered ? t('app.noMatchQueryFilters', { query }) : query ? t('app.noMatchQuery', { query }) : t('app.noMatchFilters')}</small>
-          <div class="actions">
-            <button class="glass" onclick={clearSearchAndFilters}>
-              {query && filtered ? t('app.clearAll') : query ? t('app.clearSearch') : t('app.clearFilters')}
-            </button>
-          </div>
-        </div>
-      {:else if started && noGames}
-        <div class="empty">
-          <p>{t('app.noGames')}</p>
-          <small>{t('app.noGamesHint')}</small>
-          <div class="actions">
-            <button class="pill" onclick={() => openSettings('accounts')}>{t('app.openSettings')}</button>
-            <button class="glass" onclick={() => openAddGame()}>{t('toolbar.addGame')}</button>
-          </div>
-        </div>
-      {:else if started}
-        <div class="empty">
-          <p>{lib.status.map(api.message).join('\n')}</p>
-        </div>
-      {/if}
-    </div>
-    {#if open}
-      <Detail
-        gameKey={open}
-        runningKey={running}
-        {settingUp}
-        progressByKey={progress}
-        {queue}
-        oncancel={cancelDownload}
-        onresume={resumeDownloads}
-        {version}
-        onback={closeGame}
-        onerror={(m) => (error = m)}
-        onchanged={reload}
-        ontint={(url) => (tint = url)}
-        onedit={openAddGame}
-        conflict={saveConflict}
-      />
-    {/if}
-  </div>
-</main>
-
-{#if cardMenu}
-  {#key cardMenu}
-    <GameMenu
-      game={cardMenu.game}
-      at={cardMenu}
-      label={cardMenu.game.title}
-      onclose={closeCardMenu}
-      onchanged={reload}
-      onerror={(m) => (error = m)}
-      onedit={openAddGame}
+  {#if settingsOpen && settings}
+    <Settings
+      view={settings}
+      section={settingsSection}
+      {attention}
+      {refreshedAt}
+      {refreshing}
+      {loggingIn}
+      {update}
+      {updateChecked}
+      {installing}
+      {installError}
+      oncheck={checkUpdate}
+      oninstall={installUpdate}
+      onclose={() => (settingsOpen = false)}
+      onchange={settingsChanged}
+      onrefresh={refreshNow}
+      onlogin={logIn}
     />
-  {/key}
-{/if}
-
-{#if adding}
-  {#key adding}
-    <AddGame
-      edit={adding === 'new' ? null : adding}
-      onclose={closeAddGame}
-      onsaved={reload}
-      onsettings={() => {
-        closeAddGame(false)
-        openSettings('services')
-      }}
-    />
-  {/key}
-{/if}
-
-{#if settingsOpen && settings}
-  <Settings
-    view={settings}
-    section={settingsSection}
-    {attention}
-    {refreshedAt}
-    {refreshing}
-    {loggingIn}
-    {update}
-    {updateChecked}
-    {installing}
-    {installError}
-    oncheck={checkUpdate}
-    oninstall={installUpdate}
-    onclose={() => (settingsOpen = false)}
-    onchange={settingsChanged}
-    onrefresh={refreshNow}
-    onlogin={logIn}
-  />
-{/if}
+  {/if}
+</Tooltip.Provider>
 
 <style>
   main {

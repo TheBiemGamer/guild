@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { tick } from 'svelte'
   import * as api from './api'
   import type { CopyView } from './bindings'
   import { sizeLabel } from './format'
+  import { DropdownMenu } from 'bits-ui'
   import { t } from './i18n'
   import Check from './Check.svelte'
+  import { keepOnBackForward } from './outside'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
 
   let {
@@ -59,61 +60,21 @@
   const go = () => (copy.installed ? (copy.updateAvailable ? onupdate() : onplay()) : oninstall())
 
   let open = $state(false)
-  let wrap = $state<HTMLDivElement>()
-  let switcher = $state<HTMLButtonElement>()
-  let menu = $state<HTMLDivElement>()
-
-  async function openMenu() {
-    open = true
-    await tick()
-    const items = menu?.querySelectorAll('button')
-    ;(menu?.querySelector<HTMLButtonElement>('[aria-checked="true"]') ?? items?.[0])?.focus()
-  }
+  let pair = $state<HTMLDivElement>()
+  let menu = $state<HTMLElement | null>(null)
 
   $effect(() => {
     if (busy || running) open = false
   })
 
-  function close(refocus: boolean) {
-    open = false
-    if (refocus) switcher?.focus()
-  }
-
-  function menuKeydown(e: KeyboardEvent) {
-    if (!menu) return
-    const items = Array.from(menu.querySelectorAll('button'))
-    const at = items.indexOf(document.activeElement as HTMLButtonElement)
-    const go = (i: number) => {
-      e.preventDefault()
-      items[(i + items.length) % items.length]?.focus()
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      close(true)
-    } else if (e.key === 'ArrowDown') go(at + 1)
-    else if (e.key === 'ArrowUp') go(at - 1)
-    else if (e.key === 'Home') go(0)
-    else if (e.key === 'End') go(-1)
-    else if (e.key === 'Tab') close(false)
-  }
-
-  function onpointerdown(e: PointerEvent) {
-    if (open && !wrap?.contains(e.target as Node)) close(false)
-  }
-
-  function press(f: () => void) {
-    open = false
-    f()
-  }
-
-  function choose(key: string) {
-    close(true)
-    onchoose(key)
+  /** The menu opens on the chosen launcher, whether by mouse or keyboard. */
+  function focusChosen(e: Event) {
+    const chosen = menu?.querySelector<HTMLElement>('[aria-checked="true"]')
+    if (!chosen) return
+    e.preventDefault()
+    chosen.focus()
   }
 </script>
-
-<svelte:window {onpointerdown} />
 
 {#if !copy.installed && !busy && !running && copy.provider !== 'custom' && downloadText(copy.key)}
   <span class="download">{downloadText(copy.key)}</span>
@@ -128,37 +89,57 @@
     {@render goLabel()}
   </button>
 {:else}
-  <div class="split" bind:this={wrap}>
-    <div class="pair">
-      <button
-        class="switch"
-        bind:this={switcher}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={t('play.chooseLauncher', { store: storeNames[copy.provider] })}
-        onclick={() => (open ? close(true) : openMenu())}
-      >
-        <StoreIcon provider={copy.provider} size={18} />
-        <svg class="stroke" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-      </button>
-      <span class="sep"></span>
-      <button class="go" onclick={() => press(go)}>
-        {@render goLabel()}
-      </button>
-    </div>
-    {#if open}
-      <div class="menu" role="menu" aria-label={t('play.playWith')} tabindex="-1" bind:this={menu} onkeydown={menuKeydown}>
-        <span class="label" role="presentation">{t('play.playWith')}</span>
-        {#each copies as c (c.key)}
-          <button role="menuitemradio" aria-checked={c.key === copy.key} tabindex="-1" onclick={() => choose(c.key)}>
-            <StoreIcon provider={c.provider} size={18} />
-            <span class="txt"><span>{storeNames[c.provider]}</span><small>{sub(c)}</small></span>
-            {#if c.key === copy.key}<Check />{/if}
-          </button>
-        {/each}
+  <DropdownMenu.Root bind:open>
+    <div class="split">
+      <div class="pair" bind:this={pair}>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button {...props} class="switch" aria-label={t('play.chooseLauncher', { store: storeNames[copy.provider] })}>
+              <StoreIcon provider={copy.provider} size={18} />
+              <svg class="stroke" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <span class="sep"></span>
+        <button class="go" onclick={go}>
+          {@render goLabel()}
+        </button>
       </div>
-    {/if}
-  </div>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          bind:ref={menu}
+          customAnchor={pair}
+          align="end"
+          sideOffset={8}
+          preventScroll={false}
+          aria-label={t('play.playWith')}
+          onInteractOutside={keepOnBackForward}
+          onOpenAutoFocus={focusChosen}
+        >
+          {#snippet child({ props, wrapperProps })}
+            <div {...wrapperProps}>
+              <div {...props} class="menu">
+                <span class="label" role="presentation">{t('play.playWith')}</span>
+                <DropdownMenu.RadioGroup value={copy.key} onValueChange={onchoose}>
+                  {#each copies as c (c.key)}
+                    <DropdownMenu.RadioItem value={c.key}>
+                      {#snippet child({ props, checked })}
+                        <button {...props}>
+                          <StoreIcon provider={c.provider} size={18} />
+                          <span class="txt"><span>{storeNames[c.provider]}</span><small>{sub(c)}</small></span>
+                          {#if checked}<Check />{/if}
+                        </button>
+                      {/snippet}
+                    </DropdownMenu.RadioItem>
+                  {/each}
+                </DropdownMenu.RadioGroup>
+              </div>
+            </div>
+          {/snippet}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </div>
+  </DropdownMenu.Root>
 {/if}
 
 {#snippet goLabel()}
@@ -233,10 +214,9 @@
   }
 
   .menu {
-    position: absolute;
-    z-index: 5;
-    top: calc(100% + 8px);
-    right: 0;
+    /* bits-ui copies this onto its portal wrapper: above the Settings backdrop (20) and every popup (up to 40). */
+    position: relative;
+    z-index: 50;
     width: 290px;
     padding: 4px;
     display: flex;

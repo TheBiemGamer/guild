@@ -40,6 +40,7 @@
 </script>
 
 <script lang="ts">
+  import { DropdownMenu, Tabs } from 'bits-ui'
   import { onMount, tick } from 'svelte'
   import * as api from './api'
   import type { ActOptions } from './api'
@@ -63,6 +64,7 @@
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
+  import Tip from './Tip.svelte'
   import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
 
   let {
@@ -129,7 +131,6 @@
   let actionsEl = $state<HTMLDivElement>()
   type Tab = 'overview' | 'dlc' | 'saves' | 'launch' | 'installation'
   let tab = $state<Tab>('overview')
-  let tabList = $state<HTMLDivElement>()
   /** The chosen copy's Saves tab; null without cloud saves. */
   let saves = $state<SavesView | null>(null)
   let syncing = $state(false)
@@ -305,7 +306,6 @@
   const protonChoices = $derived([{ value: '', label: t('detail.default') }, ...protons.map((p) => ({ value: p, label: p }))])
   const protonLabel = $derived(protonChoices.find((c) => c.value === (launch?.proton ?? ''))?.label ?? t('detail.default'))
   let protonOpen = $state(false)
-  let protonChip = $state<HTMLButtonElement>()
 
   /** Saves a change to the launch options; true when it was stored. */
   async function setLaunch(change: Partial<LaunchOptions>) {
@@ -437,16 +437,6 @@
 
   const run = (f: () => Promise<unknown>) => f().catch((e) => onerror(api.message(e)))
 
-  function closeMenu(refocus: boolean) {
-    menuOpen = false
-    if (refocus) moreButton?.focus()
-  }
-
-  function pick(f: () => void) {
-    closeMenu(true)
-    f()
-  }
-
   // The chosen copy's own actions; not while it is busy.
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
   // Verify, Move and Uninstall: the chosen store copy, installed.
@@ -511,16 +501,6 @@
   // A tab that went away (the DLC list emptied, the copy was uninstalled) falls back to Overview.
   const current = $derived(tabs.some((t) => t.id === tab) ? tab : 'overview')
 
-  /** Arrow keys, Home and End move between tabs (roving tabindex); the focused tab opens. */
-  function tabKeydown(e: KeyboardEvent) {
-    const at = tabs.findIndex((t) => t.id === current)
-    const to = e.key === 'ArrowRight' ? at + 1 : e.key === 'ArrowLeft' ? at - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null
-    if (to === null) return
-    e.preventDefault()
-    tab = tabs[(to + tabs.length) % tabs.length].id
-    tick().then(() => tabList?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
-  }
-
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
   // Every store game has a store page, so Details always has something to show.
   const showDetails = $derived(!!game && !custom)
@@ -530,10 +510,18 @@
 
 {#snippet copyItems()}
   {#if copy!.installDir}
-    <button role="menuitem" tabindex="-1" onclick={() => pick(() => run(() => commands.openFolder(copy!.key)))}>{t('detail.openInstallFolder')}</button>
+    <DropdownMenu.Item onSelect={() => run(() => commands.openFolder(copy!.key))}>
+      {#snippet child({ props })}
+        <button {...props}>{t('detail.openInstallFolder')}</button>
+      {/snippet}
+    </DropdownMenu.Item>
   {/if}
   {#if copy!.installed && !custom && !running}
-    <button role="menuitem" tabindex="-1" class="danger" onclick={() => pick(uninstall)}>{t('detail.uninstall')}</button>
+    <DropdownMenu.Item onSelect={uninstall}>
+      {#snippet child({ props })}
+        <button {...props} class="danger">{t('detail.uninstall')}</button>
+      {/snippet}
+    </DropdownMenu.Item>
   {/if}
 {/snippet}
 
@@ -602,33 +590,24 @@
               <button class="glass round danger" onclick={confirmUninstall}>{t('detail.uninstall')}</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>{t('common.cancel')}</button>
             {:else}
-              <div class="more-wrap">
-                <button
-                  class="glass more"
-                  bind:this={moreButton}
-                  aria-label={t('detail.moreActions')}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  onclick={() => (menuOpen ? closeMenu(true) : (menuOpen = true))}
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-                  </svg>
-                </button>
-                {#if menuOpen}
-                  <GameMenu
-                    {game}
-                    anchor={moreButton}
-                    label={t('detail.moreActions')}
-                    onclose={closeMenu}
-                    {onchanged}
-                    {onerror}
-                    {onedit}
-                    onremoved={onback}
-                    extra={copyActions ? copyItems : undefined}
-                  />
-                {/if}
-              </div>
+              <GameMenu
+                {game}
+                bind:open={menuOpen}
+                label={t('detail.moreActions')}
+                {onchanged}
+                {onerror}
+                {onedit}
+                onremoved={onback}
+                extra={copyActions ? copyItems : undefined}
+              >
+                {#snippet trigger({ props })}
+                  <button {...props} class="glass more" bind:this={moreButton} aria-label={t('detail.moreActions')}>
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                    </svg>
+                  </button>
+                {/snippet}
+              </GameMenu>
               <PlayButton
                 copies={game.copies}
                 chosen={chosenKey}
@@ -677,320 +656,339 @@
       <p class="gone">{t('detail.gone')}</p>
     {:else if game}
       <!-- Always shown, Overview alone included, so a DLC tab that arrives late doesn't move the page. -->
-      <div class="tabs" role="tablist" aria-label={t('detail.sections')} tabindex="-1" bind:this={tabList} onkeydown={tabKeydown}>
-        {#each tabs as t (t.id)}
-          <button
-            role="tab"
-            id="tab-{t.id}"
-            aria-selected={current === t.id}
-            aria-controls="tab-panel"
-            tabindex={current === t.id ? 0 : -1}
-            onclick={() => (tab = t.id)}
-          >
-            {t.label}{#if t.count}<span class="n">{t.count}</span>{/if}
-          </button>
-        {/each}
-      </div>
+      <Tabs.Root value={current} onValueChange={(v) => (tab = v as Tab)}>
+        <Tabs.List aria-label={t('detail.sections')}>
+          {#snippet child({ props })}
+            <div {...props} class="tabs">
+              {#each tabs as t (t.id)}
+                <Tabs.Trigger value={t.id}>
+                  {#snippet child({ props })}
+                    <button {...props}>
+                      {t.label}{#if t.count}<span class="n">{t.count}</span>{/if}
+                    </button>
+                  {/snippet}
+                </Tabs.Trigger>
+              {/each}
+            </div>
+          {/snippet}
+        </Tabs.List>
 
-      <div id="tab-panel" role="tabpanel" aria-labelledby="tab-{current}">
-        {#if current === 'dlc'}
-          <section class="panel" aria-label={t('detail.tab.dlc')}>
-            <ul class="dlc">
-              {#each dlcs as d (`${d.copy}|${d.id}`)}
-                <li>
-                  <span class="dlc-title">{d.title}</span>
-                  {#if confirmingDlc === `${d.copy}|${d.id}`}
-                    <!-- Asks inline, like the game's own Epic uninstall. -->
-                    <span class="dlc-state">{t('detail.dlcAsk')}</span>
-                    <button
-                      class="chip danger"
-                      aria-label={t('detail.uninstallNamed', { title: d.title })}
-                      onclick={() => {
-                        confirmingDlc = null
-                        act('uninstall', d.copy!, { dlc: d.id })
-                      }}>{t('detail.uninstall')}</button
-                    >
-                    <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>{t('common.cancel')}</button>
-                  {:else}
-                    <span class="dlc-state">{d.installed ? t('play.installed') : t('play.notInstalled')}</span>
-                    <!-- Legendary and gogdl add a DLC to an installed game only. -->
-                    {#if d.copy && !shown && game.copies.find((c) => c.key === d.copy)?.installed}
+        <Tabs.Content value={current} tabindex={-1}>
+          {#if current === 'dlc'}
+            <section class="panel" aria-label={t('detail.tab.dlc')}>
+              <ul class="dlc">
+                {#each dlcs as d (`${d.copy}|${d.id}`)}
+                  <li>
+                    <span class="dlc-title">{d.title}</span>
+                    {#if confirmingDlc === `${d.copy}|${d.id}`}
+                      <!-- Asks inline, like the game's own Epic uninstall. -->
+                      <span class="dlc-state">{t('detail.dlcAsk')}</span>
+                      <button
+                        class="chip danger"
+                        aria-label={t('detail.uninstallNamed', { title: d.title })}
+                        onclick={() => {
+                          confirmingDlc = null
+                          act('uninstall', d.copy!, { dlc: d.id })
+                        }}>{t('detail.uninstall')}</button
+                      >
+                      <button class="chip" bind:this={dlcCancel} onclick={() => (confirmingDlc = null)}>{t('common.cancel')}</button>
+                    {:else}
+                      <span class="dlc-state">{d.installed ? t('play.installed') : t('play.notInstalled')}</span>
+                      <!-- Legendary and gogdl add a DLC to an installed game only. -->
+                      {#if d.copy && !shown && game.copies.find((c) => c.key === d.copy)?.installed}
+                        <button
+                          class="chip"
+                          class:danger={d.installed}
+                          aria-label={t(d.installed ? 'detail.uninstallNamed' : 'detail.installNamed', { title: d.title })}
+                          onclick={() => (d.installed ? askUninstallDlc(d) : act('install', d.copy!, { dlc: d.id }))}
+                        >
+                          {d.installed ? t('detail.uninstall') : t('common.install')}
+                        </button>
+                      {/if}
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {:else if current === 'saves'}
+            <!-- The chosen Epic or GOG copy's cloud saves; the store's default is in its Settings card's Options. -->
+            <section class="panel rows" aria-label={t('detail.tab.saves')}>
+              <div class="row">
+                <span class="key" id="saves-cloud">{t('detail.cloudSaves')}</span>
+                <div class="chips" role="group" aria-labelledby="saves-cloud">
+                  {#each [{ value: null, label: t('detail.default'), title: t('detail.syncSavesHint') }, { value: true, label: t('common.on') }, { value: false, label: t('common.off') }] as option (option.value)}
+                    <Tip text={option.title ?? ''}>
+                      {#snippet children({ props })}
+                        <button {...props} class="chip" aria-pressed={saves !== null && saves.choice === option.value} onclick={() => setSaves(option.value)}>
+                          {option.label}
+                        </button>
+                      {/snippet}
+                    </Tip>
+                  {/each}
+                </div>
+              </div>
+              <div class="row">
+                <span class="key">{t('detail.saves')}</span>
+                <Tip text={savesLine ?? ''} truncated>
+                  {#snippet children({ props })}
+                    <span {...props} class="value" class:failed={!!saves?.error}>{savesLine ?? ' '}</span>
+                  {/snippet}
+                </Tip>
+                <Tip text={t('detail.syncNowHint')}>
+                  {#snippet children({ props })}
+                    <span {...props} class="tip-anchor">
+                      <button class="chip" disabled={!!shown || running || syncing} onclick={syncNow}
+                        >{syncing ? t('detail.syncing') : t('detail.syncNow')}</button
+                      >
+                    </span>
+                  {/snippet}
+                </Tip>
+              </div>
+            </section>
+          {:else if current === 'launch'}
+            <!-- The chosen copy's own options; Epic, GOG and Amazon apply them on Play. GOG and Amazon take only the arguments and executable. -->
+            <section class="panel rows" aria-label={t('detail.tab.launch')}>
+              {#if copy!.provider === 'steam'}
+                <div class="row">
+                  <div class="what">{t('detail.steamLaunch')}</div>
+                  <button class="chip" onclick={() => run(() => commands.openSteamProperties(copy!.key))}>{t('detail.openInSteam')}</button>
+                </div>
+              {:else if launch}
+                {#if copy!.provider !== 'custom'}
+                  <div class="row">
+                    <label class="what" for="launch-args">{t('detail.args')}<small>{t('detail.argsHint')}</small></label>
+                    {#if argsSaved}<span class="saved-note" role="status">{t('detail.saved')}</span>{/if}
+                    <input
+                      id="launch-args"
+                      class="args"
+                      type="text"
+                      spellcheck="false"
+                      autocomplete="off"
+                      bind:value={argsText}
+                      onblur={saveArgs}
+                      onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                    />
+                  </div>
+                  {#if copy!.provider === 'epic'}
+                    <div class="row">
+                      <div class="what" id="launch-offline">{t('detail.offline')}<small>{t('detail.offlineHint')}</small></div>
                       <button
                         class="chip"
-                        class:danger={d.installed}
-                        aria-label={t(d.installed ? 'detail.uninstallNamed' : 'detail.installNamed', { title: d.title })}
-                        onclick={() => (d.installed ? askUninstallDlc(d) : act('install', d.copy!, { dlc: d.id }))}
+                        aria-pressed={launch.offline}
+                        aria-labelledby="launch-offline"
+                        onclick={() => setLaunch({ offline: !launch!.offline })}
                       >
-                        {d.installed ? t('detail.uninstall') : t('common.install')}
+                        {launch.offline ? t('common.on') : t('common.off')}
                       </button>
-                    {/if}
+                    </div>
+                    <div class="row">
+                      <div class="what" id="launch-skip">{t('detail.skipCheck')}</div>
+                      <button
+                        class="chip"
+                        aria-pressed={launch.skipVersionCheck}
+                        aria-labelledby="launch-skip"
+                        onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
+                      >
+                        {launch.skipVersionCheck ? t('common.on') : t('common.off')}
+                      </button>
+                    </div>
                   {/if}
-                </li>
-              {/each}
-            </ul>
-          </section>
-        {:else if current === 'saves'}
-          <!-- The chosen Epic or GOG copy's cloud saves; the store's default is in its Settings card's Options. -->
-          <section class="panel rows" aria-label={t('detail.tab.saves')}>
-            <div class="row">
-              <span class="key" id="saves-cloud">{t('detail.cloudSaves')}</span>
-              <div class="chips" role="group" aria-labelledby="saves-cloud">
-                {#each [{ value: null, label: t('detail.default'), title: t('detail.syncSavesHint') }, { value: true, label: t('common.on') }, { value: false, label: t('common.off') }] as option (option.value)}
-                  <button
-                    class="chip"
-                    title={option.title}
-                    aria-pressed={saves !== null && saves.choice === option.value}
-                    onclick={() => setSaves(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                {/each}
-              </div>
-            </div>
-            <div class="row">
-              <span class="key">{t('detail.saves')}</span>
-              <span class="value" class:failed={!!saves?.error} title={savesLine ?? undefined}>{savesLine ?? ' '}</span>
-              <button class="chip" title={t('detail.syncNowHint')} disabled={!!shown || running || syncing} onclick={syncNow}
-                >{syncing ? t('detail.syncing') : t('detail.syncNow')}</button
-              >
-            </div>
-          </section>
-        {:else if current === 'launch'}
-          <!-- The chosen copy's own options; Epic, GOG and Amazon apply them on Play. GOG and Amazon take only the arguments and executable. -->
-          <section class="panel rows" aria-label={t('detail.tab.launch')}>
-            {#if copy!.provider === 'steam'}
-              <div class="row">
-                <div class="what">{t('detail.steamLaunch')}</div>
-                <button class="chip" onclick={() => run(() => commands.openSteamProperties(copy!.key))}>{t('detail.openInSteam')}</button>
-              </div>
-            {:else if launch}
-              {#if copy!.provider !== 'custom'}
-                <div class="row">
-                  <label class="what" for="launch-args">{t('detail.args')}<small>{t('detail.argsHint')}</small></label>
-                  {#if argsSaved}<span class="saved-note" role="status">{t('detail.saved')}</span>{/if}
-                  <input
-                    id="launch-args"
-                    class="args"
-                    type="text"
-                    spellcheck="false"
-                    autocomplete="off"
-                    bind:value={argsText}
-                    onblur={saveArgs}
-                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                  />
-                </div>
-                {#if copy!.provider === 'epic'}
                   <div class="row">
-                    <div class="what" id="launch-offline">{t('detail.offline')}<small>{t('detail.offlineHint')}</small></div>
-                    <button
-                      class="chip"
-                      aria-pressed={launch.offline}
-                      aria-labelledby="launch-offline"
-                      onclick={() => setLaunch({ offline: !launch!.offline })}
-                    >
-                      {launch.offline ? t('common.on') : t('common.off')}
-                    </button>
-                  </div>
-                  <div class="row">
-                    <div class="what" id="launch-skip">{t('detail.skipCheck')}</div>
-                    <button
-                      class="chip"
-                      aria-pressed={launch.skipVersionCheck}
-                      aria-labelledby="launch-skip"
-                      onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
-                    >
-                      {launch.skipVersionCheck ? t('common.on') : t('common.off')}
-                    </button>
+                    <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
+                    <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
+                    {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
                   </div>
                 {/if}
-                <div class="row">
-                  <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
-                  <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
-                  {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
-                </div>
-              {/if}
-              {#if protons.length}
-                <div class="row">
-                  <div class="what">{t('settings.proton')}<small>{t('detail.protonHint')}</small></div>
-                  <div class="choice">
-                    <button
-                      class="chip"
-                      bind:this={protonChip}
-                      aria-haspopup="menu"
-                      aria-expanded={protonOpen}
-                      aria-label={t('settings.protonNow', { name: protonLabel })}
-                      onclick={() => (protonOpen = !protonOpen)}>{protonLabel}</button
-                    >
-                    {#if protonOpen}
+                {#if protons.length}
+                  <div class="row">
+                    <div class="what">{t('settings.proton')}<small>{t('detail.protonHint')}</small></div>
+                    <div class="choice">
                       <ChoiceMenu
                         bind:value={() => launch?.proton ?? '', (v) => setLaunch({ proton: v || null })}
                         options={protonChoices}
                         label={t('settings.proton')}
-                        anchor={protonChip}
-                        onclose={(refocus) => {
-                          protonOpen = false
-                          if (refocus) protonChip?.focus()
-                        }}
-                      />
-                    {/if}
-                  </div>
-                </div>
-              {/if}
-            {/if}
-          </section>
-        {:else if current === 'installation'}
-          <!-- Acts on the chosen copy, like the ⋯ menu. -->
-          <section class="panel rows" aria-label={t('detail.tab.installation')}>
-            {#if copy!.installDir}
-              <div class="row">
-                <span class="key">{t('detail.folder')}</span>
-                <span class="value" title={copy!.installDir}>{copy!.installDir}</span>
-                <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.open')}</button>
-                {#if manageable}
-                  <button
-                    class="chip"
-                    title={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}
-                    disabled={!!shown || running}
-                    onclick={move}>{t('detail.moveButton')}</button
-                  >
-                {/if}
-              </div>
-            {/if}
-            {#if copy!.sizeBytes !== null || manageable}
-              <div class="row">
-                <span class="key">{t('detail.files')}</span>
-                <span class="value">{copy!.sizeBytes !== null ? sizeLabel(copy!.sizeBytes) : ''}</span>
-                {#if manageable}
-                  <button
-                    class="chip"
-                    title={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}
-                    disabled={!!shown || running}
-                    onclick={() => act('verify')}>{t('detail.verify')}</button
-                  >
-                {/if}
-              </div>
-            {/if}
-            {#if copy!.updateAvailable}
-              <div class="row">
-                <span class="key">{t('detail.version')}</span>
-                <span class="value">{t('detail.updateAvailable')}</span>
-                <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>{t('play.update')}</button>
-                <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>{t('detail.playOutdated')}</button>
-              </div>
-            {/if}
-          </section>
-          {#if manageable}
-            <div class="foot">
-              <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
-              <button
-                class="chip danger"
-                title={copy!.provider === 'steam' ? t('detail.inSteam') : undefined}
-                disabled={!!shown || running}
-                onclick={() => {
-                  uninstall()
-                  tick().then(() => confirmCancel?.focus())
-                }}>{t('detail.uninstall')}</button
-              >
-            </div>
-          {/if}
-        {:else}
-          {#if savesError}
-            <p class="sync-note" title={savesError}>{savesError}</p>
-          {/if}
-          {#if showTiles}
-            <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
-            <div class="tiles">
-              {#if playtime}
-                <div class="tile">
-                  <div class="head">
-                    <h2>{t('detail.playtime')}</h2>
-                    {#if game.playtimeStores.length}<small>{game.playtimeStores.map((p) => storeNames[p]).join(' + ')}</small>{/if}
-                  </div>
-                  <p><b>{playtime}</b></p>
-                </div>
-              {/if}
-              {#if lastPlayed}
-                <div class="tile">
-                  <div class="head"><h2>{t('detail.lastPlayed')}</h2></div>
-                  <p>
-                    <b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · {t('detail.onStore', { store: storeNames[game.lastPlayedStore] })}</span>{/if}
-                  </p>
-                </div>
-              {/if}
-              {#if ttb}
-                <div class="tile">
-                  <div class="head">
-                    <h2>{t('detail.ttb')}</h2>
-                    <button class="credit" title={t('detail.igdbCredit')} aria-label={t('detail.igdbCredit')} onclick={() => run(commands.openIgdb)}
-                      >IGDB</button
-                    >
-                  </div>
-                  <p title={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')}>
-                    <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}
-                  </p>
-                </div>
-              {/if}
-            </div>
-          {/if}
-
-          {#if !custom}
-            <div class="cols">
-              <!-- Skeleton lines hold the panels' places while the store details load. -->
-              {#if info === undefined}
-                <section class="panel about" aria-labelledby="about-heading" aria-busy="true">
-                  <h2 id="about-heading">{t('detail.about')}</h2>
-                  <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-                </section>
-              {:else if showAbout && info}
-                <section class="panel about" aria-labelledby="about-heading">
-                  <h2 id="about-heading">{t('detail.about')}</h2>
-                  {#if info.description}<p class="text">{info.description}</p>{/if}
-                  {#if info.screenshots.length && shots?.length !== 0}
-                    <div class="shots">
-                      {#if shots}
-                        {#each shots as shot, i (i)}
-                          <img src={shot} alt={t('detail.screenshot', { number: i + 1, title: game.title })} loading="lazy" />
-                        {/each}
-                      {:else}
-                        {#each info.screenshots as _, i (i)}<div class="shot" aria-hidden="true"></div>{/each}
-                      {/if}
+                        bind:open={protonOpen}
+                      >
+                        {#snippet trigger({ props })}
+                          <button {...props} class="chip" aria-label={t('settings.protonNow', { name: protonLabel })}>{protonLabel}</button>
+                        {/snippet}
+                      </ChoiceMenu>
                     </div>
+                  </div>
+                {/if}
+              {/if}
+            </section>
+          {:else if current === 'installation'}
+            <!-- Acts on the chosen copy, like the ⋯ menu. -->
+            <section class="panel rows" aria-label={t('detail.tab.installation')}>
+              {#if copy!.installDir}
+                <div class="row">
+                  <span class="key">{t('detail.folder')}</span>
+                  <Tip text={copy!.installDir} truncated>
+                    {#snippet children({ props })}<span {...props} class="value">{copy!.installDir}</span>{/snippet}
+                  </Tip>
+                  <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.open')}</button>
+                  {#if manageable}
+                    <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}>
+                      {#snippet children({ props })}
+                        <span {...props} class="tip-anchor">
+                          <button class="chip" disabled={!!shown || running} onclick={move}>{t('detail.moveButton')}</button>
+                        </span>
+                      {/snippet}
+                    </Tip>
                   {/if}
-                </section>
+                </div>
               {/if}
-              {#if showDetails}
-                <section class="panel details" class:solo={info !== undefined && !showAbout} aria-labelledby="details-heading">
-                  <h2 id="details-heading">{t('detail.details')}</h2>
-                  <dl>
-                    {#if info === undefined}
-                      {#each ['genres', 'developer', 'publisher', 'released'] as term (term)}
-                        <dt>{t(`detail.${term}`)}</dt>
-                        <dd class="skeleton" aria-hidden="true"><span></span></dd>
-                      {/each}
-                    {/if}
-                    {#if info?.genres.length}
-                      <dt>{t('detail.genres')}</dt>
-                      <dd class="tags">
-                        {#each info.genres as genre}<span>{genre}</span>{/each}
-                      </dd>
-                    {/if}
-                    {#if info?.developer}<dt>{t('detail.developer')}</dt>
-                      <dd>{info.developer}</dd>{/if}
-                    {#if info?.publisher}<dt>{t('detail.publisher')}</dt>
-                      <dd>{info.publisher}</dd>{/if}
-                    {#if info?.released}<dt>{t('detail.released')}</dt>
-                      <dd>{releaseDate(info.released)}</dd>{/if}
-                    {#if copy!.sizeBytes !== null}<dt>{t('detail.size')}</dt>
-                      <dd>{sizeLabel(copy!.sizeBytes)}</dd>{/if}
-                    {@render chips(t('detail.storePages'), storeLinks)}
-                    {@render chips(t('detail.info'), infoLinks)}
-                  </dl>
-                </section>
+              {#if copy!.sizeBytes !== null || manageable}
+                <div class="row">
+                  <span class="key">{t('detail.files')}</span>
+                  <span class="value">{copy!.sizeBytes !== null ? sizeLabel(copy!.sizeBytes) : ''}</span>
+                  {#if manageable}
+                    <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}>
+                      {#snippet children({ props })}
+                        <span {...props} class="tip-anchor">
+                          <button class="chip" disabled={!!shown || running} onclick={() => act('verify')}>{t('detail.verify')}</button>
+                        </span>
+                      {/snippet}
+                    </Tip>
+                  {/if}
+                </div>
               {/if}
-            </div>
+              {#if copy!.updateAvailable}
+                <div class="row">
+                  <span class="key">{t('detail.version')}</span>
+                  <span class="value">{t('detail.updateAvailable')}</span>
+                  <button class="chip" disabled={!!shown || running} onclick={() => act('update')}>{t('play.update')}</button>
+                  <button class="chip" disabled={!!shown || running} onclick={() => act('playOutdated')}>{t('detail.playOutdated')}</button>
+                </div>
+              {/if}
+            </section>
+            {#if manageable}
+              <div class="foot">
+                <!-- The Epic, GOG and Amazon confirm is in the hero; this chip stays, so focus is moved there by hand. -->
+                <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : ''}>
+                  {#snippet children({ props })}
+                    <span {...props} class="tip-anchor">
+                      <button
+                        class="chip danger"
+                        disabled={!!shown || running}
+                        onclick={() => {
+                          uninstall()
+                          tick().then(() => confirmCancel?.focus())
+                        }}>{t('detail.uninstall')}</button
+                      >
+                    </span>
+                  {/snippet}
+                </Tip>
+              </div>
+            {/if}
+          {:else}
+            {#if savesError}
+              <Tip text={savesError} truncated>
+                {#snippet children({ props })}<p {...props} class="sync-note">{savesError}</p>{/snippet}
+              </Tip>
+            {/if}
+            {#if showTiles}
+              <!-- Reserved height: tiles that answer late fill their slot without moving the panels below. -->
+              <div class="tiles">
+                {#if playtime}
+                  <div class="tile">
+                    <div class="head">
+                      <h2>{t('detail.playtime')}</h2>
+                      {#if game.playtimeStores.length}<small>{game.playtimeStores.map((p) => storeNames[p]).join(' + ')}</small>{/if}
+                    </div>
+                    <p><b>{playtime}</b></p>
+                  </div>
+                {/if}
+                {#if lastPlayed}
+                  <div class="tile">
+                    <div class="head"><h2>{t('detail.lastPlayed')}</h2></div>
+                    <p>
+                      <b>{lastPlayed}</b>{#if game.lastPlayedStore}<span> · {t('detail.onStore', { store: storeNames[game.lastPlayedStore] })}</span>{/if}
+                    </p>
+                  </div>
+                {/if}
+                {#if ttb}
+                  <div class="tile">
+                    <div class="head">
+                      <h2>{t('detail.ttb')}</h2>
+                      <Tip text={t('detail.igdbCredit')}>
+                        {#snippet children({ props })}
+                          <button {...props} class="credit" aria-label={t('detail.igdbCredit')} onclick={() => run(commands.openIgdb)}>IGDB</button>
+                        {/snippet}
+                      </Tip>
+                    </div>
+                    <Tip text={[beatMain && t('detail.normally', { time: beatMain }), ...beatMore].filter(Boolean).join(' · ')}>
+                      {#snippet children({ props })}
+                        <p {...props}>
+                          <b>{beatMain ?? beatMore[0]}</b>{#if beatMain && beatAll}<span> · {t('detail.all', { time: beatAll })}</span>{/if}
+                        </p>
+                      {/snippet}
+                    </Tip>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            {#if !custom}
+              <div class="cols">
+                <!-- Skeleton lines hold the panels' places while the store details load. -->
+                {#if info === undefined}
+                  <section class="panel about" aria-labelledby="about-heading" aria-busy="true">
+                    <h2 id="about-heading">{t('detail.about')}</h2>
+                    <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                  </section>
+                {:else if showAbout && info}
+                  <section class="panel about" aria-labelledby="about-heading">
+                    <h2 id="about-heading">{t('detail.about')}</h2>
+                    {#if info.description}<p class="text">{info.description}</p>{/if}
+                    {#if info.screenshots.length && shots?.length !== 0}
+                      <div class="shots">
+                        {#if shots}
+                          {#each shots as shot, i (i)}
+                            <img src={shot} alt={t('detail.screenshot', { number: i + 1, title: game.title })} loading="lazy" />
+                          {/each}
+                        {:else}
+                          {#each info.screenshots as _, i (i)}<div class="shot" aria-hidden="true"></div>{/each}
+                        {/if}
+                      </div>
+                    {/if}
+                  </section>
+                {/if}
+                {#if showDetails}
+                  <section class="panel details" class:solo={info !== undefined && !showAbout} aria-labelledby="details-heading">
+                    <h2 id="details-heading">{t('detail.details')}</h2>
+                    <dl>
+                      {#if info === undefined}
+                        {#each ['genres', 'developer', 'publisher', 'released'] as term (term)}
+                          <dt>{t(`detail.${term}`)}</dt>
+                          <dd class="skeleton" aria-hidden="true"><span></span></dd>
+                        {/each}
+                      {/if}
+                      {#if info?.genres.length}
+                        <dt>{t('detail.genres')}</dt>
+                        <dd class="tags">
+                          {#each info.genres as genre}<span>{genre}</span>{/each}
+                        </dd>
+                      {/if}
+                      {#if info?.developer}<dt>{t('detail.developer')}</dt>
+                        <dd>{info.developer}</dd>{/if}
+                      {#if info?.publisher}<dt>{t('detail.publisher')}</dt>
+                        <dd>{info.publisher}</dd>{/if}
+                      {#if info?.released}<dt>{t('detail.released')}</dt>
+                        <dd>{releaseDate(info.released)}</dd>{/if}
+                      {#if copy!.sizeBytes !== null}<dt>{t('detail.size')}</dt>
+                        <dd>{sizeLabel(copy!.sizeBytes)}</dd>{/if}
+                      {@render chips(t('detail.storePages'), storeLinks)}
+                      {@render chips(t('detail.info'), infoLinks)}
+                    </dl>
+                  </section>
+                {/if}
+              </div>
+            {/if}
           {/if}
-        {/if}
-      </div>
+        </Tabs.Content>
+      </Tabs.Root>
     {/if}
   </div>
 </section>
@@ -1184,10 +1182,6 @@
 
   button.danger {
     color: var(--danger-text);
-  }
-
-  .more-wrap {
-    position: relative;
   }
 
   .more {
@@ -1434,10 +1428,6 @@
     gap: 4px;
     margin-top: 16px;
     border-bottom: 1px solid var(--glass-line);
-  }
-
-  .tabs:focus-visible {
-    outline: none;
   }
 
   [role='tab'] {

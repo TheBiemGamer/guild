@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { DropdownMenu, RadioGroup } from 'bits-ui'
   import { onMount } from 'svelte'
   import * as api from './api'
   import { commands, type Build, type InstallChoice, type InstallFolder, type InstallPlan, type Store } from './bindings'
   import ChoiceMenu from './ChoiceMenu.svelte'
   import Check from './Check.svelte'
-  import { popover } from './popover'
+  import Tip from './Tip.svelte'
+  import { keepOnBackForward } from './outside'
   import { sizeLabel } from './format'
   import { t } from './i18n'
 
@@ -34,7 +36,6 @@
   let el: HTMLDivElement
   let installButton: HTMLButtonElement
   let changeButton = $state<HTMLButtonElement>()
-  let languageButton = $state<HTMLButtonElement>()
   let height = $state(0)
   /** undefined until the first answer; kept while a new language or build is asked. */
   let plan = $state<InstallPlan | null | undefined>(undefined)
@@ -102,47 +103,27 @@
     }
   })
 
+  // Captured, so an open menu (portalled outside the panel) is seen before it closes itself; it takes the Escape or click.
   function onkeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') oncancel()
+    if (e.key === 'Escape' && !menuOpen && !languagesOpen) oncancel()
   }
 
-  // A click outside closes it. Clicks on the cover or the Install pill are left to them (they toggle it).
+  // A click outside closes it; mouse Back and Forward don't. Clicks on the cover or the Install pill are left to them (they toggle it).
   function onpointerdown(e: PointerEvent) {
     const target = e.target as Node
-    if (el.contains(target) || opener?.contains(target)) return
+    if (e.button > 2 || menuOpen || languagesOpen || el.contains(target) || opener?.contains(target)) return
     const inside = !!anchor && e.clientX >= anchor.left && e.clientX <= anchor.right && e.clientY >= anchor.top && e.clientY <= anchor.bottom
     if (!inside) oncancel()
   }
 
-  function pickFolder(f: InstallFolder) {
-    folder = f
-    closeMenu(true)
-  }
-
   async function another() {
-    closeMenu(false)
     const picked = await api.pickFolder()
     if (picked) folder = await commands.folderSpace(picked)
     changeButton?.focus()
   }
 
-  function closeMenu(refocus: boolean) {
-    menuOpen = false
-    if (refocus) changeButton?.focus()
-  }
-
   function toggle(id: string, on: boolean) {
     chosen = on ? [...chosen, id] : chosen.filter((c) => c !== id)
-  }
-
-  /** Arrows, Home and End move between the folder menu's items. */
-  function menuKeydown(e: KeyboardEvent) {
-    const items = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role^="menuitem"]'))
-    const at = items.indexOf(document.activeElement as HTMLElement)
-    const next = { ArrowDown: (at + 1) % items.length, ArrowUp: at <= 0 ? items.length - 1 : at - 1, Home: 0, End: items.length - 1 }[e.key]
-    if (next === undefined) return
-    e.preventDefault()
-    items[next].focus()
   }
 
   function install() {
@@ -154,7 +135,7 @@
   const percent = (bytes: number) => (folder?.totalBytes ? Math.min(100, (bytes / folder.totalBytes) * 100) : 0)
 </script>
 
-<svelte:window {onkeydown} {onpointerdown} />
+<svelte:window onkeydowncapture={onkeydown} onpointerdowncapture={onpointerdown} />
 
 {#snippet dlcRow(d: InstallPlan['dlc'][number])}
   <label class="row">
@@ -167,6 +148,7 @@
 <div
   class="panel"
   class:popup={anchor}
+  data-install-panel
   bind:this={el}
   bind:clientHeight={height}
   role="dialog"
@@ -180,7 +162,9 @@
   <div class="group">
     <div class="row">
       <div class="grow">
-        <span class="path" title={path ?? ''}>{path ?? ''}</span>
+        <Tip text={path ?? ''} truncated>
+          {#snippet children({ props })}<span {...props} class="path">{path ?? ''}</span>{/snippet}
+        </Tip>
         {#if folder?.totalBytes && free !== null}
           {@const used = folder.totalBytes - free}
           <div class="bar" aria-hidden="true">
@@ -196,35 +180,38 @@
           {/if}
         {/if}
       </div>
-      <div class="menu-wrap">
-        <button
-          class="glass"
-          bind:this={changeButton}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onclick={() => (menuOpen ? closeMenu(true) : (menuOpen = true))}>{t('install.change')}</button
-        >
-        {#if menuOpen}
-          <div
-            class="menu"
-            role="menu"
-            aria-label={t('install.folders')}
-            tabindex="-1"
-            onkeydown={menuKeydown}
-            use:popover={{ anchor: changeButton, close: closeMenu }}
-          >
-            {#each folders as f (f.path)}
-              <button class="item" role="menuitemradio" aria-checked={f.path === folder?.path} onclick={() => pickFolder(f)}>
-                <span class="path">{f.path}</span>
-                {#if f.freeBytes !== null}<small>{t('install.free', { size: sizeLabel(f.freeBytes) })}</small>{/if}
-                {#if f.path === folder?.path}<Check />{/if}
-              </button>
-            {/each}
-            <hr />
-            <button class="item" role="menuitem" onclick={another}>{t('install.anotherFolder')}</button>
-          </div>
-        {/if}
-      </div>
+      <DropdownMenu.Root bind:open={menuOpen}>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}<button {...props} class="glass" bind:this={changeButton}>{t('install.change')}</button>{/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="end" sideOffset={8} preventScroll={false} aria-label={t('install.folders')} onInteractOutside={keepOnBackForward}>
+            {#snippet child({ props, wrapperProps })}
+              <div {...wrapperProps}>
+                <div {...props} class="menu">
+                  <DropdownMenu.RadioGroup value={folder?.path ?? ''} onValueChange={(path) => (folder = folders.find((f) => f.path === path) ?? folder)}>
+                    {#each folders as f (f.path)}
+                      <DropdownMenu.RadioItem value={f.path}>
+                        {#snippet child({ props, checked })}
+                          <button {...props} class="item">
+                            <span class="path">{f.path}</span>
+                            {#if f.freeBytes !== null}<small>{t('install.free', { size: sizeLabel(f.freeBytes) })}</small>{/if}
+                            {#if checked}<Check />{/if}
+                          </button>
+                        {/snippet}
+                      </DropdownMenu.RadioItem>
+                    {/each}
+                  </DropdownMenu.RadioGroup>
+                  <DropdownMenu.Separator class="sep" />
+                  <DropdownMenu.Item onSelect={another}>
+                    {#snippet child({ props })}<button {...props} class="item">{t('install.anotherFolder')}</button>{/snippet}
+                  </DropdownMenu.Item>
+                </div>
+              </div>
+            {/snippet}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
     </div>
   </div>
 
@@ -262,46 +249,53 @@
 
   {#if plan?.languages.length}
     <div class="label">{t('install.language')}</div>
-    <div class="group menu-wrap">
-      <button class="row choice" bind:this={languageButton} aria-haspopup="menu" aria-expanded={languagesOpen} onclick={() => (languagesOpen = !languagesOpen)}>
-        <span class="grow">{language ? languageName(language) : ''}</span>
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-      </button>
-      {#if languagesOpen && language}
-        <ChoiceMenu
-          bind:value={
-            () => language!,
-            (v) => {
-              language = v
-              ask()
-            }
+    <div class="group">
+      <ChoiceMenu
+        bind:value={
+          () => language ?? '',
+          (v) => {
+            language = v
+            ask()
           }
-          options={plan.languages.map((l) => ({ value: l, label: languageName(l) }))}
-          label={t('install.language')}
-          anchor={languageButton}
-          onclose={(refocus) => {
-            languagesOpen = false
-            if (refocus) languageButton?.focus()
-          }}
-        />
-      {/if}
+        }
+        options={plan.languages.map((l) => ({ value: l, label: languageName(l) }))}
+        label={t('install.language')}
+        bind:open={languagesOpen}
+      >
+        {#snippet trigger({ props })}
+          <button {...props} class="row choice">
+            <span class="grow">{language ? languageName(language) : ''}</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        {/snippet}
+      </ChoiceMenu>
     </div>
   {/if}
 
   {#if plan?.builds.length}
+    {@const builds = plan.builds}
     <div class="label" id="build-label">{t('install.build')}</div>
-    <div class="seg" role="radiogroup" aria-labelledby="build-label">
-      {#each plan.builds as b (b)}
-        <button
-          role="radio"
-          aria-checked={build === b}
-          onclick={() => {
-            build = b
-            ask()
-          }}>{b === 'linux' ? 'Linux' : 'Windows'}</button
-        >
-      {/each}
-    </div>
+    <RadioGroup.Root
+      orientation="horizontal"
+      aria-labelledby="build-label"
+      bind:value={
+        () => build ?? '',
+        (v) => {
+          build = v as Build
+          ask()
+        }
+      }
+    >
+      {#snippet child({ props })}
+        <div {...props} class="seg">
+          {#each builds as b (b)}
+            <RadioGroup.Item value={b}>
+              {#snippet child({ props })}<button {...props}>{b === 'linux' ? 'Linux' : 'Windows'}</button>{/snippet}
+            </RadioGroup.Item>
+          {/each}
+        </div>
+      {/snippet}
+    </RadioGroup.Root>
   {/if}
 
   <div class="buttons">
@@ -462,15 +456,10 @@
     background: var(--warn);
   }
 
-  .menu-wrap {
-    position: relative;
-  }
-
   .menu {
-    position: absolute;
-    z-index: 6;
-    top: 40px;
-    right: 0;
+    /* bits-ui copies this onto its portal wrapper: above the panel (30). */
+    position: relative;
+    z-index: 50;
     width: 300px;
     padding: 4px;
     border-radius: 12px;
@@ -503,7 +492,7 @@
     background: var(--glass-hover);
   }
 
-  hr {
+  .menu :global(.sep) {
     margin: 4px 6px;
     border: 0;
     border-top: 1px solid var(--glass-line);

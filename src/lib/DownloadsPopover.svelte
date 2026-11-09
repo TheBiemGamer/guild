@@ -1,16 +1,19 @@
 <script lang="ts">
+  import { Popover } from 'bits-ui'
+  import type { Snippet } from 'svelte'
   import { commands, type Card, type Progress, type QueueView, type QueuedAction, type Store } from './bindings'
   import { progressShort } from './format'
-  import { popover } from './popover'
   import { t } from './i18n'
+  import { keepOnBackForward } from './outside'
   import StoreIcon from './StoreIcon.svelte'
+  import Tip from './Tip.svelte'
 
   let {
     progress,
     queue,
     games,
-    anchor,
-    onclose,
+    open = $bindable(),
+    trigger,
     oncancel,
     onpause,
     onresume,
@@ -22,8 +25,9 @@
     queue: QueueView
     /** The library as loaded, for titles; a game hidden by the search is asked for once. */
     games: Card[]
-    anchor: HTMLElement | undefined
-    onclose: (refocus: boolean) => void
+    open: boolean
+    /** The Downloads chip: spread `props` on it. */
+    trigger: Snippet<[{ props: Record<string, unknown> }]>
     oncancel: (key: string) => void
     onpause: () => void
     onresume: () => void
@@ -34,6 +38,7 @@
   const known = $derived(new Map(games.flatMap((g) => g.copyKeys.map((k) => [k, g.title] as const))))
 
   $effect(() => {
+    if (!open) return
     for (const key of Object.keys(progress)) {
       if (known.has(key) || key in asked) continue
       asked[key] = ''
@@ -87,70 +92,96 @@
   </div>
 {/snippet}
 
-<div class="pop" role="dialog" aria-label={t('downloads.title')} tabindex="-1" use:popover={{ anchor, close: onclose }}>
-  {#if active}
-    <div class="job">
-      {@render fill(active.key, progress[active.key], queue.paused)}
-      <StoreIcon provider={storeOf(active.key)} size={16} />
-      <div class="what">
-        <b>{title(active.key)}</b>
-        <small>{activeText(progress[active.key])}</small>
-      </div>
-      {#if queue.paused}
-        <button class="glass icon" aria-label={t('common.resume')} title={t('common.resume')} onclick={onresume}>
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
-        </button>
-      {:else}
-        <button class="glass icon" aria-label={t('common.pause')} title={t('common.pause')} onclick={onpause}>
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
-        </button>
-      {/if}
-      <button
-        class="glass icon"
-        aria-label={t('downloads.cancelGame', { title: title(active.key) })}
-        title={t('common.cancel')}
-        onclick={() => oncancel(active.key)}
-      >
-        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-      </button>
-    </div>
-  {/if}
-  {#each other as [key, p] (key)}{@render job(key, p)}{/each}
-  {#each steam as [key, p] (key)}{@render job(key, p)}{/each}
-  {#if next.length}
-    <h3>{t('downloads.upNext')}</h3>
-    {#each next as j, i (`${j.key}|${j.action}`)}
-      <div class="job">
-        <StoreIcon provider={storeOf(j.key)} size={16} />
-        <div class="what">
-          <b>{title(j.key)}</b>
-          <small class="quiet">{actionName(j.action)}</small>
+<Popover.Root bind:open>
+  <Popover.Trigger>
+    {#snippet child({ props })}
+      {@render trigger({ props })}
+    {/snippet}
+  </Popover.Trigger>
+  <Popover.Portal>
+    <Popover.Content align="end" sideOffset={8} collisionPadding={8} onInteractOutside={keepOnBackForward}>
+      {#snippet child({ props, wrapperProps })}
+        <div {...wrapperProps}>
+          <div {...props} class="pop" role="dialog" aria-label={t('downloads.title')}>
+            {#if active}
+              <div class="job">
+                {@render fill(active.key, progress[active.key], queue.paused)}
+                <StoreIcon provider={storeOf(active.key)} size={16} />
+                <div class="what">
+                  <b>{title(active.key)}</b>
+                  <small>{activeText(progress[active.key])}</small>
+                </div>
+                {#if queue.paused}
+                  <Tip text={t('common.resume')}>
+                    {#snippet children({ props })}
+                      <button {...props} class="glass icon" aria-label={t('common.resume')} onclick={onresume}>
+                        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>
+                      </button>
+                    {/snippet}
+                  </Tip>
+                {:else}
+                  <Tip text={t('common.pause')}>
+                    {#snippet children({ props })}
+                      <button {...props} class="glass icon" aria-label={t('common.pause')} onclick={onpause}>
+                        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+                      </button>
+                    {/snippet}
+                  </Tip>
+                {/if}
+                <Tip text={t('common.cancel')}>
+                  {#snippet children({ props })}
+                    <button
+                      {...props}
+                      class="glass icon"
+                      aria-label={t('downloads.cancelGame', { title: title(active.key) })}
+                      onclick={() => oncancel(active.key)}
+                    >
+                      <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                    </button>
+                  {/snippet}
+                </Tip>
+              </div>
+            {/if}
+            {#each other as [key, p] (key)}{@render job(key, p)}{/each}
+            {#each steam as [key, p] (key)}{@render job(key, p)}{/each}
+            {#if next.length}
+              <h3>{t('downloads.upNext')}</h3>
+              {#each next as j, i (`${j.key}|${j.action}`)}
+                <div class="job">
+                  <StoreIcon provider={storeOf(j.key)} size={16} />
+                  <div class="what">
+                    <b>{title(j.key)}</b>
+                    <small class="quiet">{actionName(j.action)}</small>
+                  </div>
+                  <button class="glass icon" aria-label={t('downloads.moveUp', { title: title(j.key) })} disabled={i === 0} onclick={() => onmove(j.key, true)}>
+                    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+                  </button>
+                  <button
+                    class="glass icon"
+                    aria-label={t('downloads.moveDown', { title: title(j.key) })}
+                    disabled={i === next.length - 1}
+                    onclick={() => onmove(j.key, false)}
+                  >
+                    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+                  </button>
+                  <button class="glass icon" aria-label={t('downloads.remove', { title: title(j.key) })} onclick={() => oncancel(j.key)}>
+                    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                  </button>
+                </div>
+              {/each}
+            {/if}
+          </div>
         </div>
-        <button class="glass icon" aria-label={t('downloads.moveUp', { title: title(j.key) })} disabled={i === 0} onclick={() => onmove(j.key, true)}>
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
-        </button>
-        <button
-          class="glass icon"
-          aria-label={t('downloads.moveDown', { title: title(j.key) })}
-          disabled={i === next.length - 1}
-          onclick={() => onmove(j.key, false)}
-        >
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
-        </button>
-        <button class="glass icon" aria-label={t('downloads.remove', { title: title(j.key) })} onclick={() => oncancel(j.key)}>
-          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-        </button>
-      </div>
-    {/each}
-  {/if}
-</div>
+      {/snippet}
+    </Popover.Content>
+  </Popover.Portal>
+</Popover.Root>
 
 <style>
   .pop {
-    position: absolute;
-    z-index: 6;
-    top: 44px;
-    right: 0;
+    /* bits-ui copies this onto its portal wrapper: above the Settings backdrop (20) and every popup (up to 40). */
+    position: relative;
+    z-index: 50;
     width: 380px;
     padding: 6px;
     border-radius: 12px;

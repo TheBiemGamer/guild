@@ -6,7 +6,9 @@
   import ChoiceMenu from './ChoiceMenu.svelte'
   import { filterChips, removeChip, storeSegments, type Collection, type Filter } from './filters'
   import { t } from './i18n'
-  import { onMount } from 'svelte'
+  import Tip from './Tip.svelte'
+  import { mergeProps, RadioGroup } from 'bits-ui'
+  import { onMount, tick } from 'svelte'
   import { onOpenDownloads } from './api'
   import type { Card, Progress, QueueView, Sort, Store, UpdateInfo } from './bindings'
 
@@ -81,30 +83,18 @@
   /** The store segments, in order; null is All. Empty (no control) with fewer than two stores. */
   const stores = $derived(storeSegments(storesInUse))
   const storeIndex = $derived(stores.indexOf(store))
-  let segments = $state<HTMLButtonElement[]>([])
   const chips = $derived(filterChips(filters, collections))
-
-  /** Arrow keys move to the next or previous store and pick it, wrapping around (radio group). */
-  function onSegmentKey(e: KeyboardEvent) {
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
-    if (!step) return
-    e.preventDefault()
-    const i = (storeIndex + step + stores.length) % stores.length
-    store = stores[i]
-    segments[i]?.focus()
-  }
 
   const sorts = $derived(
     (['lastPlayed', 'mostPlayed', 'longestToBeat', 'shortestToBeat', 'title'] as const).map((value) => ({ value, label: t(`sort.${value}`) })),
   )
   const sortName = $derived(sorts.find((s) => s.value === sort)?.label)
 
-  let open = $state<'filters' | 'downloads' | 'sort' | 'update' | null>(null)
+  type Pop = 'filters' | 'downloads' | 'sort' | 'update'
+  let open = $state<Pop | null>(null)
   let search = $state<HTMLInputElement>()
-  let filtersChip = $state<HTMLButtonElement>()
-  let downloadsChip = $state<HTMLButtonElement>()
-  let sortChip = $state<HTMLButtonElement>()
-  let updateChip = $state<HTMLButtonElement>()
+  /** One open at a time: opening one replaces the other; closing one leaves another that opened meanwhile. */
+  const show = (pop: Pop, on: boolean) => (open = on ? pop : open === pop ? null : open)
   $effect(() => {
     popoverOpen = open !== null
   })
@@ -126,16 +116,12 @@
     return () => void unlisten.then((f) => f())
   })
 
-  function close(refocus: boolean) {
-    const chip = { filters: filtersChip, downloads: downloadsChip, sort: sortChip, update: updateChip }[open ?? 'filters']
-    open = null
-    if (refocus) chip?.focus()
-  }
-
-  function onkeydown(e: KeyboardEvent) {
+  async function onkeydown(e: KeyboardEvent) {
     if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !modal) {
       e.preventDefault()
       open = null
+      // An open popover holds focus until it has closed and handed focus back to its chip.
+      await tick()
       search?.focus()
       search?.select()
     }
@@ -163,24 +149,32 @@
 
   <div class="chips" role="group" aria-label={t('toolbar.filter')}>
     {#if stores.length}
-      <div class="seg" role="radiogroup" aria-label={t('toolbar.store')} style="--at: {storeIndex}">
-        <span class="thumb" aria-hidden="true"></span>
-        {#each stores as s, i (s ?? 'all')}
-          {@const name = s === null ? undefined : storeNames[s]}
-          <button
-            role="radio"
-            aria-checked={store === s}
-            aria-label={name}
-            title={name}
-            tabindex={store === s ? 0 : -1}
-            bind:this={segments[i]}
-            onclick={() => (store = s)}
-            onkeydown={onSegmentKey}
-          >
-            {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
-          </button>
-        {/each}
-      </div>
+      <RadioGroup.Root
+        orientation="horizontal"
+        aria-label={t('toolbar.store')}
+        bind:value={() => store ?? 'all', (v) => (store = v === 'all' ? null : (v as Store))}
+      >
+        {#snippet child({ props })}
+          <div {...props} class="seg" style="--at: {storeIndex}">
+            <span class="thumb" aria-hidden="true"></span>
+            {#each stores as s (s ?? 'all')}
+              {@const name = s === null ? undefined : storeNames[s]}
+              <Tip text={name ?? ''}>
+                {#snippet children({ props: tip })}
+                  <RadioGroup.Item value={s ?? 'all'} aria-label={name}>
+                    {#snippet child({ props })}
+                      <!-- The radio's props last: its id and data-state must not be replaced by the tooltip's. -->
+                      <button {...mergeProps(tip, props)}>
+                        {#if s === null}{t('toolbar.all')}{:else}<StoreIcon provider={s} size={18} />{/if}
+                      </button>
+                    {/snippet}
+                  </RadioGroup.Item>
+                {/snippet}
+              </Tip>
+            {/each}
+          </div>
+        {/snippet}
+      </RadioGroup.Root>
     {/if}
     <button class="chip" aria-pressed={installedOnly} onclick={() => (installedOnly = !installedOnly)}>
       {t('play.installed')}
@@ -190,101 +184,91 @@
         {chip.label}<i aria-hidden="true">✕</i>
       </button>
     {/each}
-    <div class="dd">
-      <button
-        class="chip"
-        bind:this={filtersChip}
-        aria-haspopup="dialog"
-        aria-expanded={open === 'filters'}
-        onclick={() => (open = open === 'filters' ? null : 'filters')}
-      >
-        <svg class="line" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-          <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
-          <circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" />
-        </svg>
-        {t('filters.title')}
-      </button>
-      {#if open === 'filters'}
-        <FilterPopover bind:filters {collections} multiStore={storesInUse.length > 1} anchor={filtersChip} onclose={close} onchanged={oncollections} />
-      {/if}
-    </div>
+    <FilterPopover
+      bind:filters
+      {collections}
+      multiStore={storesInUse.length > 1}
+      bind:open={() => open === 'filters', (v) => show('filters', v)}
+      onchanged={oncollections}
+    >
+      {#snippet trigger({ props })}
+        <button {...props} class="chip">
+          <svg class="line" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
+            <circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" />
+          </svg>
+          {t('filters.title')}
+        </button>
+      {/snippet}
+    </FilterPopover>
   </div>
 
   <span class="spacer"></span>
 
-  <div class="dd">
-    <button
-      class="chip"
-      bind:this={sortChip}
-      aria-haspopup="menu"
-      aria-expanded={open === 'sort'}
-      aria-label={t('toolbar.sort', { sort: sortName ?? '' })}
-      onclick={() => (open = open === 'sort' ? null : 'sort')}
-    >
-      {sortName}
-      <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-    </button>
-    {#if open === 'sort'}
-      <ChoiceMenu bind:value={sort} options={sorts} label={t('toolbar.sortBy')} anchor={sortChip} onclose={close} />
-    {/if}
-  </div>
+  <ChoiceMenu bind:value={sort} options={sorts} label={t('toolbar.sortBy')} bind:open={() => open === 'sort', (v) => show('sort', v)}>
+    {#snippet trigger({ props })}
+      <button {...props} class="chip" aria-label={t('toolbar.sort', { sort: sortName ?? '' })}>
+        {sortName}
+        <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+      </button>
+    {/snippet}
+  </ChoiceMenu>
 
   {#if update}
-    <div class="dd">
-      <button
-        class="chip"
-        bind:this={updateChip}
-        aria-haspopup="dialog"
-        aria-expanded={open === 'update'}
-        onclick={() => (open = open === 'update' ? null : 'update')}
-      >
-        <svg class="line up" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
-        {t('play.update')}
-      </button>
-      {#if open === 'update'}
-        <UpdatePopover {update} current={appVersion} {running} {installing} error={installError} anchor={updateChip} onclose={close} {oninstall} />
-      {/if}
-    </div>
+    <UpdatePopover
+      {update}
+      current={appVersion}
+      {running}
+      {installing}
+      error={installError}
+      bind:open={() => open === 'update', (v) => show('update', v)}
+      {oninstall}
+    >
+      {#snippet trigger({ props })}
+        <button {...props} class="chip">
+          <svg class="line up" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+          {t('play.update')}
+        </button>
+      {/snippet}
+    </UpdatePopover>
   {/if}
 
   {#if downloading}
-    <div class="dd">
-      <button
-        class="chip icon"
-        bind:this={downloadsChip}
-        aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
-        title={t('downloads.title')}
-        aria-haspopup="dialog"
-        aria-expanded={open === 'downloads'}
-        onclick={() => (open = open === 'downloads' ? null : 'downloads')}
-      >
-        <span class="ring" style="--done: {fraction * 100}%"></span>
-        <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-      </button>
-      {#if open === 'downloads'}
-        <DownloadsPopover {progress} {queue} {games} anchor={downloadsChip} onclose={close} {oncancel} {onpause} {onresume} {onmove} />
-      {/if}
-    </div>
+    <DownloadsPopover {progress} {queue} {games} bind:open={() => open === 'downloads', (v) => show('downloads', v)} {oncancel} {onpause} {onresume} {onmove}>
+      {#snippet trigger({ props })}
+        <Tip text={t('downloads.title')}>
+          {#snippet children({ props: tip })}
+            <button {...mergeProps(tip, props)} class="chip icon" aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}>
+              <span class="ring" style="--done: {fraction * 100}%"></span>
+              <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+            </button>
+          {/snippet}
+        </Tip>
+      {/snippet}
+    </DownloadsPopover>
   {/if}
 
-  <button class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')} title={t('toolbar.addGame')}>
-    <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-  </button>
+  <Tip text={t('toolbar.addGame')}>
+    {#snippet children({ props })}
+      <button {...props} class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')}>
+        <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    {/snippet}
+  </Tip>
 
-  <button
-    class="chip icon settings"
-    onclick={onsettings}
-    aria-label={attention ? t('toolbar.settingsAttention') : t('toolbar.settings')}
-    title={t('toolbar.settings')}
-  >
-    <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path
-        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-      />
-    </svg>
-    {#if attention}<span class="dot"></span>{/if}
-  </button>
+  <Tip text={t('toolbar.settings')}>
+    {#snippet children({ props })}
+      <button {...props} class="chip icon settings" onclick={onsettings} aria-label={attention ? t('toolbar.settingsAttention') : t('toolbar.settings')}>
+        <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+          />
+        </svg>
+        {#if attention}<span class="dot"></span>{/if}
+      </button>
+    {/snippet}
+  </Tip>
 </nav>
 
 <style>
@@ -366,10 +350,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .dd {
-    position: relative;
   }
 
   /* Store picker: one chip-sized segmented control; the selected segment's pill slides under it. */

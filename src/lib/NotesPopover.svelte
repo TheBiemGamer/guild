@@ -7,16 +7,18 @@
 </script>
 
 <script lang="ts">
+  import { Popover } from 'bits-ui'
   import type { Snippet } from 'svelte'
-  import { popover } from './popover'
   import { t } from './i18n'
+  import { keepOnBackForward } from './outside'
 
   let {
     version,
     sub,
     notes,
+    open = $bindable(),
     anchor,
-    onclose,
+    trigger,
     children,
   }: {
     version: string
@@ -24,58 +26,58 @@
     sub?: string
     /** A CHANGELOG.md section. */
     notes: string
-    anchor: HTMLElement | undefined
-    onclose: (refocus: boolean) => void
+    open: boolean
+    /** The caller's own button, which toggles `open`; clicks on it don't count as outside. */
+    anchor?: HTMLElement
+    /** Or a chip the popover owns as its trigger: spread `props` on it. */
+    trigger?: Snippet<[{ props: Record<string, unknown> }]>
     /** The footer. */
     children?: Snippet
   } = $props()
 
-  const WIDTH = 380
-  const GAP = 8
-  const EDGE = 16
   const groups = $derived(parseNotes(notes))
-  /** The content's own height; the popover scrolls when it's taller than the room. */
-  let height = $state(0)
-  // Fixed to the viewport, so the Settings panel never clips it: right-aligned under the anchor, or above
-  // it when the content doesn't fit below and there's more room above.
-  const rect = $derived(anchor?.getBoundingClientRect())
-  const left = $derived(rect ? Math.max(EDGE, Math.min(rect.right - WIDTH, window.innerWidth - WIDTH - EDGE)) : EDGE)
-  const place = $derived.by(() => {
-    if (!rect) return { top: EDGE, max: window.innerHeight - 2 * EDGE }
-    const below = window.innerHeight - EDGE - rect.bottom - GAP
-    const above = rect.top - GAP - EDGE
-    if (height <= below || below >= above) return { top: rect.bottom + GAP, max: below }
-    return { top: rect.top - GAP - Math.min(height, above), max: above }
-  })
 </script>
 
-<div
-  class="pop"
-  role="dialog"
-  aria-label={t('notes.label', { version })}
-  tabindex="-1"
-  style="left: {left}px; top: {place.top}px; max-height: {place.max}px"
-  use:popover={{ anchor, close: onclose }}
->
-  <div class="body" bind:offsetHeight={height}>
-    <div class="ver">
-      <b>{version}</b>{#if sub}<span>{sub}</span>{/if}
-    </div>
-    {#each groups as g (g.title)}
-      <h3>{g.title}</h3>
-      <ul>
-        {#each g.items as item, i (i)}<li>{item}</li>{/each}
-      </ul>
-    {/each}
-    {@render children?.()}
-  </div>
-</div>
+<Popover.Root bind:open>
+  {#if trigger}
+    <Popover.Trigger>
+      {#snippet child({ props })}
+        {@render trigger({ props })}
+      {/snippet}
+    </Popover.Trigger>
+  {/if}
+  <Popover.Portal>
+    <!-- Right-aligned under the button, above it when there's more room there; it scrolls when taller than the room. -->
+    <Popover.Content customAnchor={anchor ?? null} align="end" sideOffset={8} collisionPadding={16} onInteractOutside={keepOnBackForward}>
+      {#snippet child({ props, wrapperProps })}
+        <div {...wrapperProps}>
+          <div {...props} class="pop" role="dialog" aria-label={t('notes.label', { version })}>
+            <div class="body">
+              <div class="ver">
+                <b>{version}</b>{#if sub}<span>{sub}</span>{/if}
+              </div>
+              {#each groups as g (g.title)}
+                <h3>{g.title}</h3>
+                <ul>
+                  {#each g.items as item, i (i)}<li>{item}</li>{/each}
+                </ul>
+              {/each}
+              {@render children?.()}
+            </div>
+          </div>
+        </div>
+      {/snippet}
+    </Popover.Content>
+  </Popover.Portal>
+</Popover.Root>
 
 <style>
   .pop {
-    position: fixed;
+    /* bits-ui copies this onto its portal wrapper: above the Settings backdrop (20). */
+    position: relative;
     z-index: 30;
     width: 380px;
+    max-height: var(--bits-floating-available-height);
     overflow-y: auto;
     border-radius: 12px;
     background: var(--surface-2);
