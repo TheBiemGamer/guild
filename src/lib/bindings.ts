@@ -192,6 +192,11 @@ export const commands = {
 	winePrefixes: () => __TAURI_INVOKE<PrefixView[]>("wine_prefixes"),
 	/**  Each prefix's size on disk, walked in the background. */
 	prefixSizes: () => __TAURI_INVOKE<PrefixSize[]>("prefix_sizes"),
+	/**
+	 *  The Wine prefix of a copy, for its game page: only on Linux, once its game has run, and never for a native Linux
+	 *  build.
+	 */
+	gamePrefix: (key: string) => __TAURI_INVOKE<GamePrefix | null>("game_prefix", { key }),
 	/**  Deletes a copy's prefix, saves and all; not while its game runs. */
 	removePrefix: (key: string) => __TAURI_INVOKE<null>("remove_prefix", { key }),
 	/**  Opens a copy's prefix folder. */
@@ -420,6 +425,11 @@ export type GameInfo = {
 	screenshots: string[],
 	/**  Whether the Steam store page lists DLC; `None` when unknown (other sources, older caches). */
 	hasDlc?: boolean | null,
+};
+
+export type GamePrefix = {
+	/**  Whether winetricks can run in it: the system's, or one a Proton build here bundles. */
+	winetricks: boolean,
 };
 
 export type GridCover = {

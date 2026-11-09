@@ -590,5 +590,6 @@
   "msg.noWinetricks": "winetricks isn't installed, and this game's Proton build doesn't include it.",
   "busy.settingUp": "Setting up…",
   "detail.removePrefix": "Also remove its Wine prefix",
-  "settings.protonNow": "Proton: {name}"
+  "settings.protonNow": "Proton: {name}",
+  "detail.winePrefix": "Wine prefix"
 }

@@ -157,6 +157,7 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
             commands::wine::remove_proton,
             commands::wine::wine_prefixes,
             commands::wine::prefix_sizes,
+            commands::wine::game_prefix,
             commands::wine::remove_prefix,
             commands::wine::open_prefix,
             commands::wine::run_in_prefix,

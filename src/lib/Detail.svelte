@@ -51,6 +51,7 @@
     type Detail,
     type Dlc,
     type GameInfo,
+    type GamePrefix,
     type LaunchOptions,
     type LinkKind,
     type Progress,
@@ -501,6 +502,26 @@
   // A tab that went away (the DLC list emptied, the copy was uninstalled) falls back to Overview.
   const current = $derived(tabs.some((t) => t.id === tab) ? tab : 'overview')
 
+  /** Linux: the copy's Wine prefix, asked again each time Installation opens, since the first launch makes it. */
+  let winePrefix = $state<GamePrefix | null>(null)
+  let winePrefixOf: string | null = null
+  $effect(() => {
+    const key = launchKey
+    if (key !== winePrefixOf) {
+      winePrefix = null
+      winePrefixOf = key
+    }
+    if (!key || current !== 'installation') return
+    let alive = true
+    commands.gamePrefix(key).then(
+      (p) => alive && (winePrefix = p),
+      () => {},
+    )
+    return () => {
+      alive = false
+    }
+  })
+
   const showAbout = $derived(!!info && (info.description !== '' || info.screenshots.length > 0))
   // Every store game has a store page, so Details always has something to show.
   const showDetails = $derived(!!game && !custom)
@@ -852,6 +873,24 @@
                       {/snippet}
                     </Tip>
                   {/if}
+                </div>
+              {/if}
+              {#if winePrefix}
+                {@const key = copy!.key}
+                <div class="row">
+                  <span class="key">{t('detail.winePrefix')}</span>
+                  <span class="value"></span>
+                  <button class="chip" onclick={() => run(() => commands.openPrefix(key))}>{t('detail.open')}</button>
+                  <button class="chip" onclick={() => run(() => commands.runInPrefix(key, 'winecfg'))}>winecfg</button>
+                  <Tip text={winePrefix.winetricks ? '' : t('settings.noWinetricks')}>
+                    {#snippet children({ props })}
+                      <span {...props} class="tip-anchor">
+                        <button class="chip" disabled={!winePrefix?.winetricks} onclick={() => run(() => commands.runInPrefix(key, 'winetricks'))}
+                          >winetricks</button
+                        >
+                      </span>
+                    {/snippet}
+                  </Tip>
                 </div>
               {/if}
               {#if copy!.updateAvailable}
