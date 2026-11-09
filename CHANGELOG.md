@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.0, 2026-11-09
+
+### New
+
+- Guild runs on Linux, as an AppImage, a .deb or from the AUR. Steam works from a regular or a Flatpak install, and your Steam login and API keys are kept in your desktop's keyring.
+- On Linux, Epic, GOG, Amazon and added Windows games run through umu-launcher and Proton, each game in its own Wine prefix. GOG installs a game's Linux version when GOG has one.
+- Settings → Wine on Linux: install umu-launcher, GE-Proton and Proton-CachyOS, choose the default Proton, and open, configure or remove each game's prefix. A game's Launch tab can pick its own Proton.
+- Uninstalling a Windows game on Linux keeps its prefix, and with it your saves, unless you tick the box to remove it.
+- Installing an Epic, GOG or Amazon game opens a panel with the download and disk size, the folder it goes to and the space left on that drive. Pick another folder, choose which DLC to install, and for GOG the language and the Linux or Windows version.
+- Importing an installed Epic or Amazon game lets you search for it by name.
+
+### Changed
+
+- Install is turned off when the drive doesn't have room for the game.
+- The folder you install a game to becomes that store's install folder.
+- With no Epic install folder set, games go to Legendary's own default folder, and the install panel shows that path.
+- In a menu, typing a letter jumps to the first item that starts with it.
+- Escape closes only the topmost menu or popup.
+- Hints on buttons are tooltips now, and they also show when you reach the button with the keyboard. A cut-off path or message shows in full when you hover it.
+- While Settings or another dialog is open, screen readers and the keyboard stay inside it.
+- The mouse Back and Forward buttons do nothing while a menu or popup is open.
+
+### Fixed
+
+- A game shows as installed by the time its Ready to play notification appears.
+
 ## 0.1.1, 2026-11-08
 
 ### New
