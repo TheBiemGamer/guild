@@ -140,7 +140,8 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          exe=$(echo nsis/*-setup.exe)
+          # The Windows artifact holds only nsis/, so upload-artifact left that folder out.
+          exe=$(echo *-setup.exe)
           appimage=$(echo appimage/*.AppImage)
           base="https://github.com/$GH_REPO/releases/download/$TAG"
           jq -n \
