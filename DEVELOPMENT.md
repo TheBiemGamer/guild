@@ -85,7 +85,7 @@ The database is `library.sqlite`. Schema changes are new migration steps in `src
 
 ## Releasing
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the Windows NSIS installer and the Linux AppImage and `.deb` (on Ubuntu 22.04, so the AppImage runs on older glibc), signs the installer and the AppImage for the updater, and publishes a GitHub release with `latest.json`. A last job writes `latest.json` with both the `windows-x86_64` and `linux-x86_64` entries. The `.deb` doesn't auto-update. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the Windows NSIS installer and the Linux AppImage and `.deb` (on Ubuntu 22.04, so the AppImage runs on older glibc), signs the installer and the AppImage for the updater, and publishes a GitHub release with `latest.json`. A last job writes `latest.json` with both the `windows-x86_64` and `linux-x86_64-appimage` entries. The `.deb` doesn't auto-update: its update check finds no entry for it. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.
 
 ### One-time setup
 

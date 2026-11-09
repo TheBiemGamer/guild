@@ -153,7 +153,7 @@ jobs:
             --arg lurl "$base/$(basename "$appimage")" \
             '{version: $version, notes: $notes, pub_date: $date, platforms: {
               "windows-x86_64": {signature: $wsig, url: $wurl},
-              "linux-x86_64": {signature: $lsig, url: $lurl}}}' > latest.json
+              "linux-x86_64-appimage": {signature: $lsig, url: $lurl}}}' > latest.json
           # A draft until every file is attached, so the updater never finds a release without latest.json.
           gh release create "$TAG" --draft --title "Guild $TAG" --notes "$NOTES" \
             "$exe" "$exe.sig" "$appimage" "$appimage.sig" deb/*.deb latest.json
