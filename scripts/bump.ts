@@ -1,4 +1,4 @@
-// Sets the app version in package.json, src-tauri/Cargo.toml and src-tauri/Cargo.lock: `npm run bump 0.2.0`.
+// Sets the app version in package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock and the AUR PKGBUILD: `npm run bump 0.2.0`.
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 
@@ -20,4 +20,7 @@ function rewrite(file: string, pattern: RegExp, to: string) {
 
 rewrite('src-tauri/Cargo.toml', /^version = ".*"$/m, `version = "${version}"`)
 rewrite('src-tauri/Cargo.lock', /^name = "launcher"\r?\nversion = ".*"$/m, `name = "launcher"\nversion = "${version}"`)
+rewrite('packaging/aur/PKGBUILD', /^pkgver=.*$/m, `pkgver=${version}`)
+// A new version starts its package release count over.
+rewrite('packaging/aur/PKGBUILD', /^pkgrel=.*$/m, 'pkgrel=1')
 console.log(`Version is now ${version}.`)

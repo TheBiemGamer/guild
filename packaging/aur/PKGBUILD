@@ -1,4 +1,4 @@
-# Repackages the .deb from the GitHub release. Before pushing to the AUR, set pkgver, then run
+# Repackages the .deb from the GitHub release. npm run bump sets pkgver; before pushing to the AUR, run
 # updpkgsums and makepkg --printsrcinfo > .SRCINFO.
 pkgname=guild-bin
 pkgver=0.2.0

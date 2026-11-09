@@ -101,7 +101,7 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, bui
 
 ### Each release
 
-1. `npm run bump X.Y.Z` sets the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`.
+1. `npm run bump X.Y.Z` sets the version in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `packaging/aur/PKGBUILD` (`pkgver`, with `pkgrel` back to 1).
 2. Add a `## X.Y.Z, YYYY-MM-DD` section to `CHANGELOG.md`, with `### New`, `### Changed` or `### Fixed` groups of `- ` lines. It becomes the release notes and what the app shows before updating.
 3. Commit, then tag and push the tag:
 
@@ -110,7 +110,7 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, bui
    git push origin vX.Y.Z
    ```
 
-For the AUR package, set `pkgver` in `packaging/aur/PKGBUILD` once the release is out, run `updpkgsums` and `makepkg --printsrcinfo > .SRCINFO` there, and push both files to the `guild-bin` AUR repository.
+For the AUR package, once the release is out, run `updpkgsums` and `makepkg --printsrcinfo > .SRCINFO` there, and push both files to the `guild-bin` AUR repository.
 
 The workflow stops if the tag, `package.json` and `Cargo.toml` versions differ, or if `CHANGELOG.md` has no section for the version.
 
