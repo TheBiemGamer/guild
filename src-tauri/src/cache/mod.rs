@@ -30,7 +30,7 @@ pub struct Dirs {
 /// `%LOCALAPPDATA%`.
 pub fn local_app_data() -> PathBuf {
     directories::BaseDirs::new()
-        .expect("Windows always has a home dir")
+        .expect("Windows and Linux always have a home dir")
         .data_local_dir()
         .to_path_buf()
 }
@@ -39,7 +39,11 @@ impl Dirs {
     pub fn new() -> Self {
         let local = local_app_data();
         // `%LOCALAPPDATA%\Guild\{data,cache}`, the layout of `ProjectDirs::from("", "", "Guild")`.
-        let root = crate::migrate::root(&local);
+        let root = if cfg!(windows) {
+            crate::migrate::root(&local)
+        } else {
+            local.join(crate::migrate::FOLDER)
+        };
         let (data, cache) = (root.join("data"), root.join("cache"));
         Self {
             // Holds the owner's data too; its name never changes (see `db::STEPS`).

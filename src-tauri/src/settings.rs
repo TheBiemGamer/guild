@@ -177,7 +177,7 @@ pub fn set_steam_token(value: Option<&str>) -> Result<(), Msg> {
 
 /// Moves the secrets saved under the name before the rename (`migrate::secrets`).
 pub fn move_secrets() {
-    // `entry` registers Credential Manager as the default store first.
+    // `entry` registers the OS store as the default store first.
     if entry(SECRET_USER).is_ok() {
         crate::migrate::secrets(
             keyring_core::Entry::new,
@@ -187,10 +187,14 @@ pub fn move_secrets() {
     }
 }
 
-/// Windows Credential Manager, registered once as keyring-core's default store.
+/// Windows Credential Manager, or the Secret Service (GNOME Keyring, KWallet) on Linux, registered once as
+/// keyring-core's default store.
 fn entry(user: &str) -> Result<keyring_core::Entry, Msg> {
     static STORE: std::sync::LazyLock<Result<(), String>> = std::sync::LazyLock::new(|| {
+        #[cfg(windows)]
         let store = windows_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
+        #[cfg(target_os = "linux")]
+        let store = zbus_secret_service_keyring_store::Store::new().map_err(|e| e.to_string())?;
         keyring_core::set_default_store(store);
         Ok(())
     });

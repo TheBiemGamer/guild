@@ -455,7 +455,7 @@ pub fn executable(game: &Game) -> Result<Option<String>, Error> {
 /// Whether a process named `exe` runs.
 // shortcut: games whose executable is a bootstrapper that hands off to another exe stop counting as running early.
 pub fn is_running(exe: &str) -> bool {
-    crate::platform::process_listed(&format!("IMAGENAME eq {exe}"), exe)
+    crate::platform::image_running(exe)
 }
 
 pub fn login_state() -> StoreLogin {
@@ -736,6 +736,8 @@ mod tests {
         );
     }
 
+    // Windows paths; games on Linux run through Wine, a later phase.
+    #[cfg(windows)]
     #[test]
     fn override_exe_must_be_inside_install_dir() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1130,6 +1132,8 @@ mod tests {
         );
     }
 
+    // Windows paths; games on Linux run through Wine, a later phase.
+    #[cfg(windows)]
     #[test]
     fn moves_stay_on_the_same_drive() {
         // Refused before Legendary runs, so no process starts.
@@ -1248,9 +1252,12 @@ mod tests {
 
     #[test]
     fn failure_reports_the_last_stderr_line() {
-        use std::os::windows::process::ExitStatusExt;
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(1);
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw(1 << 8);
         let output = std::process::Output {
-            status: std::process::ExitStatus::from_raw(1),
+            status,
             stdout: Vec::new(),
             stderr: b"[cli] INFO: Logging in...\n[cli] ERROR: Login failed, cannot continue!\n\n"
                 .to_vec(),
@@ -1259,7 +1266,11 @@ mod tests {
             failure(&output),
             msg!(
                 legendaryFailed,
-                status = "exit code: 1",
+                status = if cfg!(windows) {
+                    "exit code: 1"
+                } else {
+                    "exit status: 1"
+                },
                 detail = "[cli] ERROR: Login failed, cannot continue!"
             )
         );

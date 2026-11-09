@@ -38,7 +38,10 @@ fn main() {
     #[cfg(debug_assertions)]
     export_bindings(&bindings);
     // Before anything opens a file in the app's folder; logged once the log (in that folder) is open.
-    let moved = migrate::folder(&cache::local_app_data());
+    // 0.1.0 shipped only for Windows; on Linux an old `launcher` folder is some other program's.
+    let moved = cfg!(windows)
+        .then(|| migrate::folder(&cache::local_app_data()))
+        .flatten();
     tauri::Builder::default()
         // First, so a second launch exits before the others set anything up.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -59,7 +62,7 @@ fn main() {
             tracing::info!(
                 "Guild {} started on {}",
                 app.package_info().version,
-                platform::windows_version()
+                platform::os_version()
             );
             if let Some(moved) = moved {
                 tracing::info!("app folder: {moved}");

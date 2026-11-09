@@ -1699,7 +1699,10 @@ mod tests {
                 "--with-dlcs"
             ]
         );
-        assert!(support.ends_with(r"gog\support\1425609977"), "{support}");
+        assert!(
+            Path::new(&support).ends_with(Path::new("gog").join("support").join("1425609977")),
+            "{support}"
+        );
         let none = strings(&job_args(
             "download",
             "1",
@@ -2109,6 +2112,8 @@ mod tests {
         assert!(to.is_dir());
     }
 
+    // Windows paths; games on Linux run through Wine, a later phase.
+    #[cfg(windows)]
     #[test]
     fn play_starts_the_primary_task() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2177,6 +2182,8 @@ mod tests {
         assert!(launch("1", dir, &LaunchOptions::default()).is_err());
     }
 
+    // Windows paths; games on Linux run through Wine, a later phase.
+    #[cfg(windows)]
     #[test]
     fn save_locations_resolve_their_folder_variables() {
         let install = Path::new(r"C:\Games\June");
@@ -2345,7 +2352,9 @@ mod tests {
     fn real_gogdl_info_without_login() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        let exe = root.join("gogdl").join("gogdl.exe");
+        let exe = root
+            .join("gogdl")
+            .join(if cfg!(windows) { "gogdl.exe" } else { "gogdl" });
         let http = reqwest::Client::new();
         tauri::async_runtime::block_on(crate::tools::install_to(&http, &tools::GOGDL, root))
             .unwrap();

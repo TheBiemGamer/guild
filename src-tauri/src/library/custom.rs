@@ -159,6 +159,8 @@ mod tests {
         }
     }
 
+    // Windows paths; games on Linux run through Wine, a later phase.
+    #[cfg(windows)]
     #[test]
     fn launch_runs_the_exe_in_its_folder_with_split_args() {
         let c = row(

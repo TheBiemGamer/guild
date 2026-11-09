@@ -547,7 +547,7 @@ pub fn open_log_folder(state: State<'_, AppState>) -> Res<()> {
 pub fn report_problem(app: AppHandle) -> Res<()> {
     use crate::library::percent_encode;
     let version = app.package_info().version.to_string();
-    let os = crate::platform::windows_version();
+    let os = crate::platform::os_version();
     let url = format!(
         "https://github.com/TheBiemGamer/guild/issues/new?template=bug_report.yml&version={}&os={}",
         percent_encode(&version),

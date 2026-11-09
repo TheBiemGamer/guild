@@ -1153,9 +1153,13 @@ mod tests {
     }
 
     fn output(code: u32, stderr: &[u8]) -> Output {
-        use std::os::windows::process::ExitStatusExt;
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(code);
+        // A Unix wait status holds the exit code in its second byte.
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw((code as i32) << 8);
         Output {
-            status: std::process::ExitStatus::from_raw(code),
+            status,
             stdout: Vec::new(),
             stderr: stderr.to_vec(),
         }
@@ -1688,6 +1692,8 @@ mod tests {
         );
     }
 
+    // Windows paths; games on Linux run through Wine, a later phase.
+    #[cfg(windows)]
     #[test]
     fn play_runs_main_with_the_fuel_variables() {
         let fuel = Fuel {

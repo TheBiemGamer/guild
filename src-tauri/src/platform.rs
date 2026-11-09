@@ -1,4 +1,5 @@
-//! OS-specific calls. Windows only for now.
+//! OS-specific calls, for Windows and Linux. Linux runs the store tools' Linux builds; Windows games through Wine
+//! come later.
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -10,6 +11,12 @@ pub fn no_window(command: &mut std::process::Command) -> &mut std::process::Comm
     command.creation_flags(CREATE_NO_WINDOW)
 }
 
+/// Linux opens no console window, so there is nothing to keep from flashing.
+#[cfg(target_os = "linux")]
+pub fn no_window(command: &mut std::process::Command) -> &mut std::process::Command {
+    command
+}
+
 /// Opens a folder in File Explorer, or a store URI (`steam://…`, `com.epicgames.launcher://…`) with its registered
 /// handler. explorer.exe hands it to the shell without cmd.exe parsing, so `&` in a URI is safe.
 // shortcut: explorer never reports a missing handler (Windows shows its own dialog); use ShellExecuteW if we need the error in-app.
@@ -18,6 +25,23 @@ pub fn shell_open(target: impl AsRef<std::ffi::OsStr>) -> Result<(), crate::libr
     std::process::Command::new("explorer.exe")
         .arg(target)
         .spawn()?;
+    Ok(())
+}
+
+/// Opens a folder, URL or store URI with its handler through `xdg-open`, which gets the target as one argument, no
+/// shell, so `&` in a URI is safe.
+// shortcut: like explorer, xdg-open's failure to find a handler isn't reported in-app.
+#[cfg(target_os = "linux")]
+pub fn shell_open(target: impl AsRef<std::ffi::OsStr>) -> Result<(), crate::library::Error> {
+    use std::process::Stdio;
+    let mut child = std::process::Command::new("xdg-open")
+        .arg(target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    // Reaped off-thread so it never lingers as a zombie.
+    std::thread::spawn(move || child.wait());
     Ok(())
 }
 
@@ -36,10 +60,31 @@ pub fn open_url(url: &str) -> Result<(), crate::library::Error> {
     Ok(())
 }
 
+/// Opens an `https://` URL in the default browser.
+#[cfg(target_os = "linux")]
+pub fn open_url(url: &str) -> Result<(), crate::library::Error> {
+    if !url.starts_with("https://") {
+        return Err(format!("not an https URL: {url}").into());
+    }
+    shell_open(url)
+}
+
+/// Whether process `pid` runs and is named `image` (the name guards against a reused pid).
+#[cfg(windows)]
+pub fn pid_is(pid: u32, image: &str) -> bool {
+    process_listed(&format!("PID eq {pid}"), image)
+}
+
+/// Whether any process named `image` runs.
+#[cfg(windows)]
+pub fn image_running(image: &str) -> bool {
+    process_listed(&format!("IMAGENAME eq {image}"), image)
+}
+
 /// Whether `tasklist /FI <filter>` (e.g. `PID eq 42`) lists a process named `image`.
 // shortcut: starts a tasklist process; callers only ask while a game is believed to be running.
 #[cfg(windows)]
-pub fn process_listed(filter: &str, image: &str) -> bool {
+fn process_listed(filter: &str, image: &str) -> bool {
     let output = no_window(
         std::process::Command::new("tasklist").args(["/FI", filter, "/FO", "CSV", "/NH"]),
     )
@@ -48,6 +93,7 @@ pub fn process_listed(filter: &str, image: &str) -> bool {
 }
 
 /// tasklist CSV rows look like `"steam.exe","16176","Console","1","131.968 K"`.
+#[cfg(windows)]
 fn lists_image(tasklist_csv: &str, image: &str) -> bool {
     let wanted = format!("\"{}\"", image.to_ascii_lowercase());
     tasklist_csv
@@ -55,12 +101,91 @@ fn lists_image(tasklist_csv: &str, image: &str) -> bool {
         .any(|row| row.to_ascii_lowercase().starts_with(&wanted))
 }
 
+/// Whether process `pid` runs and is named `image` (the name guards against a reused pid).
+#[cfg(target_os = "linux")]
+pub fn pid_is(pid: u32, image: &str) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| comm_is(&comm, image))
+}
+
+/// Whether any process named `image` runs.
+#[cfg(target_os = "linux")]
+pub fn image_running(image: &str) -> bool {
+    std::fs::read_dir("/proc").is_ok_and(|dir| {
+        dir.flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .bytes()
+                    .all(|b| b.is_ascii_digit())
+            })
+            .any(|e| {
+                std::fs::read_to_string(e.path().join("comm"))
+                    .is_ok_and(|comm| comm_is(&comm, image))
+            })
+    })
+}
+
+/// `/proc/<pid>/comm` holds a process name cut to its first 15 bytes, ending in a newline.
+#[cfg(target_os = "linux")]
+fn comm_is(comm: &str, image: &str) -> bool {
+    let image = &image.as_bytes()[..image.len().min(15)];
+    comm.trim_end_matches('\n')
+        .as_bytes()
+        .eq_ignore_ascii_case(image)
+}
+
 /// A DWORD value under `HKEY_CURRENT_USER\<key>`.
 #[cfg(windows)]
-pub fn user_registry_u32(key: &str, name: &str) -> std::io::Result<u32> {
+fn user_registry_u32(key: &str, name: &str) -> std::io::Result<u32> {
     winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
         .open_subkey(key)?
         .get_value(name)
+}
+
+/// The Steam client's pid, as Steam last wrote it.
+#[cfg(windows)]
+pub fn steam_pid() -> Option<u32> {
+    user_registry_u32(r"Software\Valve\Steam\ActiveProcess", "pid").ok()
+}
+
+/// The Steam client's pid, as Steam last wrote it.
+#[cfg(target_os = "linux")]
+pub fn steam_pid() -> Option<u32> {
+    let home = directories::BaseDirs::new()?
+        .home_dir()
+        .join(".steam/steam.pid");
+    std::fs::read_to_string(home).ok()?.trim().parse().ok()
+}
+
+/// The app id Steam says runs: 0 when none does, an error when Steam was never installed for this user.
+#[cfg(windows)]
+pub fn steam_running_app() -> std::io::Result<u32> {
+    user_registry_u32(r"Software\Valve\Steam", "RunningAppID")
+}
+
+/// The app id Steam says runs, from the registry Steam keeps in `~/.steam/registry.vdf` on Linux.
+// shortcut: Flatpak Steam keeps it under ~/.var/app/com.valvesoftware.Steam; read there too if owners use it.
+#[cfg(target_os = "linux")]
+pub fn steam_running_app() -> std::io::Result<u32> {
+    let home = directories::BaseDirs::new()
+        .ok_or(std::io::ErrorKind::NotFound)?
+        .home_dir()
+        .join(".steam/registry.vdf");
+    registry_vdf_u32(&std::fs::read_to_string(home)?, "RunningAppID")
+        .ok_or_else(|| std::io::ErrorKind::NotFound.into())
+}
+
+/// A number under `Registry/HKCU/Software/Valve/Steam` in Steam's registry.vdf.
+#[cfg(target_os = "linux")]
+fn registry_vdf_u32(text: &str, name: &str) -> Option<u32> {
+    use crate::library::steam::child;
+    let vdf = keyvalues_parser::Vdf::from(keyvalues_parser::parse(text).ok()?);
+    ["HKCU", "Software", "Valve", "Steam", name]
+        .iter()
+        .try_fold(&vdf.value, |v, k| child(v, k))?
+        .get_str()?
+        .parse()
+        .ok()
 }
 
 /// Kills a process and every process it started (Legendary and gogdl unpack themselves into a child process,
@@ -78,6 +203,19 @@ pub fn kill_tree(pid: u32) -> Result<(), crate::library::Error> {
         Ok(())
     } else {
         Err(format!("taskkill exited with {status}").into())
+    }
+}
+
+/// Kills a store tool and every process it started: `spawn_tool` makes it lead its own process group.
+#[cfg(target_os = "linux")]
+pub fn kill_tree(pid: u32) -> Result<(), crate::library::Error> {
+    let status = std::process::Command::new("kill")
+        .args(["-KILL", "--", &format!("-{pid}")])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("kill exited with {status}").into())
     }
 }
 
@@ -110,8 +248,16 @@ pub fn spawn_tool(command: &mut std::process::Command) -> std::io::Result<std::p
     Ok(child)
 }
 
+/// Starts a store tool (Legendary, gogdl, Nile) as the leader of its own process group, so `kill_tree` ends it with
+/// the children it starts. Never for games or `legendary launch`.
+// shortcut: a tool outlives a Guild that exits mid-download (Windows' job ends it); PR_SET_PDEATHSIG needs libc.
+#[cfg(target_os = "linux")]
+pub fn spawn_tool(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0).spawn()
+}
+
 /// `Command::output` for a store tool, started through `spawn_tool`.
-#[cfg(windows)]
 pub fn tool_output(command: &mut std::process::Command) -> std::io::Result<std::process::Output> {
     use std::process::Stdio;
     spawn_tool(
@@ -216,6 +362,19 @@ pub fn process_bytes_written(pid: u32) -> Option<u64> {
     }
 }
 
+/// Bytes a process has made the disk write (`write_bytes` in `/proc/<pid>/io`), or `None` when it's gone or not
+/// ours to read.
+#[cfg(target_os = "linux")]
+pub fn process_bytes_written(pid: u32) -> Option<u64> {
+    std::fs::read_to_string(format!("/proc/{pid}/io"))
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("write_bytes:"))?
+        .trim()
+        .parse()
+        .ok()
+}
+
 /// Windows' display language as a language code, for the languages the app has words for ("nl"); "en" otherwise.
 #[cfg(windows)]
 pub fn ui_language() -> &'static str {
@@ -225,15 +384,29 @@ pub fn ui_language() -> &'static str {
     if id & 0x3ff == 0x13 { "nl" } else { "en" }
 }
 
+/// The locale's language (`LC_ALL`, else `LC_MESSAGES`, else `LANG`) for the languages the app has words for ("nl");
+/// "en" otherwise.
+#[cfg(target_os = "linux")]
+pub fn ui_language() -> &'static str {
+    let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .into_iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|v| !v.is_empty())
+        .unwrap_or_default();
+    if locale.starts_with("nl") { "nl" } else { "en" }
+}
+
 /// The folder a GOG save location's `<?NAME?>` variable stands for; `None` for one it doesn't know. `install` is
 /// the game's install folder.
-#[cfg(windows)]
+// shortcut: on Linux, Windows games keep saves inside their Wine prefix; the Wine phase maps these there.
 pub fn gog_folder(name: &str, install: &std::path::Path) -> Option<std::path::PathBuf> {
     let base = directories::BaseDirs::new()?;
     Some(match name {
         "INSTALL" => install.to_path_buf(),
+        #[cfg(windows)]
         "SAVED_GAMES" => base.home_dir().join("Saved Games"),
         "APPLICATION_DATA_LOCAL" => base.data_local_dir().to_path_buf(),
+        #[cfg(windows)]
         "APPLICATION_DATA_LOCAL_LOW" => base.home_dir().join("AppData").join("LocalLow"),
         "APPLICATION_DATA_ROAMING" => base.data_dir().to_path_buf(),
         "DOCUMENTS" => directories::UserDirs::new()?.document_dir()?.to_path_buf(),
@@ -280,9 +453,20 @@ pub fn remove_autostart(name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Linux has no Run entries; tauri-plugin-autostart keeps its own desktop file.
+#[cfg(target_os = "linux")]
+pub fn autostart(_name: &str) -> Option<bool> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn remove_autostart(_name: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// "Windows 11 (build 26200)", from the registry; builds from 22000 on are Windows 11.
 #[cfg(windows)]
-pub fn windows_version() -> String {
+pub fn os_version() -> String {
     let build: Option<u32> = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
         .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
         .and_then(|k| k.get_value::<String, _>("CurrentBuild"))
@@ -292,6 +476,25 @@ pub fn windows_version() -> String {
         Some(b) => format!("Windows {} (build {b})", if b >= 22_000 { 11 } else { 10 }),
         None => "Windows".into(),
     }
+}
+
+/// The distribution's name, like "CachyOS Linux" (`PRETTY_NAME` in `/etc/os-release`).
+#[cfg(target_os = "linux")]
+pub fn os_version() -> String {
+    std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|text| pretty_name(&text))
+        .unwrap_or_else(|| "Linux".into())
+}
+
+#[cfg(target_os = "linux")]
+fn pretty_name(os_release: &str) -> Option<String> {
+    let value = os_release
+        .lines()
+        .find_map(|l| l.strip_prefix("PRETTY_NAME="))?
+        .trim()
+        .trim_matches(['"', '\'']);
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 #[cfg(test)]
@@ -311,6 +514,7 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
     #[test]
     fn lists_image_matches_whole_name_ignoring_case() {
         let row = "\"Steam.exe\",\"16176\",\"Console\",\"1\",\"131.968 K\"\r\n";
@@ -331,6 +535,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_store_tool_runs_in_the_job_and_to_its_end() {
         use std::os::windows::io::AsRawHandle;
@@ -350,5 +555,45 @@ mod tests {
         assert!(ok != 0 && in_job != 0);
         let output = child.wait_with_output().unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hi");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn comm_matches_the_kernels_cut_name_ignoring_case() {
+        assert!(comm_is("steam\n", "steam"));
+        assert!(!comm_is("steamwebhelper\n", "steam"));
+        assert!(comm_is("Prison Architec\n", "Prison Architect64.exe"));
+        assert!(pid_is(
+            std::process::id(),
+            std::fs::read_to_string("/proc/self/comm")
+                .unwrap()
+                .trim_end()
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn registry_vdf_and_os_release_parse() {
+        let vdf = r#""Registry" { "HKCU" { "Software" { "Valve" { "Steam" { "RunningAppID" "620" } } } } }"#;
+        assert_eq!(registry_vdf_u32(vdf, "RunningAppID"), Some(620));
+        assert_eq!(registry_vdf_u32(vdf, "Missing"), None);
+        assert_eq!(
+            pretty_name("NAME=Arch\nPRETTY_NAME=\"CachyOS Linux\"\n").as_deref(),
+            Some("CachyOS Linux")
+        );
+        assert_eq!(pretty_name("NAME=Arch\n"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_store_tool_and_its_children_die_together() {
+        use std::process::{Command, Stdio};
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & wait"])
+            .stdout(Stdio::null());
+        let mut child = super::spawn_tool(&mut command).unwrap();
+        super::kill_tree(child.id()).unwrap();
+        assert!(!child.wait().unwrap().success());
     }
 }

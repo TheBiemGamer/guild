@@ -10,6 +10,7 @@ use steamlocate::app::StateFlag;
 use steamlocate::{App, Library, SteamDir};
 
 use super::{Art, Error, Game, Progress, ProgressAction, ProviderKind};
+use crate::platform::steam_pid;
 use crate::steam_owned::OwnedGame;
 
 /// Playtime in minutes and last played time, per app id.
@@ -60,10 +61,7 @@ pub fn uninstall(game: &Game) -> Result<(), Error> {
 }
 
 pub fn running_game() -> Option<String> {
-    let id = running_id(crate::platform::user_registry_u32(
-        r"Software\Valve\Steam",
-        "RunningAppID",
-    ))?;
+    let id = running_id(crate::platform::steam_running_app())?;
     // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
     // trust it while the Steam process it was written by is still alive.
     steam_alive(steam_pid()?).then_some(id)
@@ -78,10 +76,6 @@ pub fn download_progress(game: &Game) -> Option<Progress> {
     let writes = pid.and_then(crate::platform::process_bytes_written);
     let mut anchors = ANCHORS.lock().unwrap_or_else(|e| e.into_inner());
     progress(&app, &mut anchors, pid.zip(writes), Instant::now())
-}
-/// The Steam client's pid, as Steam last wrote it.
-fn steam_pid() -> Option<u32> {
-    crate::platform::user_registry_u32(r"Software\Valve\Steam\ActiveProcess", "pid").ok()
 }
 
 /// Steam rewrites an appmanifest only when a download pauses or ends, so its byte counters stand still
@@ -321,9 +315,9 @@ fn running_id(raw: std::io::Result<u32>) -> Option<String> {
     raw.ok().filter(|&id| id != 0).map(|id| id.to_string())
 }
 
-/// Whether `pid` is a live steam.exe (the name check guards against a reused pid).
+/// Whether `pid` is a live Steam client (the name check guards against a reused pid).
 fn steam_alive(pid: u32) -> bool {
-    crate::platform::process_listed(&format!("PID eq {pid}"), "steam.exe")
+    crate::platform::pid_is(pid, if cfg!(windows) { "steam.exe" } else { "steam" })
 }
 
 fn library_games(library: &Library, librarycache: &Path) -> Vec<Game> {
