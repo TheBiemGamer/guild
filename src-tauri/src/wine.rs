@@ -346,6 +346,11 @@ fn runtime(manifest: &str) -> Option<&'static str> {
 /// (`X:\…\game.exe`) and it carries `WINEPREFIX`; umu's own processes only name the program further on.
 fn game_runs(exe: &str, prefix: &Path) -> bool {
     let wanted = prefix.as_os_str().as_encoded_bytes();
+    any_process(|cmdline, environ| is_game_process(cmdline, environ, exe, wanted))
+}
+
+/// Whether `test(cmdline, environ)` holds for any process Guild can read.
+fn any_process(test: impl Fn(&[u8], &[u8]) -> bool) -> bool {
     fs_err::read_dir("/proc")
         .into_iter()
         .flatten()
@@ -358,8 +363,16 @@ fn game_runs(exe: &str, prefix: &Path) -> bool {
         })
         .any(|e| {
             let read = |name| std::fs::read(e.path().join(name)).unwrap_or_default();
-            is_game_process(&read("cmdline"), &read("environ"), exe, wanted)
+            test(&read("cmdline"), &read("environ"))
         })
+}
+
+/// Whether a process runs with `PROTONPATH` set to `proton`, as umu-run and the game it starts do.
+fn uses_proton(environ: &[u8], proton: &Path) -> bool {
+    let wanted = proton.as_os_str().as_encoded_bytes();
+    environ
+        .split(|&b| b == 0)
+        .any(|var| var.strip_prefix(b"PROTONPATH=") == Some(wanted))
 }
 
 /// Proton runs the game with `WINEPREFIX=<prefix>/pfx/`, `pfx` being umu's link back to the prefix itself.
@@ -452,9 +465,11 @@ pub fn windows_folder(prefix: &Path, name: &str) -> Option<PathBuf> {
 }
 
 pub fn view() -> RunnerView {
+    let protons = protons();
     RunnerView {
         umu: umu().is_some(),
-        protons: protons()
+        winetricks: on_path("winetricks").is_some() || protons.iter().any(bundles_winetricks),
+        protons: protons
             .into_iter()
             .map(|p| ProtonView {
                 name: p.name,
@@ -462,12 +477,16 @@ pub fn view() -> RunnerView {
             })
             .collect(),
         proton: default_proton(),
-        winetricks: on_path("winetricks").is_some(),
     }
 }
 
 pub fn proton_names() -> Vec<String> {
     protons().into_iter().map(|p| p.name).collect()
+}
+
+/// GE-Proton and Proton-CachyOS ship winetricks with protonfixes; umu-run prefers that copy to the system's.
+fn bundles_winetricks(proton: &Proton) -> bool {
+    proton.path.join("protonfixes").join("winetricks").is_file()
 }
 
 /// Deletes a Proton build Guild installed; Steam's are left alone.
@@ -476,6 +495,9 @@ pub fn remove_proton(name: &str) -> Result<(), Msg> {
         .into_iter()
         .find(|p| p.name == name && p.removable)
         .ok_or(msg!(protonNotRemovable))?;
+    if any_process(|_, environ| uses_proton(environ, &proton.path)) {
+        return Err(msg!(protonInUse));
+    }
     fs_err::remove_dir_all(&proton.path).map_err(Msg::system)?;
     tracing::info!("removed {name}");
     Ok(())
@@ -511,10 +533,10 @@ pub fn remove_prefix(key: &str) -> Result<(), Msg> {
 /// Starts winecfg or winetricks in a copy's prefix with its Proton build, without waiting. umu-run takes `winetricks`
 /// as its own word: the one the Proton build bundles, else the system's.
 pub fn run_in_prefix(key: &str, program: &str, proton: Option<&str>) -> Result<(), Msg> {
-    if program == "winetricks" && on_path("winetricks").is_none() {
+    let (mut command, proton) = wrap(&Command::new(program), key, proton)?;
+    if program == "winetricks" && on_path("winetricks").is_none() && !bundles_winetricks(&proton) {
         return Err(msg!(noWinetricks));
     }
-    let (mut command, _) = wrap(&Command::new(program), key, proton)?;
     let mut child = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -1085,5 +1107,23 @@ mod tests {
             "june.exe",
             var
         ));
+    }
+
+    #[test]
+    fn a_proton_build_is_in_use_only_by_its_exact_path() {
+        let ge = Path::new("/tools/proton/GE-Proton11-12");
+        assert!(uses_proton(
+            b"HOME=/a\0PROTONPATH=/tools/proton/GE-Proton11-12\0",
+            ge
+        ));
+        assert!(!uses_proton(
+            b"PROTONPATH=/tools/proton/GE-Proton11-1\0",
+            ge
+        ));
+        assert!(!uses_proton(
+            b"PROTONPATH=/tools/proton/GE-Proton11-12-x\0",
+            ge
+        ));
+        assert!(!uses_proton(b"HOME=/a\0", ge));
     }
 }

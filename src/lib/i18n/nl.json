@@ -565,10 +565,11 @@
   "settings.releasesNone": "Geen versies met een gecontroleerde build.",
   "settings.openFolder": "Map openen",
   "settings.removePrefixAsk": "Deze prefix verwijderen? Saves erin gaan verloren, tenzij cloudsaves aan staan.",
-  "settings.noWinetricks": "winetricks is niet geïnstalleerd op dit systeem.",
+  "settings.noWinetricks": "winetricks is niet geïnstalleerd en zit in geen enkele Proton-versie hier.",
   "settings.noPrefixes": "Nog geen prefixes. Een Windows-game krijgt er een bij de eerste start.",
   "msg.protonNotRemovable": "Alleen Proton-versies die Guild installeerde, kunnen weg.",
-  "msg.noWinetricks": "winetricks is niet geïnstalleerd op dit systeem.",
+  "msg.protonInUse": "Er draait nog een game met deze Proton-versie. Sluit die eerst.",
+  "msg.noWinetricks": "winetricks is niet geïnstalleerd en zit niet in de Proton-versie van deze game.",
   "busy.settingUp": "Instellen…",
   "detail.removePrefix": "Ook de Wine-prefix verwijderen",
   "settings.protonNow": "Proton: {name}"

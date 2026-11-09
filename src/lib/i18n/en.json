@@ -565,10 +565,11 @@
   "settings.releasesNone": "No releases with a checked build.",
   "settings.openFolder": "Open folder",
   "settings.removePrefixAsk": "Remove this prefix? Saves stored in it are lost unless cloud saves are on.",
-  "settings.noWinetricks": "winetricks isn't installed on this system.",
+  "settings.noWinetricks": "winetricks isn't installed, and no Proton build here includes it.",
   "settings.noPrefixes": "No prefixes yet. A Windows game gets one when it first starts.",
   "msg.protonNotRemovable": "Only Proton builds Guild installed can be removed.",
-  "msg.noWinetricks": "winetricks isn't installed on this system.",
+  "msg.protonInUse": "A game is still running with this Proton build. Close it first.",
+  "msg.noWinetricks": "winetricks isn't installed, and this game's Proton build doesn't include it.",
   "busy.settingUp": "Setting up…",
   "detail.removePrefix": "Also remove its Wine prefix",
   "settings.protonNow": "Proton: {name}"
