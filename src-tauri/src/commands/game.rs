@@ -486,7 +486,7 @@ fn store_error(store: ProviderKind, reason: impl Into<Msg>) -> Msg {
 }
 
 /// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
-/// the setting, else Legendary's default (`None`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
+/// the setting, else Legendary's own default (`epic::default_base`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
 /// (gogdl has no default, and nile's is `~/Games/nile`).
 pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     let saved = open_db(state).map(|c| settings::load(&c));
@@ -497,7 +497,10 @@ pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<S
         ProviderKind::Amazon => saved
             .and_then(|s| s.amazon_install_dir)
             .or_else(gog::default_base),
-        _ => saved.and_then(|s| s.epic_install_dir),
+        // Passed as `--base-path` from now on, so the folder shown is the folder used.
+        _ => saved
+            .and_then(|s| s.epic_install_dir)
+            .or_else(epic::default_base),
     };
     dir.map(|p| p.to_string_lossy().into_owned())
 }

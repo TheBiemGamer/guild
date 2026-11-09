@@ -121,6 +121,7 @@
   let confirming = $state(false)
   /** The Epic, GOG or Amazon copy whose install panel is open. */
   let installPanel = $state<string | null>(null)
+  let installOpener = $state<HTMLElement | null>(null)
   let menuOpen = $state(false)
   let moreButton = $state<HTMLButtonElement>()
   let backButton = $state<HTMLButtonElement>()
@@ -637,9 +638,10 @@
                 onplay={() => act('play')}
                 onupdate={() => act('update')}
                 oninstall={() => {
-                  // Steam installs in its own dialog; the other stores' copies ask in the install panel under the hero.
-                  if (/^(epic|gog|amazon)-/.test(copy!.key)) installPanel = installPanel === copy!.key ? null : copy!.key
-                  else act('install')
+                  // Steam installs in its own dialog; the other stores' copies ask in the install panel under the pill.
+                  if (!/^(epic|gog|amazon)-/.test(copy!.key)) return act('install')
+                  installOpener = actionsEl?.querySelector<HTMLElement>('.split, button.pill') ?? null
+                  installPanel = installPanel === copy!.key ? null : copy!.key
                 }}
               />
               {#if job?.state === 'paused'}
@@ -649,27 +651,27 @@
                 <button class="glass round" onclick={cancel}>{t('common.cancel')}</button>
               {/if}
             {/if}
+            {#if installPanel && installPanel === copy?.key && !copy.installed && !job}
+              <!-- Over the page, under the pill; a fresh panel per copy, so a late answer never lands on another one. -->
+              {#key installPanel}
+                <div class="install">
+                  <InstallPanel
+                    game={{ key: installPanel, title: game.title }}
+                    opener={installOpener}
+                    oncancel={() => (installPanel = null)}
+                    onconfirm={(choice) => {
+                      const key = installPanel!
+                      installPanel = null
+                      act('install', key, { choice })
+                    }}
+                  />
+                </div>
+              {/key}
+            {/if}
           </div>
         </div>
       {/if}
     </header>
-
-    {#if game && installPanel && installPanel === copy?.key && !copy.installed && !job}
-      <!-- A fresh panel per copy, so a late answer never lands on another one. -->
-      {#key installPanel}
-        <div class="install">
-          <InstallPanel
-            game={{ key: installPanel, title: game.title }}
-            oncancel={() => (installPanel = null)}
-            onconfirm={(choice) => {
-              const key = installPanel!
-              installPanel = null
-              act('install', key, { choice })
-            }}
-          />
-        </div>
-      {/key}
-    {/if}
 
     {#if game === null}
       <p class="gone">{t('detail.gone')}</p>
@@ -1135,17 +1137,19 @@
   }
 
   .actions {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
-  /* The install panel, under the Install pill. */
+  /* The install panel: over the page under the Install pill, right edges aligned, so nothing below moves. */
   .install {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 12px;
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 8px);
+    right: 0;
   }
 
   .round {

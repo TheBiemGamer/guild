@@ -537,6 +537,68 @@ pub fn log_out() -> Result<(), Error> {
     run(legendary(&["auth", "--delete"]))
 }
 
+/// Legendary's config folder: `LEGENDARY_CONFIG_PATH`, else `$XDG_CONFIG_HOME/legendary`, else
+/// `~/.config/legendary`, as Legendary's `lfs/lgndry.py` picks it (on Windows too).
+pub fn config_dir() -> Option<PathBuf> {
+    match (
+        std::env::var_os("LEGENDARY_CONFIG_PATH"),
+        std::env::var_os("XDG_CONFIG_HOME"),
+    ) {
+        (Some(dir), _) => Some(PathBuf::from(dir)),
+        (None, Some(config)) => Some(PathBuf::from(config).join("legendary")),
+        (None, None) => Some(
+            directories::BaseDirs::new()?
+                .home_dir()
+                .join(".config")
+                .join("legendary"),
+        ),
+    }
+}
+
+/// Where Legendary installs without `--base-path`: `install_dir` in its `config.ini`, else `~/Games`
+/// (`core.py`'s `get_default_install_dir`).
+pub fn default_base() -> Option<PathBuf> {
+    let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
+    let ini = config_dir()
+        .and_then(|dir| std::fs::read_to_string(dir.join("config.ini")).ok())
+        .unwrap_or_default();
+    Some(ini_install_dir(&ini, &home).unwrap_or_else(|| home.join("Games")))
+}
+
+/// `install_dir` of the `[Legendary]` section, with a leading `~` made the home folder.
+fn ini_install_dir(ini: &str, home: &Path) -> Option<PathBuf> {
+    let mut section = "";
+    for line in ini.lines().map(str::trim) {
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = name;
+        } else if section == "Legendary"
+            && let Some((key, value)) = line.split_once(['=', ':'])
+            && key.trim() == "install_dir"
+        {
+            let value = value.trim();
+            return match value.strip_prefix('~') {
+                Some(rest) => Some(home.join(rest.trim_start_matches(['/', '\\']))),
+                None if !value.is_empty() => Some(PathBuf::from(value)),
+                None => None,
+            };
+        }
+    }
+    None
+}
+
+/// The folder Legendary gives a game inside its base folder: the `FolderName` its catalog item names (in
+/// `metadata/<app_name>.json`). `None` when Legendary hasn't cached the game.
+pub fn folder_name(app_name: &str) -> Option<String> {
+    let path = config_dir()?
+        .join("metadata")
+        .join(format!("{app_name}.json"));
+    let json: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    json["metadata"]["customAttributes"]["FolderName"]["value"]
+        .as_str()
+        .filter(|f| !f.is_empty())
+        .map(str::to_owned)
+}
+
 /// Ours first, then the owner's own install (`tools::LEGENDARY`).
 fn legendary_exe() -> PathBuf {
     crate::tools::LEGENDARY.exe()
@@ -1287,6 +1349,22 @@ mod tests {
             sizes_from_info(&fixture("info.json")),
             (Some(224_976_506), Some(323_783_140))
         );
+    }
+
+    #[test]
+    fn install_dir_comes_from_the_legendary_section() {
+        let home = Path::new("/home/me");
+        let ini = "[Legendary]\n; comment\ndisable_update_check = false\n";
+        assert_eq!(ini_install_dir(ini, home), None);
+        assert_eq!(
+            ini_install_dir("[Legendary]\ninstall_dir = ~/Epic Games\n", home),
+            Some(PathBuf::from("/home/me/Epic Games"))
+        );
+        assert_eq!(
+            ini_install_dir("[Legendary]\ninstall_dir=/mnt/games\n", home),
+            Some(PathBuf::from("/mnt/games"))
+        );
+        assert_eq!(ini_install_dir("[Other]\ninstall_dir = /x\n", home), None);
     }
 
     #[test]

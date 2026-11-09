@@ -38,7 +38,7 @@ pub struct InstallPlan {
     /// The game alone, without DLC.
     download_bytes: Option<u64>,
     disk_bytes: Option<u64>,
-    /// The folder the game gets inside the chosen one, when the store tool says (GOG and Amazon).
+    /// The folder the game gets inside the chosen one, when the store tool says.
     folder_name: Option<String>,
     /// The owned DLC (Epic and GOG).
     dlc: Vec<DlcSize>,
@@ -225,6 +225,7 @@ fn plan(
             InstallPlan {
                 download_bytes,
                 disk_bytes,
+                folder_name: epic::folder_name(id),
                 // shortcut: no DLC sizes; Legendary has them only per DLC, one online call each.
                 dlc: dlc(&|_| (None, None)),
                 ..InstallPlan::default()

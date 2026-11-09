@@ -455,7 +455,7 @@ export type InstallPlan = {
 	/**  The game alone, without DLC. */
 	downloadBytes: number | null,
 	diskBytes: number | null,
-	/**  The folder the game gets inside the chosen one, when the store tool says (GOG and Amazon). */
+	/**  The folder the game gets inside the chosen one, when the store tool says. */
 	folderName: string | null,
 	/**  The owned DLC (Epic and GOG). */
 	dlc: DlcSize[],

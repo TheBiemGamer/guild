@@ -11,6 +11,7 @@
   let {
     game,
     anchor = null,
+    opener = null,
     onconfirm,
     oncancel,
   }: {
@@ -18,6 +19,8 @@
     game: { key: string; title: string }
     /** The cover's rectangle in the library: the panel floats beside it. Null: inline, under the game page's Install button. */
     anchor?: DOMRect | null
+    /** Inline: what opened the panel (the Install pill), whose clicks are left to it. */
+    opener?: HTMLElement | null
     onconfirm: (choice: InstallChoice) => void
     oncancel: () => void
   } = $props()
@@ -103,10 +106,11 @@
     if (e.key === 'Escape') oncancel()
   }
 
-  // Clicks on the cover itself are left to the cover (its Install button asks again).
+  // A click outside closes it. Clicks on the cover or the Install pill are left to them (they toggle it).
   function onpointerdown(e: PointerEvent) {
-    if (!anchor || el.contains(e.target as Node)) return
-    const inside = e.clientX >= anchor.left && e.clientX <= anchor.right && e.clientY >= anchor.top && e.clientY <= anchor.bottom
+    const target = e.target as Node
+    if (el.contains(target) || opener?.contains(target)) return
+    const inside = !!anchor && e.clientX >= anchor.left && e.clientX <= anchor.right && e.clientY >= anchor.top && e.clientY <= anchor.bottom
     if (!inside) oncancel()
   }
 
@@ -165,7 +169,7 @@
   class:popup={anchor}
   bind:this={el}
   bind:clientHeight={height}
-  role={anchor ? 'dialog' : 'region'}
+  role="dialog"
   aria-label={t('install.label', { title: game.title })}
   style={anchor ? `left: ${x}px; top: ${y}px; width: ${WIDTH}px` : ''}
 >
@@ -316,6 +320,7 @@
     background: var(--surface-2);
     border: 1px solid var(--glass-on-line);
     text-align: left;
+    box-shadow: var(--shadow-modal);
   }
 
   .popup {
@@ -324,7 +329,6 @@
     /* A small window with every DLC unfolded: the popup scrolls rather than leave the window. */
     max-height: calc(100vh - 16px);
     overflow-y: auto;
-    box-shadow: var(--shadow-modal);
   }
 
   h4 {
