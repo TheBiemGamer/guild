@@ -2594,6 +2594,7 @@ dependencies = [
  "jiff",
  "keyring-core",
  "keyvalues-parser",
+ "libc",
  "protobuf",
  "qrcode",
  "reqwest",

@@ -299,11 +299,49 @@ pub fn spawn_tool(command: &mut std::process::Command) -> std::io::Result<std::p
 
 /// Starts a store tool (Legendary, gogdl, Nile) as the leader of its own process group, so `kill_tree` ends it with
 /// the children it starts. Never for games or `legendary launch`.
-// shortcut: a tool outlives a Guild that exits mid-download (Windows' job ends it); PR_SET_PDEATHSIG needs libc.
+/// The tool gets SIGKILL when Guild exits, as Windows' job ends it. That signal follows the *thread* that started the
+/// tool, so tools are started from one thread that lives as long as Guild, never from a pool thread that may exit.
+// shortcut: only the tool itself gets the signal, so children it starts may linger after a crash; kill the group if that shows up.
 #[cfg(target_os = "linux")]
 pub fn spawn_tool(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
-    command.process_group(0).spawn()
+    use std::process::{Child, Command};
+    use std::sync::{OnceLock, mpsc};
+    type Job = (Command, mpsc::Sender<std::io::Result<Child>>);
+    static SPAWNER: OnceLock<mpsc::Sender<Job>> = OnceLock::new();
+    let spawner = SPAWNER.get_or_init(|| {
+        let (jobs, rx) = mpsc::channel::<Job>();
+        std::thread::Builder::new()
+            .name("tool-spawner".into())
+            .spawn(move || {
+                for (mut command, reply) in rx {
+                    _ = reply.send(command.spawn());
+                }
+            })
+            .expect("starting the tool-spawner thread");
+        jobs
+    });
+    let guild = std::process::id();
+    command.process_group(0);
+    // SAFETY: only async-signal-safe calls (prctl, getppid) between fork and exec.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // Guild exited before prctl took effect.
+            if libc::getppid() as u32 != guild {
+                return Err(std::io::ErrorKind::BrokenPipe.into());
+            }
+            Ok(())
+        });
+    }
+    let (reply, result) = mpsc::channel();
+    let command = std::mem::replace(command, Command::new(""));
+    spawner
+        .send((command, reply))
+        .map_err(|_| std::io::ErrorKind::BrokenPipe)?;
+    result.recv().map_err(|_| std::io::ErrorKind::BrokenPipe)?
 }
 
 /// `Command::output` for a store tool, started through `spawn_tool`.
@@ -872,5 +910,25 @@ mod tests {
         let mut child = super::spawn_tool(&mut command).unwrap();
         super::kill_tree(child.id()).unwrap();
         assert!(!child.wait().unwrap().success());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_store_tool_outlives_the_thread_that_asked_for_it() {
+        use std::process::{Command, Stdio};
+        let mut child = std::thread::spawn(|| {
+            let mut command = Command::new("sleep");
+            command.arg("30").stdout(Stdio::null());
+            super::spawn_tool(&mut command).unwrap()
+        })
+        .join()
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "the tool died with the thread"
+        );
+        super::kill_tree(child.id()).unwrap();
+        _ = child.wait();
     }
 }
