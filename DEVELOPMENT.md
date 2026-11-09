@@ -6,11 +6,17 @@ Guild is built with Tauri 2, Svelte 5 + TypeScript, and Rust.
 
 You need [Node.js](https://nodejs.org) 24 or later, [Rust](https://rustup.rs) stable (edition 2024), and the [Tauri prerequisites for Windows](https://tauri.app/start/prerequisites/) (WebView2 and the MSVC build tools).
 
+On Linux you need the [Tauri prerequisites for Linux](https://tauri.app/start/prerequisites/#linux) instead. On Debian and Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev patchelf build-essential
+```
+
 ```bash
 npm install
 npm run tauri dev                       # run in development
 npm run tauri build -- --no-bundle      # release exe: src-tauri/target/release/Guild.exe
-npm run tauri build                     # installer (needs the signing key, see Releasing)
+npm run tauri build                     # installer on Windows, AppImage and .deb on Linux (needs the signing key, see Releasing)
 ```
 
 ## Checks
@@ -79,7 +85,7 @@ The database is `library.sqlite`. Schema changes are new migration steps in `src
 
 ## Releasing
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the NSIS installer, signs it for the updater and publishes a GitHub release with `latest.json`. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the Windows NSIS installer and the Linux AppImage and `.deb` (on Ubuntu 22.04, so the AppImage runs on older glibc), signs the installer and the AppImage for the updater, and publishes a GitHub release with `latest.json`. A last job writes `latest.json` with both the `windows-x86_64` and `linux-x86_64` entries. The `.deb` doesn't auto-update. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.
 
 ### One-time setup
 
@@ -103,6 +109,8 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, bui
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
+
+For the AUR package, set `pkgver` in `packaging/aur/PKGBUILD` once the release is out, run `updpkgsums` and `makepkg --printsrcinfo > .SRCINFO` there, and push both files to the `guild-bin` AUR repository.
 
 The workflow stops if the tag, `package.json` and `Cargo.toml` versions differ, or if `CHANGELOG.md` has no section for the version.
 
