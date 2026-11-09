@@ -126,6 +126,4 @@ npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
 ## Contributing
 
-- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org).
-- UI changes follow [DESIGN.md](DESIGN.md), and update it when the UI changes.
-- [CLAUDE.md](CLAUDE.md) lists the project rules that aren't obvious from the code: secrets, the database, merge keys, network behavior.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
