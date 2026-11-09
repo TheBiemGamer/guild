@@ -1,12 +1,12 @@
 //! Windows games on Linux. Each runs through umu-launcher (`umu-run`) with a Proton build, in its own Wine prefix,
 //! `<data>/prefixes/<copy key>`. A prefix holds the game's saves, so uninstalling the game keeps it.
-//! umu-launcher and GE-Proton download on request into the tools folder: umu pinned like `tools.rs`, GE-Proton's
-//! newest release checked against the `.sha512sum` file published with it.
+//! umu-launcher and Proton builds (GE-Proton, Proton-CachyOS) download on request into the tools folder: umu pinned
+//! like `tools.rs`, a Proton release checked against the `.sha512sum` file published with it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -14,13 +14,14 @@ use sha2::{Sha256, Sha512};
 
 use crate::cache::{Dirs, db};
 use crate::msg::Msg;
-use crate::platform::RunnerView;
+use crate::platform::{ProtonKind, ProtonView, ReleaseView, RunnerView};
 use crate::tools::{Installing, download};
 
 const UMU_URL: &str = "https://github.com/Open-Wine-Components/umu-launcher/releases/download/1.4.4/umu-launcher-1.4.4-zipapp.tar";
 const UMU_SHA256: &str = "eb590691841f7fad3fc3ad8fd5db4ccb87849fe7948e62b28ece7a4ee48cc851";
-const GE_RELEASE: &str =
-    "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest";
+/// `info` kind of a Proton source's recent releases, as `Release` JSON, keyed by `kind_key`.
+const RELEASES: &str = "proton-releases";
+const RELEASES_MAX_AGE_SECS: i64 = 6 * 60 * 60;
 const UMU_DATABASE: &str =
     "https://raw.githubusercontent.com/Open-Wine-Components/umu-database/main/umu-database.csv";
 /// `info` key and kind of the umu database, as `{"<store>:<codename>": "umu-<id>"}`.
@@ -45,15 +46,15 @@ fn managed_umu(tools: &Path) -> PathBuf {
     tools.join("umu").join("umu").join("umu-run")
 }
 
+fn on_path(name: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(name))
+        .find(|p| p.is_file())
+}
+
 /// umu-run on PATH (a distribution's package), else the one Guild downloaded.
 fn umu() -> Option<PathBuf> {
-    std::env::var_os("PATH")
-        .and_then(|path| {
-            std::env::split_paths(&path)
-                .map(|dir| dir.join("umu-run"))
-                .find(|p| p.is_file())
-        })
-        .or_else(|| Some(managed_umu(&Dirs::new().tools)).filter(|p| p.is_file()))
+    on_path("umu-run").or_else(|| Some(managed_umu(&Dirs::new().tools)).filter(|p| p.is_file()))
 }
 
 /// The Wine prefix of the copy `key`; `None` for a key that isn't a plain folder name.
@@ -165,29 +166,34 @@ fn fetch_umu_ids() -> Option<String> {
 pub struct Proton {
     pub name: String,
     pub path: PathBuf,
+    /// In Guild's tools folder, so Guild may remove it; Steam's are only listed.
+    pub removable: bool,
 }
 
 /// The Proton builds found, newest first: Guild's, the compatibility tools Steam lists (GE-Proton) and Steam's own in
 /// each library. A folder counts when it holds the `proton` script; of two with one name, the first found wins.
 pub fn protons() -> Vec<Proton> {
-    let mut roots = vec![Dirs::new().tools.join("proton")];
-    let mut common = Vec::new();
+    let mut found = protons_in(&[Dirs::new().tools.join("proton")], |_| true, true);
     if let Ok(steam) = steamlocate::SteamDir::locate() {
-        roots.push(steam.path().join("compatibilitytools.d"));
-        common = steam
+        let compat = [steam.path().join("compatibilitytools.d")];
+        found.extend(protons_in(&compat, |_| true, false));
+        let common: Vec<_> = steam
             .library_paths()
             .unwrap_or_default()
             .into_iter()
             .map(|l| l.join("steamapps").join("common"))
             .collect();
+        // Next to the games there, only Steam's own Proton builds.
+        found.extend(protons_in(
+            &common,
+            |name| name.starts_with("Proton"),
+            false,
+        ));
     }
-    let mut found = protons_in(&roots, |_| true);
-    // Next to the games there, only Steam's own Proton builds.
-    found.extend(protons_in(&common, |name| name.starts_with("Proton")));
     newest_first(found)
 }
 
-fn protons_in(roots: &[PathBuf], keep: impl Fn(&str) -> bool) -> Vec<Proton> {
+fn protons_in(roots: &[PathBuf], keep: impl Fn(&str) -> bool, removable: bool) -> Vec<Proton> {
     let mut found = Vec::new();
     for root in roots {
         let mut dirs: Vec<_> = fs_err::read_dir(root)
@@ -200,7 +206,11 @@ fn protons_in(roots: &[PathBuf], keep: impl Fn(&str) -> bool) -> Vec<Proton> {
         dirs.sort();
         found.extend(dirs.into_iter().filter_map(|path| {
             let name = path.file_name()?.to_str()?.to_owned();
-            keep(&name).then_some(Proton { name, path })
+            keep(&name).then_some(Proton {
+                name,
+                path,
+                removable,
+            })
         }));
     }
     found
@@ -246,21 +256,132 @@ fn default_proton() -> Option<String> {
 
 /// `game` (a Windows program with its arguments, folder and variables) run through umu-run with Proton, in the copy's
 /// own prefix. `proton` is the game's own choice, before the default in Settings.
-pub fn wrap(game: Command, key: &str, proton: Option<&str>) -> Result<Command, Msg> {
+fn wrap(game: &Command, key: &str, proton: Option<&str>) -> Result<(Command, Proton), Msg> {
     let umu = umu().ok_or(msg!(noUmu))?;
     let protons = protons();
     let default = default_proton();
-    let proton = choose(&protons, &[proton, default.as_deref()]).ok_or(msg!(noProton))?;
+    let proton = choose(&protons, &[proton, default.as_deref()])
+        .ok_or(msg!(noProton))?
+        .clone();
     let prefix = prefix(key).ok_or(msg!(gameNotInLibrary))?;
     fs_err::create_dir_all(&prefix).map_err(Msg::system)?;
-    Ok(umu_command(
-        &umu,
-        &game,
-        &prefix,
-        &proton.path,
-        &game_id(key),
-        store(key),
-    ))
+    let command = umu_command(&umu, game, &prefix, &proton.path, &game_id(key), store(key));
+    Ok((command, proton))
+}
+
+/// A game's launch through `wrap`. When umu still has to fetch the Steam Linux Runtime or set the prefix up, the copy
+/// counts as setting up (`setting_up`) until the game's own program runs.
+pub fn game_command(game: Command, key: &str, proton: Option<&str>) -> Result<Command, Msg> {
+    let (command, proton) = wrap(&game, key, proton)?;
+    let prefix = prefix(key).ok_or(msg!(gameNotInLibrary))?;
+    let mut setups = SETUPS.lock().unwrap_or_else(|e| e.into_inner());
+    let exe = Path::new(game.get_program()).file_name();
+    match exe.filter(|_| needs_setup(&prefix, &proton.path, &umu_data())) {
+        Some(exe) => {
+            setups.insert(
+                key.to_owned(),
+                Setup {
+                    exe: exe.to_string_lossy().into_owned(),
+                    prefix,
+                },
+            );
+        }
+        None => _ = setups.remove(key),
+    }
+    Ok(command)
+}
+
+/// A launch waiting on setup: the game's program file name and its prefix.
+struct Setup {
+    exe: String,
+    prefix: PathBuf,
+}
+
+static SETUPS: LazyLock<Mutex<HashMap<String, Setup>>> = LazyLock::new(Mutex::default);
+
+/// Whether the copy's launch is still setting up: asked while its umu-run runs. Ends once a process of the game's
+/// program runs in its prefix (Proton starts that program itself, so it is always seen); a failed setup ends with
+/// umu-run. Not the prefix's `version` file: Proton writes it before the game starts.
+pub fn setting_up(key: &str) -> bool {
+    let mut setups = SETUPS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(setup) = setups.get(key) else {
+        return false;
+    };
+    if game_runs(&setup.exe, &setup.prefix) {
+        setups.remove(key);
+        return false;
+    }
+    true
+}
+
+/// umu's own folder, where it keeps the Steam Linux Runtime.
+fn umu_data() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|b| b.data_dir().join("umu"))
+        .unwrap_or_default()
+}
+
+/// Whether a launch must wait: the prefix hasn't been set up (Proton writes `version` once it has), or umu still has to
+/// fetch the runtime this Proton build asks for in its `toolmanifest.vdf`.
+fn needs_setup(prefix: &Path, proton: &Path, umu_data: &Path) -> bool {
+    let manifest = fs_err::read_to_string(proton.join("toolmanifest.vdf")).unwrap_or_default();
+    !prefix.join("version").is_file()
+        || runtime(&manifest)
+            .is_some_and(|dir| !umu_data.join(dir).join("_v2-entry-point").exists())
+}
+
+/// umu's folder for the runtime a `toolmanifest.vdf` requires (`require_tool_appid`, umu's `RUNTIME_NAMES`).
+fn runtime(manifest: &str) -> Option<&'static str> {
+    let line = manifest
+        .lines()
+        .find(|l| l.contains("\"require_tool_appid\""))?;
+    match line.split('"').nth(3)? {
+        "1628350" => Some("steamrt3"),
+        "4183110" => Some("steamrt4"),
+        _ => None,
+    }
+}
+
+/// Whether a process of `exe` runs in `prefix`. Under Wine a game's first argument is its Windows path
+/// (`X:\…\game.exe`) and it carries `WINEPREFIX`; umu's own processes only name the program further on.
+fn game_runs(exe: &str, prefix: &Path) -> bool {
+    let wanted = prefix.as_os_str().as_encoded_bytes();
+    fs_err::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        })
+        .any(|e| {
+            let read = |name| std::fs::read(e.path().join(name)).unwrap_or_default();
+            is_game_process(&read("cmdline"), &read("environ"), exe, wanted)
+        })
+}
+
+/// Proton runs the game with `WINEPREFIX=<prefix>/pfx/`, `pfx` being umu's link back to the prefix itself.
+fn is_game_process(cmdline: &[u8], environ: &[u8], exe: &str, prefix: &[u8]) -> bool {
+    let first = cmdline.split(|&b| b == 0).next().unwrap_or_default();
+    let name = first
+        .rsplit(|&b| b == b'/' || b == b'\\')
+        .next()
+        .unwrap_or_default();
+    fn trim(mut v: &[u8]) -> &[u8] {
+        while let Some(rest) = v.strip_suffix(b"/") {
+            v = rest;
+        }
+        v
+    }
+    let in_prefix = environ.split(|&b| b == 0).any(|var| {
+        var.strip_prefix(b"WINEPREFIX=").map(trim).is_some_and(|v| {
+            let v = v.strip_suffix(b"/pfx").map_or(v, trim);
+            v == trim(prefix)
+        })
+    });
+    name.eq_ignore_ascii_case(exe.as_bytes()) && in_prefix
 }
 
 /// Sets up the copy's prefix if it isn't yet, before a store tool looks inside it: Legendary reads the prefix's
@@ -273,7 +394,7 @@ pub fn ready_prefix(key: &str) {
         return;
     }
     // Exits 1 for the empty program once the prefix is made, so the prefix is the outcome.
-    let ran = wrap(Command::new(""), key, None).and_then(|mut command| {
+    let ran = wrap(&Command::new(""), key, None).and_then(|(mut command, _)| {
         command
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -333,13 +454,76 @@ pub fn windows_folder(prefix: &Path, name: &str) -> Option<PathBuf> {
 pub fn view() -> RunnerView {
     RunnerView {
         umu: umu().is_some(),
-        protons: protons().into_iter().map(|p| p.name).collect(),
+        protons: protons()
+            .into_iter()
+            .map(|p| ProtonView {
+                name: p.name,
+                removable: p.removable,
+            })
+            .collect(),
         proton: default_proton(),
+        winetricks: on_path("winetricks").is_some(),
     }
 }
 
 pub fn proton_names() -> Vec<String> {
     protons().into_iter().map(|p| p.name).collect()
+}
+
+/// Deletes a Proton build Guild installed; Steam's are left alone.
+pub fn remove_proton(name: &str) -> Result<(), Msg> {
+    let proton = protons()
+        .into_iter()
+        .find(|p| p.name == name && p.removable)
+        .ok_or(msg!(protonNotRemovable))?;
+    fs_err::remove_dir_all(&proton.path).map_err(Msg::system)?;
+    tracing::info!("removed {name}");
+    Ok(())
+}
+
+/// The copy keys that have a prefix.
+pub fn prefix_keys() -> Vec<String> {
+    let root = Dirs::new().prefixes;
+    let mut keys: Vec<String> = fs_err::read_dir(&root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|k| prefix_in(&root, k).is_some())
+        .collect();
+    keys.sort();
+    keys
+}
+
+/// Deletes a copy's prefix, saves and all.
+pub fn remove_prefix(key: &str) -> Result<(), Msg> {
+    let prefix = prefix(key).ok_or(msg!(gameNotInLibrary))?;
+    match fs_err::remove_dir_all(&prefix) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Msg::system(e)),
+        _ => {
+            tracing::info!("removed wine prefix {key}");
+            Ok(())
+        }
+    }
+}
+
+/// Starts winecfg or winetricks in a copy's prefix with its Proton build, without waiting. umu-run takes `winetricks`
+/// as its own word: the one the Proton build bundles, else the system's.
+pub fn run_in_prefix(key: &str, program: &str, proton: Option<&str>) -> Result<(), Msg> {
+    if program == "winetricks" && on_path("winetricks").is_none() {
+        return Err(msg!(noWinetricks));
+    }
+    let (mut command, _) = wrap(&Command::new(program), key, proton)?;
+    let mut child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(Msg::system)?;
+    // Reaped off-thread so it never lingers as a zombie.
+    std::thread::spawn(move || child.wait());
+    Ok(())
 }
 
 /// Downloads the pinned umu-launcher into the tools folder.
@@ -354,20 +538,125 @@ pub async fn install_umu(on_percent: impl FnMut(u8)) -> Result<(), Msg> {
     Ok(())
 }
 
-/// Downloads GE-Proton's newest release into the tools folder.
-pub async fn install_ge_proton(on_percent: impl FnMut(u8)) -> Result<(), Msg> {
-    const TITLE: &str = "GE-Proton";
+fn repo(kind: ProtonKind) -> &'static str {
+    match kind {
+        ProtonKind::GeProton => "GloriousEggroll/proton-ge-custom",
+        ProtonKind::ProtonCachyos => "CachyOS/proton-cachyos",
+    }
+}
+
+fn title(kind: ProtonKind) -> &'static str {
+    match kind {
+        ProtonKind::GeProton => "GE-Proton",
+        ProtonKind::ProtonCachyos => "Proton-CachyOS",
+    }
+}
+
+/// The builds to take, by archive suffix, best first: Proton-CachyOS has an x86-64-v3 build for CPUs that run it.
+/// `""` is an archive without one (older GE-Proton releases).
+fn arches(kind: ProtonKind) -> &'static [&'static str] {
+    match kind {
+        ProtonKind::GeProton => &["x86_64", ""],
+        ProtonKind::ProtonCachyos
+            if x86_64_v3(&std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default()) =>
+        {
+            &["x86_64_v3", "x86_64"]
+        }
+        ProtonKind::ProtonCachyos => &["x86_64"],
+    }
+}
+
+/// Whether the CPU's flags in `/proc/cpuinfo` cover x86-64-v3: v2's (cx16, lahf_lm, popcnt, sse4_1, sse4_2, ssse3)
+/// plus avx, avx2, bmi1, bmi2, f16c, fma, abm (lzcnt), movbe and xsave.
+fn x86_64_v3(cpuinfo: &str) -> bool {
+    let flags: HashSet<&str> = cpuinfo
+        .lines()
+        .find_map(|l| l.strip_prefix("flags")?.split_once(':'))
+        .map(|(_, f)| f.split_whitespace().collect())
+        .unwrap_or_default();
+    [
+        "cx16", "lahf_lm", "popcnt", "sse4_1", "sse4_2", "ssse3", "avx", "avx2", "bmi1", "bmi2",
+        "f16c", "fma", "abm", "movbe", "xsave",
+    ]
+    .iter()
+    .all(|f| flags.contains(f))
+}
+
+fn kind_key(kind: ProtonKind) -> &'static str {
+    match kind {
+        ProtonKind::GeProton => "ge-proton",
+        ProtonKind::ProtonCachyos => "proton-cachyos",
+    }
+}
+
+/// A source's recent releases that have a build for this CPU and a checksum file, newest first; cached 6 h. `None`
+/// when GitHub couldn't be asked (logged). Blocking.
+fn releases(kind: ProtonKind) -> Option<Vec<Release>> {
+    let conn = db::open(&Dirs::new().db).ok();
+    let json = crate::info::cached_or_fetch(
+        conn.as_ref(),
+        kind_key(kind),
+        RELEASES,
+        RELEASES_MAX_AGE_SECS,
+        crate::library::unix_now(),
+        || {
+            let url = format!(
+                "https://api.github.com/repos/{}/releases?per_page=10",
+                repo(kind)
+            );
+            let text = tauri::async_runtime::block_on(get(&url))
+                .inspect_err(|e| tracing::warn!("{} releases: {e}", title(kind)))
+                .ok()?;
+            let list: Value = serde_json::from_str(&text).ok()?;
+            let found: Vec<Release> = list
+                .as_array()?
+                .iter()
+                .filter(|r| r["draft"] != true)
+                .filter_map(|r| parse_release(r, arches(kind)))
+                .collect();
+            serde_json::to_string(&found).ok()
+        },
+    )?;
+    serde_json::from_str(&json).ok()
+}
+
+/// The releases for Settings, each marked when its build is installed. Blocking.
+pub fn release_views(kind: ProtonKind) -> Option<Vec<ReleaseView>> {
+    let installed = proton_names();
+    Some(
+        releases(kind)?
+            .into_iter()
+            .map(|r| ReleaseView {
+                installed: installed.contains(&r.stem),
+                tag: r.tag,
+                name: r.stem,
+            })
+            .collect(),
+    )
+}
+
+/// Downloads one release of a Proton source into the tools folder, checked against its `.sha512sum`. One Proton
+/// install at a time.
+pub async fn install_proton(
+    kind: ProtonKind,
+    tag: String,
+    on_percent: impl FnMut(u8),
+) -> Result<(), Msg> {
+    let title = title(kind);
     let _busy =
-        Installing::start("proton").ok_or_else(|| msg!(toolAlreadyInstalling, tool = TITLE))?;
+        Installing::start("proton").ok_or_else(|| msg!(toolAlreadyInstalling, tool = title))?;
     let cant = |e: &dyn std::fmt::Display| {
-        tracing::warn!("install GE-Proton: {e}");
-        msg!(cantDownloadTool, tool = TITLE)
+        tracing::warn!("install {title} {tag}: {e}");
+        msg!(cantDownloadTool, tool = title)
     };
-    let release: Value = get(GE_RELEASE)
+    let found = tauri::async_runtime::spawn_blocking(move || releases(kind))
         .await
-        .and_then(|text| Ok(serde_json::from_str(&text)?))
         .map_err(|e| cant(&e))?;
-    let release = parse_release(&release).ok_or_else(|| cant(&"no x86_64 build"))?;
+    let release = found
+        .into_iter()
+        .flatten()
+        .find(|r| r.tag == tag)
+        .ok_or_else(|| cant(&"no such release"))?;
     let sums = get(&release.sha512sum).await.map_err(|e| cant(&e))?;
     let expected = parse_sha512sum(&sums, &release.file).ok_or_else(|| cant(&"no checksum"))?;
     let root = Dirs::new().tools.join("proton");
@@ -377,7 +666,7 @@ pub async fn install_ge_proton(on_percent: impl FnMut(u8)) -> Result<(), Msg> {
     _ = fs_err::remove_dir_all(&unpacking);
     let fetched =
         download::<Sha512>(http(), &release.tar, DOWNLOAD_TIMEOUT, &part, on_percent).await;
-    unpack(fetched, &expected, &part, &unpacking, TITLE)?;
+    unpack(fetched, &expected, &part, &unpacking, title)?;
     let moved = fs_err::read_dir(&unpacking).and_then(|entries| {
         for entry in entries.flatten() {
             let dest = root.join(entry.file_name());
@@ -435,32 +724,50 @@ fn unpack(
     Ok(())
 }
 
-/// A GE-Proton release's x86_64 archive and its checksum file.
-#[derive(Debug, PartialEq)]
+/// A Proton release's archive for this CPU and its checksum file. `stem` is the archive's name without `.tar.*`,
+/// which is also the folder it unpacks to.
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Release {
+    tag: String,
+    stem: String,
     file: String,
     tar: String,
     sha512sum: String,
 }
 
-/// From a GitHub release: `GE-Proton11-12-x86_64.tar.gz` with `GE-Proton11-12-x86_64.sha512sum` (older releases have
-/// no `-x86_64`).
-fn parse_release(release: &Value) -> Option<Release> {
+/// From a GitHub release: the first of `arches` among its archives, like `GE-Proton11-12-x86_64.tar.gz` or
+/// `proton-cachyos-11.0-20261015-slr-x86_64_v3.tar.xz`, with `<stem>.sha512sum` next to it. No checksum file, no
+/// release: nothing installs unchecked.
+fn parse_release(release: &Value, arches: &[&str]) -> Option<Release> {
     let assets = release["assets"].as_array()?;
     let url = |name: &str| {
         assets.iter().find(|a| a["name"] == name)?["browser_download_url"]
             .as_str()
             .map(str::to_owned)
     };
-    let file = assets
-        .iter()
-        .filter_map(|a| a["name"].as_str())
-        .find(|n| n.ends_with(".tar.gz") && !n.contains("aarch64"))?;
-    let sums = format!("{}.sha512sum", file.strip_suffix(".tar.gz")?);
+    let stem = |name: &str| {
+        name.strip_suffix(".tar.gz")
+            .or_else(|| name.strip_suffix(".tar.xz"))
+            .map(str::to_owned)
+    };
+    let arch = |stem: &str| {
+        ["x86_64_v3", "x86_64", "aarch64", "arm64"]
+            .into_iter()
+            .find(|a| stem.ends_with(&format!("-{a}")))
+            .unwrap_or("")
+    };
+    let names: Vec<&str> = assets.iter().filter_map(|a| a["name"].as_str()).collect();
+    let (file, stem) = arches.iter().find_map(|wanted| {
+        names
+            .iter()
+            .find_map(|n| stem(n).filter(|s| arch(s) == *wanted).map(|s| (*n, s)))
+    })?;
     Some(Release {
+        tag: release["tag_name"].as_str()?.to_owned(),
         tar: url(file)?,
-        sha512sum: url(&sums)?,
+        sha512sum: url(&format!("{stem}.sha512sum"))?,
         file: file.to_owned(),
+        stem,
     })
 }
 
@@ -592,8 +899,9 @@ mod tests {
             fs_err::write(dir.join("proton"), "").unwrap();
         }
         fs_err::create_dir_all(steam.join("Half unpacked")).unwrap();
-        let mut found = protons_in(&[ours.clone(), steam], |_| true);
-        found.extend(protons_in(&[common], |n| n.starts_with("Proton")));
+        let mut found = protons_in(std::slice::from_ref(&ours), |_| true, true);
+        found.extend(protons_in(&[steam], |_| true, false));
+        found.extend(protons_in(&[common], |n| n.starts_with("Proton"), false));
         let found = newest_first(found);
         let names: Vec<_> = found.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(
@@ -607,6 +915,7 @@ mod tests {
             ]
         );
         assert_eq!(found[1].path, ours.join("GE-Proton9-27"), "ours wins");
+        assert!(found[1].removable && !found[0].removable && !found[2].removable);
         assert_eq!(
             choose(&found, &[Some("Proton 10.0"), Some("GE-Proton9-27")])
                 .unwrap()
@@ -659,23 +968,47 @@ mod tests {
             asset("GE-Proton11-12-x86_64.sha512sum"),
             asset("GE-Proton11-12-x86_64.tar.gz"),
         ]});
+        let ge = ["x86_64", ""];
         assert_eq!(
-            parse_release(&release),
+            parse_release(&release, &ge),
             Some(Release {
+                tag: "GE-Proton11-12".into(),
+                stem: "GE-Proton11-12-x86_64".into(),
                 file: "GE-Proton11-12-x86_64.tar.gz".into(),
                 tar: format!("{base}/GE-Proton11-12-x86_64.tar.gz"),
                 sha512sum: format!("{base}/GE-Proton11-12-x86_64.sha512sum"),
             })
         );
-        let old =
-            json!({"assets": [asset("GE-Proton9-27.tar.gz"), asset("GE-Proton9-27.sha512sum")]});
+        let old = json!({"tag_name": "GE-Proton9-27", "assets": [asset("GE-Proton9-27.tar.gz"), asset("GE-Proton9-27.sha512sum")]});
         assert_eq!(
-            parse_release(&old).unwrap().sha512sum,
+            parse_release(&old, &ge).unwrap().sha512sum,
             format!("{base}/GE-Proton9-27.sha512sum")
         );
+        // No checksum file: not offered.
         assert_eq!(
-            parse_release(&json!({"assets": [asset("GE-Proton9-27.tar.gz")]})),
+            parse_release(
+                &json!({"tag_name": "x", "assets": [asset("GE-Proton9-27.tar.gz")]}),
+                &ge
+            ),
             None
+        );
+        let cachy = json!({"tag_name": "cachyos-11.0-20261015-slr", "assets": [
+            asset("proton-cachyos-11.0-20261015-slr-arm64.sha512sum"),
+            asset("proton-cachyos-11.0-20261015-slr-arm64.tar.xz"),
+            asset("proton-cachyos-11.0-20261015-slr-x86_64.sha512sum"),
+            asset("proton-cachyos-11.0-20261015-slr-x86_64.tar.xz"),
+            asset("proton-cachyos-11.0-20261015-slr-x86_64_v3.sha512sum"),
+            asset("proton-cachyos-11.0-20261015-slr-x86_64_v3.tar.xz"),
+        ]});
+        let v3 = parse_release(&cachy, &["x86_64_v3", "x86_64"]).unwrap();
+        assert_eq!(v3.file, "proton-cachyos-11.0-20261015-slr-x86_64_v3.tar.xz");
+        assert_eq!(
+            v3.sha512sum,
+            format!("{base}/proton-cachyos-11.0-20261015-slr-x86_64_v3.sha512sum")
+        );
+        assert_eq!(
+            parse_release(&cachy, &["x86_64"]).unwrap().stem,
+            "proton-cachyos-11.0-20261015-slr-x86_64"
         );
 
         let hash = "2e37447902529c9fc39138dc0b3f24aed3513b59a190b825e6b4a668e49e2033bdf6b8a7998e8686e067bbb3f61f3a6633e2408f0cc96f6dad983bd18e2db31e";
@@ -689,5 +1022,68 @@ mod tests {
             None
         );
         assert_eq!(parse_sha512sum("abc  x.tar.gz", "x.tar.gz"), None);
+    }
+
+    #[test]
+    fn cpu_level_comes_from_its_flags() {
+        let v3 = "processor\t: 0\nflags\t\t: fpu cx16 lahf_lm popcnt sse4_1 sse4_2 ssse3 avx avx2 bmi1 bmi2 f16c fma abm movbe xsave\n";
+        assert!(x86_64_v3(v3));
+        assert!(!x86_64_v3(&v3.replace(" avx2", "")));
+        assert!(!x86_64_v3(""));
+    }
+
+    #[test]
+    fn a_launch_sets_up_until_the_prefix_and_runtime_are_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (prefix, proton, umu) = (
+            tmp.path().join("p"),
+            tmp.path().join("GE"),
+            tmp.path().join("umu"),
+        );
+        fs_err::create_dir_all(&prefix).unwrap();
+        fs_err::create_dir_all(&proton).unwrap();
+        let manifest = "\"manifest\"\n{\n  \"require_tool_appid\" \"4183110\"\n}\n";
+        assert_eq!(runtime(manifest), Some("steamrt4"));
+        assert_eq!(
+            runtime("\"require_tool_appid\" \"1628350\""),
+            Some("steamrt3")
+        );
+        assert_eq!(runtime(""), None);
+        fs_err::write(proton.join("toolmanifest.vdf"), manifest).unwrap();
+        assert!(needs_setup(&prefix, &proton, &umu), "a new prefix");
+        fs_err::write(prefix.join("version"), "11.0-100").unwrap();
+        assert!(needs_setup(&prefix, &proton, &umu), "no runtime yet");
+        fs_err::create_dir_all(umu.join("steamrt4")).unwrap();
+        fs_err::write(umu.join("steamrt4/_v2-entry-point"), "").unwrap();
+        assert!(!needs_setup(&prefix, &proton, &umu));
+    }
+
+    #[test]
+    fn the_game_process_is_its_windows_path_in_its_prefix() {
+        let var = b"/data/prefixes/gog-1";
+        let env = b"HOME=/home/a\0WINEPREFIX=/data/prefixes/gog-1/pfx/\0";
+        let game = b"X:\\games\\June\\June.exe\0-skipintro\0";
+        assert!(is_game_process(game, env, "june.exe", var));
+        assert!(!is_game_process(
+            game,
+            b"WINEPREFIX=/data/prefixes/gog-10/pfx/\0",
+            "june.exe",
+            var
+        ));
+        // umu-run and the runtime name the program only in later arguments.
+        let umu = b"/usr/bin/python3\0/usr/bin/umu-run\0/games/June/June.exe\0";
+        assert!(!is_game_process(umu, env, "June.exe", var));
+        assert!(is_game_process(
+            b"/games/june/June.exe\0",
+            env,
+            "June.exe",
+            var
+        ));
+        assert!(is_game_process(
+            game,
+            b"WINEPREFIX=/data/prefixes/gog-1\0",
+            "june.exe",
+            var
+        ));
     }
 }

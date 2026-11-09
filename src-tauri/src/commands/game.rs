@@ -581,7 +581,8 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
             let row =
                 cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
-            crate::library::custom::launch(&row).map(|child| {
+            let proton = launch_options_of(&conn, &game.key()).proton;
+            crate::library::custom::launch(&row, proton.as_deref()).map(|child| {
                 record_play(state, &key);
                 state.lock().watch = Some(Watch {
                     key,
@@ -873,7 +874,7 @@ fn run_amazon_job(
 /// GOG and Amazon use only the arguments and the alternative executable.
 const LAUNCH_OPTIONS: &str = "launch_options";
 
-fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
+pub(super) fn launch_options_of(conn: &Connection, key: &str) -> LaunchOptions {
     let json = cache::db::pref(conn, key, LAUNCH_OPTIONS).ok().flatten();
     json.and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default()
@@ -901,13 +902,35 @@ fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchO
     Ok(options)
 }
 
-/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own).
+/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own), or a game the
+/// owner added, which only has its Proton choice (Linux).
 fn has_launch_options(g: &Game) -> bool {
     g.installed
         && matches!(
             g.provider,
-            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Custom
         )
+}
+
+/// The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
+/// of a GOG game, which runs without one.
+#[tauri::command]
+#[specta::specta]
+pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
+    let game = app.state::<AppState>().game(&key);
+    blocking(move || {
+        let native = game
+            .as_ref()
+            .filter(|g| g.provider == ProviderKind::Gog)
+            .and_then(installed_dir)
+            .is_some_and(|dir| gog::native(dir));
+        if native {
+            Vec::new()
+        } else {
+            crate::platform::protons()
+        }
+    })
+    .await
 }
 
 /// The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others.
@@ -934,6 +957,13 @@ pub async fn set_launch_options(
         .game(&key)
         .filter(has_launch_options)
         .ok_or(msg!(noLaunchOptionsHere))?;
+    if game.provider == ProviderKind::Custom {
+        // An added game keeps its program and arguments itself.
+        options = LaunchOptions {
+            proton: options.proton,
+            ..LaunchOptions::default()
+        };
+    }
     blocking(move || {
         if let Some(exe) = &options.exe {
             let dir = installed_dir(&game).ok_or(msg!(noInstallFolder))?;

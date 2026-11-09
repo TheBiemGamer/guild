@@ -286,24 +286,6 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
     Ok(())
 }
 
-/// Linux: downloads umu-launcher (`umu`) or GE-Proton's newest release (`proton`) in the background, sending each new
-/// whole percent. One of each at a time.
-#[tauri::command]
-#[specta::specta]
-pub async fn install_runner(part: String, on_percent: Channel<u8>) -> Res<()> {
-    crate::platform::install_runner(&part, |percent| {
-        let _ = on_percent.send(percent);
-    })
-    .await
-}
-
-/// The Proton builds a game's launch options may pick, newest first; none on Windows.
-#[tauri::command]
-#[specta::specta]
-pub async fn protons() -> Vec<String> {
-    blocking(crate::platform::protons).await
-}
-
 /// The owned-games login, separate from the local install.
 #[derive(Serialize, specta::Type)]
 pub struct SteamLibrary {
@@ -432,7 +414,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
 }
 
 /// Total size of the files under `dir`; a missing folder counts as empty.
-fn dir_size(dir: &std::path::Path) -> u64 {
+pub(super) fn dir_size(dir: &std::path::Path) -> u64 {
     fs_err::read_dir(dir)
         .into_iter()
         .flatten()

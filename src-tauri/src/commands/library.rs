@@ -1062,6 +1062,9 @@ fn featured_pick(games: &[Game], entries: &[Entry], lists: &Lists) -> Option<(Ca
 pub struct Poll {
     /// Key of the game running: Steam's, or the Epic or added game watched since its launch here.
     running: Option<String>,
+    /// The running game is a Windows game on Linux whose first launch still sets up (umu fetching the Steam Linux
+    /// Runtime or making its prefix); it ends once the game's program runs.
+    setting_up: bool,
     progress: HashMap<String, Progress>,
     /// The library changed (a Steam download finished), so the UI should re-ask `library`.
     changed: bool,
@@ -1156,7 +1159,14 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     for title in installed {
         super::notify_done(app, &title, crate::msg::native("readyToPlay"));
     }
+    let setting_up =
+        steam_running.is_none() && watched.as_deref().is_some_and(crate::platform::setting_up);
+    if setting_up && let Some(w) = state.lock().watch.as_mut() {
+        // The session starts when the game does, not while umu sets it up.
+        w.since = Instant::now();
+    }
     Poll {
+        setting_up,
         running: steam_running.or(watched),
         progress,
         changed,
@@ -1656,6 +1666,7 @@ mod tests {
         ]);
         let poll = Poll {
             running: Some("steam-635320".into()),
+            setting_up: false,
             progress: HashMap::from([("epic-Pumpkin".to_string(), progress)]),
             changed: false,
             queue: crate::downloads::view(&queue, |key| titles.get(key).map(|t| t.to_string())),

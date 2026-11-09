@@ -67,6 +67,7 @@
   let {
     gameKey,
     runningKey,
+    settingUp = false,
     progressByKey,
     queue,
     oncancel,
@@ -83,6 +84,8 @@
     gameKey: string
     /** Copy keys, as `poll` reports them. */
     runningKey: string | null
+    /** The running game's first launch on Linux still sets up (`poll`'s `settingUp`). */
+    settingUp?: boolean
     progressByKey: Record<string, Progress>
     /** The Epic, GOG and Amazon download queue; this game's job in it decides the busy pill. */
     queue: QueueView
@@ -267,15 +270,18 @@
   }
 
   // A string, so a library reload that keeps the copy doesn't reload the options under the cursor.
-  const launchKey = $derived(copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon') ? copy.key : null)
+  const launchKey = $derived(
+    copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon' || copy.provider === 'custom') ? copy.key : null,
+  )
   $effect(() => {
     const key = launchKey
     launch = null
     argsSaved = false
+    protons = []
     if (!key) return
     let alive = true
-    // Linux only: Windows has no Proton builds, so the row stays hidden there.
-    commands.protons().then(
+    // Linux only: Windows has no Proton builds, and a native Linux build of a GOG game runs without one.
+    commands.protons(key).then(
       (p) => alive && (protons = p),
       () => {},
     )
@@ -353,16 +359,19 @@
     menuOpen = false
     busy = label(action)
     keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill[aria-disabled]'))
+    let ok = true
     try {
       const found = await api.act(action, key, options)
       if (found) asking = { conflict: found, action, key }
     } catch (e) {
+      ok = false
       onerror(api.message(e))
     } finally {
       busy = null
       onchanged()
       keepFocus(() => actionsEl?.querySelector<HTMLButtonElement>('button.pill, button.go'))
     }
+    return ok
   }
 
   /** Queued jobs run in Legendary or gogdl, so they can be cancelled. Not Move: stopped halfway, the record and the folder disagree. */
@@ -388,7 +397,23 @@
       return
     }
     confirming = true
+    alsoPrefix = false
+    const key = copy!.key
+    commands.winePrefixes().then(
+      (list) => (hasPrefix = list.some((p) => p.key === key)),
+      () => (hasPrefix = false),
+    )
     keepFocus(() => confirmCancel)
+  }
+
+  /** Linux: whether the copy being uninstalled has a Wine prefix, and whether it goes too (off unless ticked). */
+  let hasPrefix = $state(false)
+  let alsoPrefix = $state(false)
+
+  async function confirmUninstall() {
+    const key = copy!.key
+    const prefix = hasPrefix && alsoPrefix
+    if ((await act('uninstall')) && prefix) await run(() => commands.removePrefix(key))
   }
 
   /** Keep cloud downloads it first; Keep local launches as is and uploads afterwards. */
@@ -476,7 +501,8 @@
     const ids: Tab[] = ['overview']
     if (dlcs.length) ids.push('dlc')
     if (copy?.cloudSaves) ids.push('saves')
-    if (copy?.installed && !custom) ids.push('launch')
+    // An added game's only launch option is its Proton build, so only on Linux.
+    if (copy?.installed && (!custom || protons.length)) ids.push('launch')
     if (copy?.installed || copy?.installDir) ids.push('installation')
     return ids.map((id) => ({ id, label: t(`detail.tab.${id}`), count: id === 'dlc' ? dlcs.length : undefined }))
   })
@@ -568,7 +594,10 @@
               <button class="glass round" bind:this={askCancel} onclick={cancelAsk}>{t('common.cancel')}</button>
             {:else if confirming}
               <span class="ask">{t('detail.askUninstall', { title: game.title })}</span>
-              <button class="glass round danger" onclick={() => act('uninstall')}>{t('detail.uninstall')}</button>
+              {#if hasPrefix}
+                <label class="also"><input type="checkbox" bind:checked={alsoPrefix} />{t('detail.removePrefix')}</label>
+              {/if}
+              <button class="glass round danger" onclick={confirmUninstall}>{t('detail.uninstall')}</button>
               <button class="glass round" bind:this={confirmCancel} onclick={keepUninstalled}>{t('common.cancel')}</button>
             {:else}
               <div class="more-wrap">
@@ -602,7 +631,7 @@
                 copies={game.copies}
                 chosen={chosenKey}
                 {running}
-                busy={shown}
+                busy={shown ?? (running && settingUp ? t('busy.settingUp') : null)}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
                 onupdate={() => act('update')}
@@ -714,44 +743,51 @@
                 <button class="chip" onclick={() => run(() => commands.openSteamProperties(copy!.key))}>{t('detail.openInSteam')}</button>
               </div>
             {:else if launch}
-              <div class="row">
-                <label class="what" for="launch-args">{t('detail.args')}<small>{t('detail.argsHint')}</small></label>
-                {#if argsSaved}<span class="saved-note" role="status">{t('detail.saved')}</span>{/if}
-                <input
-                  id="launch-args"
-                  class="args"
-                  type="text"
-                  spellcheck="false"
-                  autocomplete="off"
-                  bind:value={argsText}
-                  onblur={saveArgs}
-                  onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                />
-              </div>
-              {#if copy!.provider === 'epic'}
+              {#if copy!.provider !== 'custom'}
                 <div class="row">
-                  <div class="what" id="launch-offline">{t('detail.offline')}<small>{t('detail.offlineHint')}</small></div>
-                  <button class="chip" aria-pressed={launch.offline} aria-labelledby="launch-offline" onclick={() => setLaunch({ offline: !launch!.offline })}>
-                    {launch.offline ? t('common.on') : t('common.off')}
-                  </button>
+                  <label class="what" for="launch-args">{t('detail.args')}<small>{t('detail.argsHint')}</small></label>
+                  {#if argsSaved}<span class="saved-note" role="status">{t('detail.saved')}</span>{/if}
+                  <input
+                    id="launch-args"
+                    class="args"
+                    type="text"
+                    spellcheck="false"
+                    autocomplete="off"
+                    bind:value={argsText}
+                    onblur={saveArgs}
+                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  />
                 </div>
+                {#if copy!.provider === 'epic'}
+                  <div class="row">
+                    <div class="what" id="launch-offline">{t('detail.offline')}<small>{t('detail.offlineHint')}</small></div>
+                    <button
+                      class="chip"
+                      aria-pressed={launch.offline}
+                      aria-labelledby="launch-offline"
+                      onclick={() => setLaunch({ offline: !launch!.offline })}
+                    >
+                      {launch.offline ? t('common.on') : t('common.off')}
+                    </button>
+                  </div>
+                  <div class="row">
+                    <div class="what" id="launch-skip">{t('detail.skipCheck')}</div>
+                    <button
+                      class="chip"
+                      aria-pressed={launch.skipVersionCheck}
+                      aria-labelledby="launch-skip"
+                      onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
+                    >
+                      {launch.skipVersionCheck ? t('common.on') : t('common.off')}
+                    </button>
+                  </div>
+                {/if}
                 <div class="row">
-                  <div class="what" id="launch-skip">{t('detail.skipCheck')}</div>
-                  <button
-                    class="chip"
-                    aria-pressed={launch.skipVersionCheck}
-                    aria-labelledby="launch-skip"
-                    onclick={() => setLaunch({ skipVersionCheck: !launch!.skipVersionCheck })}
-                  >
-                    {launch.skipVersionCheck ? t('common.on') : t('common.off')}
-                  </button>
+                  <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
+                  <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
+                  {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
                 </div>
               {/if}
-              <div class="row">
-                <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
-                <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
-                {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
-              </div>
               {#if protons.length}
                 <div class="row">
                   <div class="what">{t('settings.proton')}<small>{t('detail.protonHint')}</small></div>
@@ -1095,6 +1131,25 @@
   .ask {
     max-width: 260px;
     color: var(--text);
+  }
+
+  /* Like the install popup's DLC choice. */
+  .also {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    font-size: 14px;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .also input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
   }
 
   button.danger {

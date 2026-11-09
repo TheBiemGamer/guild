@@ -163,13 +163,29 @@ export const commands = {
 	 *  login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.
 	 */
 	installTool: (name: string, onPercent: Channel<number>) => __TAURI_INVOKE<null>("install_tool", { name, onPercent }),
+	/**  Downloads the pinned umu-launcher in the background, sending each new whole percent. */
+	installUmu: (onPercent: Channel<number>) => __TAURI_INVOKE<null>("install_umu", { onPercent }),
+	/**  A Proton source's recent releases; `None` when GitHub couldn't be asked (the reason is logged). */
+	protonReleases: (kind: ProtonKind) => __TAURI_INVOKE<ReleaseView[] | null>("proton_releases", { kind }),
+	/**  Downloads and checks one Proton release in the background, sending each new whole percent. One at a time. */
+	installProton: (kind: ProtonKind, tag: string, onPercent: Channel<number>) => __TAURI_INVOKE<null>("install_proton", { kind, tag, onPercent }),
+	/**  Deletes a Proton build Guild installed. */
+	removeProton: (name: string) => __TAURI_INVOKE<null>("remove_proton", { name }),
+	/**  The games' Wine prefixes, by copy key. Their sizes come from `prefix_sizes`, which takes longer. */
+	winePrefixes: () => __TAURI_INVOKE<PrefixView[]>("wine_prefixes"),
+	/**  Each prefix's size on disk, walked in the background. */
+	prefixSizes: () => __TAURI_INVOKE<PrefixSize[]>("prefix_sizes"),
+	/**  Deletes a copy's prefix, saves and all; not while its game runs. */
+	removePrefix: (key: string) => __TAURI_INVOKE<null>("remove_prefix", { key }),
+	/**  Opens a copy's prefix folder. */
+	openPrefix: (key: string) => __TAURI_INVOKE<null>("open_prefix", { key }),
+	/**  Starts winecfg or winetricks in a copy's prefix, with the Proton build its game runs with. */
+	runInPrefix: (key: string, tool: PrefixTool) => __TAURI_INVOKE<null>("run_in_prefix", { key, tool }),
 	/**
-	 *  Linux: downloads umu-launcher (`umu`) or GE-Proton's newest release (`proton`) in the background, sending each new
-	 *  whole percent. One of each at a time.
+	 *  The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
+	 *  of a GOG game, which runs without one.
 	 */
-	installRunner: (part: string, onPercent: Channel<number>) => __TAURI_INVOKE<null>("install_runner", { part, onPercent }),
-	/**  The Proton builds a game's launch options may pick, newest first; none on Windows. */
-	protons: () => __TAURI_INVOKE<string[]>("protons"),
+	protons: (key: string) => __TAURI_INVOKE<string[]>("protons", { key }),
 	settingsView: () => __TAURI_INVOKE<SettingsView>("settings_view"),
 	/**  Sets one plain setting (`None` resets it). The IGDB secret goes through `set_igdb_secret`. */
 	updateSetting: (name: string, value: string | null) => __TAURI_INVOKE<null>("update_setting", { name, value }),
@@ -449,11 +465,29 @@ string;
 export type Poll = {
 	/**  Key of the game running: Steam's, or the Epic or added game watched since its launch here. */
 	running: string | null,
+	/**
+	 *  The running game is a Windows game on Linux whose first launch still sets up (umu fetching the Steam Linux
+	 *  Runtime or making its prefix); it ends once the game's program runs.
+	 */
+	settingUp: boolean,
 	progress: { [key in string]: Progress },
 	/**  The library changed (a Steam download finished), so the UI should re-ask `library`. */
 	changed: boolean,
 	/**  The Epic download queue. */
 	queue: QueueView,
+};
+
+export type PrefixSize = {
+	key: string,
+	bytes: number,
+};
+
+export type PrefixTool = "winecfg" | "winetricks";
+
+export type PrefixView = {
+	key: string,
+	/**  The game's name; `None` when it is no longer in the library. */
+	title: string | null,
 };
 
 /**
@@ -478,6 +512,15 @@ export type Progress = {
 /**  What a job in progress is doing. Steam's are all `Download`; Steam doesn't say which. */
 export type ProgressAction = "download" | "install" | "update" | "repair" | "verify";
 
+/**  Where Settings installs Proton builds from. */
+export type ProtonKind = "geProton" | "protonCachyos";
+
+/**  A Proton build found; only Guild's own may be removed. */
+export type ProtonView = {
+	name: string,
+	removable: boolean,
+};
+
 /**  The queue for the UI, in order; `active` is the head's key (also while paused). */
 export type QueueView = {
 	jobs: QueuedView[],
@@ -494,14 +537,22 @@ export type QueuedView = {
 	title: string,
 };
 
+/**  A release Settings can install: its tag, the build's name and whether that build is installed. */
+export type ReleaseView = {
+	tag: string,
+	name: string,
+	installed: boolean,
+};
+
 /**
- *  Windows games on Linux, for Settings: whether umu-launcher is found, the Proton builds found (newest first) and
- *  the one chosen in Settings (none is the newest).
+ *  Windows games on Linux, for Settings: whether umu-launcher and winetricks are found, the Proton builds found
+ *  (newest first) and the one chosen in Settings (none is the newest).
  */
 export type RunnerView = {
 	umu: boolean,
-	protons: string[],
+	protons: ProtonView[],
 	proton: string | null,
+	winetricks: boolean,
 };
 
 export type SavesView = {

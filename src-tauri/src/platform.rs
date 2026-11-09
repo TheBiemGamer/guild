@@ -421,14 +421,40 @@ pub fn gog_folder(name: &str, install: &std::path::Path, key: &str) -> Option<st
     }
 }
 
-/// Windows games on Linux, for Settings: whether umu-launcher is found, the Proton builds found (newest first) and
-/// the one chosen in Settings (none is the newest).
+/// Windows games on Linux, for Settings: whether umu-launcher and winetricks are found, the Proton builds found
+/// (newest first) and the one chosen in Settings (none is the newest).
 #[derive(serde::Serialize, specta::Type)]
 #[cfg_attr(windows, allow(dead_code))]
 pub struct RunnerView {
     pub umu: bool,
-    pub protons: Vec<String>,
+    pub protons: Vec<ProtonView>,
     pub proton: Option<String>,
+    pub winetricks: bool,
+}
+
+/// A Proton build found; only Guild's own may be removed.
+#[derive(serde::Serialize, specta::Type)]
+#[cfg_attr(windows, allow(dead_code))]
+pub struct ProtonView {
+    pub name: String,
+    pub removable: bool,
+}
+
+/// Where Settings installs Proton builds from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ProtonKind {
+    GeProton,
+    ProtonCachyos,
+}
+
+/// A release Settings can install: its tag, the build's name and whether that build is installed.
+#[derive(serde::Serialize, specta::Type)]
+#[cfg_attr(windows, allow(dead_code))]
+pub struct ReleaseView {
+    pub tag: String,
+    pub name: String,
+    pub installed: bool,
 }
 
 /// Windows has no runner to set up.
@@ -470,7 +496,18 @@ pub fn windows_game(
     key: &str,
     proton: Option<&str>,
 ) -> Result<std::process::Command, crate::msg::Msg> {
-    crate::wine::wrap(game, key, proton)
+    crate::wine::game_command(game, key, proton)
+}
+
+/// Whether a launched game still waits on its first-run setup; never on Windows.
+#[cfg(windows)]
+pub fn setting_up(_key: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub fn setting_up(key: &str) -> bool {
+    crate::wine::setting_up(key)
 }
 
 /// Points a store tool at a Windows game's Wine prefix (`WINEPREFIX`), where its saves are, setting the prefix up
@@ -486,22 +523,100 @@ pub fn in_prefix(command: &mut std::process::Command, key: &str) {
     }
 }
 
-/// Downloads umu-launcher (`umu`) or GE-Proton (`proton`); Windows needs neither.
+/// Downloads umu-launcher; Windows needs none.
 #[cfg(windows)]
-pub async fn install_runner(
-    _part: &str,
+pub async fn install_umu(_on_percent: impl FnMut(u8)) -> Result<(), crate::msg::Msg> {
+    Err(msg!(unknownTool))
+}
+
+#[cfg(target_os = "linux")]
+pub async fn install_umu(on_percent: impl FnMut(u8)) -> Result<(), crate::msg::Msg> {
+    crate::wine::install_umu(on_percent).await
+}
+
+/// A Proton source's recent releases; `None` when they couldn't be fetched, and on Windows. Blocking.
+#[cfg(windows)]
+pub fn proton_releases(_kind: ProtonKind) -> Option<Vec<ReleaseView>> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn proton_releases(kind: ProtonKind) -> Option<Vec<ReleaseView>> {
+    crate::wine::release_views(kind)
+}
+
+/// Installs one Proton release; Windows needs none.
+#[cfg(windows)]
+pub async fn install_proton(
+    _kind: ProtonKind,
+    _tag: String,
     _on_percent: impl FnMut(u8),
 ) -> Result<(), crate::msg::Msg> {
     Err(msg!(unknownTool))
 }
 
 #[cfg(target_os = "linux")]
-pub async fn install_runner(part: &str, on_percent: impl FnMut(u8)) -> Result<(), crate::msg::Msg> {
-    match part {
-        "umu" => crate::wine::install_umu(on_percent).await,
-        "proton" => crate::wine::install_ge_proton(on_percent).await,
-        _ => Err(msg!(unknownTool)),
-    }
+pub async fn install_proton(
+    kind: ProtonKind,
+    tag: String,
+    on_percent: impl FnMut(u8),
+) -> Result<(), crate::msg::Msg> {
+    crate::wine::install_proton(kind, tag, on_percent).await
+}
+
+/// Removes a Proton build Guild installed; Windows has none.
+#[cfg(windows)]
+pub fn remove_proton(_name: &str) -> Result<(), crate::msg::Msg> {
+    Err(msg!(protonNotRemovable))
+}
+
+#[cfg(target_os = "linux")]
+pub fn remove_proton(name: &str) -> Result<(), crate::msg::Msg> {
+    crate::wine::remove_proton(name)
+}
+
+/// The copy keys with a Wine prefix and each prefix's folder; none on Windows.
+#[cfg(windows)]
+pub fn prefixes() -> Vec<(String, std::path::PathBuf)> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub fn prefixes() -> Vec<(String, std::path::PathBuf)> {
+    crate::wine::prefix_keys()
+        .into_iter()
+        .filter_map(|k| crate::wine::prefix(&k).map(|p| (k, p)))
+        .collect()
+}
+
+/// Deletes a copy's Wine prefix; Windows has none.
+#[cfg(windows)]
+pub fn remove_prefix(_key: &str) -> Result<(), crate::msg::Msg> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn remove_prefix(key: &str) -> Result<(), crate::msg::Msg> {
+    crate::wine::remove_prefix(key)
+}
+
+/// Starts winecfg or winetricks (`program`) in a copy's prefix with its Proton build; Windows has none.
+#[cfg(windows)]
+pub fn run_in_prefix(
+    _key: &str,
+    _program: &str,
+    _proton: Option<&str>,
+) -> Result<(), crate::msg::Msg> {
+    Err(msg!(unknownTool))
+}
+
+#[cfg(target_os = "linux")]
+pub fn run_in_prefix(
+    key: &str,
+    program: &str,
+    proton: Option<&str>,
+) -> Result<(), crate::msg::Msg> {
+    crate::wine::run_in_prefix(key, program, proton)
 }
 
 #[cfg(windows)]

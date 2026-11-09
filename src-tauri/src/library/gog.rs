@@ -551,7 +551,7 @@ fn has_info(dir: &Path, id: impl std::fmt::Display) -> bool {
 
 /// Whether a folder holds a native Linux build: gogdl unpacks GOG's Linux installer with its `start.sh` (from its
 /// `dl/managers/linux.py`) and keeps its own manifest there, and its `launch` runs that script. Never on Windows.
-fn native(dir: &Path) -> bool {
+pub fn native(dir: &Path) -> bool {
     cfg!(target_os = "linux")
         && dir.join("start.sh").is_file()
         && dir.join(".gogdl-linux-manifest").is_file()

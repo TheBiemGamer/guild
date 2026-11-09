@@ -7,6 +7,7 @@ pub mod library;
 pub mod lists;
 pub mod settings;
 pub mod update;
+pub mod wine;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

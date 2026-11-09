@@ -78,6 +78,7 @@
   let featured = $state<Featured | null>(null)
   let version = $state(0)
   let running = $state<string | null>(null)
+  let settingUp = $state(false)
   let progress = $state<Record<string, Progress>>({})
   let queue = $state<QueueView>(api.emptyQueue)
   let open = $state<string | null>(null)
@@ -371,6 +372,7 @@
     const poller = setInterval(async () => {
       const p = await commands.poll()
       running = p.running
+      settingUp = p.settingUp
       progress = p.progress
       queue = p.queue
       if (p.changed) await reload()
@@ -589,6 +591,7 @@
           {stat}
           resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
           {running}
+          {settingUp}
           {progress}
           {queue}
           onopen={openGame}
@@ -604,7 +607,13 @@
           {#snippet header()}
             {#if showContinue && featured}
               <div style="height: {BANNER_H}px; margin-bottom: 24px">
-                <Continue {featured} running={running !== null && featured.copyKeys.includes(running)} onplay={(key) => act('play', key)} onopen={openGame} />
+                <Continue
+                  {featured}
+                  running={running !== null && featured.copyKeys.includes(running)}
+                  {settingUp}
+                  onplay={(key) => act('play', key)}
+                  onopen={openGame}
+                />
               </div>
             {/if}
             {#if !view.sections}
@@ -666,6 +675,7 @@
       <Detail
         gameKey={open}
         runningKey={running}
+        {settingUp}
         progressByKey={progress}
         {queue}
         oncancel={cancelDownload}
