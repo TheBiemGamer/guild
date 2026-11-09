@@ -40,11 +40,12 @@ export function progressLong(p: Progress): string {
   return `${t(`progress.${p.action}`, { percent: percent(p) })} · ${bytes}${left(p.secsLeft)}`
 }
 
-/** "27.3 GB", whole megabytes under 1 GB, whole kilobytes (rounded up, so only empty is "0 KB") under 1 MB. */
+/** "27.3 GB", "1.1 TB" from 1 TB, whole megabytes under 1 GB, whole kilobytes (rounded up, so only empty is "0 KB") under 1 MB. */
 export function sizeLabel(bytes: number): string {
   if (bytes < MB) return t('size.kb', { size: Math.ceil(bytes / KB) })
   if (bytes < GB) return t('size.mb', { size: Math.floor(bytes / MB) })
-  return t('size.gb', { size: gb(bytes) })
+  if (bytes < 1024 * GB) return t('size.gb', { size: gb(bytes) })
+  return t('size.tb', { size: oneDecimal(bytes / (1024 * GB)) })
 }
 
 /** Playtime tile: "Never played", "45 min", "15 h 3 min". */

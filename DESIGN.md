@@ -201,7 +201,7 @@ One family: Segoe UI Variable Text, falling back to Segoe UI and system-ui. Hier
 | Body     | 14px; 13px for hints and secondary lines                                                                           |
 | Label    | 12px/600 uppercase, 0.08em tracking: section labels, Settings group headings, tile and tab headings. 11px on chips |
 
-No UI text below 11px. Counts and numbers use tabular figures.
+No UI text below 11px. Counts and numbers use tabular figures. Folder paths in the install panel use the system monospace (Cascadia Mono on Windows) at 13px.
 
 ## Layout
 
@@ -266,6 +266,12 @@ No UI text below 11px. Counts and numbers use tabular figures.
   - Fact tiles (Playtime, Last played, How long to beat) are all exactly two lines tall, so a late answer never changes the row height. A tile with nothing to say is absent.
   - How long to beat carries a small "IGDB" credit link; the attribution is required.
   - Tabs with nothing for the game are hidden, but the tab row always shows.
+- **Install panel** (Epic, GOG, Amazon; Steam uses its own dialog): one component, `InstallPanel.svelte`, with the same fields in the same order everywhere. In the library it floats beside the cover (380px, `surface-2`, 18px radius, modal shadow; a scroll elsewhere or a click outside closes it). On the game page it opens over the page under the Install pill, right edges aligned, without a title; nothing below moves. A click outside or Escape closes it either way.
+  - A sizes line ("1.8 GB download · 3.4 GB on disk"), each part only when the store tool reports it. The sizes are cached, so a second open is complete at once.
+  - Folder: the real path in monospace, a 6px bar of the drive's use with the game added (`accent`, `warn` when it doesn't fit) and "N free after install". The path is always the real target: with no install folder set, Epic's is Legendary's own (`install_dir` in its `config.ini`, else `~/Games`) plus the game's `FolderName`; GOG and Amazon use `~/Games`. Change opens a menu: the store's install folder, folders used before for it, a `Games` folder on each other drive, then Another folder…. The folder installed to becomes the store's install folder.
+  - Not enough room: Install is disabled and the line reads "Needs X, Y free" in `warn`. Rust checks again before queueing.
+  - DLC: a checkbox row per DLC with its size for up to 4; from 5 one All DLC (N) row that folds out the list. All start ticked.
+  - Language (GOG with more than one) is a menu row; Build (GOG on Linux with a native build) is a segmented Linux / Windows control.
 - **Link chips:** 28px pills with a 14px logo, `glass-hover` fill. The UI sends a link kind and Rust builds the URL.
 - **Text:**
   - Every UI string goes through `t()` from `src/lib/i18n/<lang>.json`.
@@ -299,6 +305,7 @@ No UI text below 11px. Counts and numbers use tabular figures.
 - Ambient color can be turned off, which gives a neutral dark gradient.
 - Add a game is a chip in the toolbar. Covers come from SteamGridDB or a file (2026-11-07).
 - Downloads popover layout F2: one two-line row per download where the row itself is the progress bar (2026-11-07).
+- Install panel direction A: beside the cover in the library, inline under Install on the game page, real folder and drive space, DLC chosen there (2026-11-09).
 - Installation tab layout C: rows named after what they're about, words only, no icons (2026-11-08).
 - Non-goals: a light theme, achievements, friends, chat, store browsing, macOS.
 

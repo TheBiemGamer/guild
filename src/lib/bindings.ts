@@ -38,11 +38,11 @@ export const commands = {
 	/**
 	 *  Steam requests return at once (Steam shows its own dialogs). Epic and GOG requests return when
 	 *  Legendary or gogdl is done; installs report progress through `poll` meanwhile, under the game's key.
-	 *  `with_dlc` (Epic or GOG install, default on) installs the owned DLC too. `dlc` installs or uninstalls
-	 *  one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
+	 *  An Epic or GOG install here takes the owned DLC too (the install panel uses `install::install`). `dlc` installs or
+	 *  uninstalls one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
 	 *  An Epic or GOG Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 	 */
-	act: (action: Action, key: string, withDlc: boolean | null, dlc: string | null, keep: Keep | null, dest: string | null) => __TAURI_INVOKE<Conflict | null>("act", { action, key, withDlc, dlc, keep, dest }),
+	act: (action: Action, key: string, dlc: string | null, keep: Keep | null, dest: string | null) => __TAURI_INVOKE<Conflict | null>("act", { action, key, dlc, keep, dest }),
 	/**
 	 *  Download size of a game that isn't installed, like `27.3 GB`, for the install popup and game page.
 	 *  Epic asks Legendary and Steam asks its servers (slow, seconds), so the bytes are cached for a week. GOG's comes
@@ -51,6 +51,23 @@ export const commands = {
 	 *  None if unknown, or for Steam when no account is connected.
 	 */
 	downloadSize: (key: string) => __TAURI_INVOKE<number | null>("download_size", { key }),
+	/**
+	 *  The panel's numbers for a copy that isn't installed, for `language` and `build` (GOG). Store tools are asked once
+	 *  and their answers cached for a week, so a second open is instant. `None` for Steam, added games and installed copies.
+	 */
+	installPlan: (key: string, language: string | null, build: Build | null) => __TAURI_INVOKE<InstallPlan | null>("install_plan", { key, language, build }),
+	/**
+	 *  The folder menu of `store`: its install folder first, then the folders used before for it, then a `Games` folder
+	 *  on each other drive.
+	 */
+	installFolders: (store: Store) => __TAURI_INVOKE<InstallFolder[]>("install_folders", { store }),
+	/**  A folder picked with "Another folder…", with its drive's space. */
+	folderSpace: (path: string) => __TAURI_INVOKE<InstallFolder>("folder_space", { path }),
+	/**
+	 *  Queues the install as picked in the panel and returns when it is done, like `act`. The folder becomes the store's
+	 *  install folder. Refuses before the download when the drive hasn't room for it.
+	 */
+	install: (key: string, choice: InstallChoice) => __TAURI_INVOKE<null>("install", { key, choice }),
 	/**
 	 *  The entry's Steam copy's owned DLC for the game page. Asked from Steam, which logs on, so only
 	 *  with a connected account and when the store page lists DLC; cached a week, a failure for 6 h.
@@ -261,6 +278,9 @@ export type Action = "play" |
 /**  Epic and GOG move the folder to `dest`; Steam opens its storage manager. */
 "move";
 
+/**  A GOG build, where both a native Linux one and a Windows one exist (Linux only). */
+export type Build = "linux" | "windows";
+
 export type Card = {
 	key: string,
 	/**  The copy key Play and Install use (`entries::default_copy`). */
@@ -367,6 +387,13 @@ export type Dlc = {
 	copy: string | null,
 };
 
+export type DlcSize = {
+	id: string,
+	title: string,
+	downloadBytes: number | null,
+	diskBytes: number | null,
+};
+
 export type Featured = {
 	key: string,
 	/**  The copy key Play uses. */
@@ -402,6 +429,42 @@ export type GridCover = {
 export type Importable = {
 	key: string,
 	title: string,
+};
+
+/**  What the owner picked in the panel. */
+export type InstallChoice = {
+	/**  The base folder; the game gets its own folder inside it. */
+	folder: string,
+	/**  The DLC to install with the game, by id; `None` takes all owned DLC (the panel's choice before it knew them). */
+	dlc: string[] | null,
+	/**  GOG: one of the plan's `languages`; `None` picks one. */
+	language: string | null,
+	/**  GOG on Linux: one of the plan's `builds`; `None` is the native one. */
+	build: Build | null,
+};
+
+/**  A folder in the folder menu and the drive space around it. */
+export type InstallFolder = {
+	path: string,
+	freeBytes: number | null,
+	totalBytes: number | null,
+};
+
+/**  What an install takes. Sizes are `None` where the store tool doesn't say. */
+export type InstallPlan = {
+	/**  The game alone, without DLC. */
+	downloadBytes: number | null,
+	diskBytes: number | null,
+	/**  The folder the game gets inside the chosen one, when the store tool says. */
+	folderName: string | null,
+	/**  The owned DLC (Epic and GOG). */
+	dlc: DlcSize[],
+	/**  GOG with more than one language: its languages; `language` is the one the sizes are for. */
+	languages: string[],
+	language: string | null,
+	/**  GOG on Linux with a native build: both builds; `build` is the one the sizes are for. */
+	builds: Build[],
+	build: Build | null,
 };
 
 /**  The answer to a cloud save conflict. */

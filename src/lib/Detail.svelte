@@ -58,6 +58,7 @@
     type TimeToBeat,
   } from './bindings'
   import PlayButton from './PlayButton.svelte'
+  import InstallPanel from './InstallPanel.svelte'
   import GameMenu from './GameMenu.svelte'
   import LinkIcon, { linkNames } from './LinkIcon.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
@@ -77,7 +78,6 @@
     onerror,
     onchanged,
     ontint,
-    onconfirminstall,
     onedit,
     conflict = null,
   }: {
@@ -99,8 +99,6 @@
     onchanged: () => void
     /** This game's art for the window tint; null when it has none. */
     ontint: (url: string | null) => void
-    /** Install through the library's flow: an Epic, GOG or Amazon copy asks in the install popup first, then calls `go`. */
-    onconfirminstall: (key: string, title: string, anchor: DOMRect, go: (withDlc: boolean) => void) => void
     /** Opens the Edit dialog for a game the owner added. */
     onedit: (key: string) => void
     /** A Play from a card stopped at this cloud save conflict (`key`: the copy played); the hero asks. */
@@ -121,6 +119,9 @@
   let dlcCancel = $state<HTMLButtonElement>()
   let busy = $state<string | null>(null)
   let confirming = $state(false)
+  /** The Epic, GOG or Amazon copy whose install panel is open. */
+  let installPanel = $state<string | null>(null)
+  let installOpener = $state<HTMLElement | null>(null)
   let menuOpen = $state(false)
   let moreButton = $state<HTMLButtonElement>()
   let backButton = $state<HTMLButtonElement>()
@@ -175,6 +176,7 @@
     steamDlc = []
     confirmingDlc = null
     asking = null
+    installPanel = null
     tab = 'overview'
     api.steamDlc(key).then(
       (d) => alive && (steamDlc = d ?? []),
@@ -636,8 +638,10 @@
                 onplay={() => act('play')}
                 onupdate={() => act('update')}
                 oninstall={() => {
-                  const key = copy!.key // the copy shown when the popup opens, not when it is confirmed
-                  onconfirminstall(key, game!.title, actionsEl!.getBoundingClientRect(), (withDlc) => act('install', key, { withDlc }))
+                  // Steam installs in its own dialog; the other stores' copies ask in the install panel under the pill.
+                  if (!/^(epic|gog|amazon)-/.test(copy!.key)) return act('install')
+                  installOpener = actionsEl?.querySelector<HTMLElement>('.split, button.pill') ?? null
+                  installPanel = installPanel === copy!.key ? null : copy!.key
                 }}
               />
               {#if job?.state === 'paused'}
@@ -646,6 +650,23 @@
               {#if job && !cancelling}
                 <button class="glass round" onclick={cancel}>{t('common.cancel')}</button>
               {/if}
+            {/if}
+            {#if installPanel && installPanel === copy?.key && !copy.installed && !job}
+              <!-- Over the page, under the pill; a fresh panel per copy, so a late answer never lands on another one. -->
+              {#key installPanel}
+                <div class="install">
+                  <InstallPanel
+                    game={{ key: installPanel, title: game.title }}
+                    opener={installOpener}
+                    oncancel={() => (installPanel = null)}
+                    onconfirm={(choice) => {
+                      const key = installPanel!
+                      installPanel = null
+                      act('install', key, { choice })
+                    }}
+                  />
+                </div>
+              {/key}
             {/if}
           </div>
         </div>
@@ -1116,10 +1137,19 @@
   }
 
   .actions {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  /* The install panel: over the page under the Install pill, right edges aligned, so nothing below moves. */
+  .install {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 8px);
+    right: 0;
   }
 
   .round {
@@ -1133,7 +1163,7 @@
     color: var(--text);
   }
 
-  /* Like the install popup's DLC choice. */
+  /* Like the install panel's DLC rows. */
   .also {
     display: flex;
     align-items: center;

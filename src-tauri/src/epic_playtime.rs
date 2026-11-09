@@ -6,7 +6,6 @@
 //! log line, error string, Debug output or the frontend, and is never stored here.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use reqwest::StatusCode;
 use rusqlite::Connection;
@@ -65,20 +64,9 @@ fn session() -> Option<Session> {
     user_json()
 }
 
-/// Reads `user.json` in Legendary's config folder: `LEGENDARY_CONFIG_PATH`, else
-/// `$XDG_CONFIG_HOME/legendary`, else `~/.config/legendary`, as Legendary's `lfs/lgndry.py` picks it.
+/// Reads `user.json` in Legendary's config folder (`epic::config_dir`).
 fn user_json<T: DeserializeOwned>() -> Option<T> {
-    let dir = match (
-        std::env::var_os("LEGENDARY_CONFIG_PATH"),
-        std::env::var_os("XDG_CONFIG_HOME"),
-    ) {
-        (Some(dir), _) => PathBuf::from(dir),
-        (None, Some(config)) => PathBuf::from(config).join("legendary"),
-        (None, None) => directories::BaseDirs::new()?
-            .home_dir()
-            .join(".config")
-            .join("legendary"),
-    };
+    let dir = epic::config_dir()?;
     // Errors are dropped unread: serde's can quote the file.
     serde_json::from_slice(&std::fs::read(dir.join("user.json")).ok()?).ok()
 }

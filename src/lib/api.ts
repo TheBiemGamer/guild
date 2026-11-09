@@ -13,6 +13,8 @@ import {
   type CustomGame,
   type Featured,
   type GridCover,
+  type Build,
+  type InstallChoice,
   type Keep,
   type ProtonKind,
   type QueuedAction,
@@ -45,18 +47,18 @@ export function queueState(queue: QueueView, keys: string[]): QueueState | null 
 export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort, lists: ListFilter[]) =>
   commands.library(query, store, installedOnly, sort, lists)
 /**
- * `withDlc`: an Epic or GOG install takes the owned DLC too (Rust's default). `dlc`: act on that DLC of the copy `key`.
- * `keep`: the answer to the cloud save conflict an earlier Play returned. `dest`: the folder an Epic, GOG or Amazon Move goes to.
+ * `dlc`: act on that DLC of the copy `key`. `keep`: the answer to the cloud save conflict an earlier Play returned.
+ * `dest`: the folder an Epic, GOG or Amazon Move goes to. `choice`: an Epic, GOG or Amazon install as picked in the install panel.
  */
 export interface ActOptions {
-  withDlc?: boolean
   dlc?: string
   keep?: Keep
   dest?: string
+  choice?: InstallChoice
 }
 /** Resolves to a conflict when an Epic or GOG Play asks first instead of launching; null otherwise. */
 export const act = (action: Action, key: string, o: ActOptions = {}): Promise<Conflict | null> =>
-  commands.act(action, key, o.withDlc ?? null, o.dlc ?? null, o.keep ?? null, o.dest ?? null)
+  action === 'install' && o.choice ? commands.install(key, o.choice).then(() => null) : commands.act(action, key, o.dlc ?? null, o.keep ?? null, o.dest ?? null)
 /**
  * The Steam copy's owned DLC (Steam logs on for it: connected account only, cached in Rust). Asked once per
  * game and kept, like the other game page answers; an empty list (none, or a failure) is null, so it's asked again.
@@ -64,6 +66,9 @@ export const act = (action: Action, key: string, o: ActOptions = {}): Promise<Co
 export const steamDlc = (key: string) => remembered('steamDlc', key, () => commands.steamDlc(key).then((d) => (d.length ? d : null)))
 /** Download size in bytes (Epic asks Legendary online, GOG asks gogdl, Steam logs on; cached); null when unknown. */
 export const downloadSize = (key: string) => remembered('size', key, () => commands.downloadSize(key))
+/** The install panel's sizes, DLC, languages and builds for a copy that isn't installed (cached in Rust); null when it has none. */
+export const installPlan = (key: string, language: string | null, build: Build | null) =>
+  remembered(`plan ${language} ${build}`, key, () => commands.installPlan(key, language, build))
 /** Store details for the game page; `screenshots` are remote URLs for `screenshots`. Null when the store has none. */
 export const gameInfo = (key: string) => remembered('info', key, () => commands.gameInfo(key))
 /** `gameInfo`'s screenshots as ready-to-use URLs, downloaded on first use; failed ones are left out. */

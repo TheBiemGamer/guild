@@ -247,8 +247,8 @@ pub enum Conflict {
 
 /// Steam requests return at once (Steam shows its own dialogs). Epic and GOG requests return when
 /// Legendary or gogdl is done; installs report progress through `poll` meanwhile, under the game's key.
-/// `with_dlc` (Epic or GOG install, default on) installs the owned DLC too. `dlc` installs or uninstalls
-/// one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
+/// An Epic or GOG install here takes the owned DLC too (the install panel uses `install::install`). `dlc` installs or
+/// uninstalls one DLC of the copy `key` instead of the game. `dest` is the folder an Epic or GOG Move goes to.
 /// An Epic or GOG Play that finds a cloud save conflict returns it instead of launching; Play again with `keep`.
 #[tauri::command]
 #[specta::specta]
@@ -256,7 +256,6 @@ pub async fn act(
     app: AppHandle,
     action: Action,
     key: String,
-    with_dlc: Option<bool>,
     dlc: Option<String>,
     keep: Option<Keep>,
     dest: Option<String>,
@@ -272,11 +271,7 @@ pub async fn act(
         return Err(msg!(dlcNotInLibrary));
     }
     // A DLC install is just that DLC.
-    let with_dlc = if dlc.is_some() {
-        None
-    } else {
-        Some(with_dlc.unwrap_or(true))
-    };
+    let with_dlc = dlc.is_none().then_some(true);
     blocking(move || {
         act_blocking(
             &app,
@@ -491,9 +486,9 @@ fn store_error(store: ProviderKind, reason: impl Into<Msg>) -> Msg {
 }
 
 /// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
-/// the setting, else Legendary's default (`None`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
+/// the setting, else Legendary's own default (`epic::default_base`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
 /// (gogdl has no default, and nile's is `~/Games/nile`).
-fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
+pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     let saved = open_db(state).map(|c| settings::load(&c));
     let dir = match provider {
         ProviderKind::Gog => saved
@@ -502,7 +497,10 @@ fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
         ProviderKind::Amazon => saved
             .and_then(|s| s.amazon_install_dir)
             .or_else(gog::default_base),
-        _ => saved.and_then(|s| s.epic_install_dir),
+        // Passed as `--base-path` from now on, so the folder shown is the folder used.
+        _ => saved
+            .and_then(|s| s.epic_install_dir)
+            .or_else(epic::default_base),
     };
     dir.map(|p| p.to_string_lossy().into_owned())
 }
@@ -641,7 +639,7 @@ fn report(s: &mut Shared, key: &str, outcome: Res<()>) {
 }
 
 /// Queues an Epic or GOG job and waits until it leaves the queue: done, failed, cancelled or removed.
-fn enqueue(app: &AppHandle, job: Job) -> Res<()> {
+pub(super) fn enqueue(app: &AppHandle, job: Job) -> Res<()> {
     let state = app.state::<AppState>();
     let (tx, rx) = std::sync::mpsc::channel();
     {
@@ -818,12 +816,20 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
     match job.action {
         QueuedAction::Update => epic::update(&game.external_id, on_event),
         QueuedAction::Verify => epic::verify(&game.external_id, on_event),
-        QueuedAction::Install => epic::install(
-            job.dlc.as_deref().unwrap_or(&game.external_id),
-            job.with_dlc,
-            job.dest.as_deref().map(std::path::Path::new),
-            on_event,
-        ),
+        QueuedAction::Install => {
+            let dest = job.dest.as_deref().map(std::path::Path::new);
+            epic::install(
+                job.dlc.as_deref().unwrap_or(&game.external_id),
+                job.with_dlc,
+                dest,
+                &on_event,
+            )?;
+            // Legendary takes all DLC or none, so a choice of some follows the game one by one.
+            for dlc in job.dlcs.iter().flatten() {
+                epic::install(dlc, None, dest, &on_event)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -843,11 +849,18 @@ fn run_gog_job(
                 .as_deref()
                 .map(PathBuf::from)
                 .ok_or(msg!(noInstallBase))?;
+            let dlcs = match &job.dlcs {
+                Some(ids) => gog::Dlcs::Only(ids.clone()),
+                None if job.with_dlc != Some(false) => gog::Dlcs::All,
+                None => gog::Dlcs::Only(Vec::new()),
+            };
             let dir = gog::install(
                 open_db(state).as_ref(),
                 id,
                 &base,
-                job.with_dlc != Some(false),
+                &dlcs,
+                job.lang.as_deref(),
+                job.windows,
                 on_event,
             )?;
             gog::record_install(&cache::db::open(&state.dirs.db)?, id, &dir)
@@ -1226,8 +1239,8 @@ pub async fn sync_saves_now(app: AppHandle, key: String) -> Res<()> {
     .await
 }
 
-/// How long an Epic download size stays good; sizes change only with game updates.
-const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
+/// How long a download size stays good; sizes change only with game updates.
+pub(super) const SIZE_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// Download size of a game that isn't installed, like `27.3 GB`, for the install popup and game page.
@@ -1242,9 +1255,14 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
         .state::<AppState>()
         .game(&key)
         .filter(|g| !g.installed)?;
-    let steam_id = match game.provider {
-        ProviderKind::Epic => None,
-        ProviderKind::Steam => Some(game.external_id.parse::<u32>().ok()?),
+    let appid = match game.provider {
+        ProviderKind::Epic => {
+            return blocking(move || {
+                super::install::epic_sizes(open_db(&app.state::<AppState>()).as_ref(), &game).0
+            })
+            .await;
+        }
+        ProviderKind::Steam => game.external_id.parse::<u32>().ok()?,
         ProviderKind::Gog => {
             let dlcs: Vec<String> = game.dlc.iter().map(|d| d.id.clone()).collect();
             return blocking(move || {
@@ -1272,17 +1290,17 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
         move || {
             let conn = open_db(&app.state::<AppState>());
             let fresh = conn.as_ref().and_then(|c| cached_size(c, &key));
-            let token = match (&fresh, steam_id, conn.as_ref()) {
-                (None, Some(_), Some(c)) => steam_token(c),
+            let token = match (&fresh, conn.as_ref()) {
+                (None, Some(c)) => steam_token(c),
                 _ => None,
             };
             (fresh, token)
         }
     })
     .await;
-    let bytes = match (cached, steam_id) {
-        ((Some(bytes), _), _) => bytes,
-        ((None, token), Some(appid)) => {
+    let bytes = match cached {
+        (Some(bytes), _) => bytes,
+        (None, token) => {
             let token = token?;
             // One Steam logon at a time; Steam rate-limits them and the owned-games fetch logs on too.
             let state = app.state::<AppState>();
@@ -1311,25 +1329,6 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
                     .await
                 }
             }
-        }
-        _ => {
-            blocking(move || {
-                let conn = open_db(&app.state::<AppState>());
-                info::cached_or_run_tool(
-                    conn.as_ref(),
-                    &key,
-                    "size",
-                    SIZE_MAX_AGE_SECS,
-                    unix_now(),
-                    || {
-                        let info = epic::info_json(&game)
-                            .inspect_err(|e| tracing::warn!("legendary info {key}: {e}"))
-                            .ok()?;
-                        epic::download_size_from_info(&info).map(|size| size.to_string())
-                    },
-                )
-            })
-            .await?
         }
     };
     bytes.parse().ok()

@@ -476,9 +476,14 @@ pub fn info_json(game: &Game) -> Result<Value, Error> {
     json(&["info", &game.external_id, "--json"])
 }
 
-/// Bytes to download, from `manifest.download_size` of `info_json` (verified on a real capture).
-pub fn download_size_from_info(info: &Value) -> Option<u64> {
-    info["manifest"]["download_size"].as_u64()
+/// Bytes to download and on disk, from `manifest.download_size` and `disk_size` of `info_json` (verified on a real
+/// capture). The game alone: each DLC has a manifest of its own.
+pub fn sizes_from_info(info: &Value) -> (Option<u64>, Option<u64>) {
+    let manifest = &info["manifest"];
+    (
+        manifest["download_size"].as_u64(),
+        manifest["disk_size"].as_u64(),
+    )
 }
 
 /// `legendary list --json`: every owned game with its Epic catalog item (`metadata`).
@@ -530,6 +535,68 @@ pub fn log_in(authorization_code: &str) -> Result<(), Error> {
 /// Makes Legendary forget the login.
 pub fn log_out() -> Result<(), Error> {
     run(legendary(&["auth", "--delete"]))
+}
+
+/// Legendary's config folder: `LEGENDARY_CONFIG_PATH`, else `$XDG_CONFIG_HOME/legendary`, else
+/// `~/.config/legendary`, as Legendary's `lfs/lgndry.py` picks it (on Windows too).
+pub fn config_dir() -> Option<PathBuf> {
+    match (
+        std::env::var_os("LEGENDARY_CONFIG_PATH"),
+        std::env::var_os("XDG_CONFIG_HOME"),
+    ) {
+        (Some(dir), _) => Some(PathBuf::from(dir)),
+        (None, Some(config)) => Some(PathBuf::from(config).join("legendary")),
+        (None, None) => Some(
+            directories::BaseDirs::new()?
+                .home_dir()
+                .join(".config")
+                .join("legendary"),
+        ),
+    }
+}
+
+/// Where Legendary installs without `--base-path`: `install_dir` in its `config.ini`, else `~/Games`
+/// (`core.py`'s `get_default_install_dir`).
+pub fn default_base() -> Option<PathBuf> {
+    let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
+    let ini = config_dir()
+        .and_then(|dir| std::fs::read_to_string(dir.join("config.ini")).ok())
+        .unwrap_or_default();
+    Some(ini_install_dir(&ini, &home).unwrap_or_else(|| home.join("Games")))
+}
+
+/// `install_dir` of the `[Legendary]` section, with a leading `~` made the home folder.
+fn ini_install_dir(ini: &str, home: &Path) -> Option<PathBuf> {
+    let mut section = "";
+    for line in ini.lines().map(str::trim) {
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = name;
+        } else if section == "Legendary"
+            && let Some((key, value)) = line.split_once(['=', ':'])
+            && key.trim() == "install_dir"
+        {
+            let value = value.trim();
+            return match value.strip_prefix('~') {
+                Some(rest) => Some(home.join(rest.trim_start_matches(['/', '\\']))),
+                None if !value.is_empty() => Some(PathBuf::from(value)),
+                None => None,
+            };
+        }
+    }
+    None
+}
+
+/// The folder Legendary gives a game inside its base folder: the `FolderName` its catalog item names (in
+/// `metadata/<app_name>.json`). `None` when Legendary hasn't cached the game.
+pub fn folder_name(app_name: &str) -> Option<String> {
+    let path = config_dir()?
+        .join("metadata")
+        .join(format!("{app_name}.json"));
+    let json: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    json["metadata"]["customAttributes"]["FolderName"]["value"]
+        .as_str()
+        .filter(|f| !f.is_empty())
+        .map(str::to_owned)
 }
 
 /// Ours first, then the owner's own install (`tools::LEGENDARY`).
@@ -1276,23 +1343,38 @@ mod tests {
     }
 
     #[test]
-    fn download_size_from_info_reads_the_fixture() {
-        // Captured from `legendary info <AppName> --json` (A Short Hike); the size is `manifest.download_size`.
+    fn sizes_from_info_read_the_fixture() {
+        // Captured from `legendary info <AppName> --json` (A Short Hike).
         assert_eq!(
-            download_size_from_info(&fixture("info.json")),
-            Some(224_976_506)
+            sizes_from_info(&fixture("info.json")),
+            (Some(224_976_506), Some(323_783_140))
         );
     }
 
     #[test]
-    fn download_size_from_info_handles_missing_fields() {
-        assert_eq!(download_size_from_info(&serde_json::json!({})), None);
+    fn install_dir_comes_from_the_legendary_section() {
+        let home = Path::new("/home/me");
+        let ini = "[Legendary]\n; comment\ndisable_update_check = false\n";
+        assert_eq!(ini_install_dir(ini, home), None);
         assert_eq!(
-            download_size_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })),
-            None
+            ini_install_dir("[Legendary]\ninstall_dir = ~/Epic Games\n", home),
+            Some(PathBuf::from("/home/me/Epic Games"))
         );
+        assert_eq!(
+            ini_install_dir("[Legendary]\ninstall_dir=/mnt/games\n", home),
+            Some(PathBuf::from("/mnt/games"))
+        );
+        assert_eq!(ini_install_dir("[Other]\ninstall_dir = /x\n", home), None);
     }
 
+    #[test]
+    fn sizes_from_info_handle_missing_fields() {
+        assert_eq!(sizes_from_info(&serde_json::json!({})), (None, None));
+        assert_eq!(
+            sizes_from_info(&serde_json::json!({ "manifest": { "download_size": "big" } })),
+            (None, None)
+        );
+    }
     #[test]
     fn junk_json_gives_no_games() {
         assert!(games(&Value::Null, &Value::Null).is_empty());
