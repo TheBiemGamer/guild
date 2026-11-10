@@ -12,13 +12,13 @@
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4" alt="Platform: Windows and Linux">
 </p>
 
-Guild puts your Steam, Epic, GOG and Amazon games in one grid, next to any game you add yourself. A game you own in two stores shows up once, and you pick which store starts it.
+Guild puts your Steam, Epic, GOG, Amazon and EA games in one grid, next to any game you add yourself. A game you own in two stores shows up once, and you pick which store starts it.
 
 ![The library grid](docs/screenshot.png)
 
 ## What it does
 
-Your whole Steam library shows up, installed or not. Epic, GOG and Amazon games install, update, verify and uninstall from Guild itself, through one download queue you can pause and reorder, so you don't need their launchers. Epic and GOG cloud saves sync before and after you play. You can import games you already installed with another launcher. On Linux, Windows games run through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher) and Proton, each in its own Wine prefix, and Settings → Wine installs and manages Proton and the prefixes.
+Your whole Steam library shows up, installed or not. Epic, GOG and Amazon games install, update, verify and uninstall from Guild itself, through one download queue you can pause and reorder, so you don't need their launchers. Epic, GOG and EA cloud saves sync before and after you play. EA support is experimental: it runs on [Maxima](https://github.com/ArmchairDevelopers/Maxima), which is still early, on Windows and Linux. On Windows, installing or importing an EA game asks once for administrator permission, for the game's own setup. You can import games you already installed with another launcher. On Linux, Windows games run through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher) and Proton, each in its own Wine prefix, and Settings → Wine installs and manages Proton and the prefixes.
 
 Each game has a page with its description, screenshots, your playtime, when you last played it, how long it takes to beat, and links to its store page, PCGamingWiki, SteamDB and ProtonDB.
 
@@ -54,19 +54,20 @@ Open Settings with the gear at the top right. Under Accounts, log in to the stor
 
 - Steam: your password, or the QR code in the Steam mobile app. Steam itself has to be installed to play Steam games.
 - Epic Games, GOG and Amazon Games: Guild first offers to install the small open-source tool each one needs ([Legendary](https://github.com/derrod/legendary), [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl), [Nile](https://github.com/imLinguin/nile)), then opens the store's own login page. Each store's Options holds its install folder and import.
+- EA (experimental): the same, with [Maxima](https://github.com/TheBiemGamer/Maxima/tree/guild) as the tool. On Linux, Maxima runs EA games with its own Proton and Wine prefix, not the ones in Settings → Wine.
 
 For how long a game takes to beat, make a free app in the [Twitch developer console](https://dev.twitch.tv/console/apps) and paste its client ID and secret under Settings → Accounts. For covers of games you add yourself, paste a free [SteamGridDB](https://www.steamgriddb.com) API key there too.
 
 ## FAQ
 
 **Why is a game shown twice?**
-An Epic, GOG or Amazon copy only joins your Steam copy when [GOG GamesDB](https://gamesdb.gog.com) links it to that exact Steam app. Same title alone isn't enough, because that's how two different games end up merged.
+An Epic, GOG, Amazon or EA copy only joins your Steam copy when [GOG GamesDB](https://gamesdb.gog.com) links it to that exact Steam app. Same title alone isn't enough, because that's how two different games end up merged.
 
 **Where do my logins go?**
-Your Steam token, IGDB secret and SteamGridDB key are stored in your system's keyring: Windows Credential Manager on Windows, and GNOME Keyring, KWallet or another Secret Service keyring on Linux. They never go in a file. Guild never stores your Steam password or Steam Guard codes. Legendary, gogdl and Nile keep their own logins in their own folders.
+Your Steam token, IGDB secret and SteamGridDB key are stored in your system's keyring: Windows Credential Manager on Windows, and GNOME Keyring, KWallet or another Secret Service keyring on Linux. They never go in a file. Guild never stores your Steam password or Steam Guard codes. Legendary, gogdl, Nile and Maxima keep their own logins in their own folders.
 
 **Do I still need the store apps?**
-Only Steam. Guild installs and starts Steam games through Steam. Epic, GOG and Amazon games don't need their apps.
+Only Steam. Guild installs and starts Steam games through Steam. Epic, GOG, Amazon and EA games don't need their apps.
 
 **I had Game Launcher 0.1.0. What happened to it?**
 That was Guild's old name. Your library, settings and logins move over the first time Guild starts. The update installs Guild next to the old app, so remove Game Launcher afterwards in Windows Settings → Apps.
@@ -79,7 +80,7 @@ English and Nederlands. Guild follows your system language, and you can change i
 
 Your library, settings and play history stay on your computer, in `%LOCALAPPDATA%\Guild` on Windows and `~/.local/share/Guild` on Linux. Guild has no account of its own and sends no usage data. It talks to:
 
-- Steam, Epic, GOG and Amazon, for your logins, your games, downloads and cloud saves
+- Steam, Epic, GOG, Amazon and EA, for your logins, your games, downloads and cloud saves
 - GOG GamesDB, to match games across stores and for some covers
 - the stores' image servers, for covers and screenshots
 - IGDB and SteamGridDB, only if you add their keys
@@ -89,7 +90,7 @@ Some of these connections aren't official and can break when a store changes som
 
 ## Thanks
 
-Guild is built on [Tauri](https://tauri.app) and [Svelte](https://svelte.dev), with help from [Claude Code](https://claude.com/claude-code). Epic, GOG and Amazon support exists because of [Legendary](https://github.com/derrod/legendary), [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl) and [Nile](https://github.com/imLinguin/nile), and how to drive them came from reading [Heroic Games Launcher](https://heroicgameslauncher.com). Windows games run on Linux through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher), [GE-Proton](https://github.com/GloriousEggroll/proton-ge-custom) and [Proton-CachyOS](https://github.com/CachyOS/proton-cachyos). Game data and art come from [GOG GamesDB](https://gamesdb.gog.com), [IGDB](https://www.igdb.com) and [SteamGridDB](https://www.steamgriddb.com). The store and IGDB logos are from [Simple Icons](https://simpleicons.org), the SteamGridDB logo from [selfh.st icons](https://github.com/selfhst/icons) (CC BY 4.0).
+Guild is built on [Tauri](https://tauri.app) and [Svelte](https://svelte.dev), with help from [Claude Code](https://claude.com/claude-code). Epic, GOG, Amazon and EA support exists because of [Legendary](https://github.com/derrod/legendary), [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl), [Nile](https://github.com/imLinguin/nile) and [Maxima](https://github.com/ArmchairDevelopers/Maxima), and how to drive them came from reading [Heroic Games Launcher](https://heroicgameslauncher.com). Windows games run on Linux through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher), [GE-Proton](https://github.com/GloriousEggroll/proton-ge-custom) and [Proton-CachyOS](https://github.com/CachyOS/proton-cachyos). Game data and art come from [GOG GamesDB](https://gamesdb.gog.com), [IGDB](https://www.igdb.com) and [SteamGridDB](https://www.steamgriddb.com). The store and IGDB logos are from [Simple Icons](https://simpleicons.org), the SteamGridDB logo from [selfh.st icons](https://github.com/selfhst/icons) (CC BY 4.0).
 
 ## Contributing
 

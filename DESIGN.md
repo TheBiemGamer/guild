@@ -1,6 +1,6 @@
 ---
 name: Guild
-description: "A Windows and Linux launcher for Steam, Epic, GOG and Amazon Games libraries. Dark glass over the last-played game's art."
+description: "A Windows and Linux launcher for Steam, Epic, GOG, Amazon Games and EA libraries. Dark glass over the last-played game's art."
 colors:
   bg: "#0e0e14"
   surface: "#16161f"
