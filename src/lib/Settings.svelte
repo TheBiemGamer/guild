@@ -1090,93 +1090,92 @@
                               {/if}
                             </div>
                           {/if}
-                          {#if !view.linux}
-                            <div class="r">
-                              <div class="logo ea"><StoreIcon provider="ea" size={17} /></div>
-                              {@render who('EA', ea, t('settings.experimental'))}
-                              {#if view.ea !== 'noTool'}
-                                <button
-                                  class="btn opt"
-                                  class:open={eaOptions}
-                                  aria-expanded={eaOptions}
-                                  aria-controls="ea-options"
-                                  onclick={() => (eaOptions = !eaOptions)}
-                                >
-                                  {t('settings.options')}
-                                  {@render chevron()}
-                                </button>
+                          <div class="r">
+                            <div class="logo ea"><StoreIcon provider="ea" size={17} /></div>
+                            {@render who('EA', ea, t('settings.experimental'))}
+                            {#if view.ea !== 'noTool'}
+                              <button
+                                class="btn opt"
+                                class:open={eaOptions}
+                                aria-expanded={eaOptions}
+                                aria-controls="ea-options"
+                                onclick={() => (eaOptions = !eaOptions)}
+                              >
+                                {t('settings.options')}
+                                {@render chevron()}
+                              </button>
+                            {/if}
+                            {#if view.ea === 'noTool'}
+                              <button class="btn" disabled={maximaJob !== null} aria-live="polite" onclick={installMaxima}>
+                                {maximaJob ? jobLabel('install', maximaJob) : t('settings.installTool', { tool: 'Maxima' })}
+                              </button>
+                            {/if}
+                            {#if ea.fix}
+                              <button class="btn" disabled={eaLoggingIn} onclick={eaLogIn}>{eaLoggingIn ? t('common.loggingIn') : ea.fix}</button>
+                            {/if}
+                            {#if ea.logout}
+                              <button class="btn danger" disabled={busy} onclick={eaLogOut}>{t('settings.logOut')}</button>
+                            {/if}
+                          </div>
+                          {#if eaOptions && view.ea !== 'noTool'}
+                            <div class="opts" id="ea-options">
+                              {#if view.linux}<p class="note">{t('settings.eaOwnProton')}</p>{/if}
+                              <div class="row">
+                                <label for="ea-folder">{t('settings.installFolder')}</label>
+                                <div class="field">
+                                  <input
+                                    id="ea-folder"
+                                    type="text"
+                                    placeholder={view.defaultInstallDir ?? ''}
+                                    spellcheck="false"
+                                    bind:value={eaFolder}
+                                    onblur={saveEaFolder}
+                                    onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                                  />
+                                  {#if view.eaInstallDir}
+                                    <button
+                                      class="btn"
+                                      onclick={() => {
+                                        eaFolder = ''
+                                        saveEaFolder()
+                                      }}
+                                    >
+                                      {t('common.reset')}
+                                    </button>
+                                  {/if}
+                                </div>
+                              </div>
+                              <div class="row">
+                                <div>{t('settings.importInstall')}</div>
+                                <button class="btn" disabled={eaImporting || eaImport !== null} onclick={pickEaImport}>{t('settings.importButton')}</button>
+                              </div>
+                              {#if eaImport}
+                                <div class="row stack">
+                                  <label for="ea-import-game">{t('settings.whichGame', { path: eaImport.path })}</label>
+                                  <div class="field">
+                                    <GamePicker id="ea-import-game" games={eaImport.games} bind:value={eaImportKey} />
+                                    <button class="btn" disabled={eaImporting || eaImportKey === ''} onclick={runEaImport}
+                                      >{eaImporting ? t('settings.importing') : t('settings.import')}</button
+                                    >
+                                    <button class="btn" disabled={eaImporting} onclick={() => (eaImport = null)}>{t('common.cancel')}</button>
+                                  </div>
+                                </div>
                               {/if}
-                              {#if view.ea === 'noTool'}
-                                <button class="btn" disabled={maximaJob !== null} aria-live="polite" onclick={installMaxima}>
-                                  {maximaJob ? jobLabel('install', maximaJob) : t('settings.installTool', { tool: 'Maxima' })}
-                                </button>
-                              {/if}
-                              {#if ea.fix}
-                                <button class="btn" disabled={eaLoggingIn} onclick={eaLogIn}>{eaLoggingIn ? t('common.loggingIn') : ea.fix}</button>
-                              {/if}
-                              {#if ea.logout}
-                                <button class="btn danger" disabled={busy} onclick={eaLogOut}>{t('settings.logOut')}</button>
+                              {#if eaImportNote}<Tip text={eaImportNote} truncated
+                                  >{#snippet children({ props })}<p {...props} class="note" role="status">{eaImportNote}</p>{/snippet}</Tip
+                                >{/if}
+                              {#if maxima?.update}
+                                <div class="row">
+                                  <div>Maxima {maxima.version ?? ''}<span>{t('settings.toolAvailable', { version: maxima.pinned })}</span></div>
+                                  <button class="btn" disabled={maximaJob !== null} aria-live="polite" onclick={installMaxima}>
+                                    {maximaJob ? jobLabel('update', maximaJob) : t('play.update')}
+                                  </button>
+                                </div>
+                                {#if maximaError}<Tip text={maximaError} truncated
+                                    >{#snippet children({ props })}<p {...props} class="note" role="status">{maximaError}</p>{/snippet}</Tip
+                                  >{/if}
                               {/if}
                             </div>
-                            {#if eaOptions && view.ea !== 'noTool'}
-                              <div class="opts" id="ea-options">
-                                <div class="row">
-                                  <label for="ea-folder">{t('settings.installFolder')}</label>
-                                  <div class="field">
-                                    <input
-                                      id="ea-folder"
-                                      type="text"
-                                      placeholder={view.defaultInstallDir ?? ''}
-                                      spellcheck="false"
-                                      bind:value={eaFolder}
-                                      onblur={saveEaFolder}
-                                      onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                                    />
-                                    {#if view.eaInstallDir}
-                                      <button
-                                        class="btn"
-                                        onclick={() => {
-                                          eaFolder = ''
-                                          saveEaFolder()
-                                        }}
-                                      >
-                                        {t('common.reset')}
-                                      </button>
-                                    {/if}
-                                  </div>
-                                </div>
-                                <div class="row">
-                                  <div>{t('settings.importInstall')}</div>
-                                  <button class="btn" disabled={eaImporting || eaImport !== null} onclick={pickEaImport}>{t('settings.importButton')}</button>
-                                </div>
-                                {#if eaImport}
-                                  <div class="row stack">
-                                    <label for="ea-import-game">{t('settings.whichGame', { path: eaImport.path })}</label>
-                                    <div class="field">
-                                      <GamePicker id="ea-import-game" games={eaImport.games} bind:value={eaImportKey} />
-                                      <button class="btn" disabled={eaImporting || eaImportKey === ''} onclick={runEaImport}
-                                        >{eaImporting ? t('settings.importing') : t('settings.import')}</button
-                                      >
-                                      <button class="btn" disabled={eaImporting} onclick={() => (eaImport = null)}>{t('common.cancel')}</button>
-                                    </div>
-                                  </div>
-                                {/if}
-                                {#if eaImportNote}<Tip text={eaImportNote} truncated
-                                    >{#snippet children({ props })}<p {...props} class="note" role="status">{eaImportNote}</p>{/snippet}</Tip
-                                  >{/if}
-                                {#if maxima?.update}
-                                  <div class="row">
-                                    <div>Maxima {maxima.version ?? ''}<span>{t('settings.toolAvailable', { version: maxima.pinned })}</span></div>
-                                    <button class="btn" disabled={maximaJob !== null} aria-live="polite" onclick={installMaxima}>
-                                      {maximaJob ? jobLabel('update', maximaJob) : t('play.update')}
-                                    </button>
-                                  </div>
-                                  {#if maximaError}<Tip text={maximaError} truncated
-                                      >{#snippet children({ props })}<p {...props} class="note" role="status">{maximaError}</p>{/snippet}</Tip
-                                    >{/if}
-                                {/if}
-                              </div>
-                            {/if}
                           {/if}
                         </div>
                         <h4 id={id('gamedata')}>{t('settings.group.gameData')}</h4>

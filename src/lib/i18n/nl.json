@@ -502,6 +502,7 @@
   "settings.needGogdl": "GOG-games hebben gogdl nodig, een gratis opensourcetool.",
   "settings.needNile": "Amazon-games hebben Nile nodig, een gratis opensourcetool.",
   "settings.needMaxima": "EA-games hebben Maxima nodig, een gratis opensourcetool die nog in een vroeg stadium is.",
+  "settings.eaOwnProton": "Op Linux start Maxima EA-games met een eigen Proton en Wine-prefix, dus de Proton-keuze in Guild geldt niet voor ze.",
   "settings.experimental": "Experimenteel",
   "settings.startup": "Starten met Windows",
   "settings.startupLinux": "Starten bij inloggen",

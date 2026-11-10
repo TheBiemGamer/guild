@@ -186,7 +186,7 @@ The last-played game's art, heavily blurred and saturated, tints the whole windo
   - `success` green: Saved, Connected, test results. `error-text`: the text of error lines.
   - `scrim`: the bottom stop of gradients over art.
 - Store tiles in Settings use literal brand tints: #1b2838 Steam, #2a2a2a Epic, #86328a GOG, #232f3e Amazon Games, #ff4747 EA, #9147ff IGDB.
-- The EA row carries an Experimental label after its name (the Label style at 11px, `text-3`) and shows only on Windows; before Maxima is installed its line says the tool is still early.
+- The EA row carries an Experimental label after its name (the Label style at 11px, `text-3`); before Maxima is installed its line says the tool is still early. On Linux its Options start with a note that Maxima runs EA games with its own Proton and Wine prefix.
 
 **One bright thing.** The white pill is the only solid-bright element on a screen. Violet and green never compete with it.
 

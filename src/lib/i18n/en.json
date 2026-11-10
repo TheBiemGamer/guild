@@ -502,6 +502,7 @@
   "settings.needGogdl": "GOG games need gogdl, a free open-source tool.",
   "settings.needNile": "Amazon games need Nile, a free open-source tool.",
   "settings.needMaxima": "EA games need Maxima, a free open-source tool that is still early.",
+  "settings.eaOwnProton": "On Linux, Maxima runs EA games with its own Proton and Wine prefix, so Guild's Proton choice doesn't apply to them.",
   "settings.experimental": "Experimental",
   "settings.startup": "Start with Windows",
   "settings.startupLinux": "Start on login",

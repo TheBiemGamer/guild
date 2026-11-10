@@ -30,8 +30,6 @@ pub struct Tool {
     companions: &'static [Companion],
 }
 
-// Only Windows pins have companions so far.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Companion {
     file: &'static str,
     url: &'static str,
@@ -102,42 +100,39 @@ pub const NILE: Tool = Tool {
     companions: &[],
 };
 
-/// The owner's fork of Maxima, for EA. No Linux build yet: empty pins there, and left out of `ALL`.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// The owner's fork of Maxima, for EA.
 pub const MAXIMA: Tool = Tool {
     name: "maxima",
     title: "Maxima",
-    version: "0.1.1",
+    version: "0.1.2",
     #[cfg(windows)]
-    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.1/maxima-cli.exe",
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-cli.exe",
     #[cfg(windows)]
-    sha256: "3f434828f4154dcc15c4aac84f13ab6d1b3fde3e5a05b224cca60c4791467b27",
+    sha256: "5943ee7e1f3bf72441d9b269945f86d37bc44b29ff8c39235ab1cabbdc1c5bf7",
     #[cfg(windows)]
     exe: "maxima-cli.exe",
     #[cfg(windows)]
     companions: &[Companion {
         file: "maxima-bootstrap.exe",
-        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.1/maxima-bootstrap.exe",
-        sha256: "eb847a1a3a81571fbffc3152ad383de4b5f46cdd0d99e7980b9677fb16de7410",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-bootstrap.exe",
+        sha256: "63d087aa95b2ab52b558d1369fe8836a7a129f51c65fad77415bbe25cddae5bd",
     }],
     #[cfg(target_os = "linux")]
-    url: "",
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-cli",
     #[cfg(target_os = "linux")]
-    sha256: "",
+    sha256: "b23090fac51417030f3a8c0e8827e3c8d2ee221a16f2b8d76a6010df1b546dca",
     #[cfg(target_os = "linux")]
     exe: "maxima-cli",
     #[cfg(target_os = "linux")]
-    companions: &[],
+    companions: &[Companion {
+        file: "maxima-bootstrap",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-bootstrap",
+        sha256: "81b28f12519cb3bd95abcd571a4f8ee8e7613d80c30fd909c84ba838a0a9012e",
+    }],
     local: None,
 };
 
-pub const ALL: &[&Tool] = &[
-    &LEGENDARY,
-    &GOGDL,
-    &NILE,
-    #[cfg(windows)]
-    &MAXIMA,
-];
+pub const ALL: &[&Tool] = &[&LEGENDARY, &GOGDL, &NILE, &MAXIMA];
 
 /// The whole download, not each read: a 17 MB file on a slow line takes minutes.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
