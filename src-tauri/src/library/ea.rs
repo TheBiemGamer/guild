@@ -212,7 +212,6 @@ fn first_error(events: &[Event]) -> Option<Msg> {
 
 /// The login state from `guild account`; also remembers the account name.
 pub fn login(dirs: &Dirs) -> StoreLogin {
-    // On Linux Maxima has no pin yet (`tools.rs`), so it is never found there.
     if tools::version(&tools::MAXIMA).is_none() {
         return StoreLogin::NoTool;
     }
