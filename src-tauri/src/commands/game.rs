@@ -205,7 +205,7 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
     let Some(game) = state.game(&key) else {
         return DetailArt::default();
     };
-    let dir = state.dirs.art.join(&key);
+    let dir = state.dirs.art_for(&key);
     // The game page shows a text title, so the logo art isn't fetched.
     let hero = cache::resolve(&game.art.hero, &state.http, dir.join("hero")).await;
     DetailArt {
@@ -1756,7 +1756,7 @@ pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<
     if state.game(&key).is_none() {
         return Vec::new();
     }
-    let dir = state.dirs.art.join(&key);
+    let dir = state.dirs.art_for(&key);
     // Downloaded side by side; awaited in order, so the screenshots keep theirs.
     let downloads: Vec<_> = urls
         .into_iter()

@@ -1000,7 +1000,7 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     // The cover comes from the first copy, cached under that copy's key.
     let game = state.first_copy(&key)?;
     let key = game.key();
-    let art_dir = state.dirs.art.join(&key);
+    let art_dir = state.dirs.art_for(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {
         let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else {
             continue;
@@ -1025,8 +1025,12 @@ fn thumb_key(game: &Game, slot: &str, src: &std::path::Path) -> String {
             .ok()
     };
     match modified().filter(|_| game.provider == ProviderKind::Custom) {
-        Some(at) => format!("{}-{slot}-{}", game.key(), at.as_millis()),
-        None => format!("{}-{slot}", game.key()),
+        Some(at) => format!(
+            "{}-{slot}-{}",
+            cache::file_name(&game.key()),
+            at.as_millis()
+        ),
+        None => format!("{}-{slot}", cache::file_name(&game.key())),
     }
 }
 
@@ -1050,7 +1054,7 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
         let s = state.lock();
         featured_pick(&s.games, &s.entries, &s.lists)?
     };
-    let dir = state.dirs.art.join(game.key());
+    let dir = state.dirs.art_for(&game.key());
     let mut hero = None;
     for (slot, image) in [("hero", &game.art.hero), ("cover", &game.art.cover)] {
         if let Some(path) = cache::resolve(image, &state.http, dir.join(slot)).await {

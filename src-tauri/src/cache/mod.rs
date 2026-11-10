@@ -32,6 +32,11 @@ pub struct Dirs {
     pub prefixes: PathBuf,
 }
 
+/// `key` as a file or folder name. EA keys hold `:`, which Windows refuses in names.
+pub fn file_name(key: &str) -> String {
+    key.replace(':', "_")
+}
+
 /// `%LOCALAPPDATA%`.
 pub fn local_app_data() -> PathBuf {
     directories::BaseDirs::new()
@@ -64,6 +69,11 @@ impl Dirs {
             #[cfg(target_os = "linux")]
             prefixes: data.join("prefixes"),
         }
+    }
+
+    /// The folder cached art for the copy `key` is downloaded to.
+    pub fn art_for(&self, key: &str) -> PathBuf {
+        self.art.join(file_name(key))
     }
 }
 
