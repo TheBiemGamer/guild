@@ -104,30 +104,30 @@ pub const NILE: Tool = Tool {
 pub const MAXIMA: Tool = Tool {
     name: "maxima",
     title: "Maxima",
-    version: "0.1.2",
+    version: "0.1.3",
     #[cfg(windows)]
-    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-cli.exe",
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-cli.exe",
     #[cfg(windows)]
-    sha256: "5943ee7e1f3bf72441d9b269945f86d37bc44b29ff8c39235ab1cabbdc1c5bf7",
+    sha256: "48c7d5ac07bd74714062b7995ab33098b22c99a45c4f77672ce209eebb3e8b40",
     #[cfg(windows)]
     exe: "maxima-cli.exe",
     #[cfg(windows)]
     companions: &[Companion {
         file: "maxima-bootstrap.exe",
-        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-bootstrap.exe",
-        sha256: "63d087aa95b2ab52b558d1369fe8836a7a129f51c65fad77415bbe25cddae5bd",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-bootstrap.exe",
+        sha256: "359ea7aa789baaba7c5b1512a42eb94d58328ba707df8f54e618b5288e852232",
     }],
     #[cfg(target_os = "linux")]
-    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-cli",
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-cli",
     #[cfg(target_os = "linux")]
-    sha256: "b23090fac51417030f3a8c0e8827e3c8d2ee221a16f2b8d76a6010df1b546dca",
+    sha256: "806117b23c28276fba4e837750dfa91f01e5c2042646f848b70b4b3bf523118f",
     #[cfg(target_os = "linux")]
     exe: "maxima-cli",
     #[cfg(target_os = "linux")]
     companions: &[Companion {
         file: "maxima-bootstrap",
-        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.2/maxima-bootstrap",
-        sha256: "81b28f12519cb3bd95abcd571a4f8ee8e7613d80c30fd909c84ba838a0a9012e",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-bootstrap",
+        sha256: "075965274449be0b379e2a0b31e9cbbb1da1bdb9dc95567ade4434f597f7987b",
     }],
     local: None,
 };
