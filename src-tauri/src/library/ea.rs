@@ -1,6 +1,7 @@
 //! EA games through the owner's Maxima fork (`maxima-cli guild …`, https://github.com/TheBiemGamer/Maxima). Maxima
 //! makes every EA call and keeps its own files in `<data>/ea` (`MAXIMA_DATA_DIR`), the login included. Each command
-//! prints one JSON object per line on stdout; its stderr is dropped unread, since a token could still be in it.
+//! prints one JSON object per line on stdout. Of its stderr only `ERROR` lines reach the log, and only those without
+//! anything that looks like a token.
 
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -43,7 +44,7 @@ const INSTALL_INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 /// The account name `guild account` last reported.
 static ACCOUNT: Mutex<Option<String>> = Mutex::new(None);
 
-/// `maxima-cli` with its data in `<data>/ea`; stderr dropped.
+/// `maxima-cli` with its data in `<data>/ea`; stderr dropped unless piped for `log_errors`.
 pub fn command(dirs: &Dirs) -> Command {
     let mut command = Command::new(tools::MAXIMA.exe());
     command
@@ -301,6 +302,34 @@ fn sign_in(app: &AppHandle, events: &mpsc::Receiver<Event>) -> Result<Option<Str
     }
 }
 
+/// Logs Maxima's `ERROR` lines from `stderr` on a thread until it closes, so the pipe never fills.
+fn log_errors(stderr: impl Read + Send + 'static) {
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Some(line) = error_line(&line) {
+                tracing::warn!("maxima: {line}");
+            }
+        }
+    });
+}
+
+/// `line` if it is an `ERROR` line with nothing in it that looks like a token or a login code. Maxima scrubs its log
+/// already; Guild doesn't rely on that.
+fn error_line(line: &str) -> Option<&str> {
+    const SECRETS: [&str; 7] = [
+        "eyj",
+        "access_token",
+        "refresh_token",
+        "code=",
+        "pc_sign",
+        "sig=",
+        "token=",
+    ];
+    let line = line.trim();
+    let lower = line.to_ascii_lowercase();
+    (line.starts_with("ERROR") && !SECRETS.iter().any(|s| lower.contains(s))).then_some(line)
+}
+
 /// Reads `stdout`'s events on a thread until it closes, also after the receiver is gone, so the pipe never fills.
 fn read_events(stdout: impl Read + Send + 'static) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel();
@@ -486,10 +515,15 @@ fn download(
     action: ProgressAction,
     mut on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
-    let mut child =
-        crate::platform::spawn_tool(game_command(dirs, steam).args(args).stdout(Stdio::piped()))?;
+    let mut child = crate::platform::spawn_tool(
+        game_command(dirs, steam)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )?;
     let pid = child.id();
     on_event(InstallEvent::Started(pid));
+    log_errors(child.stderr.take().expect("stderr is piped"));
     let stdout = child.stdout.take().expect("stdout is piped");
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -573,6 +607,10 @@ fn short_job(
     let mut command = game_command(dirs, steam);
     command.args(args);
     let output = super::tool::run_with_timeout(command, b"", timeout)?.ok_or(msg!(eaNoReason))?;
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(error_line)
+        .for_each(|line| tracing::warn!("maxima: {line}"));
     let mut job = Job::default();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         job.line(line, ProgressAction::Install);
@@ -619,7 +657,11 @@ pub fn launch(
 
 /// Spawns `command` and waits up to `timeout` for `started`; on anything else it is stopped and the reason returned.
 fn start(mut command: Command, timeout: Duration) -> Result<Child, Error> {
-    let mut child = command.stdout(Stdio::piped()).spawn()?;
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    log_errors(child.stderr.take().expect("stderr is piped"));
     let events = read_events(child.stdout.take().expect("stdout is piped"));
     let deadline = Instant::now() + timeout;
     let reason = loop {
@@ -701,6 +743,25 @@ mod tests {
     } else {
         "sleep 30"
     };
+
+    #[test]
+    fn only_error_lines_without_secrets_are_logged() {
+        let error = "ERROR maxima::core::launch - game exited with code 3";
+        assert_eq!(error_line(&format!("  {error}\r")), Some(error));
+        assert_eq!(error_line("WARN maxima - slow download"), None);
+        assert_eq!(error_line("INFO maxima - ERROR in the middle"), None);
+        for secret in [
+            "eyJhbGciOi",
+            "access_token: x",
+            "Refresh_Token x",
+            "?code=QUOx",
+            "pc_sign=abc",
+            "&sig=abc",
+            "?token=abc",
+        ] {
+            assert_eq!(error_line(&format!("ERROR maxima - {secret}")), None);
+        }
+    }
 
     #[test]
     fn umu_gameid_comes_from_the_steam_twin() {
