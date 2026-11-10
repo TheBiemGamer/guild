@@ -1,4 +1,4 @@
-//! The store tools (Legendary, gogdl, Nile), installed on request into `<local data>/tools/<name>/`.
+//! The store tools (Legendary, gogdl, Nile, Maxima), installed on request into `<local data>/tools/<name>/`.
 //! Each is one pinned GitHub release asset; a download whose SHA-256 differs from the compiled-in hash is
 //! deleted before anything runs it. Bump a tool by changing its version, URL and hash together, for each OS.
 //! The Linux builds of Legendary and gogdl are Python zipapps that run on the system's `python3`.
@@ -26,6 +26,16 @@ pub struct Tool {
     exe: &'static str,
     /// A folder under `%LOCALAPPDATA%` where the owner may have put it by hand.
     local: Option<&'static str>,
+    /// Files the exe needs beside it, installed before it.
+    companions: &'static [Companion],
+}
+
+// Only Windows pins have companions so far.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct Companion {
+    file: &'static str,
+    url: &'static str,
+    sha256: &'static str,
 }
 
 /// derrod/legendary, the build the Epic parsers were written against.
@@ -49,6 +59,7 @@ pub const LEGENDARY: Tool = Tool {
     exe: "legendary",
     #[cfg(target_os = "linux")]
     local: None,
+    companions: &[],
 };
 
 pub const GOGDL: Tool = Tool {
@@ -68,6 +79,7 @@ pub const GOGDL: Tool = Tool {
     #[cfg(target_os = "linux")]
     exe: "gogdl",
     local: None,
+    companions: &[],
 };
 
 pub const NILE: Tool = Tool {
@@ -87,15 +99,51 @@ pub const NILE: Tool = Tool {
     #[cfg(target_os = "linux")]
     exe: "nile",
     local: None,
+    companions: &[],
 };
 
-pub const ALL: [&Tool; 3] = [&LEGENDARY, &GOGDL, &NILE];
+/// The owner's fork of Maxima, for EA. No Linux build yet: empty pins there, and left out of `ALL`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const MAXIMA: Tool = Tool {
+    name: "maxima",
+    title: "Maxima",
+    version: "0.1.1",
+    #[cfg(windows)]
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.1/maxima-cli.exe",
+    #[cfg(windows)]
+    sha256: "3f434828f4154dcc15c4aac84f13ab6d1b3fde3e5a05b224cca60c4791467b27",
+    #[cfg(windows)]
+    exe: "maxima-cli.exe",
+    #[cfg(windows)]
+    companions: &[Companion {
+        file: "maxima-bootstrap.exe",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.1/maxima-bootstrap.exe",
+        sha256: "eb847a1a3a81571fbffc3152ad383de4b5f46cdd0d99e7980b9677fb16de7410",
+    }],
+    #[cfg(target_os = "linux")]
+    url: "",
+    #[cfg(target_os = "linux")]
+    sha256: "",
+    #[cfg(target_os = "linux")]
+    exe: "maxima-cli",
+    #[cfg(target_os = "linux")]
+    companions: &[],
+    local: None,
+};
+
+pub const ALL: &[&Tool] = &[
+    &LEGENDARY,
+    &GOGDL,
+    &NILE,
+    #[cfg(windows)]
+    &MAXIMA,
+];
 
 /// The whole download, not each read: a 17 MB file on a slow line takes minutes.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 pub fn find(name: &str) -> Option<&'static Tool> {
-    ALL.into_iter().find(|t| t.name == name)
+    ALL.iter().copied().find(|t| t.name == name)
 }
 
 fn root() -> &'static Path {
@@ -150,12 +198,19 @@ pub fn version(tool: &'static Tool) -> Option<String> {
         .clone()
 }
 
-/// `legendary version "0.21.1", codename "Lowlife"`, `1.4.0` (gogdl), `1.2.0 Robert Speedwagon` (Nile).
+/// `legendary version "0.21.1", codename "Lowlife"`, `1.4.0` (gogdl), `1.2.0 Robert Speedwagon` (Nile),
+/// `maxima-cli 0.1.1`.
 fn parse_version(text: &str) -> Option<String> {
     let version = if text.contains('"') {
         text.split('"').nth(1)?
     } else {
-        text.split_whitespace().next()?
+        let mut words = text.split_whitespace();
+        let first = words.next()?;
+        if first.starts_with(|c: char| c.is_ascii_digit()) {
+            first
+        } else {
+            words.next()?
+        }
     };
     version
         .starts_with(|c: char| c.is_ascii_digit())
@@ -177,8 +232,8 @@ pub struct ToolView {
 }
 
 pub fn view() -> Vec<ToolView> {
-    ALL.into_iter()
-        .map(|tool| {
+    ALL.iter()
+        .map(|&tool| {
             let version = version(tool);
             let managed = tool.managed(root()).exists();
             ToolView {
@@ -221,7 +276,7 @@ impl Drop for Installing {
 }
 
 /// Downloads the pinned build next to its final place, checks its hash, then renames it into place.
-/// `on_percent` hears each new whole percent when the size is known.
+/// `on_percent` hears each new whole percent of the exe when the size is known.
 pub async fn install(
     http: &reqwest::Client,
     tool: &'static Tool,
@@ -229,19 +284,7 @@ pub async fn install(
 ) -> Result<(), Msg> {
     let _installing = Installing::start(tool.name)
         .ok_or_else(|| msg!(toolAlreadyInstalling, tool = tool.title))?;
-    let dest = tool.managed(root());
-    let part = dest.with_extension("exe.part");
-    let digest = match download::<Sha256>(http, tool.url, DOWNLOAD_TIMEOUT, &part, on_percent).await
-    {
-        Ok(digest) => digest,
-        Err(e) => {
-            tracing::warn!("install {}: {e}", tool.name);
-            let _ = fs::remove_file(&part);
-            return Err(msg!(cantDownloadTool, tool = tool.title));
-        }
-    };
-    place(&part, &dest, &digest, tool.sha256)
-        .inspect_err(|e| tracing::warn!("install {}: {e}", tool.name))?;
+    install_into(http, tool, root(), on_percent).await?;
     VERSIONS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -289,12 +332,51 @@ pub(crate) async fn download<D: Digest>(
 /// `install` into another tools folder, for tests that must not touch the owner's.
 #[cfg(test)]
 pub async fn install_to(http: &reqwest::Client, tool: &Tool, root: &Path) -> Result<(), Msg> {
-    let (part, dest) = (
-        tool.managed(root).with_extension("exe.part"),
-        tool.managed(root),
-    );
-    let digest = download::<Sha256>(http, tool.url, DOWNLOAD_TIMEOUT, &part, |_| {}).await?;
-    place(&part, &dest, &digest, tool.sha256)
+    install_into(http, tool, root, |_| {}).await
+}
+
+/// Companions go first, so an exe in place means its companions are too.
+async fn install_into(
+    http: &reqwest::Client,
+    tool: &Tool,
+    root: &Path,
+    on_percent: impl FnMut(u8),
+) -> Result<(), Msg> {
+    let dir = root.join(tool.name);
+    for companion in tool.companions {
+        let dest = dir.join(companion.file);
+        fetch(http, tool, companion.url, companion.sha256, &dest, |_| {}).await?;
+    }
+    fetch(
+        http,
+        tool,
+        tool.url,
+        tool.sha256,
+        &tool.managed(root),
+        on_percent,
+    )
+    .await
+}
+
+async fn fetch(
+    http: &reqwest::Client,
+    tool: &Tool,
+    url: &str,
+    sha256: &str,
+    dest: &Path,
+    on_percent: impl FnMut(u8),
+) -> Result<(), Msg> {
+    let part = dest.with_extension("exe.part");
+    let digest = match download::<Sha256>(http, url, DOWNLOAD_TIMEOUT, &part, on_percent).await {
+        Ok(digest) => digest,
+        Err(e) => {
+            tracing::warn!("install {}: {e}", tool.name);
+            let _ = fs::remove_file(&part);
+            return Err(msg!(cantDownloadTool, tool = tool.title));
+        }
+    };
+    place(&part, dest, &digest, sha256)
+        .inspect_err(|e| tracing::warn!("install {}: {e}", tool.name))
 }
 
 pub(crate) fn hex(bytes: &[u8]) -> String {
@@ -340,16 +422,94 @@ mod tests {
     #[test]
     fn pinned_hashes_are_lowercase_sha256_hex() {
         for tool in ALL {
-            assert_eq!(tool.sha256.len(), 64, "{}", tool.name);
-            assert!(
-                tool.sha256
-                    .chars()
-                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
-                "{}",
-                tool.name
-            );
-            assert!(tool.url.contains(tool.version), "{}", tool.name);
+            let pins = tool.companions.iter().map(|c| (c.url, c.sha256));
+            for (url, sha256) in std::iter::once((tool.url, tool.sha256)).chain(pins) {
+                assert_eq!(sha256.len(), 64, "{url}");
+                assert!(
+                    sha256
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                    "{url}"
+                );
+                assert!(url.contains(tool.version), "{url}");
+            }
         }
+    }
+
+    /// Serves `files` by path over plain HTTP on a free local port until the test process ends.
+    fn serve(files: &'static [(&'static str, &'static [u8])]) -> String {
+        use std::io::{BufRead, BufReader};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut lines = BufReader::new(&stream).lines().map_while(Result::ok);
+                let request = lines.next().unwrap_or_default();
+                lines.find(|l| l.is_empty());
+                let path = request.split(' ').nth(1).unwrap_or_default();
+                let body = files.iter().find(|(p, _)| *p == path).map(|(_, b)| *b);
+                let mut stream = &stream;
+                let _ = match body {
+                    Some(body) => write!(
+                        stream,
+                        "HTTP/1.1 200 OK
+Content-Length: {}
+Connection: close
+
+",
+                        body.len()
+                    )
+                    .and_then(|()| stream.write_all(body)),
+                    None => write!(
+                        stream,
+                        "HTTP/1.1 404 Not Found
+Content-Length: 0
+
+"
+                    ),
+                };
+            }
+        });
+        base
+    }
+
+    fn test_tool(base: &str, companion_sha256: String) -> Tool {
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        Tool {
+            name: "test-maxima",
+            title: "Test",
+            version: "1",
+            url: leak(format!("{base}/cli")),
+            sha256: leak(hex(&Sha256::digest(b"cli"))),
+            exe: "cli.exe",
+            local: None,
+            companions: Box::leak(Box::new([Companion {
+                file: "bootstrap.exe",
+                url: leak(format!("{base}/bootstrap")),
+                sha256: leak(companion_sha256),
+            }])),
+        }
+    }
+
+    #[test]
+    fn companions_install_next_to_the_exe() {
+        let base = serve(&[("/cli", b"cli"), ("/bootstrap", b"bootstrap")]);
+        let http = reqwest::Client::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("test-maxima");
+
+        let tool = test_tool(&base, hex(&Sha256::digest(b"bootstrap")));
+        tauri::async_runtime::block_on(install_to(&http, &tool, tmp.path())).unwrap();
+        assert_eq!(fs::read(dir.join("cli.exe")).unwrap(), b"cli");
+        assert_eq!(fs::read(dir.join("bootstrap.exe")).unwrap(), b"bootstrap");
+
+        fs::remove_dir_all(&dir).unwrap();
+        let tampered = test_tool(&base, LEGENDARY.sha256.to_owned());
+        assert_eq!(
+            tauri::async_runtime::block_on(install_to(&http, &tampered, tmp.path())),
+            Err(msg!(downloadMismatch))
+        );
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
     }
 
     #[test]
@@ -421,6 +581,14 @@ mod tests {
             parse_version("1.2.0 Robert Speedwagon\n").as_deref(),
             Some("1.2.0")
         );
+        assert_eq!(
+            parse_version(
+                "maxima-cli 0.1.1
+"
+            )
+            .as_deref(),
+            Some("0.1.1")
+        );
         assert_eq!(parse_version("something else"), None);
         assert_eq!(parse_version("legendary version \"\""), None);
         assert_eq!(parse_version(""), None);
@@ -435,7 +603,7 @@ mod tests {
         assert!(Installing::start("test-tool").is_some());
     }
 
-    /// Downloads every pinned build into a temp folder and checks its hash and `--version`.
+    /// Downloads every pinned build and companion into a temp folder and checks their hashes and `--version`.
     /// Network: run by hand with `cargo test -- --ignored real_downloads`.
     #[test]
     #[ignore]
@@ -445,12 +613,8 @@ mod tests {
         let http = reqwest::Client::new();
         tauri::async_runtime::block_on(async {
             for tool in ALL {
-                let part = tool.managed(dir).with_extension("exe.part");
-                let digest = download::<Sha256>(&http, tool.url, DOWNLOAD_TIMEOUT, &part, |_| {})
-                    .await
-                    .unwrap();
+                install_into(&http, tool, dir, |_| {}).await.unwrap();
                 let dest = tool.managed(dir);
-                place(&part, &dest, &digest, tool.sha256).unwrap();
                 let output = Command::new(&dest).arg("--version").output().unwrap();
                 assert_eq!(
                     parse_version(&String::from_utf8_lossy(&output.stdout)).as_deref(),
