@@ -2,6 +2,7 @@
 
 pub mod amazon;
 pub mod custom;
+pub mod ea;
 pub mod epic;
 pub mod gog;
 pub mod steam;

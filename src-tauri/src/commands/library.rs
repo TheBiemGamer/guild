@@ -17,7 +17,7 @@ use crate::library::epic;
 use crate::library::steam::{self, owned_games, with_owned};
 use crate::library::tool::StoreLogin;
 use crate::library::{Game, Progress, ProviderKind};
-use crate::library::{amazon, gog};
+use crate::library::{amazon, ea, gog};
 use crate::msg::Msg;
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
@@ -744,24 +744,14 @@ fn rescan_now(app: &AppHandle, online: bool) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
     let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
-    // EA isn't scanned yet, so only its saved login state counts.
-    let ea_in = state.lock().ea_login == Some(StoreLogin::LoggedIn);
-    let signed_out = logins.map(|(e, g, a)| {
-        signed_out(
-            &state,
-            [
-                e == StoreLogin::LoggedIn,
-                g == StoreLogin::LoggedIn,
-                a == StoreLogin::LoggedIn,
-                ea_in,
-            ],
-        )
-    });
+    let signed_out =
+        logins.map(|logins| signed_out(&state, logins.map(|l| l == StoreLogin::LoggedIn)));
     let mut s = state.lock();
-    if let Some((login, gog_login, amazon_login)) = logins {
+    if let Some([login, gog_login, amazon_login, ea_login]) = logins {
         s.epic_login = Some(login);
         s.gog_login = Some(gog_login);
         s.amazon_login = Some(amazon_login);
+        s.ea_login = Some(ea_login);
         s.signed_out = signed_out.unwrap_or_default();
         note_epic_login(&state, &mut s, login);
     }
@@ -835,7 +825,7 @@ fn scan(
     owned: Option<&[Game]>,
     dirs: &cache::Dirs,
     http: &reqwest::Client,
-) -> (ScanResults, Option<(StoreLogin, StoreLogin, StoreLogin)>) {
+) -> (ScanResults, Option<[StoreLogin; 4]>) {
     let steam = steam::list_games()
         .map_err(|e| ScanError::Shown(e.into()))
         .map(|installed| match owned {
@@ -860,7 +850,13 @@ fn scan(
     // After the list: its sync is what says whether the login still works.
     let amazon_login = amazon::login();
     results.push((ProviderKind::Amazon, games));
-    (results, Some((login, gog_login, amazon_login)))
+    let ea_login = ea::login(dirs);
+    let games = match ea_login {
+        StoreLogin::LoggedIn => ea::list(dirs).map_err(|e| ScanError::Quiet(e.into())),
+        other => Err(ScanError::Quiet(Msg::system(format!("{other:?}")))),
+    };
+    results.push((ProviderKind::Ea, games));
+    (results, Some([login, gog_login, amazon_login, ea_login]))
 }
 
 /// Only a logged-in Epic is listed. Any other state is a quiet error, so `merge` keeps the cached Epic games.

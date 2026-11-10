@@ -1,4 +1,4 @@
-//! The settings page and the Epic, GOG and Amazon login actions.
+//! The settings page and the Epic, GOG, Amazon and EA login actions.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,7 +26,7 @@ use crate::gog_login;
 use crate::library::ProviderKind;
 use crate::library::epic;
 use crate::library::tool::StoreLogin;
-use crate::library::{amazon, gog};
+use crate::library::{amazon, ea, gog};
 use crate::msg::Msg;
 use crate::settings;
 use crate::steam_login::{self, PollStep, QrSession};
@@ -126,6 +126,36 @@ pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         amazon::log_out()?;
         note_signed_out(&app, "amazon");
+        rescan(&app, true);
+        Ok(())
+    })
+    .await
+}
+
+/// Starts Maxima's login, opens EA's login window on it and hands the code back to Maxima, then loads the EA library.
+#[tauri::command]
+#[specta::specta]
+pub async fn ea_log_in(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        if ea::log_in(&app, &state.dirs)?.is_none() {
+            return Ok(());
+        }
+        state.lock().ea_login = Some(StoreLogin::LoggedIn);
+        rescan(&app, true);
+        fill_twins(app.clone());
+        Ok(())
+    })
+    .await
+}
+
+/// Forgets the EA login in Maxima, then rescans. Cached EA games stay.
+#[tauri::command]
+#[specta::specta]
+pub async fn ea_log_out(app: AppHandle) -> Res<()> {
+    blocking(move || {
+        ea::log_out(&app.state::<AppState>().dirs)?;
+        note_signed_out(&app, "ea");
         rescan(&app, true);
         Ok(())
     })
@@ -276,6 +306,9 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
         } else if tool.name == tools::NILE.name {
             let login = amazon::login();
             state.lock().amazon_login = Some(login);
+        } else if tool.name == tools::MAXIMA.name {
+            let login = ea::login(&state.dirs);
+            state.lock().ea_login = Some(login);
         }
     })
     .await;
@@ -317,6 +350,10 @@ pub struct SettingsView {
     /// The logged-in Amazon account's first name, from Nile's file.
     amazon_account: Option<String>,
     amazon_install_dir: Option<String>,
+    ea: Option<StoreLogin>,
+    /// The logged-in EA account's name, as Maxima last reported it.
+    ea_account: Option<String>,
+    ea_install_dir: Option<String>,
     /// Where Epic, GOG and Amazon install without an install folder setting: `%USERPROFILE%\Games`, Legendary's
     /// default and the one Guild passes to gogdl and Nile.
     default_install_dir: Option<String>,
@@ -367,6 +404,12 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
         } else {
             None
         };
+        let ea = state.lock().ea_login;
+        let ea_account = if ea == Some(StoreLogin::LoggedIn) {
+            ea::account_name()
+        } else {
+            None
+        };
         let cache_bytes = dir_size(&state.dirs.thumbs) + dir_size(&state.dirs.art);
         let steam = steamlocate::SteamDir::locate().is_ok();
         let steam_library = SteamLibrary {
@@ -394,6 +437,11 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             amazon_account,
             amazon_install_dir: saved
                 .amazon_install_dir
+                .map(|p| p.to_string_lossy().into_owned()),
+            ea,
+            ea_account,
+            ea_install_dir: saved
+                .ea_install_dir
                 .map(|p| p.to_string_lossy().into_owned()),
             default_install_dir: gog::default_base().map(|p| p.to_string_lossy().into_owned()),
             igdb_client_id: saved.igdb_client_id,
@@ -1057,6 +1105,9 @@ mod tests {
             amazon: None,
             amazon_account: None,
             amazon_install_dir: None,
+            ea: None,
+            ea_account: None,
+            ea_install_dir: None,
             default_install_dir: Some(r"C:\Users\Test\Games".into()),
             igdb_client_id: Some("test-client-id".into()),
             igdb_secret_set: true,

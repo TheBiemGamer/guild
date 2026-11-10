@@ -92,6 +92,7 @@
   let folder = $state(untrack(() => view.epicInstallDir ?? ''))
   let gogFolder = $state(untrack(() => view.gogInstallDir ?? ''))
   let amazonFolder = $state(untrack(() => view.amazonInstallDir ?? ''))
+  let eaFolder = $state(untrack(() => view.eaInstallDir ?? ''))
   let clientId = $state(untrack(() => view.igdbClientId ?? ''))
   let secret = $state('')
   let replacing = $state(false)
@@ -102,12 +103,14 @@
   let gridOpen = $state(untrack(() => section === 'gamedata'))
   let busy = $state(false)
   let connecting = $state(false)
-  /** The Epic, GOG and Amazon cards' Options panels; folded each time Settings opens. */
+  /** The Epic, GOG, Amazon and EA cards' Options panels; folded each time Settings opens. */
   let epicOptions = $state(false)
   let gogOptions = $state(false)
   let gogLoggingIn = $state(false)
   let amazonOptions = $state(false)
   let amazonLoggingIn = $state(false)
+  let eaOptions = $state(false)
+  let eaLoggingIn = $state(false)
   let checking = $state(false)
   let checkError = $state<string | null>(null)
   const notes = $derived(installedNotes(view.appVersion))
@@ -140,6 +143,10 @@
   let nileJob = $state<{ percent: number | null } | null>(null)
   let nileError = $state('')
   const nile = $derived(view.tools.find((t) => t.name === 'nile'))
+  /** Maxima's install or update while it runs, like Legendary's. */
+  let maximaJob = $state<{ percent: number | null } | null>(null)
+  let maximaError = $state('')
+  const maxima = $derived(view.tools.find((t) => t.name === 'maxima'))
   /** Linux, the Wine section: umu-launcher's download while it runs, like Legendary's. */
   let umuJob = $state<{ percent: number | null } | null>(null)
   let wineError = $state('')
@@ -294,6 +301,17 @@
         await commands.updateSetting('amazon_install_dir', amazonFolder.trim() || null)
       } catch (e) {
         amazonFolder = view.amazonInstallDir ?? ''
+        throw e
+      }
+    })
+  }
+  function saveEaFolder() {
+    if (eaFolder.trim() === (view.eaInstallDir ?? '')) return
+    change(async () => {
+      try {
+        await commands.updateSetting('ea_install_dir', eaFolder.trim() || null)
+      } catch (e) {
+        eaFolder = view.eaInstallDir ?? ''
         throw e
       }
     })
@@ -500,6 +518,24 @@
     amazonLoggingIn = false
   }
 
+  async function installMaxima() {
+    maximaError = ''
+    maximaJob = { percent: null }
+    try {
+      await api.installTool('maxima', (percent) => (maximaJob = { percent }))
+    } catch (e) {
+      maximaError = api.message(e)
+    }
+    maximaJob = null
+    await onchange()
+  }
+
+  async function eaLogIn() {
+    eaLoggingIn = true
+    await change(() => commands.eaLogIn())
+    eaLoggingIn = false
+  }
+
   const jobLabel = (kind: 'install' | 'update', job: { percent: number | null }) =>
     job.percent === null ? t(`settings.job.${kind}`) : t(`settings.job.${kind}Percent`, { percent: job.percent })
 
@@ -508,6 +544,7 @@
   const logOut = () => change(() => commands.epicLogOut())
   const gogLogOut = () => change(() => commands.gogLogOut())
   const amazonLogOut = () => change(() => commands.amazonLogOut())
+  const eaLogOut = () => change(() => commands.eaLogOut())
   const clearCache = () => change(() => api.clearCache())
 
   function ago(at: number | null, nowMs: number) {
@@ -580,6 +617,24 @@
     }
   })
 
+  /** What the EA card says, and which fix it offers. */
+  const ea = $derived.by(() => {
+    switch (view.ea) {
+      case 'loggedIn':
+        return { name: view.eaAccount ?? t('settings.loggedIn'), problem: null, fix: null, logout: true }
+      case 'loggedOut':
+        return { name: null, problem: t('settings.notLoggedIn'), fix: t('common.logIn'), logout: false }
+      case 'unreachable':
+        return { name: null, problem: t('settings.eaUnreachable'), fix: t('settings.reconnect'), logout: false }
+      case 'noTool':
+        return maximaError
+          ? { name: null, problem: maximaError, fix: null, logout: false }
+          : { name: t('settings.needMaxima'), problem: null, fix: null, logout: false }
+      default:
+        return { name: t('steam.checking'), problem: null, fix: null, logout: false }
+    }
+  })
+
   /** Each section starts at its top, also when the one before was scrolled down. */
   function show(name: string) {
     active = name
@@ -645,9 +700,9 @@
   <span class="secret" {id}><span class="dots">••••••••</span><span class="ok">{t('settings.saved')}</span></span>
 {/snippet}
 
-{#snippet who(store: string, card: { name: string | null; problem: string | null })}
+{#snippet who(store: string, card: { name: string | null; problem: string | null }, label?: string)}
   <div class="what">
-    {store}
+    {store}{#if label}<span class="label">{label}</span>{/if}
     {#if card.problem}<small class="problem">{card.problem}</small>
     {:else if card.name}<small>{card.name}</small>{/if}
   </div>
@@ -997,6 +1052,75 @@
                                   >{/if}
                               {/if}
                             </div>
+                          {/if}
+                          {#if !view.linux}
+                            <div class="r">
+                              <div class="logo ea"><StoreIcon provider="ea" size={17} /></div>
+                              {@render who('EA', ea, t('settings.experimental'))}
+                              {#if view.ea !== 'noTool'}
+                                <button
+                                  class="btn opt"
+                                  class:open={eaOptions}
+                                  aria-expanded={eaOptions}
+                                  aria-controls="ea-options"
+                                  onclick={() => (eaOptions = !eaOptions)}
+                                >
+                                  {t('settings.options')}
+                                  {@render chevron()}
+                                </button>
+                              {/if}
+                              {#if view.ea === 'noTool'}
+                                <button class="btn" disabled={maximaJob !== null} aria-live="polite" onclick={installMaxima}>
+                                  {maximaJob ? jobLabel('install', maximaJob) : t('settings.installTool', { tool: 'Maxima' })}
+                                </button>
+                              {/if}
+                              {#if ea.fix}
+                                <button class="btn" disabled={eaLoggingIn} onclick={eaLogIn}>{eaLoggingIn ? t('common.loggingIn') : ea.fix}</button>
+                              {/if}
+                              {#if ea.logout}
+                                <button class="btn danger" disabled={busy} onclick={eaLogOut}>{t('settings.logOut')}</button>
+                              {/if}
+                            </div>
+                            {#if eaOptions && view.ea !== 'noTool'}
+                              <div class="opts" id="ea-options">
+                                <div class="row">
+                                  <label for="ea-folder">{t('settings.installFolder')}</label>
+                                  <div class="field">
+                                    <input
+                                      id="ea-folder"
+                                      type="text"
+                                      placeholder={view.defaultInstallDir ?? ''}
+                                      spellcheck="false"
+                                      bind:value={eaFolder}
+                                      onblur={saveEaFolder}
+                                      onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                                    />
+                                    {#if view.eaInstallDir}
+                                      <button
+                                        class="btn"
+                                        onclick={() => {
+                                          eaFolder = ''
+                                          saveEaFolder()
+                                        }}
+                                      >
+                                        {t('common.reset')}
+                                      </button>
+                                    {/if}
+                                  </div>
+                                </div>
+                                {#if maxima?.update}
+                                  <div class="row">
+                                    <div>Maxima {maxima.version ?? ''}<span>{t('settings.toolAvailable', { version: maxima.pinned })}</span></div>
+                                    <button class="btn" disabled={maximaJob !== null} aria-live="polite" onclick={installMaxima}>
+                                      {maximaJob ? jobLabel('update', maximaJob) : t('play.update')}
+                                    </button>
+                                  </div>
+                                  {#if maximaError}<Tip text={maximaError} truncated
+                                      >{#snippet children({ props })}<p {...props} class="note" role="status">{maximaError}</p>{/snippet}</Tip
+                                    >{/if}
+                                {/if}
+                              </div>
+                            {/if}
                           {/if}
                         </div>
                         <h4 id={id('gamedata')}>{t('settings.group.gameData')}</h4>
@@ -1762,6 +1886,19 @@
 
   .logo.amazon {
     background: #232f3e;
+  }
+
+  .logo.ea {
+    background: #ff4747;
+  }
+
+  .what .label {
+    margin-left: 8px;
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .logo.igdb {

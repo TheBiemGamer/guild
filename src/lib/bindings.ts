@@ -175,6 +175,10 @@ export const commands = {
 	amazonLogIn: () => __TAURI_INVOKE<null>("amazon_log_in"),
 	/**  Deregisters this PC from the Amazon account and forgets the login, then rescans. Cached Amazon games stay. */
 	amazonLogOut: () => __TAURI_INVOKE<null>("amazon_log_out"),
+	/**  Starts Maxima's login, opens EA's login window on it and hands the code back to Maxima, then loads the EA library. */
+	eaLogIn: () => __TAURI_INVOKE<null>("ea_log_in"),
+	/**  Forgets the EA login in Maxima, then rescans. Cached EA games stay. */
+	eaLogOut: () => __TAURI_INVOKE<null>("ea_log_out"),
 	/**
 	 *  Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then it reads just that store's
 	 *  login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.
@@ -660,6 +664,10 @@ export type SettingsView = {
 	/**  The logged-in Amazon account's first name, from Nile's file. */
 	amazonAccount: string | null,
 	amazonInstallDir: string | null,
+	ea: StoreLogin | null,
+	/**  The logged-in EA account's name, as Maxima last reported it. */
+	eaAccount: string | null,
+	eaInstallDir: string | null,
 	/**
 	 *  Where Epic, GOG and Amazon install without an install folder setting: `%USERPROFILE%\Games`, Legendary's
 	 *  default and the one Guild passes to gogdl and Nile.
