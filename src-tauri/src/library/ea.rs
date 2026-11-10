@@ -25,8 +25,9 @@ use crate::tools;
 
 const LIBRARY_TIMEOUT: Duration = Duration::from_secs(120);
 const SHORT_TIMEOUT: Duration = Duration::from_secs(60);
-/// `guild launch` checks the license and syncs cloud saves before the game starts.
-const LAUNCH_TIMEOUT: Duration = Duration::from_secs(120);
+/// `guild launch` checks the license and syncs cloud saves before the game starts. A first launch on Linux also
+/// downloads GE-Proton, umu and the Steam runtime first.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// `guild login` prints its URL before it waits for the browser, and the account once it has the code.
 const LOGIN_STEP: Duration = Duration::from_secs(30);
 /// Where `guild login` waits for the code.
