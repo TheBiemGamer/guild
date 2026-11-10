@@ -251,9 +251,11 @@ pub async fn ea_import(app: AppHandle, key: String, path: String) -> Res<()> {
         .filter(|g| g.provider == ProviderKind::Ea && !g.installed)
         .ok_or(msg!(cantImport))?;
     blocking(move || {
+        let state = app.state::<AppState>();
         let result = ea::import(
-            &app.state::<AppState>().dirs,
+            &state.dirs,
             &game.external_id,
+            state.twin(&key),
             std::path::Path::new(&path),
         )
         .map_err(Msg::from);

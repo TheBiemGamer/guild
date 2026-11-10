@@ -55,6 +55,16 @@ pub fn command(dirs: &Dirs) -> Command {
     command
 }
 
+/// `command` for a game. With its Steam twin (`steam`, from GOG GamesDB), Maxima hands umu that game's id on Linux, so
+/// umu-protonfixes can apply its fixes.
+fn game_command(dirs: &Dirs, steam: Option<u32>) -> Command {
+    let mut command = command(dirs);
+    if let Some(appid) = steam {
+        command.env("MAXIMA_UMU_GAMEID", format!("umu-{appid}"));
+    }
+    command
+}
+
 /// One line of `maxima-cli guild` output. No `Debug` outside tests: `LoginUrl` holds single-use PKCE values.
 #[cfg_attr(test, derive(Debug))]
 #[derive(PartialEq)]
@@ -471,11 +481,13 @@ impl Job {
 /// `STALL` without new bytes, counted from the first.
 fn download(
     dirs: &Dirs,
+    steam: Option<u32>,
     args: &[&OsStr],
     action: ProgressAction,
     mut on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
-    let mut child = crate::platform::spawn_tool(command(dirs).args(args).stdout(Stdio::piped()))?;
+    let mut child =
+        crate::platform::spawn_tool(game_command(dirs, steam).args(args).stdout(Stdio::piped()))?;
     let pid = child.id();
     on_event(InstallEvent::Started(pid));
     let stdout = child.stdout.take().expect("stdout is piped");
@@ -516,6 +528,7 @@ fn download(
 pub fn install(
     dirs: &Dirs,
     id: &str,
+    steam: Option<u32>,
     title: &str,
     base: &Path,
     on_event: impl FnMut(InstallEvent),
@@ -524,6 +537,7 @@ pub fn install(
     fs_err::create_dir_all(&folder)?;
     download(
         dirs,
+        steam,
         &[OsStr::new("install"), OsStr::new(id), folder.as_os_str()],
         ProgressAction::Install,
         on_event,
@@ -536,11 +550,13 @@ pub fn install(
 pub fn update(
     dirs: &Dirs,
     id: &str,
+    steam: Option<u32>,
     dir: &Path,
     on_event: impl FnMut(InstallEvent),
 ) -> Result<(), Error> {
     download(
         dirs,
+        steam,
         &[OsStr::new("install"), OsStr::new(id), dir.as_os_str()],
         ProgressAction::Update,
         on_event,
@@ -548,8 +564,13 @@ pub fn update(
 }
 
 /// Runs a job without progress to its end.
-fn short_job(dirs: &Dirs, args: &[&OsStr], timeout: Duration) -> Result<(), Error> {
-    let mut command = command(dirs);
+fn short_job(
+    dirs: &Dirs,
+    steam: Option<u32>,
+    args: &[&OsStr],
+    timeout: Duration,
+) -> Result<(), Error> {
+    let mut command = game_command(dirs, steam);
     command.args(args);
     let output = super::tool::run_with_timeout(command, b"", timeout)?.ok_or(msg!(eaNoReason))?;
     let mut job = Job::default();
@@ -563,6 +584,7 @@ fn short_job(dirs: &Dirs, args: &[&OsStr], timeout: Duration) -> Result<(), Erro
 pub fn uninstall(dirs: &Dirs, id: &str) -> Result<(), Error> {
     short_job(
         dirs,
+        None,
         &[OsStr::new("uninstall"), OsStr::new(id)],
         UNINSTALL_TIMEOUT,
     )
@@ -570,9 +592,10 @@ pub fn uninstall(dirs: &Dirs, id: &str) -> Result<(), Error> {
 
 /// Registers an existing install at `path` (the folder holding `__Installer`) by running its setup (one UAC prompt on
 /// Windows).
-pub fn import(dirs: &Dirs, id: &str, path: &Path) -> Result<(), Error> {
+pub fn import(dirs: &Dirs, id: &str, steam: Option<u32>, path: &Path) -> Result<(), Error> {
     short_job(
         dirs,
+        steam,
         &[OsStr::new("import"), OsStr::new(id), path.as_os_str()],
         IMPORT_TIMEOUT,
     )
@@ -581,8 +604,13 @@ pub fn import(dirs: &Dirs, id: &str, path: &Path) -> Result<(), Error> {
 /// Starts the game through `guild launch` and returns Maxima once it reports `started`. Maxima stays alive while the
 /// game runs (it answers the game's license requests), so it is watched as the game. Not `spawn_tool`: its job object
 /// would stop the game with Guild. On Linux Maxima brings its own Proton and prefix, so nothing wraps it here.
-pub fn launch(dirs: &Dirs, id: &str, options: &LaunchOptions) -> Result<Child, Error> {
-    let mut command = command(dirs);
+pub fn launch(
+    dirs: &Dirs,
+    id: &str,
+    steam: Option<u32>,
+    options: &LaunchOptions,
+) -> Result<Child, Error> {
+    let mut command = game_command(dirs, steam);
     command
         .args(["launch", id, "--"])
         .args(super::tool::split_args(&options.args));
@@ -673,6 +701,18 @@ mod tests {
     } else {
         "sleep 30"
     };
+
+    #[test]
+    fn umu_gameid_comes_from_the_steam_twin() {
+        let gameid = |steam| {
+            game_command(&Dirs::new(), steam)
+                .get_envs()
+                .find(|(k, _)| *k == "MAXIMA_UMU_GAMEID")
+                .and_then(|(_, v)| v.map(ToOwned::to_owned))
+        };
+        assert_eq!(gameid(Some(2316580)), Some("umu-2316580".into()));
+        assert_eq!(gameid(None), None);
+    }
 
     #[test]
     fn launch_waits_for_started() {

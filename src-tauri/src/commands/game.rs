@@ -608,7 +608,12 @@ fn act_ea(state: &AppState, action: Action, game: &Game) -> Result<(), crate::li
     match action {
         Action::Play | Action::PlayOutdated => {
             let options = checked_launch_options(open_db(state).as_ref(), game)?;
-            let child = ea::launch(&state.dirs, &game.external_id, &options)?;
+            let child = ea::launch(
+                &state.dirs,
+                &game.external_id,
+                state.twin(&game.key()),
+                &options,
+            )?;
             let key = game.key();
             record_play(state, &key);
             state.lock().watch = Some(Watch {
@@ -961,6 +966,7 @@ fn run_ea_job(
     on_event: impl FnMut(InstallEvent),
 ) -> Result<(), crate::library::Error> {
     let id = &game.external_id;
+    let steam = state.twin(&game.key());
     match job.action {
         QueuedAction::Install => {
             let base = job
@@ -968,11 +974,11 @@ fn run_ea_job(
                 .as_deref()
                 .map(PathBuf::from)
                 .ok_or(msg!(noInstallBase))?;
-            ea::install(&state.dirs, id, &game.title, &base, on_event).map(drop)
+            ea::install(&state.dirs, id, steam, &game.title, &base, on_event).map(drop)
         }
         QueuedAction::Update => {
             let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
-            ea::update(&state.dirs, id, dir, on_event)
+            ea::update(&state.dirs, id, steam, dir, on_event)
         }
         QueuedAction::Verify => Err(msg!(eaCantVerifyOrMove).into()),
     }

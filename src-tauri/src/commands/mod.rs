@@ -179,6 +179,11 @@ impl AppState {
         self.lock().games.iter().find(|g| g.key() == key).cloned()
     }
 
+    /// The Steam app id GOG GamesDB names as the same game as this Epic, GOG, Amazon or EA copy.
+    fn twin(&self, key: &str) -> Option<u32> {
+        self.lock().twins.get(key).copied()
+    }
+
     /// The first copy of the entry with this key or a copy with this key.
     fn first_copy(&self, key: &str) -> Option<Game> {
         let s = self.lock();
