@@ -798,11 +798,14 @@
                       </button>
                     </div>
                   {/if}
-                  <div class="row">
-                    <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
-                    <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
-                    {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
-                  </div>
+                  <!-- Maxima starts EA games itself. -->
+                  {#if copy!.provider !== 'ea'}
+                    <div class="row">
+                      <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
+                      <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
+                      {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
+                    </div>
+                  {/if}
                 {/if}
                 {#if protons.length}
                   <div class="row">

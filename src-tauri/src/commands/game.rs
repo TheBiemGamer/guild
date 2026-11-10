@@ -372,10 +372,12 @@ fn act_blocking(
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
         return Err(msg!(cancelDownloadFirst));
     }
-    // Only Uninstall is left for EA: the rest was refused or queued above.
+    // Only Play and Uninstall are left for EA: the rest was refused or queued above.
     if game.provider == ProviderKind::Ea {
-        let result = ea::uninstall(&state.dirs, &game.external_id);
-        rescan(app, true);
+        let result = act_ea(&state, action, game);
+        if action == Action::Uninstall {
+            rescan(app, true);
+        }
         return result
             .map(|()| None)
             .map_err(|e| store_error(ProviderKind::Ea, e));
@@ -479,12 +481,15 @@ fn act_blocking(
         .map_err(|e| store_error(ProviderKind::Epic, e))
 }
 
-/// Why an EA copy can't do `action`, if it can't: Maxima has no verify or move, and Play comes later.
+/// Why an EA copy can't do `action`, if it can't: Maxima has no verify or move.
 fn ea_refusal(action: Action) -> Option<Msg> {
     match action {
-        Action::Play | Action::PlayOutdated => Some(msg!(eaNotYet)),
         Action::Verify | Action::Move => Some(msg!(eaCantVerifyOrMove)),
-        Action::Install | Action::Update | Action::Uninstall => None,
+        Action::Play
+        | Action::PlayOutdated
+        | Action::Install
+        | Action::Update
+        | Action::Uninstall => None,
     }
 }
 
@@ -595,6 +600,30 @@ fn act_amazon(
         ),
         Action::Uninstall => amazon::uninstall(open_db(state).as_ref(), &game.external_id),
         Action::Install | Action::Update | Action::Verify => unreachable!("queued"),
+    }
+}
+
+/// An EA copy's Play and Uninstall. Play watches `guild launch`, which stays until the game stops and its saves are up.
+fn act_ea(state: &AppState, action: Action, game: &Game) -> Result<(), crate::library::Error> {
+    match action {
+        Action::Play | Action::PlayOutdated => {
+            let options = checked_launch_options(open_db(state).as_ref(), game)?;
+            let child = ea::launch(&state.dirs, &game.external_id, &options)?;
+            let key = game.key();
+            record_play(state, &key);
+            state.lock().watch = Some(Watch {
+                key,
+                process: Process::Ours(child),
+                since: Instant::now(),
+                seen: false,
+                upload: None,
+            });
+            Ok(())
+        }
+        Action::Uninstall => ea::uninstall(&state.dirs, &game.external_id),
+        Action::Install | Action::Update | Action::Verify | Action::Move => {
+            unreachable!("queued or refused")
+        }
     }
 }
 
@@ -995,8 +1024,8 @@ fn has_launch_options(g: &Game) -> bool {
         )
 }
 
-/// The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
-/// of a GOG game, which runs without one.
+/// The Proton builds a copy's launch options may pick, newest first. None on Windows, none for a native Linux build
+/// of a GOG game, which runs without one, and none for EA, whose Maxima picks its own.
 #[tauri::command]
 #[specta::specta]
 pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
@@ -1007,7 +1036,10 @@ pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
             .filter(|g| g.provider == ProviderKind::Gog)
             .and_then(installed_dir)
             .is_some_and(|dir| gog::native(dir));
-        if native {
+        let ea = game
+            .as_ref()
+            .is_some_and(|g| g.provider == ProviderKind::Ea);
+        if native || ea {
             Vec::new()
         } else {
             crate::platform::protons()
@@ -2087,7 +2119,13 @@ mod tests {
         for action in [Action::Verify, Action::Move] {
             assert_eq!(ea_refusal(action), Some(msg!(eaCantVerifyOrMove)));
         }
-        for action in [Action::Install, Action::Update, Action::Uninstall] {
+        for action in [
+            Action::Play,
+            Action::PlayOutdated,
+            Action::Install,
+            Action::Update,
+            Action::Uninstall,
+        ] {
             assert_eq!(ea_refusal(action), None);
         }
     }

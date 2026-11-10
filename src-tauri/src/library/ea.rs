@@ -5,9 +5,9 @@
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -15,7 +15,7 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 use super::gog::{Fed, feed};
-use super::tool::{InstallEvent, StoreLogin};
+use super::tool::{InstallEvent, LaunchOptions, StoreLogin};
 use super::{Art, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
 use crate::info;
@@ -24,6 +24,8 @@ use crate::tools;
 
 const LIBRARY_TIMEOUT: Duration = Duration::from_secs(120);
 const SHORT_TIMEOUT: Duration = Duration::from_secs(60);
+/// `guild launch` checks the license and syncs cloud saves before the game starts.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(120);
 /// `guild login` prints its URL before it waits for the browser, and the account once it has the code.
 const LOGIN_STEP: Duration = Duration::from_secs(30);
 /// Where `guild login` waits for the code.
@@ -76,6 +78,10 @@ pub enum Event {
     },
     Done,
     Ok,
+    /// `guild launch`: the game started; Maxima stays until it stops.
+    Started,
+    /// `guild launch`: the game stopped and its saves are up.
+    Stopped,
     Error(String),
 }
 
@@ -131,10 +137,17 @@ pub fn parse_line(line: &str) -> Option<Event> {
             install_bytes: i.get("install_bytes")?.as_u64()?,
         });
     }
-    if object.get("done") == Some(&Value::Bool(true)) {
+    let flag = |name| object.get(name) == Some(&Value::Bool(true));
+    if flag("done") {
         return Some(Event::Done);
     }
-    (object.get("ok") == Some(&Value::Bool(true))).then_some(Event::Ok)
+    if flag("started") {
+        return Some(Event::Started);
+    }
+    if flag("stopped") {
+        return Some(Event::Stopped);
+    }
+    flag("ok").then_some(Event::Ok)
 }
 
 /// The owner's words for a `{"error": code}`.
@@ -278,15 +291,13 @@ fn sign_in(app: &AppHandle, events: &mpsc::Receiver<Event>) -> Result<Option<Str
     }
 }
 
-/// Reads `stdout`'s events on a thread until it closes.
+/// Reads `stdout`'s events on a thread until it closes, also after the receiver is gone, so the pipe never fills.
 fn read_events(stdout: impl Read + Send + 'static) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Some(event) = parse_line(&line)
-                && tx.send(event).is_err()
-            {
-                break;
+            if let Some(event) = parse_line(&line) {
+                _ = tx.send(event);
             }
         }
     });
@@ -567,6 +578,44 @@ pub fn import(dirs: &Dirs, id: &str, path: &Path) -> Result<(), Error> {
     )
 }
 
+/// Starts the game through `guild launch` and returns Maxima once it reports `started`. Maxima stays alive while the
+/// game runs (it answers the game's license requests), so it is watched as the game. Not `spawn_tool`: its job object
+/// would stop the game with Guild. On Linux Maxima brings its own Proton and prefix, so nothing wraps it here.
+pub fn launch(dirs: &Dirs, id: &str, options: &LaunchOptions) -> Result<Child, Error> {
+    let mut command = command(dirs);
+    command
+        .args(["launch", id, "--"])
+        .args(super::tool::split_args(&options.args));
+    start(command, LAUNCH_TIMEOUT)
+}
+
+/// Spawns `command` and waits up to `timeout` for `started`; on anything else it is stopped and the reason returned.
+fn start(mut command: Command, timeout: Duration) -> Result<Child, Error> {
+    let mut child = command.stdout(Stdio::piped()).spawn()?;
+    let events = read_events(child.stdout.take().expect("stdout is piped"));
+    let deadline = Instant::now() + timeout;
+    let reason = loop {
+        match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(Event::Started) => return Ok(child),
+            Ok(Event::Error(code)) => break error_msg(&code),
+            Ok(_) => {}
+            // Timed out, or stdout closed without `started`.
+            Err(_) => break msg!(eaNoReason),
+        }
+    };
+    // shortcut: on Linux a plain spawn leads no process group, so `kill_tree` fails and only maxima-cli stops; a game it
+    // already started runs on. Give it its own group if that shows up.
+    // After an error code Maxima exits by itself.
+    if matches!(child.try_wait(), Ok(None))
+        && let Err(e) = crate::platform::kill_tree(child.id())
+    {
+        tracing::warn!("stop maxima launch: {e}");
+        _ = child.kill();
+    }
+    _ = child.wait();
+    Err(reason.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,6 +639,70 @@ mod tests {
             .filter_map(|l| job.line(l, ProgressAction::Install))
             .collect();
         (progress, job.result(success))
+    }
+
+    /// A shell that prints `lines` (one JSON object each) and then runs `then`, standing in for `guild launch`.
+    fn fake_launch(lines: &[&str], then: &str) -> Command {
+        #[cfg(windows)]
+        let (shell, flag, sep) = ("cmd", "/C", " & ");
+        #[cfg(unix)]
+        let (shell, flag, sep) = ("sh", "-c", "; ");
+        // sh would strip the quotes of an unquoted line.
+        let quote = if cfg!(windows) { "" } else { "'" };
+        let mut script: Vec<String> = lines
+            .iter()
+            .map(|l| format!("echo {quote}{l}{quote}"))
+            .collect();
+        script.push(then.into());
+        let mut command = Command::new(shell);
+        // cmd takes the line as typed: escaped quotes would reach `echo`.
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::raw_arg(
+            &mut command,
+            format!("{flag} {}", script.join(sep)),
+        );
+        #[cfg(unix)]
+        command.args([flag, &script.join(sep)]);
+        command.stdin(Stdio::null());
+        crate::platform::no_window(&mut command);
+        command
+    }
+
+    const STAY: &str = if cfg!(windows) {
+        "ping -n 30 127.0.0.1 >nul"
+    } else {
+        "sleep 30"
+    };
+
+    #[test]
+    fn launch_waits_for_started() {
+        let started = Instant::now();
+        let mut child = start(fake_launch(&[r#"{"started":true}"#], STAY), LAUNCH_TIMEOUT).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        // Maxima stays while the game runs.
+        assert!(matches!(child.try_wait(), Ok(None)));
+        _ = crate::platform::kill_tree(child.id());
+        _ = child.kill();
+        _ = child.wait();
+    }
+
+    #[test]
+    fn launch_error_code_is_shown() {
+        let result = start(
+            fake_launch(&[r#"{"error":"port_in_use"}"#], STAY),
+            LAUNCH_TIMEOUT,
+        );
+        assert_eq!(result.err().map(Msg::from), Some(msg!(eaPortInUse)));
+    }
+
+    #[test]
+    fn launch_without_started_has_no_reason() {
+        // Exits without `started`.
+        let result = start(fake_launch(&[r#"{"ok":true}"#], "exit 0"), LAUNCH_TIMEOUT);
+        assert_eq!(result.err().map(Msg::from), Some(msg!(eaNoReason)));
+        // Never says anything.
+        let result = start(fake_launch(&[], STAY), Duration::from_millis(300));
+        assert_eq!(result.err().map(Msg::from), Some(msg!(eaNoReason)));
     }
 
     #[test]
@@ -734,6 +847,8 @@ mod tests {
             Some(Event::Account(None))
         );
         assert_eq!(parse_line(r#"{"ok":true}"#), Some(Event::Ok));
+        assert_eq!(parse_line(r#"{"started":true}"#), Some(Event::Started));
+        assert_eq!(parse_line(r#"{"stopped":true}"#), Some(Event::Stopped));
         assert_eq!(
             parse_line(r#"{"error":"port_in_use"}"#),
             Some(Event::Error("port_in_use".into()))

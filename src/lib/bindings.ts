@@ -210,8 +210,8 @@ export const commands = {
 	/**  Starts winecfg or winetricks in a copy's prefix, with the Proton build its game runs with. */
 	runInPrefix: (key: string, tool: PrefixTool) => __TAURI_INVOKE<null>("run_in_prefix", { key, tool }),
 	/**
-	 *  The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
-	 *  of a GOG game, which runs without one.
+	 *  The Proton builds a copy's launch options may pick, newest first. None on Windows, none for a native Linux build
+	 *  of a GOG game, which runs without one, and none for EA, whose Maxima picks its own.
 	 */
 	protons: (key: string) => __TAURI_INVOKE<string[]>("protons", { key }),
 	settingsView: () => __TAURI_INVOKE<SettingsView>("settings_view"),
