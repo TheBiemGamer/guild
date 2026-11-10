@@ -152,6 +152,8 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
             commands::settings::amazon_log_out,
             commands::settings::ea_log_in,
             commands::settings::ea_log_out,
+            commands::settings::ea_importable,
+            commands::settings::ea_import,
             commands::settings::install_tool,
             commands::wine::install_umu,
             commands::wine::proton_releases,

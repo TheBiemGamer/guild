@@ -486,6 +486,43 @@
     }
   }
 
+  /** EA's Import, like Amazon's. */
+  let eaImport = $state<{ path: string; games: { key: string; title: string }[] } | null>(null)
+  let eaImportKey = $state('')
+  let eaImporting = $state(false)
+  let eaImportNote = $state('')
+
+  async function pickEaImport() {
+    eaImportNote = ''
+    try {
+      const path = await api.pickFolder()
+      if (!path) return
+      const games = await commands.eaImportable()
+      if (games.length === 0) {
+        eaImportNote = t('settings.eaAllInstalled')
+        return
+      }
+      eaImport = { path, games }
+      eaImportKey = games[0].key
+    } catch (e) {
+      eaImportNote = api.message(e)
+    }
+  }
+
+  async function runEaImport() {
+    const { path, games } = eaImport!
+    eaImporting = true
+    try {
+      await commands.eaImport(eaImportKey, path)
+      eaImportNote = t('settings.imported', { title: games.find((g) => g.key === eaImportKey)?.title ?? t('settings.theGame') })
+      eaImport = null
+    } catch (e) {
+      eaImportNote = api.message(e)
+    }
+    eaImporting = false
+    await onchange()
+  }
+
   async function runAmazonImport() {
     const { path, games } = amazonImport!
     amazonImporting = true
@@ -1108,6 +1145,25 @@
                                     {/if}
                                   </div>
                                 </div>
+                                <div class="row">
+                                  <div>{t('settings.importInstall')}</div>
+                                  <button class="btn" disabled={eaImporting || eaImport !== null} onclick={pickEaImport}>{t('settings.importButton')}</button>
+                                </div>
+                                {#if eaImport}
+                                  <div class="row stack">
+                                    <label for="ea-import-game">{t('settings.whichGame', { path: eaImport.path })}</label>
+                                    <div class="field">
+                                      <GamePicker id="ea-import-game" games={eaImport.games} bind:value={eaImportKey} />
+                                      <button class="btn" disabled={eaImporting || eaImportKey === ''} onclick={runEaImport}
+                                        >{eaImporting ? t('settings.importing') : t('settings.import')}</button
+                                      >
+                                      <button class="btn" disabled={eaImporting} onclick={() => (eaImport = null)}>{t('common.cancel')}</button>
+                                    </div>
+                                  </div>
+                                {/if}
+                                {#if eaImportNote}<Tip text={eaImportNote} truncated
+                                    >{#snippet children({ props })}<p {...props} class="note" role="status">{eaImportNote}</p>{/snippet}</Tip
+                                  >{/if}
                                 {#if maxima?.update}
                                   <div class="row">
                                     <div>Maxima {maxima.version ?? ''}<span>{t('settings.toolAvailable', { version: maxima.pinned })}</span></div>

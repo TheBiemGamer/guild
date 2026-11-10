@@ -179,6 +179,13 @@ export const commands = {
 	eaLogIn: () => __TAURI_INVOKE<null>("ea_log_in"),
 	/**  Forgets the EA login in Maxima, then rescans. Cached EA games stay. */
 	eaLogOut: () => __TAURI_INVOKE<null>("ea_log_out"),
+	/**  Owned EA games that aren't installed, by title. */
+	eaImportable: () => __TAURI_INVOKE<Importable[]>("ea_importable"),
+	/**
+	 *  Registers an existing install of an owned EA game (`key`) at `path`, the folder holding `__Installer`, then rescans.
+	 *  Maxima runs the game's setup, which asks for administrator permission on Windows.
+	 */
+	eaImport: (key: string, path: string) => __TAURI_INVOKE<null>("ea_import", { key, path }),
 	/**
 	 *  Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then it reads just that store's
 	 *  login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.

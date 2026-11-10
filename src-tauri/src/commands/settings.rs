@@ -233,6 +233,36 @@ pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()>
     .await
 }
 
+/// Owned EA games that aren't installed, by title.
+#[tauri::command]
+#[specta::specta]
+pub fn ea_importable(state: State<'_, AppState>) -> Vec<Importable> {
+    importable(&state, ProviderKind::Ea)
+}
+
+/// Registers an existing install of an owned EA game (`key`) at `path`, the folder holding `__Installer`, then rescans.
+/// Maxima runs the game's setup, which asks for administrator permission on Windows.
+#[tauri::command]
+#[specta::specta]
+pub async fn ea_import(app: AppHandle, key: String, path: String) -> Res<()> {
+    let game = app
+        .state::<AppState>()
+        .game(&key)
+        .filter(|g| g.provider == ProviderKind::Ea && !g.installed)
+        .ok_or(msg!(cantImport))?;
+    blocking(move || {
+        let result = ea::import(
+            &app.state::<AppState>().dirs,
+            &game.external_id,
+            std::path::Path::new(&path),
+        )
+        .map_err(Msg::from);
+        rescan(&app, true);
+        result
+    })
+    .await
+}
+
 /// Makes Legendary take an existing install of an owned Epic game (`key`) at `path`, then rescans Epic.
 #[tauri::command]
 #[specta::specta]

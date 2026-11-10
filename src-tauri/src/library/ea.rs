@@ -2,19 +2,23 @@
 //! makes every EA call and keeps its own files in `<data>/ea` (`MAXIMA_DATA_DIR`), the login included. Each command
 //! prints one JSON object per line on stdout; its stderr is dropped unread, since a token could still be in it.
 
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
+use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::Value;
 use tauri::AppHandle;
 
-use super::tool::StoreLogin;
-use super::{Art, Error, Game, Image, ProviderKind};
+use super::gog::{Fed, feed};
+use super::tool::{InstallEvent, StoreLogin};
+use super::{Art, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 use crate::cache::{Dirs, db};
+use crate::info;
 use crate::msg::Msg;
 use crate::tools;
 
@@ -25,6 +29,14 @@ const LOGIN_STEP: Duration = Duration::from_secs(30);
 /// Where `guild login` waits for the code.
 const LOGIN_PORT: u16 = 31033;
 const LOGIN_EXIT: Duration = Duration::from_secs(10);
+const UNINSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Import waits on the UAC prompt of the game's setup.
+const IMPORT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// A download with no new bytes for this long is stopped. Maxima gives up after 2 minutes itself; this is for a hang.
+const STALL: Duration = Duration::from_secs(10 * 60);
+/// `info` kind of `guild info`'s `[download, disk]` bytes.
+const INSTALL_INFO: &str = "ea-install-info";
+const INSTALL_INFO_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// The account name `guild account` last reported.
 static ACCOUNT: Mutex<Option<String>> = Mutex::new(None);
@@ -52,6 +64,16 @@ pub enum Event {
     /// `guild account`: the name when logged in.
     Account(Option<String>),
     Game(EaGame),
+    /// `guild install`: bytes downloaded of `total`; the setup step after it isn't counted.
+    Progress {
+        bytes: u64,
+        total: u64,
+    },
+    /// `guild info`: what an install downloads and takes on disk.
+    Info {
+        download_bytes: u64,
+        install_bytes: u64,
+    },
     Done,
     Ok,
     Error(String),
@@ -96,6 +118,18 @@ pub fn parse_line(line: &str) -> Option<Event> {
     }
     if let Some(game) = object.get("game") {
         return serde_json::from_value(game.clone()).ok().map(Event::Game);
+    }
+    if let Some(p) = object.get("progress") {
+        return Some(Event::Progress {
+            bytes: p.get("bytes")?.as_u64()?,
+            total: p.get("total")?.as_u64()?,
+        });
+    }
+    if let Some(i) = object.get("info") {
+        return Some(Event::Info {
+            download_bytes: i.get("download_bytes")?.as_u64()?,
+            install_bytes: i.get("install_bytes")?.as_u64()?,
+        });
     }
     if object.get("done") == Some(&Value::Bool(true)) {
         return Some(Event::Done);
@@ -324,17 +358,291 @@ fn games(events: Vec<Event>, covers: &std::collections::HashMap<String, String>)
         .collect()
 }
 
+/// An install's download and disk bytes from `guild info`, cached for a week. `(None, None)` when Maxima couldn't tell.
+pub fn install_sizes(
+    dirs: &Dirs,
+    conn: Option<&Connection>,
+    id: &str,
+) -> (Option<u64>, Option<u64>) {
+    let json = info::cached_or_run_tool(
+        conn,
+        &ProviderKind::Ea.key(id),
+        INSTALL_INFO,
+        INSTALL_INFO_MAX_AGE_SECS,
+        super::unix_now(),
+        || {
+            let events = run(dirs, &["info", id], SHORT_TIMEOUT)?;
+            let sizes = info_sizes(&events);
+            if sizes.is_none() {
+                let reason = first_error(&events).unwrap_or(msg!(eaNoReason));
+                tracing::warn!("maxima info {id}: {reason}");
+            }
+            serde_json::to_string(&sizes?).ok()
+        },
+    );
+    json.and_then(|j| serde_json::from_str::<(u64, u64)>(&j).ok())
+        .map_or((None, None), |(download, disk)| {
+            (Some(download), Some(disk))
+        })
+}
+
+fn info_sizes(events: &[Event]) -> Option<(u64, u64)> {
+    events.iter().find_map(|e| match e {
+        Event::Info {
+            download_bytes,
+            install_bytes,
+        } => Some((*download_bytes, *install_bytes)),
+        _ => None,
+    })
+}
+
+/// The folder an install gets inside its base folder: the title without `: / * ? < > \ | ™ " ®` and trailing dots or
+/// spaces (Windows drops those), or the offer id the same way when that leaves nothing.
+pub fn install_folder(title: &str, id: &str) -> String {
+    let clean = |text: &str| {
+        let name: String = text
+            .chars()
+            .filter(|c| !":/*?<>\\|™\"®".contains(*c))
+            .collect();
+        name.trim().trim_end_matches('.').trim_end().to_owned()
+    };
+    let name = clean(title);
+    if name.is_empty() { clean(id) } else { name }
+}
+
+/// What a `guild install`, `uninstall` or `import` said so far.
+#[derive(Default)]
+struct Job {
+    done: bool,
+    error: Option<String>,
+}
+
+impl Job {
+    /// Takes one stdout line; returns its progress, if it is a progress line.
+    fn line(&mut self, line: &str, action: ProgressAction) -> Option<Progress> {
+        match parse_line(line)? {
+            Event::Progress { bytes, total } => Some(Progress {
+                fraction: if total == 0 {
+                    0.0
+                } else {
+                    (bytes as f64 / total as f64).clamp(0.0, 1.0) as f32
+                },
+                action,
+                done_bytes: Some(bytes),
+                total_bytes: Some(total),
+                secs_left: None,
+                done_files: None,
+                total_files: None,
+            }),
+            Event::Done => {
+                self.done = true;
+                None
+            }
+            Event::Error(code) => {
+                self.error.get_or_insert(code);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// The outcome once Maxima exited: only `done` with exit 0 is success. A killed run (Pause, Cancel) says neither.
+    fn result(self, success: bool) -> Result<(), Msg> {
+        match self.error {
+            Some(code) => Err(error_msg(&code)),
+            None if self.done && success => Ok(()),
+            None => Err(msg!(eaNoReason)),
+        }
+    }
+}
+
+/// Runs `guild install`, reporting its pid first (so Pause and Cancel can stop it), then its progress. Stopped after
+/// `STALL` without new bytes, counted from the first.
+fn download(
+    dirs: &Dirs,
+    args: &[&OsStr],
+    action: ProgressAction,
+    mut on_event: impl FnMut(InstallEvent),
+) -> Result<(), Error> {
+    let mut child = crate::platform::spawn_tool(command(dirs).args(args).stdout(Stdio::piped()))?;
+    let pid = child.id();
+    on_event(InstallEvent::Started(pid));
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut job = Job::default();
+    let mut most = 0;
+    let fed = feed(&rx, STALL, false, |line| {
+        let Some(progress) = job.line(line, action) else {
+            return false;
+        };
+        let bytes = progress.done_bytes.unwrap_or(0);
+        on_event(InstallEvent::Progress(progress));
+        let grew = bytes > most;
+        most = most.max(bytes);
+        grew
+    });
+    if fed == Fed::Stalled {
+        if let Err(e) = crate::platform::kill_tree(pid) {
+            tracing::warn!("stop stalled maxima: {e}");
+            _ = child.kill();
+        }
+        _ = child.wait();
+        return Err(msg!(eaStalled).into());
+    }
+    let status = child.wait()?;
+    Ok(job.result(status.success())?)
+}
+
+/// Downloads a game into `<base>/<install_folder(title)>` and runs its setup (one UAC prompt on Windows). Returns the
+/// folder. Run again into the same folder, Maxima skips the files it already has: that is how a paused install resumes.
+pub fn install(
+    dirs: &Dirs,
+    id: &str,
+    title: &str,
+    base: &Path,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<PathBuf, Error> {
+    let folder = base.join(install_folder(title, id));
+    fs_err::create_dir_all(&folder)?;
+    download(
+        dirs,
+        &[OsStr::new("install"), OsStr::new(id), folder.as_os_str()],
+        ProgressAction::Install,
+        on_event,
+    )?;
+    Ok(folder)
+}
+
+/// Brings an installed game to EA's current build: an install into its own folder, which downloads only the files
+/// whose size changed.
+pub fn update(
+    dirs: &Dirs,
+    id: &str,
+    dir: &Path,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), Error> {
+    download(
+        dirs,
+        &[OsStr::new("install"), OsStr::new(id), dir.as_os_str()],
+        ProgressAction::Update,
+        on_event,
+    )
+}
+
+/// Runs a job without progress to its end.
+fn short_job(dirs: &Dirs, args: &[&OsStr], timeout: Duration) -> Result<(), Error> {
+    let mut command = command(dirs);
+    command.args(args);
+    let output = super::tool::run_with_timeout(command, b"", timeout)?.ok_or(msg!(eaNoReason))?;
+    let mut job = Job::default();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        job.line(line, ProgressAction::Install);
+    }
+    Ok(job.result(output.status.success())?)
+}
+
+/// Deletes the game's own files and its `__Installer` folder; files the game wrote itself (saves) stay.
+pub fn uninstall(dirs: &Dirs, id: &str) -> Result<(), Error> {
+    short_job(
+        dirs,
+        &[OsStr::new("uninstall"), OsStr::new(id)],
+        UNINSTALL_TIMEOUT,
+    )
+}
+
+/// Registers an existing install at `path` (the folder holding `__Installer`) by running its setup (one UAC prompt on
+/// Windows).
+pub fn import(dirs: &Dirs, id: &str, path: &Path) -> Result<(), Error> {
+    short_job(
+        dirs,
+        &[OsStr::new("import"), OsStr::new(id), path.as_os_str()],
+        IMPORT_TIMEOUT,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn fixture() -> Vec<Event> {
-        let text = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/ea/library.jsonl"),
+    fn lines(name: &str) -> String {
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/ea/{name}.jsonl")),
         )
-        .unwrap();
-        text.lines().filter_map(parse_line).collect()
+        .unwrap()
+    }
+
+    fn fixture() -> Vec<Event> {
+        lines("library").lines().filter_map(parse_line).collect()
+    }
+
+    /// The progress a job's lines report, and its outcome after exiting with `success`.
+    fn job(name: &str, success: bool) -> (Vec<Progress>, Result<(), Msg>) {
+        let mut job = Job::default();
+        let progress = lines(name)
+            .lines()
+            .filter_map(|l| job.line(l, ProgressAction::Install))
+            .collect();
+        (progress, job.result(success))
+    }
+
+    #[test]
+    fn progress_lines_become_progress() {
+        let (progress, result) = job("install", true);
+        assert_eq!(result, Ok(()));
+        let fractions: Vec<f32> = progress.iter().map(|p| p.fraction).collect();
+        assert_eq!(fractions, [0.0, 0.25, 1.0]);
+        assert_eq!(progress[1].done_bytes, Some(3_915_829_247));
+        assert!(
+            progress
+                .iter()
+                .all(|p| p.total_bytes == Some(15_663_316_990)
+                    && p.action == ProgressAction::Install
+                    && p.secs_left.is_none())
+        );
+        // A run killed by Pause or Cancel ends without `done`.
+        let mut killed = Job::default();
+        killed.line(
+            r#"{"progress":{"bytes":1,"total":0}}"#,
+            ProgressAction::Update,
+        );
+        assert_eq!(killed.result(false), Err(msg!(eaNoReason)));
+    }
+
+    #[test]
+    fn a_failed_job_maps_its_code() {
+        assert_eq!(
+            job("install-declined", false).1,
+            Err(msg!(eaElevationDeclined))
+        );
+        // `done` without exit 0 is no success either.
+        assert_eq!(job("install", false).1, Err(msg!(eaNoReason)));
+    }
+
+    #[test]
+    fn info_gives_the_sizes() {
+        let events: Vec<Event> = lines("info").lines().filter_map(parse_line).collect();
+        assert_eq!(info_sizes(&events), Some((15_663_316_990, 16_953_192_983)));
+    }
+
+    #[test]
+    fn install_folder_strips_forbidden_characters() {
+        assert_eq!(
+            install_folder("Tales of Kenzera™: ZAU", "Origin.OFR.50.0005198"),
+            "Tales of Kenzera ZAU"
+        );
+        assert_eq!(
+            install_folder("Mass Effect™ Legendary Edition", "x"),
+            "Mass Effect Legendary Edition"
+        );
+        assert_eq!(install_folder("Who? ...", "x"), "Who");
+        assert_eq!(install_folder(r#":/*?<>\|"#, "DR:1"), "DR1");
     }
 
     #[test]
@@ -399,6 +707,7 @@ mod tests {
             "not json",
             "[1]",
             r#"{"progress_note":1}"#,
+            r#"{"progress":{"bytes":1}}"#,
             r#"{"done":false}"#,
             r#"{"game":{"x":1}}"#,
         ] {

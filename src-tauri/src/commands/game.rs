@@ -21,7 +21,7 @@ use crate::info::{self, GameInfo};
 use crate::library::epic;
 use crate::library::tool::{InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
-use crate::library::{amazon, gog, steam};
+use crate::library::{amazon, ea, gog, steam};
 use crate::links::{self, LinkKind};
 use crate::msg::{Msg, Param};
 use crate::platform::kill_tree;
@@ -333,8 +333,10 @@ fn act_blocking(
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
     }
-    if game.provider == ProviderKind::Ea {
-        return Err(store_error(ProviderKind::Ea, msg!(eaNotYet)));
+    if game.provider == ProviderKind::Ea
+        && let Some(reason) = ea_refusal(action)
+    {
+        return Err(store_error(ProviderKind::Ea, reason));
     }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
@@ -342,8 +344,10 @@ fn act_blocking(
         Action::Verify => Some(QueuedAction::Verify),
         _ => None,
     };
-    if matches!(game.provider, ProviderKind::Gog | ProviderKind::Amazon)
-        && action == Action::Install
+    if matches!(
+        game.provider,
+        ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Ea
+    ) && action == Action::Install
         && dlc.is_none()
         && game.installed
     {
@@ -367,6 +371,14 @@ fn act_blocking(
     }
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
         return Err(msg!(cancelDownloadFirst));
+    }
+    // Only Uninstall is left for EA: the rest was refused or queued above.
+    if game.provider == ProviderKind::Ea {
+        let result = ea::uninstall(&state.dirs, &game.external_id);
+        rescan(app, true);
+        return result
+            .map(|()| None)
+            .map_err(|e| store_error(ProviderKind::Ea, e));
     }
     if game.provider == ProviderKind::Gog && matches!(action, Action::Play | Action::PlayOutdated) {
         let upload = match saves_before_play(&state, game, keep) {
@@ -465,6 +477,15 @@ fn act_blocking(
     result
         .map(|()| None)
         .map_err(|e| store_error(ProviderKind::Epic, e))
+}
+
+/// Why an EA copy can't do `action`, if it can't: Maxima has no verify or move, and Play comes later.
+fn ea_refusal(action: Action) -> Option<Msg> {
+    match action {
+        Action::Play | Action::PlayOutdated => Some(msg!(eaNotYet)),
+        Action::Verify | Action::Move => Some(msg!(eaCantVerifyOrMove)),
+        Action::Install | Action::Update | Action::Uninstall => None,
+    }
 }
 
 /// Whether a Play would replace the watch of another game whose saves still go up once it exits. One game is watched
@@ -820,7 +841,7 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
         return run_amazon_job(state, game, job, on_event);
     }
     if game.provider == ProviderKind::Ea {
-        return Err(msg!(eaNotYet).into());
+        return run_ea_job(state, game, job, on_event);
     }
     match job.action {
         QueuedAction::Update => epic::update(&game.external_id, on_event),
@@ -900,6 +921,31 @@ fn run_amazon_job(
         }
         QueuedAction::Update => amazon::update(open_db(state).as_ref(), id, dir()?, on_event),
         QueuedAction::Verify => amazon::verify(open_db(state).as_ref(), id, dir()?, on_event),
+    }
+}
+
+/// A queued EA job. An update is an install into the game's own folder.
+fn run_ea_job(
+    state: &AppState,
+    game: &Game,
+    job: &Job,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), crate::library::Error> {
+    let id = &game.external_id;
+    match job.action {
+        QueuedAction::Install => {
+            let base = job
+                .dest
+                .as_deref()
+                .map(PathBuf::from)
+                .ok_or(msg!(noInstallBase))?;
+            ea::install(&state.dirs, id, &game.title, &base, on_event).map(drop)
+        }
+        QueuedAction::Update => {
+            let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
+            ea::update(&state.dirs, id, dir, on_event)
+        }
+        QueuedAction::Verify => Err(msg!(eaCantVerifyOrMove).into()),
     }
 }
 
@@ -2035,6 +2081,16 @@ pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> Queue
 mod tests {
     use super::*;
     use crate::view::tests::game;
+
+    #[test]
+    fn verify_and_move_are_not_offered_for_ea() {
+        for action in [Action::Verify, Action::Move] {
+            assert_eq!(ea_refusal(action), Some(msg!(eaCantVerifyOrMove)));
+        }
+        for action in [Action::Install, Action::Update, Action::Uninstall] {
+            assert_eq!(ea_refusal(action), None);
+        }
+    }
 
     #[test]
     fn restart_keeps_live_queue_paused_and_stores_its_own_flag() {

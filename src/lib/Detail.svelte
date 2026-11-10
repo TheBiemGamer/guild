@@ -444,6 +444,8 @@
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
   // Verify, Move and Uninstall: the chosen store copy, installed.
   const manageable = $derived(!!copy?.installed && !custom)
+  // Maxima can't verify or move an EA game.
+  const repairable = $derived(manageable && copy!.provider !== 'ea')
 
   // Null hides the tile (Epic's unknown playtime, never played).
   const playtime = $derived(game?.playtimeMinutes != null ? playtimeLabel(game.playtimeMinutes) : null)
@@ -831,7 +833,7 @@
                     {#snippet children({ props })}<span {...props} class="value">{copy!.installDir}</span>{/snippet}
                   </Tip>
                   <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.open')}</button>
-                  {#if manageable}
+                  {#if repairable}
                     <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}>
                       {#snippet children({ props })}
                         <span {...props} class="tip-anchor">
@@ -842,11 +844,11 @@
                   {/if}
                 </div>
               {/if}
-              {#if copy!.sizeBytes !== null || manageable}
+              {#if copy!.sizeBytes !== null || repairable}
                 <div class="row">
                   <span class="key">{t('detail.files')}</span>
                   <span class="value">{copy!.sizeBytes !== null ? sizeLabel(copy!.sizeBytes) : ''}</span>
-                  {#if manageable}
+                  {#if repairable}
                     <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}>
                       {#snippet children({ props })}
                         <span {...props} class="tip-anchor">
