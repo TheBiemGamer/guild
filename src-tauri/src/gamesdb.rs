@@ -115,12 +115,13 @@ pub async fn look_up(
 }
 
 /// The GamesDB release URL of an Epic, GOG or Amazon copy key: its store is GamesDB's platform, its id the release's.
-/// An Amazon game is looked up by its product id only.
+/// An Amazon game is looked up by its product id only; an EA game by its offer id, under GamesDB's `origin`.
 // shortcut: GamesDB keeps some Amazon releases under a bare UUID instead, maybe `legacyProductIds`; unverified, so not tried.
 fn release_url(key: &str) -> Option<String> {
-    let (platform, id) = key
+    let (store, id) = key
         .split_once('-')
-        .filter(|(p, id)| matches!(*p, "epic" | "gog" | "amazon") && !id.is_empty())?;
+        .filter(|(p, id)| matches!(*p, "epic" | "gog" | "amazon" | "ea") && !id.is_empty())?;
+    let platform = if store == "ea" { "origin" } else { store };
     Some(format!(
         "{URL}/{platform}/external_releases/{}",
         percent_encode(id)
@@ -197,11 +198,15 @@ pub fn all_cached(conn: &Connection, now_secs: i64) -> HashMap<String, Vec<u32>>
         .collect()
 }
 
-/// Every fresh cached cover of a GOG or Amazon game, by its key.
+/// Every fresh cached cover of a GOG, Amazon or EA game, by its key.
 pub fn covers(conn: &Connection, now_secs: i64) -> HashMap<String, String> {
     all_stored(conn, now_secs)
         .into_iter()
-        .filter(|(key, _)| key.starts_with("gog-") || key.starts_with("amazon-"))
+        .filter(|(key, _)| {
+            ["gog-", "amazon-", "ea-"]
+                .iter()
+                .any(|p| key.starts_with(p))
+        })
         .filter_map(|(key, s)| Some((key, s.cover?)))
         .collect()
 }
@@ -498,6 +503,18 @@ mod tests {
                 "https://gamesdb.gog.com/platforms/amazon/external_releases/amzn1.adg.product.4c6f3fb8-e68a-4706-a8eb-490905dfa633"
             )
         );
+        assert_eq!(
+            url("ea-Origin.OFR.50.0001456").as_deref(),
+            Some(
+                "https://gamesdb.gog.com/platforms/origin/external_releases/Origin.OFR.50.0001456"
+            )
+        );
+        assert_eq!(
+            url("ea-OFB-EAST:109552299").as_deref(),
+            Some("https://gamesdb.gog.com/platforms/origin/external_releases/OFB-EAST%3A109552299")
+        );
+        assert_eq!(url("ea-"), None);
+        assert_eq!(url("origin-Origin.OFR.50.0001456"), None);
         assert_eq!(url("amazon-"), None);
         assert_eq!(url("steam-70"), None);
         assert_eq!(url("custom-x"), None);

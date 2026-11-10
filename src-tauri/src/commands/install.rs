@@ -1,4 +1,4 @@
-//! The install panel of an Epic, GOG or Amazon copy: what the install takes, where it can go, and the install itself.
+//! The install panel of an Epic, GOG, Amazon or EA copy: what the install takes, where it can go, and the install itself.
 
 use std::path::{Path, PathBuf};
 
@@ -8,10 +8,10 @@ use tauri::{AppHandle, Manager};
 
 use super::game::{SIZE_MAX_AGE_SECS, enqueue, install_base};
 use super::{AppState, Res, blocking, open_db, unix_now};
-use crate::cache;
+use crate::cache::{self, Dirs};
 use crate::downloads::{Job, QueuedAction};
 use crate::info;
-use crate::library::{Game, ProviderKind, amazon, epic, gog};
+use crate::library::{Game, ProviderKind, amazon, ea, epic, gog};
 use crate::msg::Msg;
 use crate::settings;
 
@@ -94,8 +94,9 @@ pub async fn install_plan(
 ) -> Option<InstallPlan> {
     let game = store_copy(&app, &key)?;
     blocking(move || {
-        let conn = open_db(&app.state::<AppState>());
-        Some(plan(conn.as_ref(), &game, language, build))
+        let state = app.state::<AppState>();
+        let conn = open_db(&state);
+        Some(plan(&state.dirs, conn.as_ref(), &game, language, build))
     })
     .await
 }
@@ -152,7 +153,13 @@ pub async fn install(app: AppHandle, key: String, choice: InstallChoice) -> Res<
     blocking(move || {
         let state = app.state::<AppState>();
         let conn = open_db(&state);
-        let plan = plan(conn.as_ref(), &game, choice.language.clone(), choice.build);
+        let plan = plan(
+            &state.dirs,
+            conn.as_ref(),
+            &game,
+            choice.language.clone(),
+            choice.build,
+        );
         let free = crate::platform::disk_space(&folder).map(|(free, _)| free);
         if free.is_some_and(|free| needed(&plan, &chosen) > free) {
             return Err(msg!(notEnoughSpace));
@@ -187,18 +194,19 @@ fn dlc_job(owned: &[String], chosen: Vec<String>) -> (bool, Option<Vec<String>>)
     }
 }
 
-/// An Epic, GOG or Amazon copy that isn't installed.
+/// An Epic, GOG, Amazon or EA copy that isn't installed.
 fn store_copy(app: &AppHandle, key: &str) -> Option<Game> {
     app.state::<AppState>().game(key).filter(|g| {
         !g.installed
             && matches!(
                 g.provider,
-                ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+                ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Ea
             )
     })
 }
 
 fn plan(
+    dirs: &Dirs,
     conn: Option<&Connection>,
     game: &Game,
     language: Option<String>,
@@ -283,6 +291,15 @@ fn plan(
                 }),
             }
         }
+        ProviderKind::Ea => {
+            let (download_bytes, disk_bytes) = ea::install_sizes(dirs, conn, id);
+            InstallPlan {
+                download_bytes,
+                disk_bytes,
+                folder_name: Some(ea::install_folder(&game.title, id)),
+                ..InstallPlan::default()
+            }
+        }
         ProviderKind::Steam | ProviderKind::Custom => InstallPlan::default(),
     }
 }
@@ -351,7 +368,10 @@ fn remember(conn: &Connection, store: ProviderKind, folder: &Path) {
     let setting = match store {
         ProviderKind::Gog => settings::GOG_INSTALL_DIR,
         ProviderKind::Amazon => settings::AMAZON_INSTALL_DIR,
-        _ => settings::EPIC_INSTALL_DIR,
+        ProviderKind::Ea => settings::EA_INSTALL_DIR,
+        ProviderKind::Epic | ProviderKind::Steam | ProviderKind::Custom => {
+            settings::EPIC_INSTALL_DIR
+        }
     };
     let mut folders = recent(conn, store);
     folders.retain(|f| f != folder);

@@ -74,6 +74,8 @@
     gogAttention: false,
     amazon: null,
     amazonAttention: false,
+    ea: null,
+    eaAttention: false,
     stores: [],
   })
   let featured = $state<Featured | null>(null)
@@ -188,7 +190,7 @@
   /** `key` is the card's chosen copy. Steam installs in its own dialog; the other stores' copies ask in the install panel. */
   function install(key: string, anchor: DOMRect) {
     const title = lib.games.find((g) => g.chosen === key)?.title ?? ''
-    if (/^(epic|gog|amazon)-/.test(key)) confirming = { game: { key, title }, anchor }
+    if (/^(epic|gog|amazon|ea)-/.test(key)) confirming = { game: { key, title }, anchor }
     else act('install', key)
   }
 
@@ -458,7 +460,7 @@
   const resumeDownloads = () => changeQueue(commands.resumeDownloads)
 
   /** A store needs the owner: the dot on the Settings button and on Settings' Accounts. */
-  const attention = $derived(lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention)
+  const attention = $derived(lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention || lib.eaAttention)
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
   const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180

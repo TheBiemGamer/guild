@@ -1,0 +1,25 @@
+---
+source: src/library/ea.rs
+expression: summary
+---
+- ea-Origin.OFR.50.0002487 | A Way Out | false
+- ea-Origin.OFR.50.0002694 | Apex Legends | false
+- ea-Origin.OFR.50.0001380 | Battlefield 1 | false
+- ea-Origin.OFR.50.0004346 | Battlefield V | false
+- ea-Origin.OFR.50.0004152 | Battlefield™ 2042 | false
+- "ea-Origin.OFR.50.0001131 | Dragon Age: Inquisition | false"
+- ea-Origin.OFR.50.0005021 | Immortals of Aveum™ | false
+- ea-Origin.OFR.50.0005237 | Mass Effect™ 3 (2012) | false
+- ea-Origin.OFR.50.0004049 | Mass Effect™ Legendary Edition | false
+- "ea-Origin.OFR.50.0000998 | Mirror's Edge™ Catalyst | false"
+- ea-Origin.OFR.50.0003439 | Need for Speed™ Heat | false
+- "ea-DR:235663500 | Nox™ | false"
+- ea-Origin.OFR.50.0000786 | Plants vs. Zombies Garden Warfare 2 | false
+- "ea-Origin.OFR.50.0003634 | Plants vs. Zombies™: Battle for Neighborville | false"
+- "ea-Origin.OFR.50.0003794 | STAR WARS Jedi: Fallen Order™ | false"
+- ea-Origin.OFR.50.0002015 | STAR WARS™ Battlefront™ II | false
+- "ea-Origin.OFR.50.0003112 | STAR WARS™: Squadrons | false"
+- "ea-Origin.OFR.50.0005198 | Tales of Kenzera™: ZAU | true"
+- "ea-OFB-EAST:109552299 | The Sims™ 4 | false"
+- ea-Origin.OFR.50.0001456 | Titanfall 2 | false
+- ea-Origin.OFR.50.0004951 | WILD HEARTS™ | false

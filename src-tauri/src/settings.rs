@@ -22,6 +22,7 @@ pub const START_WITH_WINDOWS: &str = "start_with_windows";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const GOG_INSTALL_DIR: &str = "gog_install_dir";
 pub const AMAZON_INSTALL_DIR: &str = "amazon_install_dir";
+pub const EA_INSTALL_DIR: &str = "ea_install_dir";
 /// Linux: the Proton build Windows games run with, by folder name (`wine`); none is the newest found.
 pub const PROTON: &str = "proton";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
@@ -48,6 +49,7 @@ pub struct Settings {
     pub epic_install_dir: Option<PathBuf>,
     pub gog_install_dir: Option<PathBuf>,
     pub amazon_install_dir: Option<PathBuf>,
+    pub ea_install_dir: Option<PathBuf>,
     pub igdb_client_id: Option<String>,
     pub sort: Sort,
     /// The Language setting as saved; `msg::resolve` turns it into a language.
@@ -67,6 +69,7 @@ pub fn load(conn: &Connection) -> Settings {
         epic_install_dir: get(EPIC_INSTALL_DIR).map(PathBuf::from),
         gog_install_dir: get(GOG_INSTALL_DIR).map(PathBuf::from),
         amazon_install_dir: get(AMAZON_INSTALL_DIR).map(PathBuf::from),
+        ea_install_dir: get(EA_INSTALL_DIR).map(PathBuf::from),
         igdb_client_id: get(IGDB_CLIENT_ID),
         sort: get(LIBRARY_SORT)
             .and_then(|v| Sort::parse(&v))
@@ -85,7 +88,7 @@ pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
             None | Some("true" | "false") => Ok(()),
             Some(_) => Err(msg!(settingNotBool, name = name)),
         },
-        EPIC_INSTALL_DIR | GOG_INSTALL_DIR | AMAZON_INSTALL_DIR => match value {
+        EPIC_INSTALL_DIR | GOG_INSTALL_DIR | AMAZON_INSTALL_DIR | EA_INSTALL_DIR => match value {
             Some(dir) if !Path::new(dir).is_dir() => Err(msg!(notExistingFolder, path = dir)),
             _ => Ok(()),
         },
@@ -129,7 +132,7 @@ pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
     seen.map(|_| current.to_string())
 }
 
-/// Whether the owner logged out of `store` ("epic", "gog", "amazon") with Log out, so its Settings dot stays down
+/// Whether the owner logged out of `store` ("epic", "gog", "amazon", "ea") with Log out, so its Settings dot stays down
 /// until it is logged in again. Internal: not in `validate`.
 pub fn signed_out(conn: &Connection, store: &str) -> bool {
     db::setting(conn, &format!("signed_out_{store}"))
@@ -263,9 +266,10 @@ mod tests {
                 s.epic_install_dir,
                 s.gog_install_dir,
                 s.amazon_install_dir,
+                s.ea_install_dir,
                 s.igdb_client_id
             ),
-            (None, None, None, None)
+            (None, None, None, None, None)
         );
         assert_eq!(s.sort, Sort::Title);
         assert_eq!(s.language, "system");
@@ -316,6 +320,7 @@ mod tests {
         .unwrap();
         update(&conn, GOG_INSTALL_DIR, Some(&dir.display().to_string())).unwrap();
         update(&conn, AMAZON_INSTALL_DIR, Some(&dir.display().to_string())).unwrap();
+        update(&conn, EA_INSTALL_DIR, Some(&dir.display().to_string())).unwrap();
         update(&conn, IGDB_CLIENT_ID, Some(" abc ")).unwrap();
         let s = load(&conn);
         assert!(
@@ -328,7 +333,8 @@ mod tests {
         );
         assert_eq!(s.epic_install_dir, Some(dir.clone()));
         assert_eq!(s.gog_install_dir, Some(dir.clone()));
-        assert_eq!(s.amazon_install_dir, Some(dir));
+        assert_eq!(s.amazon_install_dir, Some(dir.clone()));
+        assert_eq!(s.ea_install_dir, Some(dir));
         assert_eq!(s.igdb_client_id.as_deref(), Some("abc"));
         // Blank resets.
         update(&conn, SHOW_BANNER, None).unwrap();
@@ -353,6 +359,7 @@ mod tests {
         assert!(validate(EPIC_INSTALL_DIR, Some(r"Z:\no\such\folder")).is_err());
         assert!(validate(GOG_INSTALL_DIR, Some(r"Z:\no\such\folder")).is_err());
         assert!(validate(AMAZON_INSTALL_DIR, Some(r"Z:\no\such\folder")).is_err());
+        assert!(validate(EA_INSTALL_DIR, Some(r"Z:\no\such\folder")).is_err());
         assert!(validate(AMBIENT, Some("false")).is_ok());
         assert!(validate(EPIC_INSTALL_DIR, None).is_ok());
     }

@@ -21,7 +21,7 @@ use crate::info::{self, GameInfo};
 use crate::library::epic;
 use crate::library::tool::{InstallEvent, LaunchOptions, SaveSync, SyncOutcome};
 use crate::library::{Game, Image, ProgressAction, ProviderKind};
-use crate::library::{amazon, gog, steam};
+use crate::library::{amazon, ea, gog, steam};
 use crate::links::{self, LinkKind};
 use crate::msg::{Msg, Param};
 use crate::platform::kill_tree;
@@ -205,7 +205,7 @@ pub async fn detail_art(app: AppHandle, key: String) -> DetailArt {
     let Some(game) = state.game(&key) else {
         return DetailArt::default();
     };
-    let dir = state.dirs.art.join(&key);
+    let dir = state.dirs.art_for(&key);
     // The game page shows a text title, so the logo art isn't fetched.
     let hero = cache::resolve(&game.art.hero, &state.http, dir.join("hero")).await;
     DetailArt {
@@ -333,14 +333,21 @@ fn act_blocking(
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
     }
+    if game.provider == ProviderKind::Ea
+        && let Some(reason) = ea_refusal(action)
+    {
+        return Err(store_error(ProviderKind::Ea, reason));
+    }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
         Action::Update => Some(QueuedAction::Update),
         Action::Verify => Some(QueuedAction::Verify),
         _ => None,
     };
-    if matches!(game.provider, ProviderKind::Gog | ProviderKind::Amazon)
-        && action == Action::Install
+    if matches!(
+        game.provider,
+        ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Ea
+    ) && action == Action::Install
         && dlc.is_none()
         && game.installed
     {
@@ -364,6 +371,16 @@ fn act_blocking(
     }
     if matches!(action, Action::Move | Action::Uninstall) && state.lock().queue.contains(&key) {
         return Err(msg!(cancelDownloadFirst));
+    }
+    // Only Play and Uninstall are left for EA: the rest was refused or queued above.
+    if game.provider == ProviderKind::Ea {
+        let result = act_ea(&state, action, game);
+        if action == Action::Uninstall {
+            rescan(app, true);
+        }
+        return result
+            .map(|()| None)
+            .map_err(|e| store_error(ProviderKind::Ea, e));
     }
     if game.provider == ProviderKind::Gog && matches!(action, Action::Play | Action::PlayOutdated) {
         let upload = match saves_before_play(&state, game, keep) {
@@ -464,6 +481,18 @@ fn act_blocking(
         .map_err(|e| store_error(ProviderKind::Epic, e))
 }
 
+/// Why an EA copy can't do `action`, if it can't: Maxima has no verify or move.
+fn ea_refusal(action: Action) -> Option<Msg> {
+    match action {
+        Action::Verify | Action::Move => Some(msg!(eaCantVerifyOrMove)),
+        Action::Play
+        | Action::PlayOutdated
+        | Action::Install
+        | Action::Update
+        | Action::Uninstall => None,
+    }
+}
+
 /// Whether a Play would replace the watch of another game whose saves still go up once it exits. One game is watched
 /// at a time, and a replaced watch never uploads.
 fn replaces_upload(watch: Option<&Watch>, key: &str) -> bool {
@@ -486,7 +515,7 @@ fn store_error(store: ProviderKind, reason: impl Into<Msg>) -> Msg {
 }
 
 /// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
-/// the setting, else Legendary's own default (`epic::default_base`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
+/// the setting, else Legendary's own default (`epic::default_base`). GOG, Amazon and EA: the store's setting, else `%USERPROFILE%\Games`
 /// (gogdl has no default, and nile's is `~/Games/nile`).
 pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     let saved = open_db(state).map(|c| settings::load(&c));
@@ -497,8 +526,11 @@ pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<S
         ProviderKind::Amazon => saved
             .and_then(|s| s.amazon_install_dir)
             .or_else(gog::default_base),
+        ProviderKind::Ea => saved
+            .and_then(|s| s.ea_install_dir)
+            .or_else(gog::default_base),
         // Passed as `--base-path` from now on, so the folder shown is the folder used.
-        _ => saved
+        ProviderKind::Epic | ProviderKind::Steam | ProviderKind::Custom => saved
             .and_then(|s| s.epic_install_dir)
             .or_else(epic::default_base),
     };
@@ -568,6 +600,35 @@ fn act_amazon(
         ),
         Action::Uninstall => amazon::uninstall(open_db(state).as_ref(), &game.external_id),
         Action::Install | Action::Update | Action::Verify => unreachable!("queued"),
+    }
+}
+
+/// An EA copy's Play and Uninstall. Play watches `guild launch`, which stays until the game stops and its saves are up.
+fn act_ea(state: &AppState, action: Action, game: &Game) -> Result<(), crate::library::Error> {
+    match action {
+        Action::Play | Action::PlayOutdated => {
+            let options = checked_launch_options(open_db(state).as_ref(), game)?;
+            let child = ea::launch(
+                &state.dirs,
+                &game.external_id,
+                state.twin(&game.key()),
+                &options,
+            )?;
+            let key = game.key();
+            record_play(state, &key);
+            state.lock().watch = Some(Watch {
+                key,
+                process: Process::Ours(child),
+                since: Instant::now(),
+                seen: false,
+                upload: None,
+            });
+            Ok(())
+        }
+        Action::Uninstall => ea::uninstall(&state.dirs, &game.external_id),
+        Action::Install | Action::Update | Action::Verify | Action::Move => {
+            unreachable!("queued or refused")
+        }
     }
 }
 
@@ -813,6 +874,9 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
     if game.provider == ProviderKind::Amazon {
         return run_amazon_job(state, game, job, on_event);
     }
+    if game.provider == ProviderKind::Ea {
+        return run_ea_job(state, game, job, on_event);
+    }
     match job.action {
         QueuedAction::Update => epic::update(&game.external_id, on_event),
         QueuedAction::Verify => epic::verify(&game.external_id, on_event),
@@ -894,6 +958,32 @@ fn run_amazon_job(
     }
 }
 
+/// A queued EA job. An update is an install into the game's own folder.
+fn run_ea_job(
+    state: &AppState,
+    game: &Game,
+    job: &Job,
+    on_event: impl FnMut(InstallEvent),
+) -> Result<(), crate::library::Error> {
+    let id = &game.external_id;
+    let steam = state.twin(&game.key());
+    match job.action {
+        QueuedAction::Install => {
+            let base = job
+                .dest
+                .as_deref()
+                .map(PathBuf::from)
+                .ok_or(msg!(noInstallBase))?;
+            ea::install(&state.dirs, id, steam, &game.title, &base, on_event).map(drop)
+        }
+        QueuedAction::Update => {
+            let dir = installed_dir(game).ok_or(msg!(notInstalled))?;
+            ea::update(&state.dirs, id, steam, dir, on_event)
+        }
+        QueuedAction::Verify => Err(msg!(eaCantVerifyOrMove).into()),
+    }
+}
+
 /// `game_prefs` name for an Epic, GOG or Amazon copy's launch options, as `LaunchOptions` JSON; none is all defaults.
 /// GOG and Amazon use only the arguments and the alternative executable.
 const LAUNCH_OPTIONS: &str = "launch_options";
@@ -926,18 +1016,22 @@ fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchO
     Ok(options)
 }
 
-/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own), or a game the
+/// Whether the copy has launch options here: an installed Epic, GOG, Amazon or EA copy (Steam keeps its own), or a game the
 /// owner added, which only has its Proton choice (Linux).
 fn has_launch_options(g: &Game) -> bool {
     g.installed
         && matches!(
             g.provider,
-            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Custom
+            ProviderKind::Epic
+                | ProviderKind::Gog
+                | ProviderKind::Amazon
+                | ProviderKind::Ea
+                | ProviderKind::Custom
         )
 }
 
-/// The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
-/// of a GOG game, which runs without one.
+/// The Proton builds a copy's launch options may pick, newest first. None on Windows, none for a native Linux build
+/// of a GOG game, which runs without one, and none for EA, whose Maxima picks its own.
 #[tauri::command]
 #[specta::specta]
 pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
@@ -948,7 +1042,10 @@ pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
             .filter(|g| g.provider == ProviderKind::Gog)
             .and_then(installed_dir)
             .is_some_and(|dir| gog::native(dir));
-        if native {
+        let ea = game
+            .as_ref()
+            .is_some_and(|g| g.provider == ProviderKind::Ea);
+        if native || ea {
             Vec::new()
         } else {
             crate::platform::protons()
@@ -1102,6 +1199,7 @@ fn sync_copy(conn: Option<&Connection>, game: &Game, sync: SaveSync) -> SyncOutc
     match (game.provider, installed_dir(game)) {
         (ProviderKind::Gog, Some(dir)) => gog::sync_saves(conn, &game.external_id, dir, sync),
         (ProviderKind::Gog, None) => SyncOutcome::Failed(msg!(notInstalled)),
+        (ProviderKind::Ea, _) => SyncOutcome::Failed(msg!(eaNotYet)),
         _ => epic::sync_saves(&game.external_id, sync),
     }
 }
@@ -1283,7 +1381,8 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
             })
             .await;
         }
-        ProviderKind::Custom => return None,
+        // shortcut: unknown until Maxima's `guild info` is read.
+        ProviderKind::Ea | ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());
@@ -1556,8 +1655,8 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// Store details for the game page (description, genres, developer, screenshots).
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 /// An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
-/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG game starts
-/// from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
+/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG or EA game
+/// starts from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
 /// and has its gaps filled like an Epic game's.
 /// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
@@ -1598,7 +1697,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
                     parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now))
                 })
             };
-            if game.provider == ProviderKind::Gog {
+            if matches!(game.provider, ProviderKind::Gog | ProviderKind::Ea) {
                 let all = match (gamesdb(), steam_twin()) {
                     (Some(base), Some(extra)) => info::fill_missing(base, extra),
                     (base, extra) => base.or(extra).unwrap_or_default(),
@@ -1657,7 +1756,7 @@ pub async fn screenshots(app: AppHandle, key: String, urls: Vec<String>) -> Vec<
     if state.game(&key).is_none() {
         return Vec::new();
     }
-    let dir = state.dirs.art.join(&key);
+    let dir = state.dirs.art_for(&key);
     // Downloaded side by side; awaited in order, so the screenshots keep theirs.
     let downloads: Vec<_> = urls
         .into_iter()
@@ -2020,6 +2119,22 @@ pub fn move_download(state: State<'_, AppState>, key: String, up: bool) -> Queue
 mod tests {
     use super::*;
     use crate::view::tests::game;
+
+    #[test]
+    fn verify_and_move_are_not_offered_for_ea() {
+        for action in [Action::Verify, Action::Move] {
+            assert_eq!(ea_refusal(action), Some(msg!(eaCantVerifyOrMove)));
+        }
+        for action in [
+            Action::Play,
+            Action::PlayOutdated,
+            Action::Install,
+            Action::Update,
+            Action::Uninstall,
+        ] {
+            assert_eq!(ea_refusal(action), None);
+        }
+    }
 
     #[test]
     fn restart_keeps_live_queue_paused_and_stores_its_own_flag() {

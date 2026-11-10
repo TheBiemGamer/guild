@@ -78,8 +78,8 @@ export const commands = {
 	 *  Store details for the game page (description, genres, developer, screenshots).
 	 *  Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 	 *  An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
-	 *  gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG game starts
-	 *  from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
+	 *  gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG or EA game
+	 *  starts from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
 	 *  and has its gaps filled like an Epic game's.
 	 *  Screenshots are remote URLs; `screenshots` turns them into local files.
 	 */
@@ -175,6 +175,17 @@ export const commands = {
 	amazonLogIn: () => __TAURI_INVOKE<null>("amazon_log_in"),
 	/**  Deregisters this PC from the Amazon account and forgets the login, then rescans. Cached Amazon games stay. */
 	amazonLogOut: () => __TAURI_INVOKE<null>("amazon_log_out"),
+	/**  Starts Maxima's login, opens EA's login window on it and hands the code back to Maxima, then loads the EA library. */
+	eaLogIn: () => __TAURI_INVOKE<null>("ea_log_in"),
+	/**  Forgets the EA login in Maxima, then rescans. Cached EA games stay. */
+	eaLogOut: () => __TAURI_INVOKE<null>("ea_log_out"),
+	/**  Owned EA games that aren't installed, by title. */
+	eaImportable: () => __TAURI_INVOKE<Importable[]>("ea_importable"),
+	/**
+	 *  Registers an existing install of an owned EA game (`key`) at `path`, the folder holding `__Installer`, then rescans.
+	 *  Maxima runs the game's setup, which asks for administrator permission on Windows.
+	 */
+	eaImport: (key: string, path: string) => __TAURI_INVOKE<null>("ea_import", { key, path }),
 	/**
 	 *  Downloads and checks a store tool (`tools.rs`), sending each new whole percent. Then it reads just that store's
 	 *  login, so its card moves on to Log in at once, and rescans in the background; the next poll picks that up.
@@ -199,8 +210,8 @@ export const commands = {
 	/**  Starts winecfg or winetricks in a copy's prefix, with the Proton build its game runs with. */
 	runInPrefix: (key: string, tool: PrefixTool) => __TAURI_INVOKE<null>("run_in_prefix", { key, tool }),
 	/**
-	 *  The Proton builds a copy's launch options may pick, newest first. None on Windows, and none for a native Linux build
-	 *  of a GOG game, which runs without one.
+	 *  The Proton builds a copy's launch options may pick, newest first. None on Windows, none for a native Linux build
+	 *  of a GOG game, which runs without one, and none for EA, whose Maxima picks its own.
 	 */
 	protons: (key: string) => __TAURI_INVOKE<string[]>("protons", { key }),
 	settingsView: () => __TAURI_INVOKE<SettingsView>("settings_view"),
@@ -506,6 +517,9 @@ export type Library = {
 	amazon: StoreLogin | null,
 	/**  The same for Amazon. */
 	amazonAttention: boolean,
+	ea: StoreLogin | null,
+	/**  The same for EA. */
+	eaAttention: boolean,
 	/**  The stores the whole library has a game from, in toolbar order; games the owner added don't count. */
 	stores: Store[],
 };
@@ -657,6 +671,10 @@ export type SettingsView = {
 	/**  The logged-in Amazon account's first name, from Nile's file. */
 	amazonAccount: string | null,
 	amazonInstallDir: string | null,
+	ea: StoreLogin | null,
+	/**  The logged-in EA account's name, as Maxima last reported it. */
+	eaAccount: string | null,
+	eaInstallDir: string | null,
 	/**
 	 *  Where Epic, GOG and Amazon install without an install folder setting: `%USERPROFILE%\Games`, Legendary's
 	 *  default and the one Guild passes to gogdl and Nile.
@@ -703,7 +721,7 @@ export type SteamLibrary = {
 	attention: boolean,
 };
 
-export type Store = "steam" | "epic" | "gog" | "amazon" | 
+export type Store = "steam" | "epic" | "gog" | "amazon" | "ea" | 
 /**  A program the owner added (`custom_games`); never merged with a store copy. */
 "custom";
 

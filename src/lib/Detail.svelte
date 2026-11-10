@@ -274,7 +274,10 @@
 
   // A string, so a library reload that keeps the copy doesn't reload the options under the cursor.
   const launchKey = $derived(
-    copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon' || copy.provider === 'custom') ? copy.key : null,
+    copy?.installed &&
+      (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon' || copy.provider === 'ea' || copy.provider === 'custom')
+      ? copy.key
+      : null,
   )
   $effect(() => {
     const key = launchKey
@@ -441,6 +444,8 @@
   const copyActions = $derived(!shown && !!copy && (copy.installed || !!copy.installDir))
   // Verify, Move and Uninstall: the chosen store copy, installed.
   const manageable = $derived(!!copy?.installed && !custom)
+  // Maxima can't verify or move an EA game.
+  const repairable = $derived(manageable && copy!.provider !== 'ea')
 
   // Null hides the tile (Epic's unknown playtime, never played).
   const playtime = $derived(game?.playtimeMinutes != null ? playtimeLabel(game.playtimeMinutes) : null)
@@ -618,7 +623,7 @@
                 onupdate={() => act('update')}
                 oninstall={() => {
                   // Steam installs in its own dialog; the other stores' copies ask in the install panel under the pill.
-                  if (!/^(epic|gog|amazon)-/.test(copy!.key)) return act('install')
+                  if (!/^(epic|gog|amazon|ea)-/.test(copy!.key)) return act('install')
                   installOpener = actionsEl?.querySelector<HTMLElement>('.split, button.pill') ?? null
                   installPanel = installPanel === copy!.key ? null : copy!.key
                 }}
@@ -793,11 +798,14 @@
                       </button>
                     </div>
                   {/if}
-                  <div class="row">
-                    <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
-                    <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
-                    {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
-                  </div>
+                  <!-- Maxima starts EA games itself. -->
+                  {#if copy!.provider !== 'ea'}
+                    <div class="row">
+                      <div class="what">{t('detail.altExe')}<small class="path">{launch.exe ?? t('detail.default')}</small></div>
+                      <button class="chip" onclick={chooseExe}>{t('detail.choose')}</button>
+                      {#if launch.exe}<button class="chip" onclick={() => setLaunch({ exe: null })}>{t('common.reset')}</button>{/if}
+                    </div>
+                  {/if}
                 {/if}
                 {#if protons.length}
                   <div class="row">
@@ -828,7 +836,7 @@
                     {#snippet children({ props })}<span {...props} class="value">{copy!.installDir}</span>{/snippet}
                   </Tip>
                   <button class="chip" onclick={() => run(() => commands.openFolder(copy!.key))}>{t('detail.open')}</button>
-                  {#if manageable}
+                  {#if repairable}
                     <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.moveHint')}>
                       {#snippet children({ props })}
                         <span {...props} class="tip-anchor">
@@ -839,11 +847,11 @@
                   {/if}
                 </div>
               {/if}
-              {#if copy!.sizeBytes !== null || manageable}
+              {#if copy!.sizeBytes !== null || repairable}
                 <div class="row">
                   <span class="key">{t('detail.files')}</span>
                   <span class="value">{copy!.sizeBytes !== null ? sizeLabel(copy!.sizeBytes) : ''}</span>
-                  {#if manageable}
+                  {#if repairable}
                     <Tip text={copy!.provider === 'steam' ? t('detail.inSteam') : t('detail.verifyHint')}>
                       {#snippet children({ props })}
                         <span {...props} class="tip-anchor">

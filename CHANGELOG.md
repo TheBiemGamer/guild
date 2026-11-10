@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- EA games, through Maxima: log in, then install, update, uninstall, import and play your EA games from Guild, on Windows and Linux. EA is marked Experimental, because Maxima is still early.
+
 ## 0.2.0, 2026-11-09
 
 ### New

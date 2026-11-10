@@ -62,10 +62,10 @@ On PowerShell, set the variable first with `$env:INSTA_UPDATE='always'`. Commit 
 src/                  Svelte UI (App.svelte, src/lib/*)
 src-tauri/src/        Rust backend
   commands/           Tauri commands (library, game page, settings)
-  library/            store integrations (steam.rs, epic.rs, gog.rs, amazon.rs, custom.rs)
+  library/            store integrations (steam.rs, epic.rs, gog.rs, amazon.rs, ea.rs, custom.rs)
   cache/              SQLite cache, migrations, art cache
   entries.rs          merges store copies into one card
-  gamesdb.rs          GOG GamesDB lookups (Steam ↔ Epic, GOG and Amazon)
+  gamesdb.rs          GOG GamesDB lookups (Steam ↔ Epic, GOG, Amazon and EA)
   igdb.rs             how long to beat
 scripts/              benchmark and frontend tests
 PRODUCT.md            who Guild is for and what it must stay
@@ -82,6 +82,21 @@ cd src-tauri && cargo test bindings
 `cargo test` fails while the file is stale (and rewrites it), so commit it with the Rust change. `src/lib/api.ts` only adds what needs logic on top: remembered answers, cover batching, asset URLs and pickers.
 
 The database is `library.sqlite`. Schema changes are new migration steps in `src-tauri/src/cache/db.rs`.
+
+## Store tools
+
+Legendary, gogdl, Nile and Maxima are pinned per OS in `src-tauri/src/tools.rs`: a version, a download URL and a SHA-256 for each file. Guild refuses a download whose hash doesn't match.
+
+To bump Maxima:
+
+1. Make the change in the fork, [TheBiemGamer/Maxima](https://github.com/TheBiemGamer/Maxima), on the `guild` branch. Maxima builds only on nightly Rust and needs `protoc`.
+2. Tag it `guild-vX.Y.Z` and push the tag. The fork's release workflow publishes `maxima-cli`, `maxima-bootstrap` (`.exe` on Windows) and `SHA256SUMS` as loose files.
+3. In `tools.rs`, set `MAXIMA`'s version and change all four URLs and hashes: the CLI and the bootstrap, for Windows and Linux.
+4. Check the pins against the real downloads:
+
+   ```bash
+   cd src-tauri && cargo test real_downloads_match_their_pins -- --ignored
+   ```
 
 ## Releasing
 

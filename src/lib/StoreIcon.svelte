@@ -3,11 +3,13 @@
   import epicSvg from './icons/epicgames.svg?raw'
   import gogSvg from './icons/gog.svg?raw'
   import amazonSvg from './icons/amazongames.svg?raw'
+  import eaSvg from './icons/ea.svg?raw'
   // The files are white-filled; `no-inline` keeps them out of data: URLs, which the CSP blocks.
   import steamFile from './icons/steam.svg?no-inline'
   import epicFile from './icons/epicgames.svg?no-inline'
   import gogFile from './icons/gog.svg?no-inline'
   import amazonFile from './icons/amazongames.svg?no-inline'
+  import eaFile from './icons/ea.svg?no-inline'
   import padSvg from './icons/gamepad.svg?raw'
   import padFile from './icons/gamepad.svg?no-inline'
   import type { Store } from './bindings'
@@ -20,6 +22,7 @@
     epic: path(epicSvg),
     gog: path(gogSvg),
     amazon: path(amazonSvg),
+    ea: path(eaSvg),
     custom: path(padSvg),
   }
   export const storeNames: Record<Store, string> = {
@@ -27,12 +30,13 @@
     epic: 'Epic Games',
     gog: 'GOG',
     amazon: 'Amazon Games',
+    ea: 'EA',
     get custom() {
       return t('store.custom')
     },
   }
   /** For places that repeat the logo many times (every cover): an <img> is rasterized once and cached. */
-  export const logoFile: Record<Store, string> = { steam: steamFile, epic: epicFile, gog: gogFile, amazon: amazonFile, custom: padFile }
+  export const logoFile: Record<Store, string> = { steam: steamFile, epic: epicFile, gog: gogFile, amazon: amazonFile, ea: eaFile, custom: padFile }
 </script>
 
 <script lang="ts">

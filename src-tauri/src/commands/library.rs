@@ -17,7 +17,7 @@ use crate::library::epic;
 use crate::library::steam::{self, owned_games, with_owned};
 use crate::library::tool::StoreLogin;
 use crate::library::{Game, Progress, ProviderKind};
-use crate::library::{amazon, gog};
+use crate::library::{amazon, ea, gog};
 use crate::msg::Msg;
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
@@ -101,6 +101,9 @@ pub struct Library {
     amazon: Option<StoreLogin>,
     /// The same for Amazon.
     amazon_attention: bool,
+    ea: Option<StoreLogin>,
+    /// The same for EA.
+    ea_attention: bool,
     /// The stores the whole library has a game from, in toolbar order; games the owner added don't count.
     stores: Vec<ProviderKind>,
 }
@@ -148,8 +151,13 @@ pub fn library(
         groups = view::favorites_first(&shown, groups, &s.entries, &s.games, &s.lists);
     }
     let (games, groups) = sections(&s.games, &s.entries, &s.ttb, &s.lists, shown, groups);
-    let [epic_attention, gog_attention, amazon_attention] = attentions(
-        [s.epic_login, s.gog_login, s.amazon_login],
+    let [
+        epic_attention,
+        gog_attention,
+        amazon_attention,
+        ea_attention,
+    ] = attentions(
+        [s.epic_login, s.gog_login, s.amazon_login, s.ea_login],
         &s.games,
         s.signed_out,
     );
@@ -170,6 +178,8 @@ pub fn library(
         gog_attention,
         amazon: s.amazon_login,
         amazon_attention,
+        ea: s.ea_login,
+        ea_attention,
         stores: stores_in_use(&s.games),
     }
 }
@@ -189,9 +199,14 @@ fn attention(logged_in: bool, unreachable: bool, has_games: bool, signed_out: bo
     !signed_out && !logged_in && (unreachable || has_games)
 }
 
-/// `attention` for Epic, GOG and Amazon, in that order; an unknown state (no online scan yet) raises nothing.
-fn attentions(logins: [Option<StoreLogin>; 3], games: &[Game], signed_out: [bool; 3]) -> [bool; 3] {
-    let stores = [ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Amazon];
+/// `attention` for Epic, GOG, Amazon and EA, in that order; an unknown state (no online scan yet) raises nothing.
+fn attentions(logins: [Option<StoreLogin>; 4], games: &[Game], signed_out: [bool; 4]) -> [bool; 4] {
+    let stores = [
+        ProviderKind::Epic,
+        ProviderKind::Gog,
+        ProviderKind::Amazon,
+        ProviderKind::Ea,
+    ];
     std::array::from_fn(|i| {
         logins[i].is_some_and(|l| {
             attention(
@@ -310,7 +325,7 @@ impl Drop for Running {
     }
 }
 
-/// Looks up the Steam apps (and a GOG or Amazon game's cover) of every Epic, GOG and Amazon game without a fresh cached answer,
+/// Looks up the Steam apps (and a GOG, Amazon or EA game's cover) of every Epic, GOG, Amazon and EA game without a fresh cached answer,
 /// one request per `TWIN_GAP`, in the background. Answers are cached; errors are skipped and retried on a later
 /// run, and an unreachable GamesDB (offline) ends the run.
 /// Only one run at a time. Each answer with Steam apps or a cover updates the library and tells the next poll.
@@ -333,7 +348,10 @@ pub(crate) fn fill_twins(app: AppHandle) {
                 .filter(|g| {
                     matches!(
                         g.provider,
-                        ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+                        ProviderKind::Epic
+                            | ProviderKind::Gog
+                            | ProviderKind::Amazon
+                            | ProviderKind::Ea
                     )
                 })
                 .map(Game::key)
@@ -361,11 +379,13 @@ pub(crate) fn fill_twins(app: AppHandle) {
                         );
                     }
                     let mut s = state.lock();
-                    // A GOG or Amazon game's grid art: until the next scan of its store reads it from the cache.
+                    // A GOG, Amazon or EA game's grid art: until the next scan of its store reads it from the cache.
                     // shortcut: a card whose header was already shown keeps it until the UI asks for its cover again.
                     let covered = s.games.iter_mut().find(|g| {
-                        matches!(g.provider, ProviderKind::Gog | ProviderKind::Amazon)
-                            && g.key() == key
+                        matches!(
+                            g.provider,
+                            ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Ea
+                        ) && g.key() == key
                     });
                     if let (Some(game), Some(url)) = (covered, cover) {
                         game.art.cover.url = Some(url);
@@ -724,21 +744,14 @@ fn rescan_now(app: &AppHandle, online: bool) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
     let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
-    let signed_out = logins.map(|(e, g, a)| {
-        signed_out(
-            &state,
-            [
-                e == StoreLogin::LoggedIn,
-                g == StoreLogin::LoggedIn,
-                a == StoreLogin::LoggedIn,
-            ],
-        )
-    });
+    let signed_out =
+        logins.map(|logins| signed_out(&state, logins.map(|l| l == StoreLogin::LoggedIn)));
     let mut s = state.lock();
-    if let Some((login, gog_login, amazon_login)) = logins {
+    if let Some([login, gog_login, amazon_login, ea_login]) = logins {
         s.epic_login = Some(login);
         s.gog_login = Some(gog_login);
         s.amazon_login = Some(amazon_login);
+        s.ea_login = Some(ea_login);
         s.signed_out = signed_out.unwrap_or_default();
         note_epic_login(&state, &mut s, login);
     }
@@ -785,15 +798,15 @@ fn rescan_now(app: &AppHandle, online: bool) -> bool {
     true
 }
 
-/// The Epic, GOG and Amazon "logged out on purpose" flags; a store found logged in clears its flag.
-fn signed_out(state: &AppState, logged_in: [bool; 3]) -> [bool; 3] {
+/// The Epic, GOG, Amazon and EA "logged out on purpose" flags; a store found logged in clears its flag.
+fn signed_out(state: &AppState, logged_in: [bool; 4]) -> [bool; 4] {
     let Some(conn) = open_db(state) else {
-        return [false; 3];
+        return [false; 4];
     };
-    let mut flags = [false; 3];
+    let mut flags = [false; 4];
     for ((flag, store), logged_in) in flags
         .iter_mut()
-        .zip(["epic", "gog", "amazon"])
+        .zip(["epic", "gog", "amazon", "ea"])
         .zip(logged_in)
     {
         *flag = settings::signed_out(&conn, store);
@@ -812,7 +825,7 @@ fn scan(
     owned: Option<&[Game]>,
     dirs: &cache::Dirs,
     http: &reqwest::Client,
-) -> (ScanResults, Option<(StoreLogin, StoreLogin, StoreLogin)>) {
+) -> (ScanResults, Option<[StoreLogin; 4]>) {
     let steam = steam::list_games()
         .map_err(|e| ScanError::Shown(e.into()))
         .map(|installed| match owned {
@@ -837,7 +850,13 @@ fn scan(
     // After the list: its sync is what says whether the login still works.
     let amazon_login = amazon::login();
     results.push((ProviderKind::Amazon, games));
-    (results, Some((login, gog_login, amazon_login)))
+    let ea_login = ea::login(dirs);
+    let games = match ea_login {
+        StoreLogin::LoggedIn => ea::list(dirs).map_err(|e| ScanError::Quiet(e.into())),
+        other => Err(ScanError::Quiet(Msg::system(format!("{other:?}")))),
+    };
+    results.push((ProviderKind::Ea, games));
+    (results, Some([login, gog_login, amazon_login, ea_login]))
 }
 
 /// Only a logged-in Epic is listed. Any other state is a quiet error, so `merge` keeps the cached Epic games.
@@ -981,7 +1000,7 @@ pub async fn cover(app: AppHandle, key: String) -> Option<Cover> {
     // The cover comes from the first copy, cached under that copy's key.
     let game = state.first_copy(&key)?;
     let key = game.key();
-    let art_dir = state.dirs.art.join(&key);
+    let art_dir = state.dirs.art_for(&key);
     for (slot, image) in [("cover", &game.art.cover), ("header", &game.art.header)] {
         let Some(src) = cache::resolve(image, &state.http, art_dir.join(slot)).await else {
             continue;
@@ -1006,8 +1025,12 @@ fn thumb_key(game: &Game, slot: &str, src: &std::path::Path) -> String {
             .ok()
     };
     match modified().filter(|_| game.provider == ProviderKind::Custom) {
-        Some(at) => format!("{}-{slot}-{}", game.key(), at.as_millis()),
-        None => format!("{}-{slot}", game.key()),
+        Some(at) => format!(
+            "{}-{slot}-{}",
+            cache::file_name(&game.key()),
+            at.as_millis()
+        ),
+        None => format!("{}-{slot}", cache::file_name(&game.key())),
     }
 }
 
@@ -1031,7 +1054,7 @@ pub async fn featured(app: AppHandle) -> Option<Featured> {
         let s = state.lock();
         featured_pick(&s.games, &s.entries, &s.lists)?
     };
-    let dir = state.dirs.art.join(game.key());
+    let dir = state.dirs.art_for(&game.key());
     let mut hero = None;
     for (slot, image) in [("hero", &game.art.hero), ("cover", &game.art.cover)] {
         if let Some(path) = cache::resolve(image, &state.http, dir.join(slot)).await {
@@ -1394,13 +1417,14 @@ mod tests {
         assert_eq!(stores_in_use(&[]), []);
         let games = [
             copy(ProviderKind::Custom),
+            copy(ProviderKind::Ea),
             copy(ProviderKind::Amazon),
             copy(ProviderKind::Steam),
             copy(ProviderKind::Amazon),
         ];
         assert_eq!(
             stores_in_use(&games),
-            [ProviderKind::Steam, ProviderKind::Amazon]
+            [ProviderKind::Steam, ProviderKind::Amazon, ProviderKind::Ea]
         );
     }
 
@@ -1415,48 +1439,49 @@ mod tests {
             copy(ProviderKind::Epic),
             copy(ProviderKind::Gog),
             copy(ProviderKind::Amazon),
+            copy(ProviderKind::Ea),
         ];
         // Never set up: no tool, or never logged in, with no games cached.
         assert_eq!(
-            attentions([Some(StoreLogin::NoTool); 3], &none, [false; 3]),
-            [false; 3]
+            attentions([Some(StoreLogin::NoTool); 4], &none, [false; 4]),
+            [false; 4]
         );
         assert_eq!(
-            attentions([Some(StoreLogin::LoggedOut); 3], &none, [false; 3]),
-            [false; 3]
+            attentions([Some(StoreLogin::LoggedOut); 4], &none, [false; 4]),
+            [false; 4]
         );
         // Used before (games cached), then logged out or the tool went missing.
         assert_eq!(
-            attentions([Some(StoreLogin::LoggedOut); 3], &all, [false; 3]),
-            [true; 3]
+            attentions([Some(StoreLogin::LoggedOut); 4], &all, [false; 4]),
+            [true; 4]
         );
         assert_eq!(
-            attentions([Some(StoreLogin::NoTool); 3], &all, [false; 3]),
-            [true; 3]
+            attentions([Some(StoreLogin::NoTool); 4], &all, [false; 4]),
+            [true; 4]
         );
         // A login that can't be checked is always a problem.
-        let unreachable = [Some(StoreLogin::Unreachable); 3];
-        assert_eq!(attentions(unreachable, &none, [false; 3]), [true; 3]);
+        let unreachable = [Some(StoreLogin::Unreachable); 4];
+        assert_eq!(attentions(unreachable, &none, [false; 4]), [true; 4]);
         // Logged in, or not known yet: no dot.
         assert_eq!(
-            attentions([Some(StoreLogin::LoggedIn); 3], &all, [false; 3]),
-            [false; 3]
+            attentions([Some(StoreLogin::LoggedIn); 4], &all, [false; 4]),
+            [false; 4]
         );
-        assert_eq!(attentions([None; 3], &all, [false; 3]), [false; 3]);
+        assert_eq!(attentions([None; 4], &all, [false; 4]), [false; 4]);
         // Each store counts only its own games.
         let gog_only = [copy(ProviderKind::Gog)];
         assert_eq!(
-            attentions([Some(StoreLogin::LoggedOut); 3], &gog_only, [false; 3]),
-            [false, true, false]
+            attentions([Some(StoreLogin::LoggedOut); 4], &gog_only, [false; 4]),
+            [false, true, false, false]
         );
         // Logged out on purpose: no dot, cached games or not, and an unreachable store isn't expected to answer.
-        let logged_out = [Some(StoreLogin::LoggedOut); 3];
-        assert_eq!(attentions(logged_out, &all, [true; 3]), [false; 3]);
-        assert_eq!(attentions(unreachable, &all, [true; 3]), [false; 3]);
+        let logged_out = [Some(StoreLogin::LoggedOut); 4];
+        assert_eq!(attentions(logged_out, &all, [true; 4]), [false; 4]);
+        assert_eq!(attentions(unreachable, &all, [true; 4]), [false; 4]);
         // Only the store logged out of on purpose stays quiet.
         assert_eq!(
-            attentions(logged_out, &all, [false, true, false]),
-            [true, false, true]
+            attentions(logged_out, &all, [false, true, false, true]),
+            [true, false, true, false]
         );
     }
 
@@ -1635,6 +1660,8 @@ mod tests {
             gog_attention: true,
             amazon: None,
             amazon_attention: false,
+            ea: None,
+            ea_attention: false,
             stores: stores_in_use(&games),
         };
         insta::assert_json_snapshot!(library);

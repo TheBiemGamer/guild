@@ -25,9 +25,16 @@ pub struct Dirs {
     pub gog: PathBuf,
     /// Nile's config folder (`library::amazon`).
     pub amazon: PathBuf,
+    /// Maxima's data folder, its login included (`library::ea`).
+    pub ea: PathBuf,
     /// One Wine prefix per Windows game (`wine`). They hold the games' saves, so they are owner data.
     #[cfg(target_os = "linux")]
     pub prefixes: PathBuf,
+}
+
+/// `key` as a file or folder name. EA keys hold `:`, which Windows refuses in names.
+pub fn file_name(key: &str) -> String {
+    key.replace(':', "_")
 }
 
 /// `%LOCALAPPDATA%`.
@@ -58,9 +65,15 @@ impl Dirs {
             tools: data.join("tools"),
             gog: data.join("gog"),
             amazon: data.join("amazon"),
+            ea: data.join("ea"),
             #[cfg(target_os = "linux")]
             prefixes: data.join("prefixes"),
         }
+    }
+
+    /// The folder cached art for the copy `key` is downloaded to.
+    pub fn art_for(&self, key: &str) -> PathBuf {
+        self.art.join(file_name(key))
     }
 }
 
