@@ -274,7 +274,10 @@
 
   // A string, so a library reload that keeps the copy doesn't reload the options under the cursor.
   const launchKey = $derived(
-    copy?.installed && (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon' || copy.provider === 'custom') ? copy.key : null,
+    copy?.installed &&
+      (copy.provider === 'epic' || copy.provider === 'gog' || copy.provider === 'amazon' || copy.provider === 'ea' || copy.provider === 'custom')
+      ? copy.key
+      : null,
   )
   $effect(() => {
     const key = launchKey
@@ -618,7 +621,7 @@
                 onupdate={() => act('update')}
                 oninstall={() => {
                   // Steam installs in its own dialog; the other stores' copies ask in the install panel under the pill.
-                  if (!/^(epic|gog|amazon)-/.test(copy!.key)) return act('install')
+                  if (!/^(epic|gog|amazon|ea)-/.test(copy!.key)) return act('install')
                   installOpener = actionsEl?.querySelector<HTMLElement>('.split, button.pill') ?? null
                   installPanel = installPanel === copy!.key ? null : copy!.key
                 }}

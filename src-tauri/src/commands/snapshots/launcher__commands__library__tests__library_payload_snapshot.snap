@@ -76,6 +76,8 @@ expression: library
   "gogAttention": true,
   "amazon": null,
   "amazonAttention": false,
+  "ea": null,
+  "eaAttention": false,
   "stores": [
     "steam",
     "epic",

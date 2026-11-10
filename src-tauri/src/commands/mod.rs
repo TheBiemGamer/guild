@@ -68,8 +68,9 @@ struct Shared {
     epic_login: Option<StoreLogin>,
     gog_login: Option<StoreLogin>,
     amazon_login: Option<StoreLogin>,
-    /// Epic, GOG and Amazon logged out on purpose (`settings::signed_out`), read with the logins.
-    signed_out: [bool; 3],
+    ea_login: Option<StoreLogin>,
+    /// Epic, GOG, Amazon and EA logged out on purpose (`settings::signed_out`), read with the logins.
+    signed_out: [bool; 4],
     /// Epic logged out since the last run; shown once until dismissed.
     epic_notice: bool,
     /// Steam games polled for download progress.

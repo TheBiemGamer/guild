@@ -1,4 +1,4 @@
-//! One library entry (card) per game: an Epic, GOG or Amazon copy joins its Steam twin when that match is exact and
+//! One library entry (card) per game: an Epic, GOG, Amazon or EA copy joins its Steam twin when that match is exact and
 //! one-to-one. Never on title alone: a wrong merge is worse than a duplicate card. Pure functions, unit tested.
 
 use std::collections::{HashMap, HashSet};
@@ -10,16 +10,21 @@ use crate::library::{Game, ProviderKind};
 pub struct Entry {
     /// The Steam copy's key when merged, else the only copy's key.
     pub key: String,
-    /// Indices into `games`: the Steam copy, then the Epic, the GOG and the Amazon copy.
+    /// Indices into `games`: the Steam copy, then the Epic, the GOG, the Amazon and the EA copy.
     pub copies: Vec<usize>,
 }
 
 /// The stores whose copies can join a Steam game, in copy order.
-const JOINING: [ProviderKind; 3] = [ProviderKind::Epic, ProviderKind::Gog, ProviderKind::Amazon];
+const JOINING: [ProviderKind; 4] = [
+    ProviderKind::Epic,
+    ProviderKind::Gog,
+    ProviderKind::Amazon,
+    ProviderKind::Ea,
+];
 
-/// Entries in `games` order (title order). Per store, an Epic, GOG or Amazon game joins `steam-<twin>` only when
+/// Entries in `games` order (title order). Per store, an Epic, GOG, Amazon or EA game joins `steam-<twin>` only when
 /// that Steam game is in `games` and no other game of the same store has the same twin. When several do, the one
-/// whose title equals the Steam title (trimmed, case-insensitive) joins if it is the only such one. Copies from the
+/// whose title equals the Steam title (trimmed, case-insensitive, without ™, ® and ©) joins if it is the only such one. Copies from the
 /// other stores only ever meet through a Steam game.
 pub fn group(games: &[Game], twins: &HashMap<String, u32>) -> Vec<Entry> {
     let mut claims: HashMap<(ProviderKind, u32), Vec<usize>> = HashMap::new();
@@ -32,7 +37,8 @@ pub fn group(games: &[Game], twins: &HashMap<String, u32>) -> Vec<Entry> {
         }
     }
     // Steam app id -> its one copy from each other store.
-    let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
+    let plain = |t: &str| t.replace(['™', '®', '©'], "").trim().to_lowercase();
+    let same = |a: &str, b: &str| plain(a) == plain(b);
     let mut joined: HashMap<&str, Vec<usize>> = HashMap::new();
     for g in games.iter().filter(|g| g.provider == ProviderKind::Steam) {
         let Ok(id) = g.external_id.parse::<u32>() else {
@@ -135,7 +141,7 @@ pub fn steam_appid(entry: &Entry, games: &[Game], twins: &HashMap<String, u32>) 
     let first = &games[entry.copies[0]];
     match first.provider {
         ProviderKind::Steam => first.external_id.parse().ok(),
-        ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon => {
+        ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Ea => {
             twins.get(&first.key()).copied()
         }
         ProviderKind::Custom => None,
@@ -174,6 +180,14 @@ mod tests {
     fn amazon(id: &str, title: &str) -> Game {
         Game {
             provider: ProviderKind::Amazon,
+            title: title.into(),
+            ..game(id, false, None, None)
+        }
+    }
+
+    fn ea(id: &str, title: &str) -> Game {
+        Game {
+            provider: ProviderKind::Ea,
             title: title.into(),
             ..game(id, false, None, None)
         }
@@ -343,6 +357,55 @@ mod tests {
             steam("635320", "Last Day of June"),
         ];
         assert_eq!(group(&alone, &HashMap::new()).len(), 2);
+    }
+
+    #[test]
+    fn ea_copy_merges_with_its_steam_twin() {
+        let games = vec![
+            ea("Origin.OFR.50.0001456", "Titanfall™ 2"),
+            steam("1237970", "Titanfall 2"),
+        ];
+        let twins = HashMap::from([("ea-Origin.OFR.50.0001456".to_string(), 1237970)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            keys(&games, &entries[0]),
+            ["steam-1237970", "ea-Origin.OFR.50.0001456"]
+        );
+        assert_eq!(
+            find(&entries, &games, "ea-Origin.OFR.50.0001456").map(|e| e.key.as_str()),
+            Some("steam-1237970")
+        );
+    }
+
+    #[test]
+    fn ea_copy_without_the_steam_game_stays_separate() {
+        let games = vec![
+            ea("OFB-EAST:109552299", "The Sims™ 4"),
+            amazon(LDOJ, "The Sims 4"),
+        ];
+        let twins = HashMap::from([
+            ("ea-OFB-EAST:109552299".to_string(), 1222670),
+            (format!("amazon-{LDOJ}"), 1222670),
+        ]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.copies.len() == 1));
+        assert_eq!(steam_appid(&entries[0], &games, &twins), Some(1222670));
+    }
+
+    #[test]
+    fn trademark_signs_dont_block_the_title_match() {
+        let games = vec![
+            ea("a", "Titanfall™ 2"),
+            ea("b", "Titanfall® 2 Deluxe"),
+            steam("1237970", "Titanfall 2"),
+        ];
+        let twins = HashMap::from([("ea-a".to_string(), 1237970), ("ea-b".to_string(), 1237970)]);
+        let entries = group(&games, &twins);
+        assert_eq!(entries.len(), 2);
+        let steam_entry = entries.iter().find(|e| e.key == "steam-1237970").unwrap();
+        assert_eq!(keys(&games, steam_entry), ["steam-1237970", "ea-a"]);
     }
 
     #[test]

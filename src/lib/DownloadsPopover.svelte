@@ -54,7 +54,8 @@
   const active = $derived(queue.jobs[0])
   const next = $derived(queue.jobs.slice(1))
   const jobs = $derived(Object.entries(progress))
-  const storeOf = (key: string): Store => (key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : key.startsWith('amazon-') ? 'amazon' : 'steam')
+  const storeOf = (key: string): Store =>
+    key.startsWith('gog-') ? 'gog' : key.startsWith('epic-') ? 'epic' : key.startsWith('amazon-') ? 'amazon' : key.startsWith('ea-') ? 'ea' : 'steam'
   // Epic and GOG jobs outside the queue (Move, a GOG DLC uninstall) show their progress only; Steam's run in Steam.
   const other = $derived(jobs.filter(([k]) => storeOf(k) !== 'steam' && k !== active?.key))
   const steam = $derived(jobs.filter(([k]) => storeOf(k) === 'steam'))

@@ -273,7 +273,7 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
         } else if tool.name == tools::GOGDL.name {
             let login = gog::login().0;
             state.lock().gog_login = Some(login);
-        } else {
+        } else if tool.name == tools::NILE.name {
             let login = amazon::login();
             state.lock().amazon_login = Some(login);
         }
