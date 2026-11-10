@@ -104,30 +104,30 @@ pub const NILE: Tool = Tool {
 pub const MAXIMA: Tool = Tool {
     name: "maxima",
     title: "Maxima",
-    version: "0.1.3",
+    version: "0.1.4",
     #[cfg(windows)]
-    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-cli.exe",
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.4/maxima-cli.exe",
     #[cfg(windows)]
-    sha256: "48c7d5ac07bd74714062b7995ab33098b22c99a45c4f77672ce209eebb3e8b40",
+    sha256: "033025c06b5ef8bc02be7b2c6f564e62af68c0f48807fa50d706b427674b9198",
     #[cfg(windows)]
     exe: "maxima-cli.exe",
     #[cfg(windows)]
     companions: &[Companion {
         file: "maxima-bootstrap.exe",
-        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-bootstrap.exe",
-        sha256: "359ea7aa789baaba7c5b1512a42eb94d58328ba707df8f54e618b5288e852232",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.4/maxima-bootstrap.exe",
+        sha256: "bcd019599bc5f59f3bb081f6e501802f53e1a38ae359ce658a64571033bbd6ac",
     }],
     #[cfg(target_os = "linux")]
-    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-cli",
+    url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.4/maxima-cli",
     #[cfg(target_os = "linux")]
-    sha256: "806117b23c28276fba4e837750dfa91f01e5c2042646f848b70b4b3bf523118f",
+    sha256: "4c5f6fc875abad50aae106a5363dec53c56097ce33089913df607d54ae44c0d6",
     #[cfg(target_os = "linux")]
     exe: "maxima-cli",
     #[cfg(target_os = "linux")]
     companions: &[Companion {
         file: "maxima-bootstrap",
-        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.3/maxima-bootstrap",
-        sha256: "075965274449be0b379e2a0b31e9cbbb1da1bdb9dc95567ade4434f597f7987b",
+        url: "https://github.com/TheBiemGamer/Maxima/releases/download/guild-v0.1.4/maxima-bootstrap",
+        sha256: "0beeadf53d29270531137531b74aec2bf283b87b3e51ace94e20d74279049c3b",
     }],
     local: None,
 };
