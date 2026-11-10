@@ -53,16 +53,18 @@ pub enum ProviderKind {
     Epic,
     Gog,
     Amazon,
+    Ea,
     /// A program the owner added (`custom_games`); never merged with a store copy.
     Custom,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 5] = [
+    pub const ALL: [ProviderKind; 6] = [
         ProviderKind::Steam,
         ProviderKind::Epic,
         ProviderKind::Gog,
         ProviderKind::Amazon,
+        ProviderKind::Ea,
         ProviderKind::Custom,
     ];
 
@@ -72,6 +74,7 @@ impl ProviderKind {
             Self::Epic => "epic",
             Self::Gog => "gog",
             Self::Amazon => "amazon",
+            Self::Ea => "ea",
             Self::Custom => "custom",
         }
     }
@@ -86,6 +89,7 @@ impl ProviderKind {
             Self::Epic => "Epic Games",
             Self::Gog => "GOG",
             Self::Amazon => "Amazon Games",
+            Self::Ea => "EA",
             Self::Custom => "added games",
         }
     }

@@ -61,6 +61,7 @@
   "msg.gameProgramMissing": "Het programma van de game ontbreekt: {path}",
   "msg.gameFilesMissing": "De bestanden van de game ontbreken.",
   "msg.noSaveFolder": "Onbekend waar deze game zijn saves bewaart.",
+  "msg.eaNotYet": "Ondersteuning voor EA is nog niet af.",
   "msg.amazonBusy": "Er loopt een Amazon-download. Probeer het opnieuw als die klaar is.",
   "msg.cantReachAmazon": "Kan Amazon niet bereiken.",
   "msg.cantStartAmazonLogin": "Kan het inloggen bij Amazon niet starten. Probeer het opnieuw.",

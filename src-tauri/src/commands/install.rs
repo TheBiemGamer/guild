@@ -187,13 +187,13 @@ fn dlc_job(owned: &[String], chosen: Vec<String>) -> (bool, Option<Vec<String>>)
     }
 }
 
-/// An Epic, GOG or Amazon copy that isn't installed.
+/// An Epic, GOG, Amazon or EA copy that isn't installed.
 fn store_copy(app: &AppHandle, key: &str) -> Option<Game> {
     app.state::<AppState>().game(key).filter(|g| {
         !g.installed
             && matches!(
                 g.provider,
-                ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon
+                ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Ea
             )
     })
 }
@@ -283,7 +283,8 @@ fn plan(
                 }),
             }
         }
-        ProviderKind::Steam | ProviderKind::Custom => InstallPlan::default(),
+        // shortcut: sizes and folder unknown until Maxima's `guild info` is read.
+        ProviderKind::Ea | ProviderKind::Steam | ProviderKind::Custom => InstallPlan::default(),
     }
 }
 
@@ -351,7 +352,10 @@ fn remember(conn: &Connection, store: ProviderKind, folder: &Path) {
     let setting = match store {
         ProviderKind::Gog => settings::GOG_INSTALL_DIR,
         ProviderKind::Amazon => settings::AMAZON_INSTALL_DIR,
-        _ => settings::EPIC_INSTALL_DIR,
+        ProviderKind::Ea => settings::EA_INSTALL_DIR,
+        ProviderKind::Epic | ProviderKind::Steam | ProviderKind::Custom => {
+            settings::EPIC_INSTALL_DIR
+        }
     };
     let mut folders = recent(conn, store);
     folders.retain(|f| f != folder);

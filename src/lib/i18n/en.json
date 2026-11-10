@@ -61,6 +61,7 @@
   "msg.gameProgramMissing": "The game's program is missing: {path}",
   "msg.gameFilesMissing": "The game's files are missing.",
   "msg.noSaveFolder": "Can't tell where this game keeps its saves.",
+  "msg.eaNotYet": "EA support isn't finished yet.",
   "msg.amazonBusy": "An Amazon download is running. Try again when it's done.",
   "msg.cantReachAmazon": "Couldn't reach Amazon.",
   "msg.cantStartAmazonLogin": "Couldn't start the Amazon login. Try again.",

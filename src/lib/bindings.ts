@@ -78,8 +78,8 @@ export const commands = {
 	 *  Store details for the game page (description, genres, developer, screenshots).
 	 *  Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 	 *  An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
-	 *  gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG game starts
-	 *  from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
+	 *  gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG or EA game
+	 *  starts from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
 	 *  and has its gaps filled like an Epic game's.
 	 *  Screenshots are remote URLs; `screenshots` turns them into local files.
 	 */
@@ -506,6 +506,9 @@ export type Library = {
 	amazon: StoreLogin | null,
 	/**  The same for Amazon. */
 	amazonAttention: boolean,
+	ea: StoreLogin | null,
+	/**  The same for EA. */
+	eaAttention: boolean,
 	/**  The stores the whole library has a game from, in toolbar order; games the owner added don't count. */
 	stores: Store[],
 };
@@ -703,7 +706,7 @@ export type SteamLibrary = {
 	attention: boolean,
 };
 
-export type Store = "steam" | "epic" | "gog" | "amazon" | 
+export type Store = "steam" | "epic" | "gog" | "amazon" | "ea" | 
 /**  A program the owner added (`custom_games`); never merged with a store copy. */
 "custom";
 

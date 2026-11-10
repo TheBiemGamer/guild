@@ -333,6 +333,9 @@ fn act_blocking(
     if game.provider == ProviderKind::Custom {
         return act_custom(&state, action, game).map(|()| None);
     }
+    if game.provider == ProviderKind::Ea {
+        return Err(store_error(ProviderKind::Ea, msg!(eaNotYet)));
+    }
     let queued = match action {
         Action::Install => Some(QueuedAction::Install),
         Action::Update => Some(QueuedAction::Update),
@@ -486,7 +489,7 @@ fn store_error(store: ProviderKind, reason: impl Into<Msg>) -> Msg {
 }
 
 /// The base folder a queued install goes into, fixed when it is queued so Pause and Resume use the same one. Epic:
-/// the setting, else Legendary's own default (`epic::default_base`). GOG and Amazon: the store's setting, else `%USERPROFILE%\Games`
+/// the setting, else Legendary's own default (`epic::default_base`). GOG, Amazon and EA: the store's setting, else `%USERPROFILE%\Games`
 /// (gogdl has no default, and nile's is `~/Games/nile`).
 pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<String> {
     let saved = open_db(state).map(|c| settings::load(&c));
@@ -497,8 +500,11 @@ pub(super) fn install_base(state: &AppState, provider: ProviderKind) -> Option<S
         ProviderKind::Amazon => saved
             .and_then(|s| s.amazon_install_dir)
             .or_else(gog::default_base),
+        ProviderKind::Ea => saved
+            .and_then(|s| s.ea_install_dir)
+            .or_else(gog::default_base),
         // Passed as `--base-path` from now on, so the folder shown is the folder used.
-        _ => saved
+        ProviderKind::Epic | ProviderKind::Steam | ProviderKind::Custom => saved
             .and_then(|s| s.epic_install_dir)
             .or_else(epic::default_base),
     };
@@ -813,6 +819,9 @@ fn run_job(state: &AppState, game: &Game, job: &Job) -> Result<(), crate::librar
     if game.provider == ProviderKind::Amazon {
         return run_amazon_job(state, game, job, on_event);
     }
+    if game.provider == ProviderKind::Ea {
+        return Err(msg!(eaNotYet).into());
+    }
     match job.action {
         QueuedAction::Update => epic::update(&game.external_id, on_event),
         QueuedAction::Verify => epic::verify(&game.external_id, on_event),
@@ -926,13 +935,17 @@ fn checked_launch_options(conn: Option<&Connection>, game: &Game) -> Res<LaunchO
     Ok(options)
 }
 
-/// Whether the copy has launch options here: an installed Epic, GOG or Amazon copy (Steam keeps its own), or a game the
+/// Whether the copy has launch options here: an installed Epic, GOG, Amazon or EA copy (Steam keeps its own), or a game the
 /// owner added, which only has its Proton choice (Linux).
 fn has_launch_options(g: &Game) -> bool {
     g.installed
         && matches!(
             g.provider,
-            ProviderKind::Epic | ProviderKind::Gog | ProviderKind::Amazon | ProviderKind::Custom
+            ProviderKind::Epic
+                | ProviderKind::Gog
+                | ProviderKind::Amazon
+                | ProviderKind::Ea
+                | ProviderKind::Custom
         )
 }
 
@@ -1102,6 +1115,7 @@ fn sync_copy(conn: Option<&Connection>, game: &Game, sync: SaveSync) -> SyncOutc
     match (game.provider, installed_dir(game)) {
         (ProviderKind::Gog, Some(dir)) => gog::sync_saves(conn, &game.external_id, dir, sync),
         (ProviderKind::Gog, None) => SyncOutcome::Failed(msg!(notInstalled)),
+        (ProviderKind::Ea, _) => SyncOutcome::Failed(msg!(eaNotYet)),
         _ => epic::sync_saves(&game.external_id, sync),
     }
 }
@@ -1283,7 +1297,8 @@ pub async fn download_size(app: AppHandle, key: String) -> Option<u64> {
             })
             .await;
         }
-        ProviderKind::Custom => return None,
+        // shortcut: unknown until Maxima's `guild info` is read.
+        ProviderKind::Ea | ProviderKind::Custom => return None,
     };
     let cached = blocking({
         let (app, key) = (app.clone(), key.clone());
@@ -1556,8 +1571,8 @@ fn parse_details(json: Option<String>) -> Option<GameInfo> {
 /// Store details for the game page (description, genres, developer, screenshots).
 /// Fetched once a week per game; a failed fetch is not cached, so the next visit retries.
 /// An Epic game starts from Legendary's catalog (cached as `null` when it says nothing) and has its
-/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG game starts
-/// from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
+/// gaps filled from its Steam twin's page, else from GOG GamesDB (30 days, 7 for a miss). A GOG or EA game
+/// starts from GamesDB and has its gaps filled from its Steam twin's page. An Amazon game starts from Nile's `library.json`
 /// and has its gaps filled like an Epic game's.
 /// Screenshots are remote URLs; `screenshots` turns them into local files.
 #[tauri::command]
@@ -1598,7 +1613,7 @@ pub async fn game_info(app: AppHandle, key: String) -> Option<GameInfo> {
                     parse_details(steam_details(conn.as_ref(), &http, &id.to_string(), now))
                 })
             };
-            if game.provider == ProviderKind::Gog {
+            if matches!(game.provider, ProviderKind::Gog | ProviderKind::Ea) {
                 let all = match (gamesdb(), steam_twin()) {
                     (Some(base), Some(extra)) => info::fill_missing(base, extra),
                     (base, extra) => base.or(extra).unwrap_or_default(),
