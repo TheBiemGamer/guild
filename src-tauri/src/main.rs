@@ -90,6 +90,7 @@ fn main() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 commands::game::stop_queue_on_exit(app);
+                commands::library::end_session_on_exit(app);
             }
         });
 }
