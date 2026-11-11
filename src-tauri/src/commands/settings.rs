@@ -17,7 +17,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
-use super::library::{fill_twins, refresh_owned, rescan};
+use super::library::{fill_twins, refresh_owned, rescan, rescan_local, rescan_store};
 use super::{AppState, Res, blocking};
 use crate::amazon_login;
 use crate::cache;
@@ -43,7 +43,7 @@ pub async fn epic_log_in(app: AppHandle) -> Res<()> {
             return Ok(());
         };
         epic::log_in(&code)?;
-        rescan(&app, true);
+        rescan_store(&app, ProviderKind::Epic);
         Ok(())
     })
     .await
@@ -62,7 +62,7 @@ pub async fn epic_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         epic::log_out()?;
         note_signed_out(&app, "epic");
-        rescan(&app, true);
+        rescan_store(&app, ProviderKind::Epic);
         // The user did this; it isn't news.
         app.state::<AppState>().lock().epic_notice = false;
         Ok(())
@@ -79,7 +79,7 @@ pub async fn gog_log_in(app: AppHandle) -> Res<()> {
             return Ok(());
         };
         gog::log_in(&code)?;
-        rescan(&app, true);
+        rescan_store(&app, ProviderKind::Gog);
         fill_twins(app.clone());
         Ok(())
     })
@@ -93,7 +93,7 @@ pub async fn gog_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         gog::log_out()?;
         note_signed_out(&app, "gog");
-        rescan(&app, true);
+        rescan_store(&app, ProviderKind::Gog);
         Ok(())
     })
     .await
@@ -112,7 +112,7 @@ pub async fn amazon_log_in(app: AppHandle) -> Res<()> {
             return Ok(());
         };
         amazon::register(&sign_in, &code)?;
-        rescan(&app, true);
+        rescan_store(&app, ProviderKind::Amazon);
         fill_twins(app.clone());
         Ok(())
     })
@@ -126,7 +126,7 @@ pub async fn amazon_log_out(app: AppHandle) -> Res<()> {
     blocking(move || {
         amazon::log_out()?;
         note_signed_out(&app, "amazon");
-        rescan(&app, true);
+        rescan_store(&app, ProviderKind::Amazon);
         Ok(())
     })
     .await
@@ -197,7 +197,7 @@ pub async fn amazon_import(app: AppHandle, key: String, path: String) -> Res<()>
             std::path::Path::new(&path),
         )
         .map_err(Msg::from);
-        rescan(&app, true);
+        rescan_local(&app);
         result
     })
     .await
@@ -214,7 +214,7 @@ pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
         .ok_or(msg!(cantImport))?;
     blocking(move || {
         let result = epic::import(&game.external_id, &path).map_err(Msg::from);
-        rescan(&app, true);
+        rescan_local(&app);
         result
     })
     .await
@@ -226,7 +226,7 @@ pub async fn epic_import(app: AppHandle, key: String, path: String) -> Res<()> {
 pub async fn epic_egl_sync(app: AppHandle) -> Res<()> {
     blocking(move || {
         let result = epic::egl_sync().map_err(Msg::from);
-        rescan(&app, true);
+        rescan_local(&app);
         result
     })
     .await
@@ -247,7 +247,7 @@ pub async fn gog_import(app: AppHandle, path: String) -> Res<String> {
             .ok_or(msg!(notInGogLibrary))?;
         let conn = cache::db::open(&state.dirs.db)?;
         gog::record_install(&conn, &id, std::path::Path::new(&path))?;
-        rescan(&app, true);
+        rescan_local(&app);
         Ok(title)
     })
     .await
@@ -265,22 +265,25 @@ pub async fn install_tool(app: AppHandle, name: String, on_percent: Channel<u8>)
     })
     .await?;
     let quick = app.clone();
-    blocking(move || {
+    let store = blocking(move || {
         let state = quick.state::<AppState>();
         if tool.name == tools::LEGENDARY.name {
             let login = epic::login_state();
             state.lock().epic_login = Some(login);
+            ProviderKind::Epic
         } else if tool.name == tools::GOGDL.name {
             let login = gog::login().0;
             state.lock().gog_login = Some(login);
+            ProviderKind::Gog
         } else {
             let login = amazon::login();
             state.lock().amazon_login = Some(login);
+            ProviderKind::Amazon
         }
     })
     .await;
     tauri::async_runtime::spawn(blocking(move || {
-        rescan(&app, true);
+        rescan_store(&app, store);
         app.state::<AppState>().lock().library_changed = true;
     }));
     Ok(())

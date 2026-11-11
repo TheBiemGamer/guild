@@ -3,7 +3,8 @@
 //! its CLI; Legendary keeps the login tokens, downloads and launches.
 //! JSON shapes are from Legendary 0.21's `cli.py` and `models/game.py`:
 //! - `list --json`: `[{app_name, app_title, metadata: <Epic catalog item>, …}]`
-//! - `list-installed --json`: `[{app_name, title, install_path, …}]`
+//! - `installed.json` in its config folder: `{app_name: {app_name, title, install_path, …}}`, the entries
+//!   `list-installed --json` prints, read directly to skip starting Legendary.
 //! - `status --json`: `{account: "<not logged in>" | name, …}`
 
 use std::collections::{HashMap, HashSet};
@@ -24,7 +25,57 @@ use super::tool::{
 use super::{Art, Dlc, Error, Game, Image, Progress, ProgressAction, ProviderKind};
 
 pub fn list_games() -> Result<Vec<Game>, Error> {
-    Ok(games(&json(&["list", "--json"])?, &installed_list()?))
+    Ok(games(&json(&["list", "--json"])?, &installed()?))
+}
+
+/// The cached Epic games with their install state read again from `installed.json`, without starting Legendary.
+/// Installed games missing from the cache are added, as `games` does.
+// shortcut: an installed non-game (kept only while installed) stays as an uninstalled card until the next online scan.
+pub fn local_games(cached: Vec<Game>) -> Result<Vec<Game>, Error> {
+    Ok(with_installed(cached, &installed()?))
+}
+
+fn with_installed(cached: Vec<Game>, installed: &Value) -> Vec<Game> {
+    let mut installed = by_app_name(installed);
+    let mut games: Vec<Game> = cached
+        .into_iter()
+        .map(|mut g| {
+            for d in &mut g.dlc {
+                d.installed = installed.remove(d.id.as_str()).is_some();
+            }
+            let fresh = game(
+                &g.external_id,
+                &g.title,
+                installed.remove(g.external_id.as_str()),
+                Art::default(),
+            );
+            Game {
+                installed: fresh.installed,
+                install_dir: fresh.install_dir,
+                size_bytes: fresh.size_bytes,
+                update_available: fresh.update_available,
+                ..g
+            }
+        })
+        .collect();
+    games.extend(installed.into_iter().map(|(name, local)| {
+        game(
+            name,
+            local["title"].as_str().unwrap_or(name),
+            Some(local),
+            Art::default(),
+        )
+    }));
+    games
+}
+
+fn by_app_name(installed: &Value) -> HashMap<&str, &Value> {
+    installed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|g| Some((g["app_name"].as_str()?, g)))
+        .collect()
 }
 
 /// `legendary launch` arguments. Flags from `legendary launch --help` (0.21.1); its "additional arguments
@@ -183,23 +234,20 @@ fn has_cloud_saves(metadata: &Value) -> bool {
     !metadata["customAttributes"]["CloudSaveFolder"].is_null()
 }
 
-/// Installed games with their update flags. The update check is online, so when it fails
-/// (e.g. offline) the plain list still answers, with no updates marked.
-fn installed_list() -> Result<Value, Error> {
-    with_fallback(
-        json(&["list-installed", "--check-updates", "--json"]),
-        || json(&["list-installed", "--json"]),
-    )
+/// Legendary's installed games, as `list-installed --json` lists them: the values of its `installed.json`. No file
+/// means nothing is installed; an unreadable one is an error, so a scan keeps what it knew.
+fn installed() -> Result<Value, Error> {
+    let path = config_dir().ok_or("no home folder")?.join("installed.json");
+    match std::fs::read(&path) {
+        Ok(bytes) => installed_from(&bytes),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(Value::Array(Vec::new())),
+        Err(e) => Err(e.into()),
+    }
 }
 
-fn with_fallback(
-    checked: Result<Value, Error>,
-    plain: impl FnOnce() -> Result<Value, Error>,
-) -> Result<Value, Error> {
-    checked.or_else(|e| {
-        tracing::warn!("legendary list-installed --check-updates: {e}");
-        plain()
-    })
+fn installed_from(bytes: &[u8]) -> Result<Value, Error> {
+    let map: serde_json::Map<String, Value> = serde_json::from_slice(bytes)?;
+    Ok(Value::Array(map.into_iter().map(|(_, g)| g).collect()))
 }
 
 /// Runs a hidden `legendary install` of a game or a DLC (Legendary's app name), reporting its pid and
@@ -492,9 +540,9 @@ pub fn catalog() -> Result<Value, Error> {
     json(&["list", "--json"])
 }
 
-/// File name of an installed game's main executable (from `list-installed`), to spot it in the process list.
+/// File name of an installed game's main executable (from `installed.json`), to spot it in the process list.
 pub fn executable(game: &Game) -> Result<Option<String>, Error> {
-    let installed = json(&["list-installed", "--json"])?;
+    let installed = installed()?;
     let exe = installed
         .as_array()
         .into_iter()
@@ -659,12 +707,7 @@ fn is_game(item: &Value) -> bool {
 /// installed, so nothing installed disappears. A DLC (any item whose `mainGameItem` names another
 /// item's catalog id) goes under that base game when the base is listed; otherwise the rules above apply to it.
 fn games(owned: &Value, installed: &Value) -> Vec<Game> {
-    let mut installed: HashMap<&str, &Value> = installed
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|g| Some((g["app_name"].as_str()?, g)))
-        .collect();
+    let mut installed = by_app_name(installed);
     // `list --json` nests DLC in its base game's `dlcs`; flattened, the catalog id finds the base either way.
     let items: Vec<&Value> = owned
         .as_array()
@@ -770,8 +813,7 @@ fn game(name: &str, title: &str, installed: Option<&Value>, art: Art) -> Game {
     }
 }
 
-/// `list-installed --check-updates --json` marks an update with `update_available`, or by a `remote_version`
-/// that differs from `version`. // shortcut: both spellings are read because no real capture with an update exists yet.
+/// An installed entry marks an update with `update_available`, or by a `remote_version` that differs from `version`. // shortcut: both spellings are read because no real capture with an update exists yet.
 fn has_update(local: &Value) -> bool {
     local["update_available"].as_bool().unwrap_or_else(|| {
         local["remote_version"]
@@ -930,17 +972,38 @@ mod tests {
     }
 
     #[test]
-    fn failed_update_check_falls_back_to_the_plain_list() {
-        let plain = || Ok(serde_json::json!([{ "app_name": "A" }]));
+    fn installed_json_lists_its_entries() {
+        let bytes = br#"{"Fortnite": {"app_name": "Fortnite", "install_path": "C:\\Fn"}}"#;
         assert_eq!(
-            with_fallback(Err("offline".into()), plain).unwrap(),
-            serde_json::json!([{ "app_name": "A" }])
+            installed_from(bytes).unwrap(),
+            serde_json::json!([{ "app_name": "Fortnite", "install_path": "C:\\Fn" }])
         );
+        assert_eq!(installed_from(b"{}").unwrap(), serde_json::json!([]));
+        assert!(installed_from(b"{\"Fortn").is_err());
+    }
+
+    #[test]
+    fn local_scan_marks_cached_games_from_installed() {
+        let cached = sorted_games();
+        // Fortnite uninstalled, Goo installed, the base game's art and title kept.
+        let installed = serde_json::json!([{ "app_name": "Goo", "title": "Goo", "install_path": "C:\\Goo", "install_size": 7 }]);
+        let mut local = with_installed(cached.clone(), &installed);
+        local.sort_by(|a, b| a.external_id.cmp(&b.external_id));
+        let goo = &local[1];
+        assert!(goo.installed && goo.size_bytes == Some(7));
+        assert_eq!((&goo.title, &goo.art), (&cached[1].title, &cached[1].art));
+        assert!(!local[0].installed && local[0].install_dir.is_none());
+        // The same installs give back the online scan's games.
         assert_eq!(
-            with_fallback(Ok(Value::Null), || Err("unused".into())).unwrap(),
-            Value::Null
+            with_installed(cached.clone(), &fixture("list-installed.json")),
+            cached
         );
-        assert!(with_fallback(Err("a".into()), || Err("b".into())).is_err());
+        // A game installed outside the cache is added.
+        let new = serde_json::json!([{ "app_name": "New", "title": "New Game" }]);
+        assert_eq!(
+            with_installed(cached, &new).last().unwrap().title,
+            "New Game"
+        );
     }
 
     #[test]

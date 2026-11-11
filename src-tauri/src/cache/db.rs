@@ -570,11 +570,6 @@ pub fn put_info(
     Ok(())
 }
 
-pub fn delete_info(conn: &Connection, key: &str, kind: &str) -> Result<(), Error> {
-    conn.execute("DELETE FROM info WHERE key = ?1 AND kind = ?2", [key, kind])?;
-    Ok(())
-}
-
 /// Replaces every cached game of `provider` with `games` in one transaction.
 pub fn replace(conn: &mut Connection, provider: ProviderKind, games: &[Game]) -> Result<(), Error> {
     let tx = conn.transaction()?;
