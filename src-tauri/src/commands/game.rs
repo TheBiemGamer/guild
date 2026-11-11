@@ -298,12 +298,20 @@ fn act_blocking(
     let state = app.state::<AppState>();
     let key = game.key();
     let play = matches!(action, Action::Play | Action::PlayOutdated);
-    if play
-        && game.provider != ProviderKind::Steam
-        && replaces_upload(state.lock().watch.as_ref(), &key)
-    {
-        return Err(msg!(closeGameFirst));
-    }
+    // Held until this Play has set its watch (or failed), so a second Play can't slip in before it.
+    let _launching = if play && game.provider != ProviderKind::Steam {
+        let guard = match LAUNCHING.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return Err(msg!(closeGameFirst)),
+        };
+        if play_refused(state.lock().watch.as_ref(), game.provider) {
+            return Err(msg!(closeGameFirst));
+        }
+        Some(guard)
+    } else {
+        None
+    };
     if action == Action::Uninstall {
         let steam = steam::running_game().map(|id| ProviderKind::Steam.key(&id));
         if card_running(&state.lock(), &key, steam.as_deref()) {
@@ -464,10 +472,13 @@ fn act_blocking(
         .map_err(|e| store_error(ProviderKind::Epic, e))
 }
 
-/// Whether a Play would replace the watch of another game whose saves still go up once it exits. One game is watched
-/// at a time, and a replaced watch never uploads.
-fn replaces_upload(watch: Option<&Watch>, key: &str) -> bool {
-    watch.is_some_and(|w| w.key != key && w.upload.is_some())
+/// Taken by a non-Steam Play from its check of the watch until it sets its own.
+static LAUNCHING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Whether a Play must wait: one game is watched at a time, and a replaced watch would lose its session and
+/// save upload. Steam times its own games, so its Play never touches the watch.
+fn play_refused(watch: Option<&Watch>, provider: ProviderKind) -> bool {
+    provider != ProviderKind::Steam && watch.is_some()
 }
 
 /// Whether a copy of the card `key` belongs to runs: Steam's running game (`steam`, its key) or the watched one.
@@ -2197,12 +2208,12 @@ mod tests {
     }
 
     #[test]
-    fn play_never_drops_another_games_save_upload() {
-        let uploading = watch("gog-1", Some(SaveSync::Upload));
-        assert!(replaces_upload(Some(&uploading), "epic-2"));
-        assert!(!replaces_upload(Some(&uploading), "gog-1"));
-        assert!(!replaces_upload(Some(&watch("custom-a", None)), "epic-2"));
-        assert!(!replaces_upload(None, "epic-2"));
+    fn play_never_replaces_a_running_games_watch() {
+        let running = watch("gog-1", None);
+        assert!(play_refused(Some(&running), ProviderKind::Epic));
+        assert!(play_refused(Some(&running), ProviderKind::Gog));
+        assert!(!play_refused(Some(&running), ProviderKind::Steam));
+        assert!(!play_refused(None, ProviderKind::Custom));
     }
 
     #[test]

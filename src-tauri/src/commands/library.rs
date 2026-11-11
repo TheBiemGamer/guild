@@ -498,13 +498,22 @@ fn show_playtime(state: &AppState, conn: &rusqlite::Connection) {
 }
 
 /// Adds a play session timed here, ending now, to the copy's own playtime.
-// shortcut: a session still running when the launcher quits is lost.
 fn record_session(state: &AppState, key: &str, played: Duration) {
     let seconds = played.as_secs() as i64;
     let Some(conn) = open_db(state) else { return };
     match cache::db::add_session(&conn, key, super::unix_now() - seconds, seconds) {
         Ok(()) => show_playtime(state, &conn),
         Err(e) => tracing::warn!("playtime: {e}"),
+    }
+}
+
+/// Times the watched game's session up to now when the launcher quits while it runs.
+// shortcut: its saves aren't uploaded at exit (network); the next Play asks about the newer local save.
+pub(crate) fn end_session_on_exit(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let ended = state.lock().watch.take();
+    if let Some(w) = ended.filter(|w| w.seen) {
+        record_session(&state, &w.key, w.since.elapsed());
     }
 }
 
