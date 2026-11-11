@@ -681,59 +681,112 @@ fn owned(state: &AppState) -> Option<Vec<Game>> {
 /// Scans, merges and saves; Epic, GOG and Amazon only when `online`. Runs on a blocking thread and waits for a rescan
 /// already running (`ScanTurns`). Returns whether the library changed since the call.
 pub(super) fn rescan(app: &AppHandle, online: bool) -> bool {
-    let scans = &app.state::<AppState>().scans;
-    scans.run(scans.ask(), online, || rescan_now(app, online))
+    let state = app.state::<AppState>();
+    let scans = &state.scans;
+    scans.run(
+        scans.ask(),
+        online,
+        || Some(scan_online(&state.dirs, &state.http)),
+        |fetched| rescan_now(app, fetched),
+    )
 }
 
-/// Rescans one at a time, so a slow older scan never overwrites a newer result. A rescan asked for while one runs
-/// waits, then skips when a scan that started after it asked (and online, if it asked for online) already ran: any
-/// number of callers waiting behind one scan make one more.
+/// Rescans one at a time, so a slow older scan never overwrites a newer result. The slow online fetch runs outside
+/// that turn (one fetch at a time), so a quick local rescan never waits behind it; the online scan then takes its turn
+/// and scans the local stores again, so what it saves is never older than a local rescan that ran during the fetch.
+/// A rescan asked for while one runs waits, then skips when a scan that started after it asked (and online, if it
+/// asked for online) already ran: any number of callers waiting behind one scan make one more.
 #[derive(Default)]
 pub(super) struct ScanTurns {
     turn: Mutex<()>,
-    /// Scans started.
+    fetch: Mutex<()>,
+    /// Local scans started.
     started: AtomicU64,
-    /// `started` as it was after the last online scan started.
-    online_started: AtomicU64,
+    /// Online fetches started.
+    fetched: AtomicU64,
     /// Scans that changed the library.
     changes: AtomicU64,
 }
 
+/// `ScanTurns` counters as a caller saw them when it asked.
+#[derive(Clone, Copy)]
+struct Asked {
+    started: u64,
+    fetched: u64,
+    changes: u64,
+}
+
 impl ScanTurns {
     /// The scans started and changes made so far, read without waiting.
-    fn ask(&self) -> (u64, u64) {
-        (
-            self.started.load(Ordering::SeqCst),
-            self.changes.load(Ordering::SeqCst),
-        )
+    fn ask(&self) -> Asked {
+        Asked {
+            started: self.started.load(Ordering::SeqCst),
+            fetched: self.fetched.load(Ordering::SeqCst),
+            changes: self.changes.load(Ordering::SeqCst),
+        }
     }
 
     /// Runs `scan` (which returns whether it changed the library) in turn, unless a scan started after `asked`
-    /// covered it. Returns whether the library changed since `asked`.
-    fn run(&self, asked: (u64, u64), online: bool, scan: impl FnOnce() -> bool) -> bool {
-        let _turn = self.turn.lock().unwrap_or_else(|e| e.into_inner());
-        let latest = if online {
-            &self.online_started
-        } else {
-            &self.started
-        };
-        if latest.load(Ordering::SeqCst) <= asked.0 {
-            let started = self.started.fetch_add(1, Ordering::SeqCst) + 1;
-            if online {
-                self.online_started.store(started, Ordering::SeqCst);
+    /// covered it. `online` first runs `fetch` outside the turn and hands its result to `scan`; offline, `scan` gets
+    /// the default. Returns whether the library changed since `asked`.
+    fn run<T: Default>(
+        &self,
+        asked: Asked,
+        online: bool,
+        fetch: impl FnOnce() -> T,
+        scan: impl FnOnce(T) -> bool,
+    ) -> bool {
+        if !online {
+            let _turn = lock(&self.turn);
+            if self.started.load(Ordering::SeqCst) <= asked.started {
+                self.scan(scan, T::default());
             }
-            if scan() {
-                self.changes.fetch_add(1, Ordering::SeqCst);
-            }
+            return self.changed(asked);
         }
-        self.changes.load(Ordering::SeqCst) != asked.1
+        let fetch_turn = lock(&self.fetch);
+        if self.fetched.load(Ordering::SeqCst) <= asked.fetched {
+            self.fetched.fetch_add(1, Ordering::SeqCst);
+            let fetched = fetch();
+            let _turn = lock(&self.turn);
+            // Released only once in turn, so an online rescan waiting to fetch saves after this one.
+            drop(fetch_turn);
+            self.scan(scan, fetched);
+        } else {
+            drop(fetch_turn);
+            // Covered by an online scan that may still be saving: wait for it, so its change is counted.
+            drop(lock(&self.turn));
+        }
+        self.changed(asked)
+    }
+
+    fn scan<T>(&self, scan: impl FnOnce(T) -> bool, fetched: T) {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        if scan(fetched) {
+            self.changes.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn changed(&self, asked: Asked) -> bool {
+        self.changes.load(Ordering::SeqCst) != asked.changes
     }
 }
 
-fn rescan_now(app: &AppHandle, online: bool) -> bool {
+fn lock(m: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// What `scan_online` found: the Epic, GOG and Amazon lists and their logins.
+type Online = (ScanResults, (StoreLogin, StoreLogin, StoreLogin));
+
+/// Scans the local stores and merges them with `online`, then saves.
+fn rescan_now(app: &AppHandle, online: Option<Online>) -> bool {
     let state = app.state::<AppState>();
     let owned = owned(&state);
-    let (results, logins) = scan(online, owned.as_deref(), &state.dirs, &state.http);
+    let mut results = scan_local(owned.as_deref(), &state.dirs);
+    let logins = online.map(|(found, logins)| {
+        results.extend(found);
+        logins
+    });
     let signed_out = logins.map(|(e, g, a)| {
         signed_out(
             &state,
@@ -817,12 +870,7 @@ fn signed_out(state: &AppState, logged_in: [bool; 3]) -> [bool; 3] {
     flags
 }
 
-fn scan(
-    online: bool,
-    owned: Option<&[Game]>,
-    dirs: &cache::Dirs,
-    http: &reqwest::Client,
-) -> (ScanResults, Option<(StoreLogin, StoreLogin, StoreLogin)>) {
+fn scan_local(owned: Option<&[Game]>, dirs: &cache::Dirs) -> ScanResults {
     let steam = steam::list_games()
         .map_err(|e| ScanError::Shown(e.into()))
         .map(|installed| match owned {
@@ -830,24 +878,47 @@ fn scan(
             None => installed,
         });
     let custom = crate::library::custom::list(dirs).map_err(|e| ScanError::Shown(e.into()));
-    let mut results = vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)];
-    if !online {
-        return (results, None);
-    }
-    let login = epic::login_state();
-    let games = epic_result(login, || epic::list_games().map_err(Msg::from));
-    results.push((ProviderKind::Epic, games));
-    let (gog_login, creds) = gog::login();
-    let games = match creds {
-        Some(creds) => gog::list(http, dirs, &creds).map_err(|e| ScanError::Quiet(e.into())),
-        None => Err(ScanError::Quiet(Msg::system(format!("{gog_login:?}")))),
-    };
-    results.push((ProviderKind::Gog, games));
-    let games = amazon::list(dirs).map_err(|e| ScanError::Quiet(e.into()));
-    // After the list: its sync is what says whether the login still works.
-    let amazon_login = amazon::login();
-    results.push((ProviderKind::Amazon, games));
-    (results, Some((login, gog_login, amazon_login)))
+    vec![(ProviderKind::Steam, steam), (ProviderKind::Custom, custom)]
+}
+
+/// Syncs Epic, GOG and Amazon at the same time: each store's tool is slow (up to minutes) and independent.
+fn scan_online(dirs: &cache::Dirs, http: &reqwest::Client) -> Online {
+    std::thread::scope(|s| {
+        let epic = s.spawn(|| {
+            let login = epic::login_state();
+            (
+                login,
+                epic_result(login, || epic::list_games().map_err(Msg::from)),
+            )
+        });
+        let gog = s.spawn(|| {
+            let (login, creds) = gog::login();
+            let games = match creds {
+                Some(creds) => {
+                    gog::list(http, dirs, &creds).map_err(|e| ScanError::Quiet(e.into()))
+                }
+                None => Err(ScanError::Quiet(Msg::system(format!("{login:?}")))),
+            };
+            (login, games)
+        });
+        let amazon = s.spawn(|| {
+            let games = amazon::list(dirs).map_err(|e| ScanError::Quiet(e.into()));
+            // After the list: its sync is what says whether the login still works.
+            (amazon::login(), games)
+        });
+        // A store thread that panicked would have panicked the sequential scan too.
+        let (login, epic) = epic.join().expect("epic scan");
+        let (gog_login, gog) = gog.join().expect("gog scan");
+        let (amazon_login, amazon) = amazon.join().expect("amazon scan");
+        (
+            vec![
+                (ProviderKind::Epic, epic),
+                (ProviderKind::Gog, gog),
+                (ProviderKind::Amazon, amazon),
+            ],
+            (login, gog_login, amazon_login),
+        )
+    })
 }
 
 /// Only a logged-in Epic is listed. Any other state is a quiet error, so `merge` keeps the cached Epic games.
@@ -1239,24 +1310,35 @@ mod tests {
         let turns = ScanTurns::default();
         let runs = Cell::new(0);
         let mut waiting = Vec::new();
-        turns.run(turns.ask(), false, || {
-            runs.set(runs.get() + 1);
-            waiting.extend([
-                (turns.ask(), false),
-                (turns.ask(), false),
-                (turns.ask(), true),
-                (turns.ask(), true),
-            ]);
-            true
-        });
-        let changed: Vec<bool> = waiting
-            .into_iter()
-            .map(|(asked, online)| {
-                turns.run(asked, online, || {
+        let run = |asked, online| {
+            turns.run(
+                asked,
+                online,
+                || (),
+                |()| {
                     runs.set(runs.get() + 1);
                     false
-                })
-            })
+                },
+            )
+        };
+        turns.run(
+            turns.ask(),
+            false,
+            || (),
+            |()| {
+                runs.set(runs.get() + 1);
+                waiting.extend([
+                    (turns.ask(), false),
+                    (turns.ask(), false),
+                    (turns.ask(), true),
+                    (turns.ask(), true),
+                ]);
+                true
+            },
+        );
+        let changed: Vec<bool> = waiting
+            .into_iter()
+            .map(|(asked, online)| run(asked, online))
             .collect();
         // One offline run covers the second offline ask but not the online ones; one online run covers both.
         assert_eq!(runs.get(), 3);
@@ -1264,14 +1346,60 @@ mod tests {
         assert_eq!(changed, [true; 4]);
         // An online scan covers an offline ask made before it started.
         let asked = turns.ask();
-        turns.run(turns.ask(), true, || false);
-        turns.run(asked, false, || panic!("covered by the online scan"));
+        run(turns.ask(), true);
+        turns.run(
+            asked,
+            false,
+            || (),
+            |()| panic!("covered by the online scan"),
+        );
         // A new ask after everything finished runs.
-        assert!(!turns.run(turns.ask(), false, || {
-            runs.set(runs.get() + 1);
-            false
-        }));
-        assert_eq!(runs.get(), 4);
+        assert!(!run(turns.ask(), false));
+        assert_eq!(runs.get(), 5);
+    }
+
+    #[test]
+    fn a_local_rescan_does_not_wait_for_an_online_fetch() {
+        use std::sync::mpsc;
+        let turns = ScanTurns::default();
+        let (fetching, fetch_started) = mpsc::channel();
+        let (finish_fetch, fetch_may_finish) = mpsc::channel::<()>();
+        let saved = Mutex::new(Vec::new());
+        std::thread::scope(|s| {
+            let (turns, saved) = (&turns, &saved);
+            let online = s.spawn(move || {
+                turns.run(
+                    turns.ask(),
+                    true,
+                    || {
+                        fetching.send(()).unwrap();
+                        fetch_may_finish.recv().unwrap();
+                        "online"
+                    },
+                    |found| {
+                        saved.lock().unwrap().push(found);
+                        true
+                    },
+                )
+            });
+            fetch_started.recv().unwrap();
+            // Runs while the fetch is still going.
+            let asked = turns.ask();
+            assert!(turns.run(
+                asked,
+                false,
+                || unreachable!(),
+                |found: &str| {
+                    saved.lock().unwrap().push(found);
+                    true
+                }
+            ));
+            assert_eq!(*saved.lock().unwrap(), [""]);
+            finish_fetch.send(()).unwrap();
+            assert!(online.join().unwrap());
+        });
+        // The online scan saved last, with a fresh local scan of its own.
+        assert_eq!(*saved.lock().unwrap(), ["", "online"]);
     }
 
     #[test]
