@@ -676,6 +676,20 @@ pub fn prefixes() -> Vec<(String, std::path::PathBuf)> {
         .collect()
 }
 
+/// Each Proton build found by name, with its folder; none on Windows.
+#[cfg(windows)]
+pub fn proton_dirs() -> Vec<(String, std::path::PathBuf)> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+pub fn proton_dirs() -> Vec<(String, std::path::PathBuf)> {
+    crate::wine::protons()
+        .into_iter()
+        .map(|p| (p.name, p.path))
+        .collect()
+}
+
 /// Deletes a copy's Wine prefix; Windows has none.
 #[cfg(windows)]
 pub fn remove_prefix(_key: &str) -> Result<(), crate::msg::Msg> {
