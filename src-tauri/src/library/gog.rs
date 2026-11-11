@@ -298,7 +298,7 @@ pub fn list(http: &reqwest::Client, dirs: &Dirs, creds: &Creds) -> Result<Vec<Ga
         let saves = with_cloud_saves(http, &conn, &installs, &installed, now).await;
         Ok::<_, Error>((owned, products, latest, saves))
     })?;
-    let covers = crate::gamesdb::covers(&conn, now);
+    let covers = crate::gamesdb::covers(&conn);
     let mut games = games(&owned, &products, &installs, &latest, &covers);
     for g in &mut games {
         g.cloud_saves = g.installed && g.external_id.parse().is_ok_and(|id| saves.contains(&id));
