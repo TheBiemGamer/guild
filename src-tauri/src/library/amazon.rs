@@ -348,7 +348,7 @@ pub fn list(dirs: &Dirs) -> Result<Vec<Game>, Error> {
         .unwrap_or_default()
         .into_iter()
         .collect();
-    let covers = crate::gamesdb::covers(&conn, now);
+    let covers = crate::gamesdb::covers(&conn);
     Ok(games(&library, &installed, &covers, &updates))
 }
 

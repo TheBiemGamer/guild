@@ -174,13 +174,12 @@ pub fn remember(conn: &Connection, key: &str, apps: &[u32], cover: Option<&str>,
     }
 }
 
-/// Every fresh cached answer with its game key.
-fn all_stored(conn: &Connection, now_secs: i64) -> Vec<(String, Stored)> {
-    let Ok(mut stmt) = conn.prepare("SELECT key, json FROM info WHERE kind = ?1 AND fetched >= ?2")
-    else {
+/// Every cached answer with its game key, stale ones too: age only decides a refetch (`cached`).
+fn all_stored(conn: &Connection) -> Vec<(String, Stored)> {
+    let Ok(mut stmt) = conn.prepare("SELECT key, json FROM info WHERE kind = ?1") else {
         return Vec::new();
     };
-    let rows = stmt.query_map(rusqlite::params![TWIN, now_secs - TWIN_MAX_AGE_SECS], |r| {
+    let rows = stmt.query_map([TWIN], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
     });
     let Ok(rows) = rows else { return Vec::new() };
@@ -189,17 +188,17 @@ fn all_stored(conn: &Connection, now_secs: i64) -> Vec<(String, Stored)> {
         .collect()
 }
 
-/// Every fresh cached Steam app list by Epic, GOG or Amazon game key.
-pub fn all_cached(conn: &Connection, now_secs: i64) -> HashMap<String, Vec<u32>> {
-    all_stored(conn, now_secs)
+/// Every cached Steam app list by Epic, GOG or Amazon game key.
+pub fn all_cached(conn: &Connection) -> HashMap<String, Vec<u32>> {
+    all_stored(conn)
         .into_iter()
         .map(|(key, s)| (key, s.steam))
         .collect()
 }
 
-/// Every fresh cached cover of a GOG or Amazon game, by its key.
-pub fn covers(conn: &Connection, now_secs: i64) -> HashMap<String, String> {
-    all_stored(conn, now_secs)
+/// Every cached cover of a GOG or Amazon game, by its key.
+pub fn covers(conn: &Connection) -> HashMap<String, String> {
+    all_stored(conn)
         .into_iter()
         .filter(|(key, _)| key.starts_with("gog-") || key.starts_with("amazon-"))
         .filter_map(|(key, s)| Some((key, s.cover?)))
@@ -324,16 +323,31 @@ mod tests {
             cached(&conn, "epic-b", 1000 + day),
             Some(vec![381210, 471230])
         );
-        let all = all_cached(&conn, 1000 + day);
+        let all = all_cached(&conn);
         assert_eq!(all.len(), 2);
         assert_eq!(all["epic-b"], [381210, 471230]);
         assert_eq!(cached(&conn, "epic-a", 1000 + 31 * day), None);
-        assert!(all_cached(&conn, 1000 + 31 * day).is_empty());
+    }
+
+    #[test]
+    fn stale_answers_still_show_and_are_asked_again() {
+        let (_dir, conn) = temp_db();
+        let stale = 1000 + TWIN_MAX_AGE_SECS + 1;
+        remember(
+            &conn,
+            "gog-1",
+            &[70],
+            Some("https://images.gog.com/c.jpg"),
+            1000,
+        );
+        assert_eq!(cached(&conn, "gog-1", stale), None);
+        assert_eq!(all_cached(&conn)["gog-1"], [70]);
+        assert_eq!(covers(&conn)["gog-1"], "https://images.gog.com/c.jpg");
     }
 
     /// Lists same-title Steam/Epic pairs that still aren't one card, with why. Reads the database
     /// (`LAUNCHER_DB`, a copy, or else the app's `library.sqlite`) read-only, and never merges anything.
-    /// A pair whose Epic game has no fresh cached `twin3` list is asked from GamesDB, at most 15 times.
+    /// A pair whose Epic game has no cached `twin3` list is asked from GamesDB, at most 15 times.
     /// `LAUNCHER_DB=<copy> cargo test leftover_same_title_pairs -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -343,12 +357,8 @@ mod tests {
             .map_or_else(|| crate::cache::Dirs::new().db, Into::into);
         let conn =
             Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
         let games = db::load(&conn).unwrap();
-        let mut lists = all_cached(&conn, now);
+        let mut lists = all_cached(&conn);
         let steam = steam_ids(&games);
         let pairs: Vec<(usize, usize)> = games
             .iter()
@@ -530,7 +540,7 @@ mod tests {
             1000,
         );
         assert_eq!(
-            covers(&conn, 1000),
+            covers(&conn),
             HashMap::from([
                 (
                     "gog-1".to_string(),
@@ -542,7 +552,7 @@ mod tests {
                 ),
             ])
         );
-        assert_eq!(all_cached(&conn, 1000)["gog-1"], [635320]);
+        assert_eq!(all_cached(&conn)["gog-1"], [635320]);
         // An answer stored before covers were kept still reads.
         db::put_info(&conn, "gog-3", TWIN, r#"{"steam":[70]}"#, 1000).unwrap();
         assert_eq!(cached(&conn, "gog-3", 1000), Some(vec![70]));
@@ -553,6 +563,6 @@ mod tests {
         let (_dir, conn) = temp_db();
         db::put_info(&conn, "epic-Brill", "twin2", r#"{"steam":null}"#, 1000).unwrap();
         assert_eq!(cached(&conn, "epic-Brill", 1000), None);
-        assert!(all_cached(&conn, 1000).is_empty());
+        assert!(all_cached(&conn).is_empty());
     }
 }

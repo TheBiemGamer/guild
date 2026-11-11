@@ -255,7 +255,7 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
         view::merge_last_played(&mut games, &cache::db::launches(&conn)?);
         epic_playtime::merge(&conn, &mut games);
         view::sort_by_title(&mut games);
-        let twin_lists = crate::gamesdb::all_cached(&conn, super::unix_now());
+        let twin_lists = crate::gamesdb::all_cached(&conn);
         let ttb = crate::igdb::all_normally(&conn);
         let lists = cache::db::lists(&conn)?;
         let mut s = state.lock();
@@ -340,7 +340,7 @@ pub(crate) fn fill_twins(app: AppHandle) {
                 .collect();
             let Some(conn) = open_db(&state) else { return };
             let now = super::unix_now();
-            // Cached answers are already in `twin_lists` (load_cache), so only the unanswered remain.
+            // Cached answers are already in `twin_lists` (load_cache), so only unanswered and stale ones remain.
             keys.into_iter()
                 .filter(|key| crate::gamesdb::cached(&conn, key, now).is_none())
                 .collect::<Vec<_>>()
@@ -371,7 +371,8 @@ pub(crate) fn fill_twins(app: AppHandle) {
                         game.art.cover.url = Some(url);
                         s.library_changed = true;
                     }
-                    if !apps.is_empty() {
+                    // A refetched stale answer is usually unchanged, and can also drop the Steam apps it had.
+                    if s.twin_lists.get(&key).map_or(&[][..], Vec::as_slice) != apps {
                         s.twin_lists.insert(key, apps);
                         regroup(&mut s);
                         // The next poll tells the UI to re-ask the library.
