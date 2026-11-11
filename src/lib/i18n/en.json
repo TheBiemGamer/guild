@@ -136,6 +136,7 @@
   "msg.enterClientId": "Enter the Client ID first.",
   "msg.saveClientSecret": "Save the Client Secret first.",
   "msg.notInQueue": "This game isn't in the download queue.",
+  "msg.queuedJobFailed": "Couldn't finish {title}. {reason}",
   "msg.cantCancelInstall": "Couldn't cancel the install: {detail}",
   "msg.cantPauseDownload": "Couldn't pause the download: {detail}",
   "msg.appName": "Guild",

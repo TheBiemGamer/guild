@@ -542,6 +542,8 @@ export type Poll = {
 	changed: boolean,
 	/**  The Epic download queue. */
 	queue: QueueView,
+	/**  A resumed download failed; shown like the failure of one started now. */
+	failed: Msg | null,
 };
 
 export type PrefixSize = {

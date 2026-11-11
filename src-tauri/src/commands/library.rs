@@ -1080,6 +1080,8 @@ pub struct Poll {
     changed: bool,
     /// The Epic download queue.
     queue: crate::downloads::QueueView,
+    /// A resumed download failed; shown like the failure of one started now.
+    failed: Option<crate::msg::Msg>,
 }
 
 #[tauri::command]
@@ -1146,7 +1148,7 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     if !finished.is_empty() {
         rescan(app, false);
     }
-    let (progress, changed, queue, installed) = {
+    let (progress, changed, queue, installed, failed) = {
         let mut s = state.lock();
         let queue = super::queue_view(&s);
         // A download that stopped without installing the game (cancelled in Steam) gets no toast.
@@ -1164,6 +1166,7 @@ fn poll_blocking(app: &AppHandle) -> Poll {
             take_changed(&mut s, !finished.is_empty()),
             queue,
             installed,
+            s.failed.take(),
         )
     };
     for title in installed {
@@ -1181,6 +1184,7 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         progress,
         changed,
         queue,
+        failed,
     }
 }
 
@@ -1680,6 +1684,7 @@ mod tests {
             progress: HashMap::from([("epic-Pumpkin".to_string(), progress)]),
             changed: false,
             queue: crate::downloads::view(&queue, |key| titles.get(key).map(|t| t.to_string())),
+            failed: None,
         };
         insta::assert_json_snapshot!(poll);
     }

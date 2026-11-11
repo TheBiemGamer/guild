@@ -637,13 +637,20 @@ fn save_queue(state: &AppState, queue: &Queue) {
     }
 }
 
-/// Gives the `act` waiting for `key` its outcome; a job nobody waits for (restored at start) only logs a failure.
+/// Gives the `act` waiting for `key` its outcome; a job nobody waits for (restored at start) hands its failure,
+/// with the game's title, to the next poll instead.
 fn report(s: &mut Shared, key: &str, outcome: Res<()>) {
     match s.waiters.remove(key) {
         Some(waiter) => _ = waiter.send(outcome),
         None => {
             if let Err(e) = outcome {
                 tracing::warn!("download {key}: {e}");
+                let title = s
+                    .games
+                    .iter()
+                    .find(|g| g.key() == key)
+                    .map_or_else(|| key.to_string(), |g| g.title.clone());
+                s.failed = Some(msg!(queuedJobFailed, title = title, reason = e));
             }
         }
     }
@@ -2099,6 +2106,19 @@ mod tests {
     }
 
     #[test]
+    fn a_restored_job_that_fails_reaches_the_next_poll() {
+        let mut s = Shared::default();
+        s.queue.push(Job::new("epic-a", QueuedAction::Install));
+        finish_job(&mut s, "epic-a", failed(), ProviderKind::Epic);
+        let failed = s.failed.expect("the next poll shows it");
+        assert_eq!(failed.code, "queuedJobFailed");
+        assert_eq!(
+            failed.params["title"],
+            crate::msg::Param::Text("epic-a".into())
+        );
+    }
+
+    #[test]
     fn a_running_job_starts_unhindered() {
         let (mut s, _rxs) = running(&["epic-a"]);
         assert_eq!(
@@ -2165,6 +2185,7 @@ mod tests {
         let (toast, repaired) = finish_job(&mut s, "epic-a", failed(), ProviderKind::Epic);
         assert_eq!((toast, repaired), (None, false));
         assert!(rxs[0].recv().unwrap().is_err());
+        assert!(s.failed.is_none(), "its waiter shows it");
         assert!(s.library_changed);
         assert_eq!(s.queue.next().map(|j| j.key.as_str()), Some("epic-b"));
     }

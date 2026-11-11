@@ -90,6 +90,9 @@ struct Shared {
     interrupted: bool,
     /// The `act` call waiting for a queued job's outcome, by copy key.
     waiters: HashMap<String, std::sync::mpsc::Sender<Res<()>>>,
+    /// A queued job nobody waited for (restored at start) failed; the next poll shows it.
+    /// shortcut: holds one failure, so of several within one poll only the last shows; a list if that happens.
+    failed: Option<crate::msg::Msg>,
     watch: Option<Watch>,
     /// Steam rejected the saved token; the Settings dot asks the owner to connect again.
     steam_attention: bool,
