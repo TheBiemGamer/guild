@@ -18,7 +18,7 @@
   import guildFile from '../../src-tauri/icons/source/guild.svg?no-inline'
 
   let {
-    view,
+    view = $bindable(),
     section = null,
     attention,
     refreshedAt,
@@ -261,7 +261,19 @@
     await onchange()
   }
 
-  const toggle = (name: string, on: boolean) => change(() => commands.updateSetting(name, String(on)))
+  type SwitchField = { [K in keyof SettingsView]: SettingsView[K] extends boolean ? K : never }[keyof SettingsView]
+
+  /** A switch flips at once and flips back if the save fails. None of them change the library, so nothing reloads. */
+  async function toggle(name: string, field: SwitchField, on: boolean) {
+    error = null
+    view[field] = on
+    try {
+      await commands.updateSetting(name, String(on))
+    } catch (e) {
+      view[field] = !on
+      error = api.message(e)
+    }
+  }
 
   function saveFolder() {
     if (folder.trim() === (view.epicInstallDir ?? '')) return
@@ -620,13 +632,13 @@
   </Switch.Root>
 {/snippet}
 
-{#snippet switchRow(name: Icon, setting: string, on: boolean, label: string, hint?: string)}
+{#snippet switchRow(name: Icon, setting: string, field: SwitchField, label: string, hint?: string)}
   <div class="r">
     {@render tile(name)}
     <div class="what">
       <span id="{setting}-label">{label}</span>{#if hint}<small>{hint}</small>{/if}
     </div>
-    {@render toggleButton(on, `${setting}-label`, (v) => toggle(setting, v))}
+    {@render toggleButton(view[field], `${setting}-label`, (v) => toggle(setting, field, v))}
   </div>
 {/snippet}
 
@@ -782,7 +794,7 @@
                               </div>
                               <div class="row">
                                 <div id="saves-label">{t('settings.syncSaves')}</div>
-                                {@render toggleButton(view.cloudSaves, 'saves-label', (v) => toggle('cloud_saves', v))}
+                                {@render toggleButton(view.cloudSaves, 'saves-label', (v) => toggle('cloud_saves', 'cloudSaves', v))}
                               </div>
                               <div class="row">
                                 <div>{t('settings.importInstall')}</div>
@@ -883,7 +895,7 @@
                               </div>
                               <div class="row">
                                 <div id="gog-saves-label">{t('settings.syncSaves')}</div>
-                                {@render toggleButton(view.gogCloudSaves, 'gog-saves-label', (v) => toggle('gog_cloud_saves', v))}
+                                {@render toggleButton(view.gogCloudSaves, 'gog-saves-label', (v) => toggle('gog_cloud_saves', 'gogCloudSaves', v))}
                               </div>
                               <div class="row">
                                 <div>{t('settings.importInstall')}</div>
@@ -1116,16 +1128,16 @@
                           {@render switchRow(
                             'power',
                             'start_with_windows',
-                            view.startWithWindows,
+                            'startWithWindows',
                             view.linux ? t('settings.startupLinux') : t('settings.startup'),
                           )}
-                          {@render switchRow('tray', 'close_to_tray', view.closeToTray, t('settings.tray'), t('settings.trayHint'))}
-                          {@render switchRow('bell', 'notify_downloads', view.notifyDownloads, t('settings.notify'))}
+                          {@render switchRow('tray', 'close_to_tray', 'closeToTray', t('settings.tray'), t('settings.trayHint'))}
+                          {@render switchRow('bell', 'notify_downloads', 'notifyDownloads', t('settings.notify'))}
                         </div>
                         <h4>{t('settings.group.look')}</h4>
                         <div class="group">
-                          {@render switchRow('palette', 'ambient', view.ambient, t('settings.ambient'))}
-                          {@render switchRow('banner', 'show_banner', view.showBanner, t('settings.banner'))}
+                          {@render switchRow('palette', 'ambient', 'ambient', t('settings.ambient'))}
+                          {@render switchRow('banner', 'show_banner', 'showBanner', t('settings.banner'))}
                           <div class="r">
                             {@render tile('globe')}
                             <div class="what">{t('settings.language')}</div>

@@ -19,6 +19,7 @@
 
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import { SvelteSet } from 'svelte/reactivity'
   import { Tooltip } from 'bits-ui'
   import * as api from './lib/api'
   import {
@@ -157,8 +158,16 @@
     if (filters.some(gone)) filters = filters.filter((f) => !gone(f))
   }
 
+  /** The heart fills at once; the reload after moves the game into or out of Favorites. */
   async function setFavorite(key: string, on: boolean) {
-    await commands.setFavorite(key, on).catch((e) => (error = api.message(e)))
+    const game = lib.games.find((g) => g.key === key)
+    if (game) game.favorite = on
+    try {
+      await commands.setFavorite(key, on)
+    } catch (e) {
+      if (game) game.favorite = !on
+      error = api.message(e)
+    }
     await reload()
   }
 
@@ -195,7 +204,14 @@
   /** A Play from a card that stopped at a cloud save conflict; the game page asks, in its hero. */
   let saveConflict = $state<{ key: string; conflict: Conflict } | null>(null)
 
+  /** Copies whose Play command hasn't returned yet: their Play shows Launching… and takes no second click. */
+  const launching = new SvelteSet<string>()
+
   async function act(action: Action, key: string, options: api.ActOptions = {}) {
+    if (action === 'play') {
+      if (launching.has(key)) return
+      launching.add(key)
+    }
     try {
       const conflict = await api.act(action, key, options)
       if (conflict) {
@@ -205,6 +221,7 @@
     } catch (e) {
       error = api.message(e)
     }
+    launching.delete(key)
     await reload()
   }
 
@@ -251,8 +268,10 @@
   }
 
   async function openSettings(section: string | null = null) {
-    // Read fresh each time: the Epic state and cache size change while the panel is closed.
-    await loadSettings()
+    // Opens on the last read at once; the fresh one (the Epic state and cache size change while the panel
+    // is closed) lands a moment later. Only the first open, before start's read, waits.
+    const fresh = loadSettings()
+    if (!settings) await fresh
     settingsSection = section
     settingsOpen = settings !== null
   }
@@ -563,6 +582,7 @@
             {stat}
             resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
             {running}
+            {launching}
             {settingUp}
             {progress}
             {queue}
@@ -582,6 +602,7 @@
                   <Continue
                     {featured}
                     running={running !== null && featured.copyKeys.includes(running)}
+                    launching={launching.has(featured.chosen)}
                     {settingUp}
                     onplay={(key) => act('play', key)}
                     onopen={openGame}
@@ -694,7 +715,7 @@
 
   {#if settingsOpen && settings}
     <Settings
-      view={settings}
+      bind:view={() => settings!, (v) => (settings = v)}
       section={settingsSection}
       {attention}
       {refreshedAt}

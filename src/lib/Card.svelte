@@ -10,6 +10,7 @@
     index,
     stat = null,
     running,
+    launching = false,
     settingUp = false,
     progress,
     queued,
@@ -27,6 +28,8 @@
     /** Which hours the bottom-left badge shows; it takes Install's place on a game that isn't installed. */
     stat?: 'playtime' | 'ttb' | null
     running: boolean
+    /** Its Play is starting. */
+    launching?: boolean
     /** Running, but its first launch on Linux still sets up. */
     settingUp?: boolean
     progress: Progress | undefined
@@ -182,6 +185,8 @@
             <button class="glass small" onclick={() => oncancel(waiting.key)}>{t('common.cancel')}</button>
           {/if}
         </span>
+      {:else if launching}
+        <button class="pill small" aria-disabled="true">{t('busy.play')}</button>
       {:else if game.installed}
         <button class="pill small" onclick={() => onplay(game.chosen)}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path class="solid" d="M7 4.5v15l12.5-7.5z" /></svg>

@@ -240,7 +240,8 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - Default is `surface-2`, stepping to `line` on hover.
   - Glass is `glass-on` with `glass-on-line`, for secondary actions on glass.
   - Destructive actions use `danger-text`, never a red fill.
-  - Focus is a 2px `focus` outline with 2px offset, everywhere. Disabled is 60% opacity. A busy button ("Downloading…", "Queued") is `aria-disabled` so it keeps focus.
+  - Focus is a 2px `focus` outline with 2px offset, everywhere. Disabled is 60% opacity. A busy button ("Downloading…", "Queued") is `aria-disabled` so it keeps focus. Play on a card or the Continue banner turns into a busy Launching… pill until the launch command returns, so a second click starts nothing.
+  - Favorites and Settings switches change on click and flip back if the save fails; Settings opens on the last read view and refreshes behind it.
 - **Chips:** 36px, `glass` fill, `glass-line` border, `text-2`. Selected (`aria-pressed`) is `glass-on`, `glass-on-line`, `text`.
   - The Settings chip carries an 8px amber dot only for a real problem: a saved login that stopped working, or a store that was set up and broke. A store never set up raises nothing.
   - The store selector is one segmented control (a bits-ui `RadioGroup`) listing only the stores the library has games from. It is absent with one store. Arrows (all four), Home and End move to a segment and pick it, wrapping; one segment is the Tab stop.

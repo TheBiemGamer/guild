@@ -11,6 +11,7 @@
     stat = null,
     resetKey,
     running,
+    launching,
     settingUp = false,
     progress,
     queue,
@@ -34,6 +35,8 @@
     resetKey: string
     /** Copy keys, as `poll` reports them. */
     running: string | null
+    /** Copies whose Play is starting. */
+    launching: ReadonlySet<string>
     /** The running game still sets up (`poll`'s `settingUp`). */
     settingUp?: boolean
     progress: Record<string, Progress>
@@ -172,6 +175,7 @@
           {index}
           {stat}
           running={running !== null && game.copyKeys.includes(running)}
+          launching={launching.has(game.chosen)}
           {settingUp}
           progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
           queued={queue.jobs.length ? queueState(queue, game.copyKeys) : null}
