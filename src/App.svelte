@@ -356,6 +356,7 @@
       settingUp = p.settingUp
       progress = p.progress
       queue = p.queue
+      if (p.failed) error = api.message(p.failed)
       if (p.changed) await reload()
     }, 2000)
     // Steam installs and uninstalls finish in Steam's own dialogs; pick them up.

@@ -136,6 +136,7 @@
   "msg.enterClientId": "Vul eerst de Client ID in.",
   "msg.saveClientSecret": "Sla eerst het Client Secret op.",
   "msg.notInQueue": "Deze game staat niet in de downloadwachtrij.",
+  "msg.queuedJobFailed": "Kan {title} niet afronden. {reason}",
   "msg.cantCancelInstall": "Kan de installatie niet annuleren: {detail}",
   "msg.cantPauseDownload": "Kan de download niet pauzeren: {detail}",
   "msg.appName": "Guild",
