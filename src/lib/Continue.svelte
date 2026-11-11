@@ -5,12 +5,15 @@
   let {
     featured,
     running,
+    launching = false,
     settingUp = false,
     onplay,
     onopen,
   }: {
     featured: Featured
     running: boolean
+    /** Its Play is starting. */
+    launching?: boolean
     /** Running, but its first launch on Linux still sets up. */
     settingUp?: boolean
     onplay: (key: string) => void
@@ -28,8 +31,10 @@
   <div class="text">
     <small>{t('continue.title')}</small>
     <h2>{featured.title}</h2>
-    <button class="pill" disabled={running} onclick={() => onplay(featured.chosen)}>
-      {#if running}
+    <button class="pill" disabled={running} aria-disabled={launching} onclick={() => launching || onplay(featured.chosen)}>
+      {#if launching}
+        {t('busy.play')}
+      {:else if running}
         {settingUp ? t('busy.settingUp') : t('play.playing')}
       {:else}
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
