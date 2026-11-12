@@ -961,7 +961,11 @@ fn scan_store(
                 Some(creds) => {
                     gog::list(http, dirs, &creds).map_err(|e| ScanError::Quiet(e.into()))
                 }
-                None => Err(ScanError::Quiet(Msg::system(format!("{login:?}")))),
+                None => Err(ScanError::Quiet(Msg::system(match login {
+                    StoreLogin::NoTool => "gogdl isn't installed",
+                    StoreLogin::Unreachable => "gogdl couldn't reach GOG",
+                    _ => "not logged in",
+                }))),
             };
             (store, games, login)
         }
@@ -1233,30 +1237,45 @@ pub async fn poll(app: AppHandle) -> Poll {
     blocking(move || poll_blocking(&app)).await
 }
 
+/// A watch whose game isn't seen running ends when our own process exited, else once it had `START_GRACE` to start.
+fn watch_ends(exit: Option<std::process::ExitStatus>, since: Instant) -> bool {
+    exit.is_some() || since.elapsed() > START_GRACE
+}
+
 fn poll_blocking(app: &AppHandle) -> Poll {
     let state = app.state::<AppState>();
     let steam_running = steam::running_game().map(|id| ProviderKind::Steam.key(&id));
     // Our own process answers at once; an Epic game's name is looked up after the lock is let go.
     let watch = state.lock().watch.as_mut().map(|w| {
-        let running = match &mut w.process {
-            Process::Ours(child) => Ok(matches!(child.try_wait(), Ok(None))),
-            Process::Named(exe) => Err(exe.clone()),
+        let (running, exit) = match &mut w.process {
+            Process::Ours(child) => {
+                let waited = child.try_wait();
+                (Ok(matches!(waited, Ok(None))), waited.ok().flatten())
+            }
+            Process::Named(exe) => (Err(exe.clone()), None),
         };
-        (w.key.clone(), running, w.since)
+        (w.key.clone(), running, exit, w.since)
     });
-    let watched = watch.and_then(|(key, running, since)| {
+    let watched = watch.and_then(|(key, running, exit, since)| {
         if running.unwrap_or_else(|exe| epic::is_running(&exe)) {
             if let Some(w) = state.lock().watch.as_mut().filter(|w| w.since == since) {
                 w.seen = true;
             }
             return Some(key);
         }
-        // Gone, or never showed up: stop watching once it had time to start, time the session if it ran,
-        // and upload its saves.
+        // Gone, or never showed up: stop watching once it had time to start (at once when our own process exited),
+        // time the session if it ran, and upload its saves.
         // shortcut: one that never showed up (a bootstrapper exe) has its saves uploaded while it may still run.
-        if since.elapsed() > START_GRACE {
+        if watch_ends(exit, since) {
             let ended = state.lock().watch.take();
             if let Some(w) = ended {
+                if let Some(status) = exit.filter(|s| !s.success() || !w.seen) {
+                    tracing::warn!(
+                        "{}: the game exited ({status}) after {} s",
+                        w.key,
+                        w.since.elapsed().as_secs()
+                    );
+                }
                 if w.seen {
                     record_session(&state, &w.key, w.since.elapsed());
                 }
@@ -1894,5 +1913,13 @@ mod tests {
             failed: None,
         };
         insta::assert_json_snapshot!(poll);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_watch_ends_as_soon_as_our_process_exits() {
+        let status = std::process::Command::new("false").status().unwrap();
+        assert!(watch_ends(Some(status), Instant::now()));
+        assert!(!watch_ends(None, Instant::now()));
     }
 }

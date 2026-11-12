@@ -273,7 +273,7 @@ pub async fn act(
     // A DLC install is just that DLC.
     let with_dlc = dlc.is_none().then_some(true);
     blocking(move || {
-        act_blocking(
+        let result = act_blocking(
             &app,
             action,
             &game,
@@ -281,7 +281,11 @@ pub async fn act(
             dlc.as_deref(),
             keep,
             dest.as_deref(),
-        )
+        );
+        if let (Action::Play | Action::PlayOutdated, Err(e)) = (action, &result) {
+            tracing::warn!("{key}: Play failed: {e}");
+        }
+        result
     })
     .await
 }
