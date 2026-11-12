@@ -21,6 +21,10 @@ pub struct UpdateInfo {
 #[tauri::command]
 #[specta::specta]
 pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> Res<Option<UpdateInfo>> {
+    // Flathub updates a Flatpak, which must not update itself.
+    if crate::platform::flatpak() {
+        return Ok(None);
+    }
     let mut pending = state.update.lock().await;
     let checked = async {
         app.updater_builder()

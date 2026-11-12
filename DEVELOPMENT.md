@@ -83,6 +83,23 @@ cd src-tauri && cargo test bindings
 
 The database is `library.sqlite`. Schema changes are new migration steps in `src-tauri/src/cache/db.rs`.
 
+## Flatpak
+
+`packaging/flatpak/` holds a manifest for local test builds. It unpacks an AppImage built from your checkout onto the GNOME runtime, which has WebKitGTK. You need `flatpak` and `flatpak-builder`, and the runtime from Flathub:
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.gnome.Platform//51 org.gnome.Sdk//51 org.freedesktop.Platform.Compat.i386//26.08 org.flatpak.Builder
+npm run tauri build -- --bundles appimage --config '{"bundle":{"createUpdaterArtifacts":false}}'
+cp src-tauri/target/release/bundle/appimage/Guild_*_amd64.AppImage packaging/flatpak/Guild.AppImage
+cd packaging/flatpak
+flatpak-builder --user --install --force-clean --repo=repo build-dir cloud.biem.guild.yml
+flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo repo guild.flatpak cloud.biem.guild
+flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest cloud.biem.guild.yml
+```
+
+Install the bundle on another PC with `flatpak install --user guild.flatpak` (it fetches the runtime from Flathub) and start it with `flatpak run cloud.biem.guild`. A bundle has no remote, so Flatpak doesn't fetch the 32-bit extensions Windows games need; install them once with `flatpak install --user flathub org.freedesktop.Platform.Compat.i386//26.08 org.freedesktop.Platform.GL32.default//26.08` (on NVIDIA, the `GL32.nvidia-*` that matches the driver instead of `GL32.default`). In a Flatpak, Guild doesn't check for updates and hides the autostart switch, and it trusts Steam's `RunningAppID` without checking for the Steam process, which the sandbox can't see. It reads Steam folders and installs to `~/Games`, `/mnt`, `/media` and `/run/media`; give it other folders with `flatpak override --user --filesystem=<path> cloud.biem.guild`.
+
 ## Releasing
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: it runs the checks, builds the Windows NSIS installer and the Linux AppImage and `.deb` (on Ubuntu 22.04, so the AppImage runs on older glibc), signs the installer and the AppImage for the updater, and publishes a GitHub release with `latest.json`. A last job writes `latest.json` with both the `windows-x86_64` and `linux-x86_64-appimage` entries. The `.deb` doesn't auto-update: its update check finds no entry for it. The installed app checks `releases/latest/download/latest.json` for updates. Running the workflow by hand only builds and signs, and keeps the files as workflow artifacts.

@@ -1,0 +1,85 @@
+id: cloud.biem.guild
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: guild
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  # GPU, and controllers for games
+  - --device=all
+  # 32-bit Wine and Proton parts
+  - --allow=multiarch
+  # Wine and pressure-vessel use syscalls the default seccomp filter blocks
+  - --allow=devel
+  # pressure-vessel shares /dev/shm with the container it starts games in
+  - --allow=per-app-dev-shm
+  # The Steam refresh token, the IGDB secret and the SteamGridDB key, in the keyring
+  - --talk-name=org.freedesktop.secrets
+  # Tray icon
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Download-finished notifications
+  - --talk-name=org.freedesktop.Notifications
+  # Steam: its library, pid, registry.vdf and art (regular and Flatpak Steam); Guild never writes there
+  - --filesystem=~/.steam:ro
+  - --filesystem=xdg-data/Steam:ro
+  - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
+  # umu keeps the Steam Linux Runtime in the host's ~/.local/share/umu when in a Flatpak; pressure-vessel can only
+  # hand a folder on the real disk to the Flatpak portal's sub-sandbox it runs games in
+  - --filesystem=xdg-data/umu:create
+  # The default install folder for Epic, GOG and Amazon games
+  - --filesystem=~/Games:create
+  # Install folders and Steam libraries on other drives
+  - --filesystem=/mnt
+  - --filesystem=/media
+  - --filesystem=/run/media
+
+add-extensions:
+  org.freedesktop.Platform.Compat.i386:
+    directory: lib/i386-linux-gnu
+    version: '26.08'
+
+  org.freedesktop.Platform.GL32:
+    directory: lib/i386-linux-gnu/GL
+    version: '1.4'
+    versions: 26.08;1.4
+    subdirectories: true
+    no-autodownload: true
+    autodelete: false
+    add-ld-path: lib
+    merge-dirs: vulkan/icd.d;glvnd/egl_vendor.d;OpenCL/vendors;lib/dri;lib/d3d;vulkan/explicit_layer.d;vulkan/implicit_layer.d
+    download-if: active-gl-driver
+    enable-if: active-gl-driver
+    autoprune-unless: active-gl-driver
+
+modules:
+  - name: guild
+    buildsystem: simple
+    build-commands:
+      - chmod +x Guild.AppImage
+      - ./Guild.AppImage --appimage-extract >/dev/null
+      - install -Dm755 squashfs-root/usr/bin/Guild /app/bin/guild
+      - mkdir -p /app/lib/i386-linux-gnu/GL
+      # The tray library; the GNOME runtime has WebKitGTK but not this
+      - cp -a squashfs-root/usr/lib/libayatana-*.so* squashfs-root/usr/lib/libdbusmenu-*.so* /app/lib/
+      - install -Dm644 ld.so.conf -t /app/etc
+      - install -Dm644 cloud.biem.guild.desktop -t /app/share/applications
+      - install -Dm644 cloud.biem.guild.metainfo.xml -t /app/share/metainfo
+      - install -Dm644 cloud.biem.guild.png /app/share/icons/hicolor/256x256/apps/cloud.biem.guild.png
+    sources:
+      # Built from this checkout, see DEVELOPMENT.md. A Flathub manifest would point at the release's AppImage.
+      - type: file
+        path: Guild.AppImage
+      - type: inline
+        dest-filename: ld.so.conf
+        contents: /app/lib/i386-linux-gnu
+      - type: file
+        path: cloud.biem.guild.desktop
+      - type: file
+        path: cloud.biem.guild.metainfo.xml
+      - type: file
+        path: cloud.biem.guild.png

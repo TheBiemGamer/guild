@@ -69,6 +69,41 @@ pub fn open_url(url: &str) -> Result<(), crate::library::Error> {
     shell_open(url)
 }
 
+/// Windows has no Flatpak.
+#[cfg(windows)]
+pub fn flatpak() -> bool {
+    false
+}
+
+/// Whether Guild runs as a Flatpak: the store updates it, and the sandbox hides host processes and the host's
+/// autostart folder.
+#[cfg(target_os = "linux")]
+pub fn flatpak() -> bool {
+    static FLATPAK: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| std::path::Path::new("/.flatpak-info").exists());
+    *FLATPAK
+}
+
+/// Windows draws the tray icon itself.
+#[cfg(windows)]
+pub fn tray_icon_dir() -> Option<std::path::PathBuf> {
+    None
+}
+
+/// Where the tray writes its icon for the desktop's tray to read: a Flatpak's own `$XDG_RUNTIME_DIR` is private to
+/// the sandbox, but `$XDG_RUNTIME_DIR/app/<app id>` is the same folder on the host. `None` keeps tray-icon's default.
+#[cfg(target_os = "linux")]
+pub fn tray_icon_dir() -> Option<std::path::PathBuf> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+    let id = std::env::var_os("FLATPAK_ID").filter(|_| flatpak())?;
+    Some(
+        std::path::Path::new(&runtime)
+            .join("app")
+            .join(id)
+            .join("tray-icon"),
+    )
+}
+
 /// Whether process `pid` runs and is named `image` (the name guards against a reused pid).
 #[cfg(windows)]
 pub fn pid_is(pid: u32, image: &str) -> bool {
@@ -788,7 +823,13 @@ pub fn os_version() -> String {
 /// sets them, like "CachyOS Linux, KDE, wayland": WebKitGTK and tray bugs often depend on those two.
 #[cfg(target_os = "linux")]
 pub fn os_version() -> String {
-    let distro = std::fs::read_to_string("/etc/os-release")
+    // A Flatpak's /etc/os-release names its runtime; the host's is under /run/host.
+    let release = if flatpak() {
+        "/run/host/os-release"
+    } else {
+        "/etc/os-release"
+    };
+    let distro = std::fs::read_to_string(release)
         .ok()
         .and_then(|text| pretty_name(&text))
         .unwrap_or_else(|| "Linux".into());
