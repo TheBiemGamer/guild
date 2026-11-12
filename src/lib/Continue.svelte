@@ -36,7 +36,9 @@
     <small>{t('continue.title')}</small>
     <h2>{featured.title}</h2>
     <button class="pill" disabled={running} aria-disabled={launching} onclick={() => launching || onplay(featured.chosen)}>
-      {#if launching}
+      {#if running && setupPercent !== null}
+        {settingUpLabel(setupPercent)}
+      {:else if launching}
         {t('busy.play')}
       {:else if running}
         {settingUp ? settingUpLabel(setupPercent) : t('play.playing')}
