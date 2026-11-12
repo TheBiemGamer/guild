@@ -1271,9 +1271,10 @@ fn poll_blocking(app: &AppHandle) -> Poll {
             if let Some(w) = ended {
                 if let Some(status) = exit.filter(|s| !s.success() || !w.seen) {
                     tracing::warn!(
-                        "{}: the game exited ({status}) after {} s",
+                        "{}: the game exited ({status}) after {} s{}",
                         w.key,
-                        w.since.elapsed().as_secs()
+                        w.since.elapsed().as_secs(),
+                        crate::log::game_output_tail(&w.key, 20)
                     );
                 }
                 if w.seen {
