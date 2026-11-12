@@ -636,7 +636,7 @@
                 copies={game.copies}
                 chosen={chosenKey}
                 {running}
-                busy={shown ?? (running && settingUp ? settingUpLabel(setupPercent) : null)}
+                busy={running && setupPercent !== null ? settingUpLabel(setupPercent) : (shown ?? (running && settingUp ? settingUpLabel() : null))}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
                 onupdate={() => act('update')}
