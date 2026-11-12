@@ -1218,6 +1218,8 @@ pub struct Poll {
     /// The running game is a Windows game on Linux whose first launch still sets up (umu fetching the Steam Linux
     /// Runtime or making its prefix); it ends once the game's program runs.
     setting_up: bool,
+    /// The running game's Play is downloading umu-launcher or Proton first: how far, in percent.
+    setup_percent: Option<u8>,
     progress: HashMap<String, Progress>,
     /// The library changed (a Steam download finished), so the UI should re-ask `library`.
     changed: bool,
@@ -1321,9 +1323,18 @@ fn poll_blocking(app: &AppHandle) -> Poll {
         // The session starts when the game does, not while umu sets it up.
         w.since = Instant::now();
     }
+    // A Play installing umu or Proton first shows as that game setting up, with the download's percent.
+    let preparing = crate::platform::preparing();
+    let running = steam_running
+        .or(watched)
+        .or(preparing.as_ref().map(|p| p.0.clone()));
+    let setup_percent = preparing
+        .filter(|p| running.as_ref() == Some(&p.0))
+        .map(|p| p.1);
     Poll {
-        setting_up,
-        running: steam_running.or(watched),
+        setting_up: setting_up || setup_percent.is_some(),
+        setup_percent,
+        running,
         progress,
         changed,
         queue,
@@ -1888,6 +1899,7 @@ mod tests {
         let poll = Poll {
             running: Some("steam-635320".into()),
             setting_up: false,
+            setup_percent: None,
             progress: HashMap::from([("epic-Pumpkin".to_string(), progress)]),
             changed: false,
             queue: crate::downloads::view(&queue, |key| titles.get(key).map(|t| t.to_string())),

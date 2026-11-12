@@ -4,6 +4,7 @@
   import { cover, prefetch, type QueueState } from './api'
   import type { Card, Cover, Progress } from './bindings'
   import { t } from './i18n'
+  import { settingUpLabel } from './format'
 
   let {
     game,
@@ -12,6 +13,7 @@
     running,
     launching = false,
     settingUp = false,
+    setupPercent = null,
     progress,
     queued,
     onopen,
@@ -32,6 +34,8 @@
     launching?: boolean
     /** Running, but its first launch on Linux still sets up. */
     settingUp?: boolean
+    /** Its Play is downloading umu or Proton first. */
+    setupPercent?: number | null
     progress: Progress | undefined
     /** Where this game is in the download queue; null when it isn't. */
     queued: QueueState | null
@@ -154,7 +158,7 @@
   </span>
 
   {#if running}
-    <span class="badge" id={statusId}>{settingUp ? t('busy.settingUp') : t('play.playing')}</span>
+    <span class="badge" id={statusId}>{settingUp ? settingUpLabel(setupPercent) : t('play.playing')}</span>
   {:else if waiting}
     <span class="chip" id={statusId}>{waiting.state === 'paused' ? t('downloads.paused') : t('card.queued')}</span>
   {:else if progress}

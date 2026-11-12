@@ -83,7 +83,7 @@ Your library, settings and play history stay on your computer, in `%LOCALAPPDATA
 - GOG GamesDB, to match games across stores and for some covers
 - the stores' image servers, for covers and screenshots
 - IGDB and SteamGridDB, only if you add their keys
-- GitHub, to check for Guild updates, and to download a store tool, umu-launcher or a Proton build when you ask for it
+- GitHub, to check for Guild updates, and to download a store tool, umu-launcher or a Proton build when you ask for it, and umu-launcher and GE-Proton the first time you play a Windows game on Linux without them
 
 Some of these connections aren't official and can break when a store changes something. When a store login stops working, a dot shows on the Settings button.
 

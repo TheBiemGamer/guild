@@ -7,6 +7,10 @@ import type { Progress } from './bindings.ts'
 export type { Progress }
 
 /** `id` is a group id from Rust's `view::group`, in its order per sort, and `favorites` and `allGames` from `view::favorites_first`. */
+/** A running game's first launch that still sets up, with the umu or Proton download's percent while its Play fetches one. */
+export const settingUpLabel = (percent: number | null = null) =>
+  percent === null ? t('busy.settingUp') : t('busy.settingUpPercent', { percent: `${percent}%` })
+
 export const groupLabel = (id: string) => t(`group.${id}`)
 
 const KB = 1024

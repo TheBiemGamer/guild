@@ -272,6 +272,7 @@ fn wrap(game: &Command, key: &str, proton: Option<&str>) -> Result<(Command, Pro
 /// A game's launch through `wrap`. When umu still has to fetch the Steam Linux Runtime or set the prefix up, the copy
 /// counts as setting up (`setting_up`) until the game's own program runs.
 pub fn game_command(game: Command, key: &str, proton: Option<&str>) -> Result<Command, Msg> {
+    install_runner(key)?;
     let (command, proton) = wrap(&game, key, proton)?;
     let prefix = prefix(key).ok_or(msg!(gameNotInLibrary))?;
     let mut setups = SETUPS.lock().unwrap_or_else(|e| e.into_inner());
@@ -289,6 +290,56 @@ pub fn game_command(game: Command, key: &str, proton: Option<&str>) -> Result<Co
         None => _ = setups.remove(key),
     }
     Ok(command)
+}
+
+/// Installs what a Windows game needs and isn't found: umu-launcher, and the newest GE-Proton when there is no Proton
+/// build at all. Blocking; Plays take turns (`LAUNCHING`), so two never download at once. `preparing` reports it.
+fn install_runner(key: &str) -> Result<(), Msg> {
+    let need_umu = umu().is_none();
+    let need_proton = protons().is_empty();
+    if !need_umu && !need_proton {
+        return Ok(());
+    }
+    let _preparing = Preparing::start(key);
+    if need_umu {
+        tauri::async_runtime::block_on(install_umu(Preparing::report))?;
+    }
+    if need_proton {
+        let newest = releases(ProtonKind::GeProton)
+            .and_then(|r| r.into_iter().next())
+            .ok_or(msg!(noProton))?;
+        let install = install_proton(ProtonKind::GeProton, newest.tag, Preparing::report);
+        tauri::async_runtime::block_on(install)?;
+    }
+    Ok(())
+}
+
+static PREPARING: Mutex<Option<(String, u8)>> = Mutex::new(None);
+
+struct Preparing;
+
+impl Preparing {
+    fn start(key: &str) -> Self {
+        *PREPARING.lock().unwrap_or_else(|e| e.into_inner()) = Some((key.to_owned(), 0));
+        Self
+    }
+
+    fn report(percent: u8) {
+        if let Some(p) = PREPARING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            p.1 = percent;
+        }
+    }
+}
+
+impl Drop for Preparing {
+    fn drop(&mut self) {
+        *PREPARING.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+/// The copy whose Play is installing umu or Proton, and the download's percent.
+pub fn preparing() -> Option<(String, u8)> {
+    PREPARING.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// A launch waiting on setup: the game's program file name and its prefix.

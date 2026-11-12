@@ -81,6 +81,7 @@
   let version = $state(0)
   let running = $state<string | null>(null)
   let settingUp = $state(false)
+  let setupPercent = $state<number | null>(null)
   let progress = $state<Record<string, Progress>>({})
   let queue = $state<QueueView>(api.emptyQueue)
   let open = $state<string | null>(null)
@@ -373,6 +374,7 @@
       const p = await commands.poll()
       running = p.running
       settingUp = p.settingUp
+      setupPercent = p.setupPercent
       progress = p.progress
       queue = p.queue
       if (p.failed) error = api.message(p.failed)
@@ -584,6 +586,7 @@
             {running}
             {launching}
             {settingUp}
+            {setupPercent}
             {progress}
             {queue}
             onopen={openGame}
@@ -604,6 +607,7 @@
                     running={running !== null && featured.copyKeys.includes(running)}
                     launching={launching.has(featured.chosen)}
                     {settingUp}
+                    {setupPercent}
                     onplay={(key) => act('play', key)}
                     onopen={openGame}
                   />
@@ -669,6 +673,7 @@
           gameKey={open}
           runningKey={running}
           {settingUp}
+          {setupPercent}
           progressByKey={progress}
           {queue}
           oncancel={cancelDownload}

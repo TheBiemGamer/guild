@@ -13,6 +13,7 @@
     running,
     launching,
     settingUp = false,
+    setupPercent = null,
     progress,
     queue,
     onopen,
@@ -39,6 +40,8 @@
     launching: ReadonlySet<string>
     /** The running game still sets up (`poll`'s `settingUp`). */
     settingUp?: boolean
+    /** Its Play is downloading umu or Proton first (`poll`'s `setupPercent`). */
+    setupPercent?: number | null
     progress: Record<string, Progress>
     queue: QueueView
     onopen: (key: string) => void
@@ -177,6 +180,7 @@
           running={running !== null && game.copyKeys.includes(running)}
           launching={launching.has(game.chosen)}
           {settingUp}
+          {setupPercent}
           progress={game.copyKeys.map((k) => progress[k]).find(Boolean)}
           queued={queue.jobs.length ? queueState(queue, game.copyKeys) : null}
           {onopen}
