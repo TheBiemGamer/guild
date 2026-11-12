@@ -688,6 +688,8 @@ export type SettingsView = {
 	startWithWindows: boolean,
 	/**  Picks the Linux wording where the Windows one names Windows. */
 	linux: boolean,
+	/**  A Flatpak hides the autostart switch (the sandbox can't reach the host's autostart folder) and update checks. */
+	flatpak: boolean,
 	closeToTray: boolean,
 	notifyDownloads: boolean,
 	appVersion: string,

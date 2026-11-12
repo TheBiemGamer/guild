@@ -1153,12 +1153,14 @@
                         <h3>{t('settings.section.general')}</h3>
                         <h4>{t('settings.group.startup')}</h4>
                         <div class="group">
-                          {@render switchRow(
-                            'power',
-                            'start_with_windows',
-                            'startWithWindows',
-                            view.linux ? t('settings.startupLinux') : t('settings.startup'),
-                          )}
+                          {#if !view.flatpak}
+                            {@render switchRow(
+                              'power',
+                              'start_with_windows',
+                              'startWithWindows',
+                              view.linux ? t('settings.startupLinux') : t('settings.startup'),
+                            )}
+                          {/if}
                           {@render switchRow('tray', 'close_to_tray', 'closeToTray', t('settings.tray'), t('settings.trayHint'))}
                           {@render switchRow('bell', 'notify_downloads', 'notifyDownloads', t('settings.notify'))}
                         </div>
@@ -1389,7 +1391,7 @@
                             {@render tile('about')}
                             <div class="what">
                               <!-- The header shows the version, so this row says only what the last check found. -->
-                              {versionNote ?? t('settings.version', { version: view.appVersion })}
+                              {(view.flatpak ? null : versionNote) ?? t('settings.version', { version: view.appVersion })}
                             </div>
                             {#if notes}
                               <button
@@ -1406,7 +1408,7 @@
                               <button class="btn" aria-disabled={installing} onclick={() => installing || oninstall()}>
                                 {installing ? t('update.downloading') : t('update.restart')}
                               </button>
-                            {:else}
+                            {:else if !view.flatpak}
                               <button class="btn" disabled={checking} onclick={checkNow}>{checking ? t('steam.checking') : t('settings.checkUpdates')}</button>
                             {/if}
                           </div>
