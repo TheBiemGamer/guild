@@ -1,0 +1,5 @@
+Guild.AppImage
+.flatpak-builder/
+build-dir/
+repo/
+*.flatpak
