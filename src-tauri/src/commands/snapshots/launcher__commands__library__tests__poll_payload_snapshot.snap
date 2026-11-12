@@ -5,6 +5,7 @@ expression: poll
 {
   "running": "steam-635320",
   "settingUp": false,
+  "setupPercent": null,
   "progress": {
     "epic-Pumpkin": {
       "fraction": 0.5,
