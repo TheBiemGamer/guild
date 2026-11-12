@@ -90,6 +90,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
+    if let Some(dir) = crate::platform::tray_icon_dir() {
+        tray = tray.temp_dir_path(dir);
+    }
     tray.build(app)?;
     Ok(())
 }
