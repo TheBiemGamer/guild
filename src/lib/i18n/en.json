@@ -583,6 +583,7 @@
   "msg.protonInUse": "A game is still running with this Proton build. Close it first.",
   "msg.noWinetricks": "winetricks isn't installed, and this game's Proton build doesn't include it.",
   "busy.settingUp": "Setting up…",
+  "busy.settingUpPercent": "Setting up… {percent}",
   "detail.removePrefix": "Also remove its Wine prefix",
   "settings.protonNow": "Proton: {name}",
   "settings.protonFor": "Proton for Windows games",

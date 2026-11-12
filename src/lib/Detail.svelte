@@ -66,12 +66,13 @@
   import ChoiceMenu from './ChoiceMenu.svelte'
   import StoreIcon, { storeNames } from './StoreIcon.svelte'
   import Tip from './Tip.svelte'
-  import { lastPlayedLabel, playtimeLabel, progressLong, sizeLabel, syncedLabel, ttbLabel } from './format'
+  import { lastPlayedLabel, playtimeLabel, progressLong, settingUpLabel, sizeLabel, syncedLabel, ttbLabel } from './format'
 
   let {
     gameKey,
     runningKey,
     settingUp = false,
+    setupPercent = null,
     progressByKey,
     queue,
     oncancel,
@@ -89,6 +90,8 @@
     runningKey: string | null
     /** The running game's first launch on Linux still sets up (`poll`'s `settingUp`). */
     settingUp?: boolean
+    /** Its Play is downloading umu or Proton first. */
+    setupPercent?: number | null
     progressByKey: Record<string, Progress>
     /** The Epic, GOG and Amazon download queue; this game's job in it decides the busy pill. */
     queue: QueueView
@@ -633,7 +636,7 @@
                 copies={game.copies}
                 chosen={chosenKey}
                 {running}
-                busy={shown ?? (running && settingUp ? t('busy.settingUp') : null)}
+                busy={shown ?? (running && settingUp ? settingUpLabel(setupPercent) : null)}
                 onchoose={(key) => (chosenKey = key)}
                 onplay={() => act('play')}
                 onupdate={() => act('update')}

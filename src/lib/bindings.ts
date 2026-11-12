@@ -553,6 +553,8 @@ export type Poll = {
 	 *  Runtime or making its prefix); it ends once the game's program runs.
 	 */
 	settingUp: boolean,
+	/**  The running game's Play is downloading umu-launcher or Proton first: how far, in percent. */
+	setupPercent: number | null,
 	progress: { [key in string]: Progress },
 	/**  The library changed (a Steam download finished), so the UI should re-ask `library`. */
 	changed: boolean,

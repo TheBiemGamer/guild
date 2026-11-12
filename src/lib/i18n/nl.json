@@ -583,6 +583,7 @@
   "msg.protonInUse": "Er draait nog een game met deze Proton-versie. Sluit die eerst.",
   "msg.noWinetricks": "winetricks is niet geïnstalleerd en zit niet in de Proton-versie van deze game.",
   "busy.settingUp": "Instellen…",
+  "busy.settingUpPercent": "Instellen… {percent}",
   "detail.removePrefix": "Ook de Wine-prefix verwijderen",
   "settings.protonNow": "Proton: {name}",
   "settings.protonFor": "Proton voor Windows-games",

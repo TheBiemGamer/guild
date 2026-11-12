@@ -1,12 +1,14 @@
 <script lang="ts">
   import type { Featured } from './bindings'
   import { t } from './i18n'
+  import { settingUpLabel } from './format'
 
   let {
     featured,
     running,
     launching = false,
     settingUp = false,
+    setupPercent = null,
     onplay,
     onopen,
   }: {
@@ -16,6 +18,8 @@
     launching?: boolean
     /** Running, but its first launch on Linux still sets up. */
     settingUp?: boolean
+    /** Its Play is downloading umu or Proton first. */
+    setupPercent?: number | null
     onplay: (key: string) => void
     onopen: (key: string) => void
   } = $props()
@@ -35,7 +39,7 @@
       {#if launching}
         {t('busy.play')}
       {:else if running}
-        {settingUp ? t('busy.settingUp') : t('play.playing')}
+        {settingUp ? settingUpLabel(setupPercent) : t('play.playing')}
       {:else}
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
         {t('play.play')}
