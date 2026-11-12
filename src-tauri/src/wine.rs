@@ -272,7 +272,11 @@ fn wrap(game: &Command, key: &str, proton: Option<&str>) -> Result<(Command, Pro
 /// A game's launch through `wrap`. When umu still has to fetch the Steam Linux Runtime or set the prefix up, the copy
 /// counts as setting up (`setting_up`) until the game's own program runs.
 pub fn game_command(game: Command, key: &str, proton: Option<&str>) -> Result<Command, Msg> {
-    let (command, proton) = wrap(&game, key, proton)?;
+    let (mut command, proton) = wrap(&game, key, proton)?;
+    match fs_err::File::create(crate::log::game_output(key)) {
+        Ok(file) => _ = command.stderr(file.into_file()),
+        Err(e) => tracing::warn!("game output: {e}"),
+    }
     let prefix = prefix(key).ok_or(msg!(gameNotInLibrary))?;
     let mut setups = SETUPS.lock().unwrap_or_else(|e| e.into_inner());
     let exe = Path::new(game.get_program()).file_name();
