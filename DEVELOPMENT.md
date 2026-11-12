@@ -98,7 +98,7 @@ flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakr
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest cloud.biem.guild.yml
 ```
 
-Install the bundle on another PC with `flatpak install --user guild.flatpak` (it fetches the runtime from Flathub) and start it with `flatpak run cloud.biem.guild`. In a Flatpak, Guild doesn't check for updates and hides the autostart switch, and it trusts Steam's `RunningAppID` without checking for the Steam process, which the sandbox can't see. It reads Steam folders and installs to `~/Games`, `/mnt`, `/media` and `/run/media`; give it other folders with `flatpak override --user --filesystem=<path> cloud.biem.guild`.
+Install the bundle on another PC with `flatpak install --user guild.flatpak` (it fetches the runtime from Flathub) and start it with `flatpak run cloud.biem.guild`. A bundle has no remote, so Flatpak doesn't fetch the 32-bit extensions Windows games need; install them once with `flatpak install --user flathub org.freedesktop.Platform.Compat.i386//26.08 org.freedesktop.Platform.GL32.default//26.08` (on NVIDIA, the `GL32.nvidia-*` that matches the driver instead of `GL32.default`). In a Flatpak, Guild doesn't check for updates and hides the autostart switch, and it trusts Steam's `RunningAppID` without checking for the Steam process, which the sandbox can't see. It reads Steam folders and installs to `~/Games`, `/mnt`, `/media` and `/run/media`; give it other folders with `flatpak override --user --filesystem=<path> cloud.biem.guild`.
 
 ## Releasing
 
