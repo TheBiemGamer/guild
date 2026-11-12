@@ -28,6 +28,9 @@ finish-args:
   - --filesystem=~/.steam:ro
   - --filesystem=xdg-data/Steam:ro
   - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
+  # umu keeps the Steam Linux Runtime in the host's ~/.local/share/umu when in a Flatpak; pressure-vessel can only
+  # hand a folder on the real disk to the Flatpak portal's sub-sandbox it runs games in
+  - --filesystem=xdg-data/umu:create
   # The default install folder for Epic, GOG and Amazon games
   - --filesystem=~/Games:create
   # Install folders and Steam libraries on other drives

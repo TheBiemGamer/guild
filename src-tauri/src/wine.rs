@@ -314,11 +314,18 @@ pub fn setting_up(key: &str) -> bool {
     true
 }
 
-/// umu's own folder, where it keeps the Steam Linux Runtime.
+/// umu's own folder, where it keeps the Steam Linux Runtime. In a Flatpak umu skips the sandbox's data folder for the
+/// host's (`umu_consts.py`).
 fn umu_data() -> PathBuf {
-    directories::BaseDirs::new()
-        .map(|b| b.data_dir().join("umu"))
-        .unwrap_or_default()
+    let host = std::env::var_os("HOST_XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| directories::BaseDirs::new().map(|b| b.home_dir().join(".local/share")));
+    let data = if crate::platform::flatpak() {
+        host
+    } else {
+        directories::BaseDirs::new().map(|b| b.data_dir().to_path_buf())
+    };
+    data.map(|d| d.join("umu")).unwrap_or_default()
 }
 
 /// Whether a launch must wait: the prefix hasn't been set up (Proton writes `version` once it has), or umu still has to
