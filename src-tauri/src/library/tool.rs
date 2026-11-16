@@ -44,6 +44,10 @@ pub struct LaunchOptions {
     pub exe: Option<String>,
     /// Linux: the Proton build this game runs with, by folder name; none follows Settings.
     pub proton: Option<String>,
+    /// Linux: whether it runs in gamescope, with MangoHud, with GameMode; none follows Settings.
+    pub gamescope: Option<bool>,
+    pub mangohud: Option<bool>,
+    pub gamemode: Option<bool>,
 }
 
 /// Splits typed arguments on whitespace; double quotes group. No shell, no variables.

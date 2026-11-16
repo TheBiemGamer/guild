@@ -115,6 +115,7 @@ const EN: &[(&str, &str)] = &[
     ("updated", "Updated"),
     ("repaired", "Repaired"),
     ("filesVerified", "Files verified"),
+    ("gameRunning", "A game is running"),
 ];
 
 /// Dutch, as in `src/lib/i18n/nl.json`.
@@ -130,6 +131,7 @@ const NL: &[(&str, &str)] = &[
     ("updated", "Bijgewerkt"),
     ("repaired", "Hersteld"),
     ("filesVerified", "Bestanden gecontroleerd"),
+    ("gameRunning", "Er draait een game"),
 ];
 
 /// The languages with words, by code; the Language setting is one of these or "system".

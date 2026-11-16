@@ -594,8 +594,8 @@ fn act_custom(state: &AppState, action: Action, game: &Game) -> Res<()> {
             let row =
                 cache::db::custom_game(&conn, &game.external_id)?.ok_or(msg!(gameNotInLibrary))?;
             let key = game.key();
-            let proton = launch_options_of(&conn, &game.key()).proton;
-            crate::library::custom::launch(&row, proton.as_deref()).map(|child| {
+            let options = launch_options_of(&conn, &game.key());
+            crate::library::custom::launch(&row, &options).map(|child| {
                 record_play(state, &key);
                 state.lock().watch = Some(Watch {
                     key,
@@ -974,6 +974,13 @@ pub async fn protons(app: AppHandle, key: String) -> Vec<String> {
     .await
 }
 
+/// Linux: the game tools installed, for a game's Launch options; `None` on Windows.
+#[tauri::command]
+#[specta::specta]
+pub async fn game_tools() -> Option<crate::platform::GameTools> {
+    blocking(crate::platform::game_tools).await
+}
+
 /// A GOG game installed as its native Linux build, which runs without Proton.
 pub(super) fn native_build(game: &Game) -> bool {
     game.provider == ProviderKind::Gog && installed_dir(game).is_some_and(|dir| gog::native(dir))
@@ -1006,8 +1013,11 @@ pub async fn set_launch_options(
     if game.provider == ProviderKind::Custom {
         // An added game keeps its program and arguments itself.
         options = LaunchOptions {
-            proton: options.proton,
-            ..LaunchOptions::default()
+            args: String::new(),
+            offline: false,
+            skip_version_check: false,
+            exe: None,
+            ..options
         };
     }
     blocking(move || {
@@ -2282,6 +2292,9 @@ mod tests {
             skip_version_check: false,
             exe: Some(r"bin\game.exe".into()),
             proton: Some("GE-Proton11-12".into()),
+            gamescope: None,
+            mangohud: Some(true),
+            gamemode: Some(false),
         };
         store_launch_options(&conn, "epic-A", &options).unwrap();
         assert_eq!(launch_options_of(&conn, "epic-A"), options);
@@ -2291,7 +2304,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             json,
-            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe","proton":"GE-Proton11-12"}"#
+            r#"{"args":"-dx11","offline":true,"skipVersionCheck":false,"exe":"bin\\game.exe","proton":"GE-Proton11-12","gamescope":null,"mangohud":true,"gamemode":false}"#
         );
         store_launch_options(&conn, "epic-A", &LaunchOptions::default()).unwrap();
         assert_eq!(

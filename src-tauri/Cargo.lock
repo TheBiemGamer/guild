@@ -2623,6 +2623,7 @@ dependencies = [
  "windows-native-keyring-store",
  "windows-sys 0.61.2",
  "winreg",
+ "zbus",
  "zbus-secret-service-keyring-store",
 ]
 

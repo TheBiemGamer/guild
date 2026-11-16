@@ -652,8 +652,8 @@
   <span class="tile">{@render icon(name)}</span>
 {/snippet}
 
-{#snippet toggleButton(on: boolean, labelId: string, onchange: (on: boolean) => void)}
-  <Switch.Root checked={on} onCheckedChange={onchange} aria-labelledby={labelId}>
+{#snippet toggleButton(on: boolean, labelId: string, onchange: (on: boolean) => void, disabled = false)}
+  <Switch.Root checked={on} onCheckedChange={onchange} aria-labelledby={labelId} {disabled}>
     {#snippet child({ props })}
       <button {...props} class="toggle"></button>
     {/snippet}
@@ -667,6 +667,17 @@
       <span id="{setting}-label">{label}</span>{#if hint}<small>{hint}</small>{/if}
     </div>
     {@render toggleButton(view[field], `${setting}-label`, (v) => toggle(setting, field, v))}
+  </div>
+{/snippet}
+
+{#snippet toolRow(setting: string, field: SwitchField, name: string, hint: string, installed: boolean, extension?: string)}
+  <div class="r">
+    <div class="what">
+      <span id="{setting}-label">{name}</span>
+      {#if installed}<small>{hint}</small>
+      {:else}<small class="problem">{view.flatpak && extension ? t('settings.toolMissingFlatpak', { extension }) : t('settings.toolMissing')}</small>{/if}
+    </div>
+    {@render toggleButton(installed && view[field], `${setting}-label`, (v) => toggle(setting, field, v), !installed)}
   </div>
 {/snippet}
 
@@ -1153,14 +1164,12 @@
                         <h3>{t('settings.section.general')}</h3>
                         <h4>{t('settings.group.startup')}</h4>
                         <div class="group">
-                          {#if !view.flatpak}
-                            {@render switchRow(
-                              'power',
-                              'start_with_windows',
-                              'startWithWindows',
-                              view.linux ? t('settings.startupLinux') : t('settings.startup'),
-                            )}
-                          {/if}
+                          {@render switchRow(
+                            'power',
+                            'start_with_windows',
+                            'startWithWindows',
+                            view.linux ? t('settings.startupLinux') : t('settings.startup'),
+                          )}
                           {@render switchRow('tray', 'close_to_tray', 'closeToTray', t('settings.tray'), t('settings.trayHint'))}
                           {@render switchRow('bell', 'notify_downloads', 'notifyDownloads', t('settings.notify'))}
                         </div>
@@ -1231,6 +1240,28 @@
                               </div>
                             {/if}
                           </div>
+                        </div>
+
+                        <h4>{t('settings.group.gameTools')}</h4>
+                        <div class="group">
+                          {@render toolRow(
+                            'gamescope',
+                            'useGamescope',
+                            'Gamescope',
+                            t('settings.gamescopeHint'),
+                            runner.tools.gamescope,
+                            'org.freedesktop.Platform.VulkanLayer.gamescope',
+                          )}
+                          {@render toolRow(
+                            'mangohud',
+                            'useMangohud',
+                            'MangoHud',
+                            t('settings.mangohudHint'),
+                            runner.tools.mangohud,
+                            'org.freedesktop.Platform.VulkanLayer.MangoHud',
+                          )}
+                          {@render toolRow('gamemode', 'useGamemode', 'GameMode', t('settings.gamemodeHint'), runner.tools.gamemode)}
+                          <p class="note">{t('settings.protonForHint')}</p>
                         </div>
 
                         <h4>{t('settings.group.protonBuilds')}</h4>

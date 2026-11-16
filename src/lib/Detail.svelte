@@ -51,6 +51,7 @@
     type Detail,
     type Dlc,
     type GameInfo,
+    type GameTools,
     type GamePrefix,
     type LaunchOptions,
     type LinkKind,
@@ -305,6 +306,28 @@
     }
   })
 
+  /** Linux: the game tools installed; null on Windows. A game's choice is null (follows Settings), true or false. */
+  let tools = $state<GameTools | null>(null)
+  onMount(() => {
+    commands.gameTools().then(
+      (found) => (tools = found),
+      () => {},
+    )
+  })
+  type ToolId = keyof GameTools
+  const toolRows: { id: ToolId; name: string; hint: string }[] = [
+    { id: 'gamescope', name: 'Gamescope', hint: 'settings.gamescopeHint' },
+    { id: 'mangohud', name: 'MangoHud', hint: 'settings.mangohudHint' },
+    { id: 'gamemode', name: 'GameMode', hint: 'settings.gamemodeHint' },
+  ]
+  const toolChoices = $derived([
+    { value: '', label: t('detail.default') },
+    { value: 'on', label: t('common.on') },
+    { value: 'off', label: t('common.off') },
+  ])
+  const toolChoice = (on: boolean | null | undefined) => (on == null ? '' : on ? 'on' : 'off')
+  let toolOpen = $state<Record<ToolId, boolean>>({ gamescope: false, mangohud: false, gamemode: false })
+
   /** Linux: the Proton builds a game may pick, newest first; '' follows Settings. */
   let protons = $state<string[]>([])
   const protonChoices = $derived([{ value: '', label: t('detail.default') }, ...protons.map((p) => ({ value: p, label: p }))])
@@ -497,8 +520,8 @@
     const ids: Tab[] = ['overview']
     if (dlcs.length) ids.push('dlc')
     if (copy?.cloudSaves) ids.push('saves')
-    // An added game's only launch option is its Proton build, so only on Linux.
-    if (copy?.installed && (!custom || protons.length)) ids.push('launch')
+    // An added game's only launch options are its Proton build and game tools, so only on Linux.
+    if (copy?.installed && (!custom || protons.length || tools)) ids.push('launch')
     if (copy?.installed || copy?.installDir) ids.push('installation')
     return ids.map((id) => ({ id, label: t(`detail.tab.${id}`), count: id === 'dlc' ? dlcs.length : undefined }))
   })
@@ -839,6 +862,33 @@
                       </ChoiceMenu>
                     </div>
                   </div>
+                {/if}
+                {#if tools}
+                  {#each toolRows as tool (tool.id)}
+                    {@const label = toolChoices.find((c) => c.value === toolChoice(launch?.[tool.id]))?.label ?? ''}
+                    <div class="row">
+                      <div class="what">
+                        {tool.name}<small>{tools[tool.id] ? t(tool.hint) : t('settings.toolMissing')}</small>
+                      </div>
+                      <div class="choice">
+                        {#if tools[tool.id]}
+                          <ChoiceMenu
+                            bind:value={() => toolChoice(launch?.[tool.id]), (v) => setLaunch({ [tool.id]: v === '' ? null : v === 'on' })}
+                            options={toolChoices}
+                            label={tool.name}
+                            bind:open={toolOpen[tool.id]}
+                          >
+                            {#snippet trigger({ props })}
+                              <button {...props} class="chip" aria-label={t('detail.toolNow', { tool: tool.name, choice: label })}>{label}</button>
+                            {/snippet}
+                          </ChoiceMenu>
+                        {:else}
+                          <button class="chip" disabled aria-label={t('detail.toolNow', { tool: tool.name, choice: t('common.off') })}>{t('common.off')}</button
+                          >
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
                 {/if}
               {/if}
             </section>
