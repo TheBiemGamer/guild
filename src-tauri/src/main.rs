@@ -18,6 +18,8 @@ mod gamesdb;
 mod gog_login;
 mod igdb;
 mod info;
+#[cfg(target_os = "linux")]
+mod known_fixes;
 mod library;
 mod links;
 mod log;

@@ -32,7 +32,7 @@ const UMU_IDS_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// GitHub's API refuses requests without a User-Agent.
-fn http() -> &'static reqwest::Client {
+pub fn http() -> &'static reqwest::Client {
     static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
         reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
@@ -272,8 +272,14 @@ fn wrap(game: &Command, key: &str, proton: Option<&str>) -> Result<(Command, Pro
 
 /// A game's launch through `wrap`. When umu still has to fetch the Steam Linux Runtime or set the prefix up, the copy
 /// counts as setting up (`setting_up`) until the game's own program runs.
-pub fn game_command(game: Command, key: &str, options: &LaunchOptions) -> Result<Command, Msg> {
+pub fn game_command(mut game: Command, key: &str, options: &LaunchOptions) -> Result<Command, Msg> {
     install_runner(key)?;
+    // A variable the store tool or the game's own options already set wins over a known fix.
+    for (name, value) in crate::known_fixes::env(key) {
+        if !game.get_envs().any(|(set, _)| set == name.as_str()) {
+            game.env(name, value);
+        }
+    }
     let (command, proton) = wrap(&game, key, options.proton.as_deref())?;
     let mut command = crate::game_tools::wrap(command, crate::game_tools::chosen(options));
     match fs_err::File::create(crate::log::game_output(key)) {
