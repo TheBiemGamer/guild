@@ -1161,11 +1161,8 @@ pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::proc
         current_user(&cfg).as_ref(),
     ));
     // On Linux through the runner; the SDK paths stay Linux paths there, as Nile's own launch leaves them.
-    let mut command = crate::platform::windows_game(
-        command,
-        &ProviderKind::Amazon.key(id),
-        options.proton.as_deref(),
-    )?;
+    let mut command =
+        crate::platform::windows_game(command, &ProviderKind::Amazon.key(id), options)?;
     Ok(command.spawn()?)
 }
 

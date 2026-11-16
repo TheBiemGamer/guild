@@ -627,6 +627,16 @@ pub struct RunnerView {
     pub protons: Vec<ProtonView>,
     pub proton: Option<String>,
     pub winetricks: bool,
+    /// The game tools installed (`GameTools`).
+    pub tools: GameTools,
+}
+
+/// Linux: gamescope, MangoHud and GameMode, as chosen in Settings, as installed, or as a game runs with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct GameTools {
+    pub gamescope: bool,
+    pub mangohud: bool,
+    pub gamemode: bool,
 }
 
 /// A Proton build found; only Guild's own may be removed.
@@ -676,24 +686,54 @@ pub fn protons() -> Vec<String> {
     crate::wine::proton_names()
 }
 
-/// A Windows game's program as it runs: as is on Windows. `key` is its copy key, `proton` its own Proton choice.
+/// A Windows game's program as it runs: as is on Windows. `key` is its copy key, `options` its launch options.
 #[cfg(windows)]
 pub fn windows_game(
     game: std::process::Command,
     _key: &str,
-    _proton: Option<&str>,
+    _options: &crate::library::tool::LaunchOptions,
 ) -> Result<std::process::Command, crate::msg::Msg> {
     Ok(game)
 }
 
-/// A Windows game's program as it runs: through umu-launcher and Proton, in the copy's own Wine prefix.
+/// A Windows game's program as it runs: through umu-launcher and its Proton choice, in the copy's own Wine prefix,
+/// inside its game tools.
 #[cfg(target_os = "linux")]
 pub fn windows_game(
     game: std::process::Command,
     key: &str,
-    proton: Option<&str>,
+    options: &crate::library::tool::LaunchOptions,
 ) -> Result<std::process::Command, crate::msg::Msg> {
-    crate::wine::game_command(game, key, proton)
+    crate::wine::game_command(game, key, options)
+}
+
+/// A native game's program as it runs: as is on Windows.
+#[cfg(windows)]
+pub fn native_game(
+    game: std::process::Command,
+    _options: &crate::library::tool::LaunchOptions,
+) -> std::process::Command {
+    game
+}
+
+/// A native Linux game's program as it runs: inside its game tools.
+#[cfg(target_os = "linux")]
+pub fn native_game(
+    game: std::process::Command,
+    options: &crate::library::tool::LaunchOptions,
+) -> std::process::Command {
+    crate::game_tools::wrap(game, crate::game_tools::chosen(options))
+}
+
+/// The game tools installed; `None` on Windows, which has none.
+#[cfg(windows)]
+pub fn game_tools() -> Option<GameTools> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn game_tools() -> Option<GameTools> {
+    Some(crate::game_tools::installed())
 }
 
 /// The copy whose Play installs umu-launcher or Proton first, and the download's percent; never on Windows.

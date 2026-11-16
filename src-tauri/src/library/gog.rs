@@ -1257,13 +1257,9 @@ pub fn launch(id: &str, dir: &Path, options: &LaunchOptions) -> Result<std::proc
         return Err(msg!(gameProgramMissing, path = exe.display().to_string()).into());
     }
     let mut command = if native(dir) {
-        command
+        crate::platform::native_game(command, options)
     } else {
-        crate::platform::windows_game(
-            command,
-            &ProviderKind::Gog.key(id),
-            options.proton.as_deref(),
-        )?
+        crate::platform::windows_game(command, &ProviderKind::Gog.key(id), options)?
     };
     Ok(command.spawn()?)
 }
