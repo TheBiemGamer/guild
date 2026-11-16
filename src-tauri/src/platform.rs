@@ -891,6 +891,63 @@ pub fn remove_autostart(_name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Windows has no Flatpak; its autostart is tauri-plugin-autostart's.
+#[cfg(windows)]
+pub fn portal_autostart(_on: bool) -> Result<bool, String> {
+    Err("no portal on Windows".into())
+}
+
+/// Asks the desktop portal's Background interface to start Guild on login (`on`) or not, since a Flatpak can't
+/// write the host's autostart folder. The desktop may ask the owner first. Returns whether autostart is now on.
+#[cfg(target_os = "linux")]
+pub fn portal_autostart(on: bool) -> Result<bool, String> {
+    use std::collections::HashMap;
+    use zbus::zvariant::{OwnedValue, Value};
+    let request = || -> zbus::Result<bool> {
+        let bus = zbus::blocking::Connection::session()?;
+        // The portal answers on a Request object whose path follows from our bus name and this token; listen first.
+        static REQUESTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let token = format!("guild{}_{n}", std::process::id());
+        let sender = bus
+            .unique_name()
+            .map(|n| n.trim_start_matches(':').replace('.', "_"))
+            .unwrap_or_default();
+        let response = zbus::blocking::proxy::Builder::<zbus::blocking::Proxy>::new(&bus)
+            .destination("org.freedesktop.portal.Desktop")?
+            .path(format!(
+                "/org/freedesktop/portal/desktop/request/{sender}/{token}"
+            ))?
+            .interface("org.freedesktop.portal.Request")?
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()?;
+        let mut answers = response.receive_signal("Response")?;
+        let commandline = vec!["guild", crate::tray::MINIMIZED];
+        let options = HashMap::from([
+            ("handle_token", Value::from(token.as_str())),
+            ("autostart", Value::from(on)),
+            ("commandline", Value::from(commandline)),
+        ]);
+        bus.call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.Background"),
+            "RequestBackground",
+            &("", options),
+        )?;
+        let answer = answers
+            .next()
+            .ok_or_else(|| zbus::Error::Failure("the portal never answered".into()))?;
+        let (status, results): (u32, HashMap<String, OwnedValue>) = answer.body().deserialize()?;
+        let granted = results
+            .get("autostart")
+            .and_then(|v| bool::try_from(v).ok())
+            .unwrap_or(false);
+        Ok(status == 0 && granted)
+    };
+    request().map_err(|e| e.to_string())
+}
+
 /// "Windows 11 (build 26200)", from the registry; builds from 22000 on are Windows 11.
 #[cfg(windows)]
 pub fn os_version() -> String {

@@ -17,7 +17,8 @@ pub const CLOSE_TO_TRAY: &str = "close_to_tray";
 pub const NOTIFY_DOWNLOADS: &str = "notify_downloads";
 /// "system" (Windows' display language), "en" or "nl" (`msg::is_language`).
 pub const LANGUAGE: &str = "language";
-/// Not stored: the autostart entry in the registry is the truth (`commands::settings`).
+/// Stored only in a Flatpak, where the portal writes the host's autostart entry out of Guild's reach; elsewhere
+/// the entry itself is the truth (`commands::settings`).
 pub const START_WITH_WINDOWS: &str = "start_with_windows";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const GOG_INSTALL_DIR: &str = "gog_install_dir";
@@ -127,6 +128,15 @@ pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
         return None;
     }
     seen.map(|_| current.to_string())
+}
+
+/// Whether the Background portal was last told to start Guild on login (a Flatpak only).
+pub fn portal_autostart(conn: &Connection) -> bool {
+    db::setting(conn, START_WITH_WINDOWS)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
 }
 
 /// Whether the owner logged out of `store` ("epic", "gog", "amazon") with Log out, so its Settings dot stays down

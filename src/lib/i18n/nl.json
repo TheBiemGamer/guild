@@ -105,6 +105,7 @@
   "msg.unknownTool": "Onbekende tool.",
   "msg.cantChangeStartup": "Kan het opstartitem van Windows niet wijzigen: {detail}",
   "msg.cantChangeAutostart": "Kan het autostart-item niet wijzigen: {detail}",
+  "msg.autostartNotAllowed": "Je bureaublad staat niet toe dat Guild start bij inloggen.",
   "msg.cantClearFolder": "Kan {path} niet leegmaken: {detail}",
   "msg.notConnecting": "Inloggen bij Steam is gestopt.",
   "msg.steamNoAccount": "Steam stuurde geen accountnaam.",

@@ -1153,14 +1153,12 @@
                         <h3>{t('settings.section.general')}</h3>
                         <h4>{t('settings.group.startup')}</h4>
                         <div class="group">
-                          {#if !view.flatpak}
-                            {@render switchRow(
-                              'power',
-                              'start_with_windows',
-                              'startWithWindows',
-                              view.linux ? t('settings.startupLinux') : t('settings.startup'),
-                            )}
-                          {/if}
+                          {@render switchRow(
+                            'power',
+                            'start_with_windows',
+                            'startWithWindows',
+                            view.linux ? t('settings.startupLinux') : t('settings.startup'),
+                          )}
                           {@render switchRow('tray', 'close_to_tray', 'closeToTray', t('settings.tray'), t('settings.trayHint'))}
                           {@render switchRow('bell', 'notify_downloads', 'notifyDownloads', t('settings.notify'))}
                         </div>
