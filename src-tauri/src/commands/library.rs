@@ -1351,6 +1351,11 @@ fn poll_blocking(app: &AppHandle) -> Poll {
     let setup_percent = preparing
         .filter(|p| running.as_ref() == Some(&p.0))
         .map(|p| p.1);
+    let mut s = state.lock();
+    if running.is_some() != s.awake.is_some() {
+        s.awake = running.is_some().then(crate::platform::keep_awake);
+    }
+    drop(s);
     Poll {
         setting_up: setting_up || setup_percent.is_some(),
         setup_percent,

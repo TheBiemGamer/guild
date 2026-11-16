@@ -150,6 +150,7 @@
   "msg.updated": "Updated",
   "msg.repaired": "Repaired",
   "msg.filesVerified": "Files verified",
+  "msg.gameRunning": "A game is running",
   "group.favorites": "Favorites",
   "group.allGames": "All games",
   "group.today": "Today",

@@ -150,6 +150,7 @@
   "msg.updated": "Bijgewerkt",
   "msg.repaired": "Hersteld",
   "msg.filesVerified": "Bestanden gecontroleerd",
+  "msg.gameRunning": "Er draait een game",
   "group.favorites": "Favorieten",
   "group.allGames": "Alle games",
   "group.today": "Vandaag",

@@ -94,6 +94,8 @@ struct Shared {
     /// shortcut: holds one failure, so of several within one poll only the last shows; a list if that happens.
     failed: Option<crate::msg::Msg>,
     watch: Option<Watch>,
+    /// Held while a game runs (Steam's or the watched one), so the PC doesn't sleep under it.
+    awake: Option<crate::platform::Awake>,
     /// Steam rejected the saved token; the Settings dot asks the owner to connect again.
     steam_attention: bool,
     /// An owned-games fetch is in flight.

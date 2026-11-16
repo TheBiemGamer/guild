@@ -104,6 +104,81 @@ pub fn tray_icon_dir() -> Option<std::path::PathBuf> {
     )
 }
 
+/// Holds off system sleep and screen blanking until dropped. Guild exiting or crashing ends it too: the hold
+/// belongs to its thread (Windows) or its session bus connection (Linux).
+pub struct Awake(#[allow(dead_code)] std::sync::mpsc::Sender<()>);
+
+/// Starts an `Awake` hold on its own thread, so a desktop that doesn't answer never stalls the caller.
+pub fn keep_awake() -> Awake {
+    let (hold, released) = std::sync::mpsc::channel();
+    if let Err(e) = std::thread::Builder::new()
+        .name("awake".into())
+        .spawn(move || hold_awake(&released))
+    {
+        tracing::warn!("keep awake: {e}");
+    }
+    Awake(hold)
+}
+
+/// Holds until `released` disconnects. The request is per thread, so it is set and cleared on this one.
+#[cfg(windows)]
+fn hold_awake(released: &std::sync::mpsc::Receiver<()>) {
+    use windows_sys::Win32::System::Power::{
+        ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
+    };
+    // SAFETY: plain flags in, the previous state out.
+    if unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) }
+        == 0
+    {
+        tracing::warn!("keep awake: Windows refused the request");
+        return;
+    }
+    _ = released.recv();
+    // SAFETY: as above.
+    unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
+}
+
+/// Holds through the desktop portal's idle Inhibit (KDE, GNOME and others; allowed in the Flatpak without a talk-name)
+/// until `released` disconnects. Without a portal the game just runs.
+#[cfg(target_os = "linux")]
+fn hold_awake(released: &std::sync::mpsc::Receiver<()>) {
+    use zbus::zvariant::{OwnedObjectPath, Value};
+    // Idle only: it keeps the screen on and stops idle suspend, like Windows' request; the gtk backend refuses the
+    // suspend flag, which would also block a suspend the owner asks for.
+    const IDLE: u32 = 8;
+    let inhibit = || -> zbus::Result<(zbus::blocking::Connection, OwnedObjectPath)> {
+        let bus = zbus::blocking::Connection::session()?;
+        let options = std::collections::HashMap::from([(
+            "reason",
+            Value::from(crate::msg::native("gameRunning")),
+        )]);
+        let reply = bus.call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.Inhibit"),
+            "Inhibit",
+            &("", IDLE, options),
+        )?;
+        let request = reply.body().deserialize()?;
+        Ok((bus, request))
+    };
+    let (bus, request) = match inhibit() {
+        Ok(held) => held,
+        Err(e) => return tracing::warn!("keep awake: {e}"),
+    };
+    _ = released.recv();
+    let closed = bus.call_method(
+        Some("org.freedesktop.portal.Desktop"),
+        &request,
+        Some("org.freedesktop.portal.Request"),
+        "Close",
+        &(),
+    );
+    if let Err(e) = closed {
+        tracing::warn!("keep awake: release: {e}");
+    }
+}
+
 /// Whether process `pid` runs and is named `image` (the name guards against a reused pid).
 #[cfg(windows)]
 pub fn pid_is(pid: u32, image: &str) -> bool {
