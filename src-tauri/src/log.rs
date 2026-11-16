@@ -114,6 +114,29 @@ fn stamp(at: Timestamp, tz: TimeZone) -> String {
     at.to_zoned(tz).strftime("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// Where a Windows game's output (umu-run, pressure-vessel, Proton) goes: `logs/game-<copy key>.log`, rewritten at
+/// each launch, so a launch that fails can be explained in launcher.log.
+pub fn game_output(key: &str) -> PathBuf {
+    crate::cache::Dirs::new()
+        .logs
+        .join(format!("game-{key}.log"))
+}
+
+/// The last `lines` lines of a copy's game output, each indented; empty when it has none.
+pub fn game_output_tail(key: &str, lines: usize) -> String {
+    tail(&game_output(key), lines)
+}
+
+fn tail(path: &Path, lines: usize) -> String {
+    let text = std::fs::read(path).unwrap_or_default();
+    let text = String::from_utf8_lossy(&text);
+    let all: Vec<&str> = text.lines().collect();
+    all[all.len().saturating_sub(lines)..]
+        .iter()
+        .map(|l| format!("\n    {l}"))
+        .collect()
+}
+
 /// Sends this crate's info and above to the log file in `dir` (and stderr in debug builds). The file is
 /// written unbuffered, so nothing waits to be flushed when the app exits.
 pub fn init(dir: &Path) {
@@ -193,5 +216,14 @@ mod tests {
             stamp(Timestamp::from_second(1_719_835_200).unwrap(), tz),
             "2024-07-01 14:00:00"
         );
+    }
+
+    #[test]
+    fn a_game_output_tail_is_its_last_lines_indented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("game.log");
+        assert_eq!(tail(&path, 2), "");
+        fs::write(&path, "a\nb\nc\n").unwrap();
+        assert_eq!(tail(&path, 2), "\n    b\n    c");
     }
 }
