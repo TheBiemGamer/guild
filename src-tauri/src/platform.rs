@@ -586,6 +586,17 @@ pub fn windows_game(
     crate::wine::game_command(game, key, proton)
 }
 
+/// The copy whose Play installs umu-launcher or Proton first, and the download's percent; never on Windows.
+#[cfg(windows)]
+pub fn preparing() -> Option<(String, u8)> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn preparing() -> Option<(String, u8)> {
+    crate::wine::preparing()
+}
+
 /// Whether a launched game still waits on its first-run setup; never on Windows.
 #[cfg(windows)]
 pub fn setting_up(_key: &str) -> bool {
