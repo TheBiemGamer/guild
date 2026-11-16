@@ -29,6 +29,7 @@ expression: view
   "gogCloudSaves": false,
   "startWithWindows": false,
   "linux": false,
+  "flatpak": false,
   "closeToTray": true,
   "notifyDownloads": true,
   "appVersion": "[version]",

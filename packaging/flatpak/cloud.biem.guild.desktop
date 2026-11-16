@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Guild
+Comment=Your Steam, Epic, GOG and Amazon games in one library
+Exec=guild
+Icon=cloud.biem.guild
+Terminal=false
+Categories=Game;
+Keywords=Steam;Epic;GOG;Amazon;Proton;launcher;library;
+StartupWMClass=Guild

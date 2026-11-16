@@ -336,6 +336,8 @@ pub struct SettingsView {
     start_with_windows: bool,
     /// Picks the Linux wording where the Windows one names Windows.
     linux: bool,
+    /// A Flatpak hides the autostart switch (the sandbox can't reach the host's autostart folder) and update checks.
+    flatpak: bool,
     close_to_tray: bool,
     notify_downloads: bool,
     app_version: String,
@@ -408,6 +410,7 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             gog_cloud_saves: saved.gog_cloud_saves,
             start_with_windows: app.autolaunch().is_enabled().unwrap_or(false),
             linux: cfg!(target_os = "linux"),
+            flatpak: crate::platform::flatpak(),
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
@@ -1070,6 +1073,7 @@ mod tests {
             gog_cloud_saves: false,
             start_with_windows: false,
             linux: false,
+            flatpak: false,
             close_to_tray: true,
             notify_downloads: true,
             app_version: env!("CARGO_PKG_VERSION").into(),

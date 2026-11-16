@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>cloud.biem.guild</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Guild</name>
+  <summary>Your Steam, Epic, GOG and Amazon games in one library</summary>
+  <developer id="cloud.biem">
+    <name>TheBiemGamer</name>
+  </developer>
+  <description>
+    <p>Guild puts your Steam, Epic, GOG and Amazon games in one grid, next to any game you add yourself. A game you own in two stores shows up once, and you pick which store starts it.</p>
+    <p>Epic, GOG and Amazon games install, update, verify and uninstall from Guild itself, through one download queue you can pause and reorder. Epic and GOG cloud saves sync before and after you play. Windows games run through umu-launcher and Proton, each in its own Wine prefix.</p>
+    <p>Each game has a page with its description, screenshots, your playtime and how long it takes to beat. You can sort and filter the library, mark favorites, hide games and make your own collections.</p>
+    <p>Steam games install and start through the Steam client, which stays installed.</p>
+  </description>
+  <launchable type="desktop-id">cloud.biem.guild.desktop</launchable>
+  <url type="homepage">https://github.com/TheBiemGamer/guild</url>
+  <url type="bugtracker">https://github.com/TheBiemGamer/guild/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/TheBiemGamer/guild/main/docs/screenshot.png</image>
+      <caption>The library grid</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">720</display_length>
+  </requires>
+  <releases>
+    <release version="0.2.0" date="2026-11-09">
+      <description>
+        <p>Guild runs on Linux. Epic, GOG, Amazon and added Windows games run through umu-launcher and Proton, each game in its own Wine prefix.</p>
+      </description>
+    </release>
+  </releases>
+</component>

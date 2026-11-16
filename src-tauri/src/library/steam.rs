@@ -68,7 +68,9 @@ pub fn running_game() -> Option<String> {
     let id = running_id(crate::platform::steam_running_app())?;
     // After a Steam crash RunningAppID keeps its last value (seen on this PC), so only
     // trust it while the Steam process it was written by is still alive.
-    steam_alive(steam_pid()?).then_some(id)
+    // shortcut: a Flatpak can't see host processes, so there a crash's stale id counts as running until Steam starts
+    // again; find another liveness signal if that shows up.
+    (crate::platform::flatpak() || steam_alive(steam_pid()?)).then_some(id)
 }
 
 pub fn download_progress(game: &Game) -> Option<Progress> {
