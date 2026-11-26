@@ -686,7 +686,7 @@
                       : t('sidebar.emptyCollection', { name: filterName(libView, collections) })}
               </p>
             </div>
-          {:else if started && viewTotal > 0}
+          {:else if started && lib.counts.library + lib.counts.hidden > 0}
             <div class="empty">
               <p>{t('app.noMatch')}</p>
               <small>{query && filtered ? t('app.noMatchQueryFilters', { query }) : query ? t('app.noMatchQuery', { query }) : t('app.noMatchFilters')}</small>
