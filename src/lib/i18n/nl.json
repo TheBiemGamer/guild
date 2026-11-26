@@ -310,7 +310,6 @@
   "toolbar.removeFilter": "Filter verwijderen: {name}",
   "toolbar.sort": "Sorteren: {sort}",
   "toolbar.sortBy": "Sorteren op",
-  "toolbar.downloadsAt": "Downloads, {percent}",
   "toolbar.addGame": "Game toevoegen",
   "toolbar.settings": "Instellingen",
   "toolbar.settingsAttention": "Instellingen (vraagt aandacht)",

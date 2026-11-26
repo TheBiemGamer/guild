@@ -166,13 +166,19 @@
     nav?.querySelector<HTMLInputElement>('.new input')?.focus()
   }
 
+  let creating = false
+
   async function create() {
+    if (creating) return
+    creating = true
     try {
       await commands.createCollection(name)
     } catch (e) {
       // The name is empty or taken: the field stays for another try.
       problem = api.message(e)
       return
+    } finally {
+      creating = false
     }
     naming = false
     problem = null
@@ -422,12 +428,7 @@
         {#snippet trigger({ props })}
           <Tip text={rail ? rowName(t('downloads.title'), jobCount) : ''}>
             {#snippet children({ props: tip })}
-              <button
-                {...mergeProps(tip, props)}
-                class="item downloads"
-                bind:this={downloadsRow}
-                aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
-              >
+              <button {...mergeProps(tip, props)} class="item downloads" bind:this={downloadsRow} aria-label={rowName(t('downloads.title'), jobCount)}>
                 {#if rail}<span class="ring" style="--done: {fraction * 100}%"></span>{/if}
                 <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
                 <span class="name">{t('downloads.title')}</span>

@@ -498,7 +498,7 @@
   const cancelDownload = (key: string) => changeQueue(() => commands.cancelInstall(key))
   const resumeDownloads = () => changeQueue(commands.resumeDownloads)
 
-  /** A store needs the owner: the dot on the Settings button and on Settings' Accounts. */
+  /** A store needs the owner: the dot on the Settings row and on Settings' Accounts. */
   const attention = $derived(lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention)
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
   const showContinue = $derived(libView === null && featured !== null && query === '' && (settings?.showBanner ?? true))
@@ -675,17 +675,20 @@
               <small>{t('app.epicUnreachableHint')}</small>
             </div>
           {:else if started && lib.counts.library + lib.counts.hidden > 0 && !query && !filtered && viewTotal === 0}
-            <div class="empty">
-              <p>
-                {libView === null
-                  ? t('sidebar.allHidden')
-                  : libView === 'favorites'
-                    ? t('sidebar.emptyFavorites')
-                    : libView === 'hidden'
-                      ? t('sidebar.emptyHidden')
-                      : t('sidebar.emptyCollection', { name: filterName(libView, collections) })}
-              </p>
-            </div>
+            <!-- reload() publishes before it leaves a vanished view; render nothing until the fallback lands. -->
+            {#if fallbackView(libView, lib.counts, collections) === libView}
+              <div class="empty">
+                <p>
+                  {libView === null
+                    ? t('sidebar.allHidden')
+                    : libView === 'favorites'
+                      ? t('sidebar.emptyFavorites')
+                      : libView === 'hidden'
+                        ? t('sidebar.emptyHidden')
+                        : t('sidebar.emptyCollection', { name: filterName(libView, collections) })}
+                </p>
+              </div>
+            {/if}
           {:else if started && lib.counts.library + lib.counts.hidden > 0}
             <div class="empty">
               <p>{t('app.noMatch')}</p>

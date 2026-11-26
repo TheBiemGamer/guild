@@ -12,7 +12,7 @@ use crate::msg::Msg;
 pub struct Collection {
     id: i64,
     name: String,
-    /// Games in it.
+    /// Games in it, hidden ones left out.
     count: usize,
     /// Up to three entry keys of its games, most recently played first.
     covers: Vec<String>,

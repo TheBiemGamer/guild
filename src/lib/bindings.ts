@@ -316,7 +316,7 @@ export type Card = {
 export type Collection = {
 	id: number,
 	name: string,
-	/**  Games in it. */
+	/**  Games in it, hidden ones left out. */
 	count: number,
 	/**  Up to three entry keys of its games, most recently played first. */
 	covers: string[],
