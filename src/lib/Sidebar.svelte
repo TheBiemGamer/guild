@@ -211,6 +211,8 @@
       problem = api.message(e)
       // Saved by leaving the field onto nothing focusable: focus is lost, so bring it back where Escape closes the note.
       if (!document.activeElement || document.activeElement === document.body) rowOf(c.id)?.focus()
+      // Focus went on elsewhere: no note to hold the overlay open; the row shows the old name.
+      else if (!nav?.contains(document.activeElement)) problem = null
     }
     onchanged()
   }
