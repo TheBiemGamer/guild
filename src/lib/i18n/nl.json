@@ -290,6 +290,7 @@
   "filters.renameNamed": "{name} hernoemen",
   "filters.deleteNamed": "{name} verwijderen",
   "sidebar.label": "Bibliotheeknavigatie",
+  "sidebar.rowName": "{name}, {count}",
   "sidebar.collections": "Collecties",
   "sidebar.newCollection": "Nieuwe collectie",
   "sidebar.collectionName": "Naam van de collectie",

@@ -290,6 +290,7 @@
   "filters.renameNamed": "Rename {name}",
   "filters.deleteNamed": "Delete {name}",
   "sidebar.label": "Library navigation",
+  "sidebar.rowName": "{name}, {count}",
   "sidebar.collections": "Collections",
   "sidebar.newCollection": "New collection",
   "sidebar.collectionName": "Collection name",

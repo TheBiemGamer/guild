@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import { MediaQuery } from 'svelte/reactivity'
+  import { mergeProps } from 'bits-ui'
   import * as api from './api'
   import { onOpenDownloads } from './api'
   import { commands, type Card, type Collection, type Counts, type Progress, type QueueView } from './bindings'
   import { collectionFilter } from './filters'
   import { t } from './i18n'
-  import { downloadFraction, fallbackView, type Pop, type View } from './sidebar'
+  import { downloadFraction, fallbackView, RAIL_BELOW, type Pop, type View } from './sidebar'
   import ActionMenu, { type Action } from './ActionMenu.svelte'
   import DownloadsPopover from './DownloadsPopover.svelte'
   import Tip from './Tip.svelte'
@@ -66,9 +68,12 @@
   /** The row that is the Tab stop: the view, or Library while a gone row waits for App's fallback. */
   const current = $derived(fallbackView(view, counts, collections))
 
+  const rowName = (name: string, count: number | string) => t('sidebar.rowName', { name, count })
+
   function choose(v: View, e: MouseEvent) {
     onnavigate()
     view = v
+    problem = null
     // WebKitGTK doesn't focus a clicked button.
     ;(e.currentTarget as HTMLElement).focus()
   }
@@ -145,6 +150,12 @@
   let ctx = $state<{ c: Collection; x: number; y: number } | null>(null)
   let ctxOpen = $state(false)
 
+  const narrow = new MediaQuery(`max-width: ${RAIL_BELOW - 1}px`)
+  /** A name field, a delete question or a failure doesn't fit the rail: the full sidebar lies over the content meanwhile, so the grid keeps its width. */
+  const editing = $derived(naming || renaming !== null || deleting !== null || problem !== null)
+  const rail = $derived(narrow.current && !editing)
+  const settingsName = $derived(attention ? t('toolbar.settingsAttention') : t('toolbar.settings'))
+
   const rowOf = (id: number) => nav?.querySelector<HTMLElement>(`[data-collection="${id}"]`)
 
   async function startNaming() {
@@ -165,15 +176,18 @@
     }
     naming = false
     problem = null
-    plusButton?.focus()
     onchanged()
+    // In a narrow window + moves back into the rail, a new element.
+    await tick()
+    plusButton?.focus()
   }
 
-  function nameKeydown(e: KeyboardEvent) {
+  async function nameKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') create()
     else if (e.key === 'Escape') {
       naming = false
       problem = null
+      await tick()
       plusButton?.focus()
     }
   }
@@ -256,22 +270,37 @@
 </script>
 
 {#snippet row(v: View, label: string, count: number, icon: string)}
-  <button
-    class="item"
-    class:on={current === v}
-    data-row
-    tabindex={current === v ? 0 : -1}
-    aria-current={current === v ? 'page' : undefined}
-    onclick={(e) => choose(v, e)}
-    onkeydown={rowKeys}
-  >
-    <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d={icon} /></svg>
-    <span class="name">{label}</span>
-    <em>{count}</em>
-  </button>
+  <Tip text={rail ? rowName(label, count) : ''}>
+    {#snippet children({ props })}
+      <button
+        {...mergeProps(props, { onclick: (e: MouseEvent) => choose(v, e) })}
+        class="item"
+        class:on={current === v}
+        data-row
+        tabindex={current === v ? 0 : -1}
+        aria-current={current === v ? 'page' : undefined}
+        aria-label={rowName(label, count)}
+        onkeydown={rowKeys}
+      >
+        <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d={icon} /></svg>
+        <span class="name">{label}</span>
+        <em>{count}</em>
+      </button>
+    {/snippet}
+  </Tip>
 {/snippet}
 
-<nav class="side" aria-label={t('sidebar.label')} bind:this={nav}>
+{#snippet plus()}
+  <Tip text={t('sidebar.newCollection')}>
+    {#snippet children({ props })}
+      <button {...props} class="plus" bind:this={plusButton} aria-label={t('sidebar.newCollection')} onclick={startNaming}>
+        <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    {/snippet}
+  </Tip>
+{/snippet}
+
+<nav class="side" class:rail class:over={narrow.current && editing} aria-label={t('sidebar.label')} bind:this={nav}>
   {@render row(
     null,
     t('app.library'),
@@ -283,14 +312,8 @@
   {/if}
 
   <div class="sec">
-    <h2 id="sidebar-collections">{t('sidebar.collections')}</h2>
-    <Tip text={t('sidebar.newCollection')}>
-      {#snippet children({ props })}
-        <button {...props} class="plus" bind:this={plusButton} aria-label={t('sidebar.newCollection')} onclick={startNaming}>
-          <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-        </button>
-      {/snippet}
-    </Tip>
+    <h2 id="sidebar-collections" class:visually-hidden={rail}>{t('sidebar.collections')}</h2>
+    {#if !rail}{@render plus()}{/if}
   </div>
   <div class="list" role="group" aria-labelledby="sidebar-collections">
     {#if naming}
@@ -324,32 +347,38 @@
             onblur={() => saveRename(c)}
           />
         {:else}
-          <button
-            class="item two"
-            class:on={current === v}
-            data-row
-            data-collection={c.id}
-            tabindex={current === v ? 0 : -1}
-            aria-current={current === v ? 'page' : undefined}
-            onclick={(e) => choose(v, e)}
-            onkeydown={rowKeys}
-            oncontextmenu={(e) => openAt(e, c)}
-          >
-            <span class="stack" aria-hidden="true">
-              {#if c.covers.length === 0}<span class="tile" style="--i: 0"></span>{/if}
-              {#each [...c.covers.entries()].reverse() as [i, key] (key)}
-                {#if art[key]}
-                  <img src={art[key]} alt="" width="20" height="30" decoding="async" style="--i: {i}" />
-                {:else}
-                  <span class="tile" style="--i: {i}"></span>
-                {/if}
-              {/each}
-            </span>
-            <span class="text">
-              <span class="name">{c.name}</span>
-              <small>{t('sidebar.gamesCount', { n: c.count })}</small>
-            </span>
-          </button>
+          {@const label = rowName(c.name, t('sidebar.gamesCount', { n: c.count }))}
+          <Tip text={rail ? label : ''}>
+            {#snippet children({ props })}
+              <button
+                {...mergeProps(props, { onclick: (e: MouseEvent) => choose(v, e) })}
+                class="item two"
+                class:on={current === v}
+                data-row
+                data-collection={c.id}
+                tabindex={current === v ? 0 : -1}
+                aria-current={current === v ? 'page' : undefined}
+                aria-label={label}
+                onkeydown={rowKeys}
+                oncontextmenu={(e) => openAt(e, c)}
+              >
+                <span class="stack" aria-hidden="true">
+                  {#if c.covers.length === 0}<span class="tile" style="--i: 0"></span>{/if}
+                  {#each [...c.covers.entries()].reverse() as [i, key] (key)}
+                    {#if art[key]}
+                      <img src={art[key]} alt="" width="20" height="30" decoding="async" style="--i: {i}" />
+                    {:else}
+                      <span class="tile" style="--i: {i}"></span>
+                    {/if}
+                  {/each}
+                </span>
+                <span class="text">
+                  <span class="name">{c.name}</span>
+                  <small>{t('sidebar.gamesCount', { n: c.count })}</small>
+                </span>
+              </button>
+            {/snippet}
+          </Tip>
           <ActionMenu label={c.name} actions={actions(c)} bind:open={() => more === c.id, (o) => (more = o ? c.id : more === c.id ? null : more)}>
             {#snippet trigger({ props })}
               <button {...props} class="more" tabindex="-1" aria-label={t('detail.moreActions')}>⋯</button>
@@ -358,10 +387,11 @@
         {/if}
       </div>
     {:else}
-      {#if !naming}<p class="note">{t('sidebar.noCollections')}</p>{/if}
+      {#if !naming && !rail}<p class="note">{t('sidebar.noCollections')}</p>{/if}
     {/each}
     {#if problem}<p class="note problem" role="alert">{problem}</p>{/if}
   </div>
+  {#if rail}{@render plus()}{/if}
 
   {#if counts.hidden > 0}
     {@render row(
@@ -376,30 +406,39 @@
     {#if downloading}
       <DownloadsPopover {progress} {queue} {games} bind:open={() => pop === 'downloads', showDownloads} {oncancel} {onpause} {onresume} {onmove}>
         {#snippet trigger({ props })}
-          <button
-            {...props}
-            class="item downloads"
-            bind:this={downloadsRow}
-            aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
-          >
-            <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-            <span class="name">{t('downloads.title')}</span>
-            <em>{jobCount}</em>
-            <span class="bar" aria-hidden="true"><i style="width: {fraction * 100}%"></i></span>
-          </button>
+          <Tip text={rail ? rowName(t('downloads.title'), jobCount) : ''}>
+            {#snippet children({ props: tip })}
+              <button
+                {...mergeProps(tip, props)}
+                class="item downloads"
+                bind:this={downloadsRow}
+                aria-label={t('toolbar.downloadsAt', { percent: `${Math.round(fraction * 100)}%` })}
+              >
+                {#if rail}<span class="ring" style="--done: {fraction * 100}%"></span>{/if}
+                <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+                <span class="name">{t('downloads.title')}</span>
+                <em>{jobCount}</em>
+                {#if !rail}<span class="bar" aria-hidden="true"><i style="width: {fraction * 100}%"></i></span>{/if}
+              </button>
+            {/snippet}
+          </Tip>
         {/snippet}
       </DownloadsPopover>
     {/if}
-    <button class="item" bind:this={settingsRow} onclick={onsettings} aria-label={attention ? t('toolbar.settingsAttention') : t('toolbar.settings')}>
-      <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-        <circle cx="12" cy="12" r="3" />
-        <path
-          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-        />
-      </svg>
-      <span class="name">{t('toolbar.settings')}</span>
-      {#if attention}<span class="dot"></span>{/if}
-    </button>
+    <Tip text={rail ? settingsName : ''}>
+      {#snippet children({ props })}
+        <button {...mergeProps(props, { onclick: onsettings })} class="item" bind:this={settingsRow} aria-label={settingsName}>
+          <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+          <span class="name">{t('toolbar.settings')}</span>
+          {#if attention}<span class="dot"></span>{/if}
+        </button>
+      {/snippet}
+    </Tip>
   </div>
 </nav>
 
@@ -697,5 +736,94 @@
     height: 8px;
     border-radius: 50%;
     background: var(--warn);
+  }
+
+  /* Instant, no width transition: the virtualised grid's column count follows its width. */
+  .rail {
+    width: 64px;
+    padding: 14px 10px;
+    align-items: center;
+  }
+
+  .rail .item {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .rail .item .line {
+    width: 20px;
+    height: 20px;
+  }
+
+  .rail .name,
+  .rail em,
+  .rail .text,
+  .rail .more {
+    display: none;
+  }
+
+  .rail .sec {
+    width: 28px;
+    height: 1px;
+    margin: 8px 0;
+    padding: 0;
+    background: var(--glass-line);
+  }
+
+  .rail .list {
+    scrollbar-width: none;
+  }
+
+  .rail .list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rail .stack {
+    width: 30px;
+    height: 36px;
+  }
+
+  .rail .stack img,
+  .rail .tile {
+    width: 23px;
+    height: 34px;
+  }
+
+  .rail .plus {
+    margin-top: 6px;
+  }
+
+  .rail .bottom {
+    align-items: center;
+  }
+
+  .rail .dot {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+
+  /* Progress as a ring inside the button's edge; it changes with each poll, never per frame. */
+  .ring {
+    position: absolute;
+    inset: 3px;
+    padding: 2px;
+    border-radius: 8px;
+    background: conic-gradient(var(--accent-2) 0 var(--done), transparent var(--done));
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+    pointer-events: none;
+  }
+
+  /* Over the content, out of the layout: the grid keeps the rail's width while a field, question or failure shows. */
+  .over {
+    position: relative;
+    z-index: 25;
+    margin-right: -160px;
+    background: var(--surface-2);
+    box-shadow: var(--shadow-modal);
   }
 </style>
