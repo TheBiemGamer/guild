@@ -75,6 +75,16 @@ pub async fn set_status(app: AppHandle, key: String, status: PlayStatus) -> Res<
     .await
 }
 
+/// A launch moves a Backlog game to Playing; anything else is left as it is.
+pub(crate) fn start_playing(state: &AppState, key: &str) -> Res<()> {
+    let keys = copy_keys(state, key)?;
+    change(state, |conn| {
+        cache::db::start_playing(conn, &keys, crate::library::unix_now())
+            .map(drop)
+            .map_err(Msg::from)
+    })
+}
+
 /// Every collection by name, with how many games are in it.
 #[tauri::command]
 #[specta::specta]

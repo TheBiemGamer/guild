@@ -1907,6 +1907,9 @@ fn record_play(state: &AppState, key: &str) {
     if let Err(e) = saved {
         tracing::warn!("record launch: {e}");
     }
+    if let Err(e) = super::lists::start_playing(state, key) {
+        tracing::warn!("start playing {key}: {e}");
+    }
 }
 
 /// Cancels a game's queued job: the active one is stopped (Legendary and gogdl resume it next time) and

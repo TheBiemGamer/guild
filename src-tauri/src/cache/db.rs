@@ -407,7 +407,6 @@ pub fn set_status(
 }
 
 /// A launch moves a game to Playing only while its newest status is Backlog (or none). Returns whether it wrote.
-#[allow(dead_code)] // used by the commands in a later task; drop then
 pub fn start_playing(conn: &mut Connection, keys: &[String], at: i64) -> Result<bool, Error> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut rows = Vec::new();
