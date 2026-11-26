@@ -138,11 +138,7 @@ pub fn launch(
     args.splice(2..2, ["--no-wine".to_string(), "--json".to_string()]);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let game = launch_command(&json(&args)?).ok_or(msg!(legendaryNoReason))?;
-    let mut game = crate::platform::windows_game(
-        game,
-        &ProviderKind::Epic.key(app_name),
-        options.proton.as_deref(),
-    )?;
+    let mut game = crate::platform::windows_game(game, &ProviderKind::Epic.key(app_name), options)?;
     Ok(Some(game.spawn()?))
 }
 
@@ -892,7 +888,7 @@ mod tests {
             offline: true,
             skip_version_check: true,
             exe: Some(r"bin\game.exe".into()),
-            proton: None,
+            ..LaunchOptions::default()
         };
         assert_eq!(
             launch_args("Fn", &all, false),

@@ -123,6 +123,8 @@ export const commands = {
 	syncSavesNow: (key: string) => __TAURI_INVOKE<null>("sync_saves_now", { key }),
 	/**  The Launch options tab of an installed Epic, GOG or Amazon copy; `None` for others. */
 	launchOptions: (key: string) => __TAURI_INVOKE<LaunchOptions | null>("launch_options", { key }),
+	/**  Linux: the game tools installed, for a game's Launch options; `None` on Windows. */
+	gameTools: () => __TAURI_INVOKE<GameTools | null>("game_tools"),
 	/**
 	 *  Saves an installed Epic, GOG or Amazon copy's launch options. `exe` may be absolute (from the file picker); it is
 	 *  stored relative to the install folder, and only when it is a file inside it. Returns what was stored.
@@ -438,6 +440,13 @@ export type GamePrefix = {
 	winetricks: boolean,
 };
 
+/**  Linux: gamescope, MangoHud and GameMode, as chosen in Settings, as installed, or as a game runs with. */
+export type GameTools = {
+	gamescope: boolean,
+	mangohud: boolean,
+	gamemode: boolean,
+};
+
 export type GridCover = {
 	/**  The full image, passed back to `save_custom_game`. */
 	url: string,
@@ -499,6 +508,10 @@ export type LaunchOptions = {
 	exe?: string | null,
 	/**  Linux: the Proton build this game runs with, by folder name; none follows Settings. */
 	proton?: string | null,
+	/**  Linux: whether it runs in gamescope, with MangoHud, with GameMode; none follows Settings. */
+	gamescope?: boolean | null,
+	mangohud?: boolean | null,
+	gamemode?: boolean | null,
 };
 
 export type Library = {
@@ -635,6 +648,8 @@ export type RunnerView = {
 	protons: ProtonView[],
 	proton: string | null,
 	winetricks: boolean,
+	/**  The game tools installed (`GameTools`). */
+	tools: GameTools,
 };
 
 export type SavesView = {
@@ -690,8 +705,12 @@ export type SettingsView = {
 	startWithWindows: boolean,
 	/**  Picks the Linux wording where the Windows one names Windows. */
 	linux: boolean,
-	/**  A Flatpak hides the autostart switch (the sandbox can't reach the host's autostart folder) and update checks. */
+	/**  A Flatpak hides update checks. */
 	flatpak: boolean,
+	/**  Linux: gamescope, MangoHud and GameMode for every game unless its launch options say otherwise. */
+	useGamescope: boolean,
+	useMangohud: boolean,
+	useGamemode: boolean,
 	closeToTray: boolean,
 	notifyDownloads: boolean,
 	appVersion: string,

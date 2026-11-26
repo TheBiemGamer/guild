@@ -336,8 +336,12 @@ pub struct SettingsView {
     start_with_windows: bool,
     /// Picks the Linux wording where the Windows one names Windows.
     linux: bool,
-    /// A Flatpak hides the autostart switch (the sandbox can't reach the host's autostart folder) and update checks.
+    /// A Flatpak hides update checks.
     flatpak: bool,
+    /// Linux: gamescope, MangoHud and GameMode for every game unless its launch options say otherwise.
+    use_gamescope: bool,
+    use_mangohud: bool,
+    use_gamemode: bool,
     close_to_tray: bool,
     notify_downloads: bool,
     app_version: String,
@@ -408,9 +412,16 @@ pub async fn settings_view(app: AppHandle) -> Res<SettingsView> {
             ambient: saved.ambient,
             cloud_saves: saved.cloud_saves,
             gog_cloud_saves: saved.gog_cloud_saves,
-            start_with_windows: app.autolaunch().is_enabled().unwrap_or(false),
+            start_with_windows: if crate::platform::flatpak() {
+                settings::portal_autostart(&conn)
+            } else {
+                app.autolaunch().is_enabled().unwrap_or(false)
+            },
             linux: cfg!(target_os = "linux"),
             flatpak: crate::platform::flatpak(),
+            use_gamescope: saved.game_tools.gamescope,
+            use_mangohud: saved.game_tools.mangohud,
+            use_gamemode: saved.game_tools.gamemode,
             close_to_tray: saved.close_to_tray,
             notify_downloads: saved.notify_downloads,
             app_version: app.package_info().version.to_string(),
@@ -443,6 +454,18 @@ pub async fn update_setting(app: AppHandle, name: String, value: Option<String>)
     blocking(move || {
         if name == settings::START_WITH_WINDOWS {
             settings::validate(&name, value.as_deref())?;
+            if crate::platform::flatpak() {
+                let on = value.as_deref() == Some("true");
+                let now = crate::platform::portal_autostart(on)
+                    .map_err(|e| msg!(cantChangeAutostart, detail = e))?;
+                let conn = cache::db::open(&app.state::<AppState>().dirs.db)?;
+                settings::update(&conn, &name, Some(&now.to_string()))?;
+                return if now == on {
+                    Ok(())
+                } else {
+                    Err(msg!(autostartNotAllowed))
+                };
+            }
             let autostart = app.autolaunch();
             let done = if value.as_deref() == Some("true") {
                 autostart.enable()
@@ -1074,6 +1097,9 @@ mod tests {
             start_with_windows: false,
             linux: false,
             flatpak: false,
+            use_gamescope: false,
+            use_mangohud: false,
+            use_gamemode: false,
             close_to_tray: true,
             notify_downloads: true,
             app_version: env!("CARGO_PKG_VERSION").into(),

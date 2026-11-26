@@ -104,6 +104,81 @@ pub fn tray_icon_dir() -> Option<std::path::PathBuf> {
     )
 }
 
+/// Holds off system sleep and screen blanking until dropped. Guild exiting or crashing ends it too: the hold
+/// belongs to its thread (Windows) or its session bus connection (Linux).
+pub struct Awake(#[allow(dead_code)] std::sync::mpsc::Sender<()>);
+
+/// Starts an `Awake` hold on its own thread, so a desktop that doesn't answer never stalls the caller.
+pub fn keep_awake() -> Awake {
+    let (hold, released) = std::sync::mpsc::channel();
+    if let Err(e) = std::thread::Builder::new()
+        .name("awake".into())
+        .spawn(move || hold_awake(&released))
+    {
+        tracing::warn!("keep awake: {e}");
+    }
+    Awake(hold)
+}
+
+/// Holds until `released` disconnects. The request is per thread, so it is set and cleared on this one.
+#[cfg(windows)]
+fn hold_awake(released: &std::sync::mpsc::Receiver<()>) {
+    use windows_sys::Win32::System::Power::{
+        ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
+    };
+    // SAFETY: plain flags in, the previous state out.
+    if unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) }
+        == 0
+    {
+        tracing::warn!("keep awake: Windows refused the request");
+        return;
+    }
+    _ = released.recv();
+    // SAFETY: as above.
+    unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
+}
+
+/// Holds through the desktop portal's idle Inhibit (KDE, GNOME and others; allowed in the Flatpak without a talk-name)
+/// until `released` disconnects. Without a portal the game just runs.
+#[cfg(target_os = "linux")]
+fn hold_awake(released: &std::sync::mpsc::Receiver<()>) {
+    use zbus::zvariant::{OwnedObjectPath, Value};
+    // Idle only: it keeps the screen on and stops idle suspend, like Windows' request; the gtk backend refuses the
+    // suspend flag, which would also block a suspend the owner asks for.
+    const IDLE: u32 = 8;
+    let inhibit = || -> zbus::Result<(zbus::blocking::Connection, OwnedObjectPath)> {
+        let bus = zbus::blocking::Connection::session()?;
+        let options = std::collections::HashMap::from([(
+            "reason",
+            Value::from(crate::msg::native("gameRunning")),
+        )]);
+        let reply = bus.call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.Inhibit"),
+            "Inhibit",
+            &("", IDLE, options),
+        )?;
+        let request = reply.body().deserialize()?;
+        Ok((bus, request))
+    };
+    let (bus, request) = match inhibit() {
+        Ok(held) => held,
+        Err(e) => return tracing::warn!("keep awake: {e}"),
+    };
+    _ = released.recv();
+    let closed = bus.call_method(
+        Some("org.freedesktop.portal.Desktop"),
+        &request,
+        Some("org.freedesktop.portal.Request"),
+        "Close",
+        &(),
+    );
+    if let Err(e) = closed {
+        tracing::warn!("keep awake: release: {e}");
+    }
+}
+
 /// Whether process `pid` runs and is named `image` (the name guards against a reused pid).
 #[cfg(windows)]
 pub fn pid_is(pid: u32, image: &str) -> bool {
@@ -552,6 +627,16 @@ pub struct RunnerView {
     pub protons: Vec<ProtonView>,
     pub proton: Option<String>,
     pub winetricks: bool,
+    /// The game tools installed (`GameTools`).
+    pub tools: GameTools,
+}
+
+/// Linux: gamescope, MangoHud and GameMode, as chosen in Settings, as installed, or as a game runs with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct GameTools {
+    pub gamescope: bool,
+    pub mangohud: bool,
+    pub gamemode: bool,
 }
 
 /// A Proton build found; only Guild's own may be removed.
@@ -601,24 +686,54 @@ pub fn protons() -> Vec<String> {
     crate::wine::proton_names()
 }
 
-/// A Windows game's program as it runs: as is on Windows. `key` is its copy key, `proton` its own Proton choice.
+/// A Windows game's program as it runs: as is on Windows. `key` is its copy key, `options` its launch options.
 #[cfg(windows)]
 pub fn windows_game(
     game: std::process::Command,
     _key: &str,
-    _proton: Option<&str>,
+    _options: &crate::library::tool::LaunchOptions,
 ) -> Result<std::process::Command, crate::msg::Msg> {
     Ok(game)
 }
 
-/// A Windows game's program as it runs: through umu-launcher and Proton, in the copy's own Wine prefix.
+/// A Windows game's program as it runs: through umu-launcher and its Proton choice, in the copy's own Wine prefix,
+/// inside its game tools.
 #[cfg(target_os = "linux")]
 pub fn windows_game(
     game: std::process::Command,
     key: &str,
-    proton: Option<&str>,
+    options: &crate::library::tool::LaunchOptions,
 ) -> Result<std::process::Command, crate::msg::Msg> {
-    crate::wine::game_command(game, key, proton)
+    crate::wine::game_command(game, key, options)
+}
+
+/// A native game's program as it runs: as is on Windows.
+#[cfg(windows)]
+pub fn native_game(
+    game: std::process::Command,
+    _options: &crate::library::tool::LaunchOptions,
+) -> std::process::Command {
+    game
+}
+
+/// A native Linux game's program as it runs: inside its game tools.
+#[cfg(target_os = "linux")]
+pub fn native_game(
+    game: std::process::Command,
+    options: &crate::library::tool::LaunchOptions,
+) -> std::process::Command {
+    crate::game_tools::wrap(game, crate::game_tools::chosen(options))
+}
+
+/// The game tools installed; `None` on Windows, which has none.
+#[cfg(windows)]
+pub fn game_tools() -> Option<GameTools> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn game_tools() -> Option<GameTools> {
+    Some(crate::game_tools::installed())
 }
 
 /// The copy whose Play installs umu-launcher or Proton first, and the download's percent; never on Windows.
@@ -814,6 +929,63 @@ pub fn autostart(_name: &str) -> Option<bool> {
 #[cfg(target_os = "linux")]
 pub fn remove_autostart(_name: &str) -> std::io::Result<()> {
     Ok(())
+}
+
+/// Windows has no Flatpak; its autostart is tauri-plugin-autostart's.
+#[cfg(windows)]
+pub fn portal_autostart(_on: bool) -> Result<bool, String> {
+    Err("no portal on Windows".into())
+}
+
+/// Asks the desktop portal's Background interface to start Guild on login (`on`) or not, since a Flatpak can't
+/// write the host's autostart folder. The desktop may ask the owner first. Returns whether autostart is now on.
+#[cfg(target_os = "linux")]
+pub fn portal_autostart(on: bool) -> Result<bool, String> {
+    use std::collections::HashMap;
+    use zbus::zvariant::{OwnedValue, Value};
+    let request = || -> zbus::Result<bool> {
+        let bus = zbus::blocking::Connection::session()?;
+        // The portal answers on a Request object whose path follows from our bus name and this token; listen first.
+        static REQUESTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let token = format!("guild{}_{n}", std::process::id());
+        let sender = bus
+            .unique_name()
+            .map(|n| n.trim_start_matches(':').replace('.', "_"))
+            .unwrap_or_default();
+        let response = zbus::blocking::proxy::Builder::<zbus::blocking::Proxy>::new(&bus)
+            .destination("org.freedesktop.portal.Desktop")?
+            .path(format!(
+                "/org/freedesktop/portal/desktop/request/{sender}/{token}"
+            ))?
+            .interface("org.freedesktop.portal.Request")?
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()?;
+        let mut answers = response.receive_signal("Response")?;
+        let commandline = vec!["guild", crate::tray::MINIMIZED];
+        let options = HashMap::from([
+            ("handle_token", Value::from(token.as_str())),
+            ("autostart", Value::from(on)),
+            ("commandline", Value::from(commandline)),
+        ]);
+        bus.call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.Background"),
+            "RequestBackground",
+            &("", options),
+        )?;
+        let answer = answers
+            .next()
+            .ok_or_else(|| zbus::Error::Failure("the portal never answered".into()))?;
+        let (status, results): (u32, HashMap<String, OwnedValue>) = answer.body().deserialize()?;
+        let granted = results
+            .get("autostart")
+            .and_then(|v| bool::try_from(v).ok())
+            .unwrap_or(false);
+        Ok(status == 0 && granted)
+    };
+    request().map_err(|e| e.to_string())
 }
 
 /// "Windows 11 (build 26200)", from the registry; builds from 22000 on are Windows 11.

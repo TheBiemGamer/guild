@@ -24,6 +24,11 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   # Download-finished notifications
   - --talk-name=org.freedesktop.Notifications
+  # MangoHud and gamescope from their Flathub Vulkan layer extensions, when installed; gamemoderun is in the runtime
+  - --env=PATH=/app/bin:/usr/bin:/usr/lib/extensions/vulkan/MangoHud/bin:/usr/lib/extensions/vulkan/gamescope/bin
+  - --env=LD_LIBRARY_PATH=/usr/lib/extensions/vulkan/gamescope/lib
+  - --filesystem=xdg-run/gamescope-0
+  - --filesystem=xdg-config/MangoHud:ro
   # Steam: its library, pid, registry.vdf and art (regular and Flatpak Steam); Guild never writes there
   - --filesystem=~/.steam:ro
   - --filesystem=xdg-data/Steam:ro

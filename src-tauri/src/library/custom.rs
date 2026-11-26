@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::tool::LaunchOptions;
 use super::{Art, Error, Game, Image, ProviderKind};
 use crate::cache::Dirs;
 use crate::msg::Msg;
@@ -116,11 +117,11 @@ fn command(c: &CustomGame) -> Command {
 }
 
 /// Starts the program and returns its process, to watch. Doesn't wait for it. On Linux the .exe runs through the
-/// runner (`platform::windows_game`) with `proton`, the game's own choice, else the one chosen in Settings.
-pub fn launch(c: &CustomGame, proton: Option<&str>) -> Result<std::process::Child, Error> {
+/// runner (`platform::windows_game`) with its own launch options (its Proton and game tools), else Settings'.
+pub fn launch(c: &CustomGame, options: &LaunchOptions) -> Result<std::process::Child, Error> {
     check_exe(&c.exe).map_err(|_| missing(&c.name))?;
     let key = ProviderKind::Custom.key(&c.id);
-    Ok(crate::platform::windows_game(command(c), &key, proton)?.spawn()?)
+    Ok(crate::platform::windows_game(command(c), &key, options)?.spawn()?)
 }
 
 #[cfg(test)]
@@ -200,7 +201,13 @@ mod tests {
         assert!(check_exe(&exe.to_string_lossy()).is_ok());
         assert!(check_exe(&bat.to_string_lossy()).is_err());
         assert!(check_exe(&dir.join("gone.exe").to_string_lossy()).is_err());
-        assert!(launch(&row(&dir.join("gone.exe").to_string_lossy(), ""), None).is_err());
+        assert!(
+            launch(
+                &row(&dir.join("gone.exe").to_string_lossy(), ""),
+                &LaunchOptions::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]

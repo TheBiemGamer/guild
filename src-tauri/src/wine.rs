@@ -13,6 +13,7 @@ use serde_json::Value;
 use sha2::{Sha256, Sha512};
 
 use crate::cache::{Dirs, db};
+use crate::library::tool::LaunchOptions;
 use crate::msg::Msg;
 use crate::platform::{ProtonKind, ProtonView, ReleaseView, RunnerView};
 use crate::tools::{Installing, download};
@@ -31,7 +32,7 @@ const UMU_IDS_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// GitHub's API refuses requests without a User-Agent.
-fn http() -> &'static reqwest::Client {
+pub fn http() -> &'static reqwest::Client {
     static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
         reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
@@ -46,7 +47,7 @@ fn managed_umu(tools: &Path) -> PathBuf {
     tools.join("umu").join("umu").join("umu-run")
 }
 
-fn on_path(name: &str) -> Option<PathBuf> {
+pub fn on_path(name: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|dir| dir.join(name))
         .find(|p| p.is_file())
@@ -271,9 +272,16 @@ fn wrap(game: &Command, key: &str, proton: Option<&str>) -> Result<(Command, Pro
 
 /// A game's launch through `wrap`. When umu still has to fetch the Steam Linux Runtime or set the prefix up, the copy
 /// counts as setting up (`setting_up`) until the game's own program runs.
-pub fn game_command(game: Command, key: &str, proton: Option<&str>) -> Result<Command, Msg> {
+pub fn game_command(mut game: Command, key: &str, options: &LaunchOptions) -> Result<Command, Msg> {
     install_runner(key)?;
-    let (mut command, proton) = wrap(&game, key, proton)?;
+    // A variable the store tool or the game's own options already set wins over a known fix.
+    for (name, value) in crate::known_fixes::env(key) {
+        if !game.get_envs().any(|(set, _)| set == name.as_str()) {
+            game.env(name, value);
+        }
+    }
+    let (command, proton) = wrap(&game, key, options.proton.as_deref())?;
+    let mut command = crate::game_tools::wrap(command, crate::game_tools::chosen(options));
     match fs_err::File::create(crate::log::game_output(key)) {
         Ok(file) => _ = command.stderr(file.into_file()),
         Err(e) => tracing::warn!("game output: {e}"),
@@ -531,6 +539,7 @@ pub fn view() -> RunnerView {
     RunnerView {
         umu: umu().is_some(),
         winetricks: on_path("winetricks").is_some() || protons.iter().any(bundles_winetricks),
+        tools: crate::game_tools::installed(),
         protons: protons
             .into_iter()
             .map(|p| ProtonView {

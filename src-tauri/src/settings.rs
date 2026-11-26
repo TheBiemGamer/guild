@@ -17,13 +17,18 @@ pub const CLOSE_TO_TRAY: &str = "close_to_tray";
 pub const NOTIFY_DOWNLOADS: &str = "notify_downloads";
 /// "system" (Windows' display language), "en" or "nl" (`msg::is_language`).
 pub const LANGUAGE: &str = "language";
-/// Not stored: the autostart entry in the registry is the truth (`commands::settings`).
+/// Stored only in a Flatpak, where the portal writes the host's autostart entry out of Guild's reach; elsewhere
+/// the entry itself is the truth (`commands::settings`).
 pub const START_WITH_WINDOWS: &str = "start_with_windows";
 pub const EPIC_INSTALL_DIR: &str = "epic_install_dir";
 pub const GOG_INSTALL_DIR: &str = "gog_install_dir";
 pub const AMAZON_INSTALL_DIR: &str = "amazon_install_dir";
 /// Linux: the Proton build Windows games run with, by folder name (`wine`); none is the newest found.
 pub const PROTON: &str = "proton";
+/// Linux: whether games run in gamescope, with MangoHud or with GameMode unless their launch options say otherwise.
+pub const GAMESCOPE: &str = "gamescope";
+pub const MANGOHUD: &str = "mangohud";
+pub const GAMEMODE: &str = "gamemode";
 pub const IGDB_CLIENT_ID: &str = "igdb_client_id";
 /// The library's sort, as the toolbar last left it (serde names: `mostPlayed`, `longestToBeat`). It sets
 /// the grouping too. An old `library_group` row is left alone and ignored.
@@ -52,9 +57,11 @@ pub struct Settings {
     pub sort: Sort,
     /// The Language setting as saved; `msg::resolve` turns it into a language.
     pub language: String,
+    /// Linux: gamescope, MangoHud and GameMode for every game; off by default.
+    pub game_tools: crate::platform::GameTools,
 }
 
-/// Unset or unreadable values fall back to the defaults: every switch on, the language Windows'.
+/// Unset or unreadable values fall back to the defaults: every switch on but the game tools, the language Windows'.
 pub fn load(conn: &Connection) -> Settings {
     let get = |name| db::setting(conn, name).ok().flatten();
     Settings {
@@ -74,6 +81,11 @@ pub fn load(conn: &Connection) -> Settings {
         language: get(LANGUAGE)
             .filter(|v| crate::msg::is_language(v))
             .unwrap_or_else(|| "system".into()),
+        game_tools: crate::platform::GameTools {
+            gamescope: get(GAMESCOPE).is_some_and(|v| v == "true"),
+            mangohud: get(MANGOHUD).is_some_and(|v| v == "true"),
+            gamemode: get(GAMEMODE).is_some_and(|v| v == "true"),
+        },
     }
 }
 
@@ -81,7 +93,7 @@ pub fn load(conn: &Connection) -> Settings {
 pub fn validate(name: &str, value: Option<&str>) -> Result<(), Msg> {
     match name {
         SHOW_BANNER | AMBIENT | CLOUD_SAVES | GOG_CLOUD_SAVES | CLOSE_TO_TRAY
-        | NOTIFY_DOWNLOADS | START_WITH_WINDOWS => match value {
+        | NOTIFY_DOWNLOADS | START_WITH_WINDOWS | GAMESCOPE | MANGOHUD | GAMEMODE => match value {
             None | Some("true" | "false") => Ok(()),
             Some(_) => Err(msg!(settingNotBool, name = name)),
         },
@@ -127,6 +139,15 @@ pub fn take_updated(conn: &Connection, current: &str) -> Option<String> {
         return None;
     }
     seen.map(|_| current.to_string())
+}
+
+/// Whether the Background portal was last told to start Guild on login (a Flatpak only).
+pub fn portal_autostart(conn: &Connection) -> bool {
+    db::setting(conn, START_WITH_WINDOWS)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
 }
 
 /// Whether the owner logged out of `store` ("epic", "gog", "amazon") with Log out, so its Settings dot stays down

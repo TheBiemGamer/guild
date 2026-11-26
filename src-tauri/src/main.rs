@@ -12,10 +12,14 @@ mod downloads;
 mod entries;
 mod epic_login;
 mod epic_playtime;
+#[cfg(target_os = "linux")]
+mod game_tools;
 mod gamesdb;
 mod gog_login;
 mod igdb;
 mod info;
+#[cfg(target_os = "linux")]
+mod known_fixes;
 mod library;
 mod links;
 mod log;
@@ -127,6 +131,7 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
             commands::game::set_saves,
             commands::game::sync_saves_now,
             commands::game::launch_options,
+            commands::game::game_tools,
             commands::game::set_launch_options,
             commands::game::open_steam_properties,
             commands::library::poll,
