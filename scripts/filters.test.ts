@@ -1,18 +1,7 @@
 // node --test scripts/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  collectionFilter,
-  filterChips,
-  filterGroups,
-  isList,
-  matches,
-  removeChip,
-  storeSegments,
-  titleMatches,
-  toggleFilter,
-  type Filter,
-} from '../src/lib/filters.ts'
+import { collectionFilter, filterChips, filterGroups, matches, removeChip, storeSegments, titleMatches, toggleFilter, type Filter } from '../src/lib/filters.ts'
 
 test('chips follow the popover order, one per filter that is on', () => {
   assert.deepEqual(filterChips([]), [])
@@ -107,37 +96,19 @@ test('the new groups widen inside and narrow across', () => {
   )
 })
 
-const collections = [
-  { id: 3, name: 'Backlog', count: 2 },
-  { id: 7, name: 'Co-op', count: 1 },
-]
-
-test('Lists come after Status: Favorites, each collection, then Hidden', () => {
-  const lists = filterGroups(collections)[1]
-  assert.deepEqual(lists, { label: 'Lists', filters: ['favorites', 'collection-3', 'collection-7', 'hidden'] })
-  assert.deepEqual(filterGroups([])[1].filters, ['favorites', 'hidden'])
+test('the popover has no Lists group', () => {
   assert.deepEqual(
-    filterGroups([]).map((g) => g.label),
-    ['Status', 'Lists', 'Your playtime', 'How long to beat', 'Has'],
+    filterGroups().map((g) => g.label),
+    ['Status', 'Your playtime', 'How long to beat', 'Has'],
   )
 })
 
-test('list chips are named after the list and come after Status', () => {
-  const on: Filter[] = ['bothStores', 'hidden', collectionFilter(7), 'notInstalled', 'favorites']
-  assert.deepEqual(
-    filterChips(on, collections).map((c) => c.label),
-    ['Not installed', 'Favorites', 'Co-op', 'Hidden', 'On more than one store'],
-  )
-  const left = removeChip(on, filterChips(on, collections)[2])
-  assert.deepEqual(left, ['bothStores', 'hidden', 'notInstalled', 'favorites'])
-  assert.ok(isList('collection-7') && isList('hidden') && !isList('update'))
-})
-
-test('lists widen each other and narrow the other groups', () => {
+test('the view relies on lists widening each other and narrowing the other groups', () => {
   const fav = { ...game, favorite: true }
   const inCoop = { ...game, collections: [7] }
   const hidden = { ...game, hidden: true, installed: false }
   assert.ok(matches(fav, ['favorites'], {}))
+  assert.ok(!matches(game, ['favorites'], {}))
   assert.ok(!matches(inCoop, ['favorites'], {}))
   assert.ok(matches(inCoop, ['favorites', collectionFilter(7)], {}))
   assert.ok(!matches(inCoop, [collectionFilter(3)], {}))
@@ -154,10 +125,10 @@ test('more than one store means two or more, of any stores', () => {
 })
 
 test('the Has group shows only with more than one store in use', () => {
-  const ids = (multi: boolean) => filterGroups([], multi).flatMap((g) => g.filters)
+  const ids = (multi: boolean) => filterGroups(multi).flatMap((g) => g.filters)
   assert.ok(ids(true).includes('bothStores'))
   assert.ok(!ids(false).includes('bothStores'))
-  assert.equal(filterGroups([], false).length, filterGroups([]).length - 1)
+  assert.equal(filterGroups(false).length, filterGroups().length - 1)
 })
 
 test('store segments: All plus the stores in use, none for a single store', () => {

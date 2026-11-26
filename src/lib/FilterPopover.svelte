@@ -1,109 +1,25 @@
 <script lang="ts">
   import { Popover } from 'bits-ui'
-  import { tick, type Snippet } from 'svelte'
-  import * as api from './api'
-  import { commands } from './bindings'
-  import { collectionFilter, filterGroups, filterName, toggleFilter, type Collection, type Filter } from './filters'
+  import type { Snippet } from 'svelte'
+  import { filterGroups, filterName, toggleFilter, type Filter } from './filters'
   import { t } from './i18n'
   import { keepOnBackForward } from './outside'
-  import Tip from './Tip.svelte'
 
   let {
     filters = $bindable(),
-    collections,
     multiStore,
     open = $bindable(),
     trigger,
-    onchanged,
   }: {
     filters: Filter[]
-    collections: Collection[]
     /** The library uses more than one store: the Has group shows. */
     multiStore: boolean
     open: boolean
     /** The Filters chip: spread `props` on it. */
     trigger: Snippet<[{ props: Record<string, unknown> }]>
-    /** After a collection was renamed or deleted. */
-    onchanged: () => void
   } = $props()
 
-  const groups = $derived(filterGroups(collections, multiStore))
-
-  let managing = $state(false)
-  let manageButton = $state<HTMLButtonElement>()
-  let renaming = $state<number | null>(null)
-  let draft = $state('')
-  let deleting = $state<number | null>(null)
-  /** Why the last rename or delete failed. */
-  let problem = $state<string | null>(null)
-  let panel = $state<HTMLDivElement>()
-
-  // Each opening starts with the list closed, as when the popover was mounted per opening.
-  $effect(() => {
-    if (open) return
-    managing = false
-    renaming = deleting = null
-    problem = null
-  })
-
-  async function focusIn(selector: string) {
-    await tick()
-    panel?.querySelector<HTMLElement>(selector)?.focus()
-  }
-
-  function startRename(c: Collection) {
-    renaming = c.id
-    draft = c.name
-    problem = null
-    focusIn('input')
-  }
-
-  async function saveRename(c: Collection) {
-    if (renaming !== c.id) return
-    renaming = null
-    if (draft.trim() === c.name) return
-    try {
-      await commands.renameCollection(c.id, draft)
-      problem = null
-    } catch (e) {
-      problem = api.message(e)
-    }
-    onchanged()
-  }
-
-  function renameKeydown(e: KeyboardEvent, c: Collection) {
-    if (e.key === 'Enter') saveRename(c)
-    else if (e.key === 'Escape') {
-      // Stopped before bits-ui's Escape listener on document: only the rename ends, not the popover.
-      e.preventDefault()
-      e.stopPropagation()
-      renaming = null
-      focusIn(`[data-name="${c.id}"]`)
-    }
-  }
-
-  function askDelete(c: Collection) {
-    deleting = c.id
-    problem = null
-    focusIn('.cancel')
-  }
-
-  function keep(c: Collection) {
-    deleting = null
-    focusIn(`[data-delete="${c.id}"]`)
-  }
-
-  async function remove(c: Collection) {
-    deleting = null
-    try {
-      await commands.deleteCollection(c.id)
-      filters = filters.filter((f) => f !== collectionFilter(c.id))
-    } catch (e) {
-      problem = api.message(e)
-    }
-    manageButton?.focus()
-    onchanged()
-  }
+  const groups = $derived(filterGroups(multiStore))
 </script>
 
 <Popover.Root bind:open>
@@ -121,54 +37,13 @@
               <h3 id="filter-group-{i}">{group.label}</h3>
               <div class="toggles" role="group" aria-labelledby="filter-group-{i}">
                 {#each group.filters as f (f)}
-                  <button aria-pressed={filters.includes(f)} onclick={() => (filters = toggleFilter(filters, f))}>{filterName(f, collections)}</button>
+                  <button aria-pressed={filters.includes(f)} onclick={() => (filters = toggleFilter(filters, f))}>{filterName(f)}</button>
                 {/each}
               </div>
             {/each}
             <div class="foot">
               <button class="link" onclick={() => (filters = [])}>{t('filters.clear')}</button>
-              <button class="link" bind:this={manageButton} aria-expanded={managing} aria-controls="manage-collections" onclick={() => (managing = !managing)}>
-                {t('filters.manage')}
-              </button>
             </div>
-            {#if managing}
-              <div class="manage" id="manage-collections" bind:this={panel}>
-                {#each collections as c (c.id)}
-                  <div class="row">
-                    {#if deleting === c.id}
-                      <span class="ask">{t('filters.askDelete', { name: c.name })}</span>
-                      <button class="small danger" onclick={() => remove(c)}>{t('common.delete')}</button>
-                      <button class="small cancel" onclick={() => keep(c)}>{t('common.cancel')}</button>
-                    {:else if renaming === c.id}
-                      <input
-                        aria-label={t('filters.renameNamed', { name: c.name })}
-                        bind:value={draft}
-                        onkeydown={(e) => renameKeydown(e, c)}
-                        onblur={() => saveRename(c)}
-                      />
-                    {:else}
-                      <Tip text={t('filters.rename')}>
-                        {#snippet children({ props })}
-                          <button
-                            {...props}
-                            class="name"
-                            data-name={c.id}
-                            aria-label={t('filters.renameNamed', { name: c.name })}
-                            onclick={() => startRename(c)}>{c.name}</button
-                          >
-                        {/snippet}
-                      </Tip>
-                      <button class="x" data-delete={c.id} aria-label={t('filters.deleteNamed', { name: c.name })} onclick={() => askDelete(c)}>✕</button>
-                    {/if}
-                  </div>
-                {:else}
-                  <p class="note">{t('filters.noCollections')}</p>
-                {/each}
-                {#if problem}<Tip text={problem} truncated>
-                    {#snippet children({ props })}<p {...props} class="note problem" role="alert">{problem}</p>{/snippet}
-                  </Tip>{/if}
-              </div>
-            {/if}
           </div>
         </div>
       {/snippet}
@@ -255,96 +130,5 @@
   .link:hover:not(:disabled) {
     background: transparent;
     color: var(--text);
-  }
-
-  .manage {
-    display: grid;
-    gap: 2px;
-    margin-top: 8px;
-  }
-
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 32px;
-    font-size: 13px;
-  }
-
-  .name {
-    flex: 1;
-    min-width: 0;
-    padding: 6px 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-align: left;
-    background: transparent;
-  }
-
-  .name:hover:not(:disabled),
-  .x:hover:not(:disabled) {
-    background: var(--glass-hover);
-  }
-
-  .x {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    flex: none;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--text-3);
-    font-size: 11px;
-  }
-
-  .x:hover:not(:disabled) {
-    color: var(--text);
-  }
-
-  input {
-    flex: 1;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 10px;
-    background: var(--glass);
-    border: 1px solid var(--glass-line);
-    font-size: 13px;
-  }
-
-  .ask {
-    flex: 1;
-    min-width: 0;
-    color: var(--text);
-  }
-
-  .small {
-    flex: none;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    background: var(--glass-hover);
-    border: 1px solid var(--glass-line);
-    font-size: 13px;
-  }
-
-  .small:hover:not(:disabled) {
-    background: var(--glass-on);
-  }
-
-  .danger {
-    color: var(--danger-text);
-  }
-
-  .note {
-    margin: 4px 8px;
-    font-size: 13px;
-    color: var(--text-2);
-  }
-
-  .problem {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 </style>

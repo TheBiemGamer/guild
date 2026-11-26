@@ -2,7 +2,19 @@
   import { Tooltip } from 'bits-ui'
   import type { Snippet } from 'svelte'
 
-  let { text, truncated = false, children }: { text: string; truncated?: boolean; children: Snippet<[{ props: Record<string, unknown> }]> } = $props()
+  let {
+    text,
+    truncated = false,
+    side = 'top',
+    sideOffset = 6,
+    children,
+  }: {
+    text: string
+    truncated?: boolean
+    side?: 'top' | 'right' | 'bottom' | 'left'
+    sideOffset?: number
+    children: Snippet<[{ props: Record<string, unknown> }]>
+  } = $props()
 
   let open = $state(false)
   /** The element the pointer or focus last reached; measured when the tooltip is about to open. */
@@ -40,7 +52,7 @@
     {/snippet}
   </Tooltip.Trigger>
   <Tooltip.Portal>
-    <Tooltip.Content class="tip" sideOffset={6} collisionPadding={8}>{text}</Tooltip.Content>
+    <Tooltip.Content class="tip" {side} {sideOffset} collisionPadding={8}>{text}</Tooltip.Content>
   </Tooltip.Portal>
 </Tooltip.Root>
 

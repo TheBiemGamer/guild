@@ -20,15 +20,18 @@
   let {
     actions,
     label,
+    at = null,
     open = $bindable(),
     trigger,
   }: {
     actions: Action[]
     /** The menu's accessible name. */
     label: string
+    /** Opens at the pointer (a right-click); otherwise it hangs below `trigger`, right-aligned. */
+    at?: { x: number; y: number } | null
     open: boolean
     /** The caller's ⋯ button: spread `props` on it. */
-    trigger: Snippet<[{ props: Record<string, unknown> }]>
+    trigger?: Snippet<[{ props: Record<string, unknown> }]>
   } = $props()
 
   let content = $state<HTMLElement | null>(null)
@@ -53,16 +56,19 @@
 </script>
 
 <DropdownMenu.Root bind:open>
-  <DropdownMenu.Trigger>
-    {#snippet child({ props })}
-      {@render trigger({ props })}
-    {/snippet}
-  </DropdownMenu.Trigger>
+  {#if trigger}
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        {@render trigger({ props })}
+      {/snippet}
+    </DropdownMenu.Trigger>
+  {/if}
   <DropdownMenu.Portal>
     <DropdownMenu.Content
       bind:ref={content}
-      align="end"
-      sideOffset={8}
+      customAnchor={at ? { getBoundingClientRect: () => new DOMRect(at.x, at.y, 0, 0) } : null}
+      align={at ? 'start' : 'end'}
+      sideOffset={at ? 0 : 8}
       collisionPadding={8}
       preventScroll={false}
       aria-label={label}

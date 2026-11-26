@@ -103,6 +103,34 @@ pub struct Library {
     amazon_attention: bool,
     /// The stores the whole library has a game from, in toolbar order; games the owner added don't count.
     stores: Vec<ProviderKind>,
+    /// For the sidebar's rows.
+    counts: Counts,
+}
+
+#[derive(Serialize, specta::Type)]
+pub struct Counts {
+    /// Cards that are not hidden.
+    library: usize,
+    /// Favorites that are not hidden.
+    favorites: usize,
+    hidden: usize,
+}
+
+fn sidebar_counts(entries: &[Entry], games: &[Game], lists: &Lists) -> Counts {
+    let mut c = Counts {
+        library: 0,
+        favorites: 0,
+        hidden: 0,
+    };
+    for e in entries {
+        if lists.hidden(e, games) {
+            c.hidden += 1;
+        } else {
+            c.library += 1;
+            c.favorites += usize::from(lists.favorite(e, games));
+        }
+    }
+    c
 }
 
 /// `lists` are the Lists filters that are on ("favorites", "hidden", "collection-<id>"); the UI applies
@@ -171,6 +199,7 @@ pub fn library(
         amazon: s.amazon_login,
         amazon_attention,
         stores: stores_in_use(&s.games),
+        counts: sidebar_counts(&s.entries, &s.games, &s.lists),
     }
 }
 
@@ -250,6 +279,8 @@ pub struct ViewPrefs {
 pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
     blocking(move || {
         let state = app.state::<AppState>();
+        // Held until the lists are published, so a list change can't be overwritten by an older read.
+        let turn = state.lists_write.lock().expect("lists lock poisoned");
         let conn = cache::db::open(&state.dirs.db)?;
         let mut games = cache::db::load(&conn)?;
         view::merge_last_played(&mut games, &cache::db::launches(&conn)?);
@@ -261,6 +292,7 @@ pub async fn load_cache(app: AppHandle) -> Res<ViewPrefs> {
         let mut s = state.lock();
         s.ttb = ttb;
         s.lists = lists;
+        drop(turn);
         // A scan that already finished wins over the cache.
         if s.games.is_empty() {
             s.games = games;
@@ -1864,6 +1896,24 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_counts_count_cards_and_leave_hidden_out() {
+        use crate::view::tests::game;
+        let games = vec![
+            game("a", true, None, None),
+            game("b", true, None, None),
+            game("c", true, None, None),
+        ];
+        let entries = entries::group(&games, &HashMap::new());
+        let lists = Lists {
+            favorite: HashSet::from([games[0].key(), games[1].key()]),
+            hidden: HashSet::from([games[1].key(), games[2].key()]),
+            ..Lists::default()
+        };
+        let c = sidebar_counts(&entries, &games, &lists);
+        assert_eq!((c.library, c.favorites, c.hidden), (1, 1, 2));
+    }
+
+    #[test]
     fn library_payload_snapshot() {
         let (games, entries, lists) = payload_games();
         let ttb = HashMap::from([("steam-635320".to_string(), 6 * 3600)]);
@@ -1893,6 +1943,7 @@ mod tests {
             amazon: None,
             amazon_attention: false,
             stores: stores_in_use(&games),
+            counts: sidebar_counts(&entries, &games, &lists),
         };
         insta::assert_json_snapshot!(library);
     }

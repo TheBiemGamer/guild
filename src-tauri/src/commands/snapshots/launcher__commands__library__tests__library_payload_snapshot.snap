@@ -80,5 +80,10 @@ expression: library
     "steam",
     "epic",
     "gog"
-  ]
+  ],
+  "counts": {
+    "library": 2,
+    "favorites": 1,
+    "hidden": 0
+  }
 }

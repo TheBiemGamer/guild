@@ -316,8 +316,10 @@ export type Card = {
 export type Collection = {
 	id: number,
 	name: string,
-	/**  Games in it. */
+	/**  Games in it, hidden ones left out. */
 	count: number,
+	/**  Up to three entry keys of its games, most recently played first. */
+	covers: string[],
 };
 
 /**  Why an Epic or GOG Play didn't launch yet: the question to ask first. */
@@ -340,6 +342,14 @@ export type CopyView = {
 	installDir: string | null,
 	/**  An installed Epic or GOG copy that keeps its saves in its store's cloud. */
 	cloudSaves: boolean,
+};
+
+export type Counts = {
+	/**  Cards that are not hidden. */
+	library: number,
+	/**  Favorites that are not hidden. */
+	favorites: number,
+	hidden: number,
 };
 
 export type Cover = {
@@ -537,6 +547,8 @@ export type Library = {
 	amazonAttention: boolean,
 	/**  The stores the whole library has a game from, in toolbar order; games the owner added don't count. */
 	stores: Store[],
+	/**  For the sidebar's rows. */
+	counts: Counts,
 };
 
 export type LinkKind = "steamStore" | "epicStore" | "pcGamingWiki" | "steamDb" | "protonDb";

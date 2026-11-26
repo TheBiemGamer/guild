@@ -26,7 +26,7 @@
     /** The library as loaded, for titles; a game hidden by the search is asked for once. */
     games: Card[]
     open: boolean
-    /** The Downloads chip: spread `props` on it. */
+    /** The sidebar's Downloads row: spread `props` on it. */
     trigger: Snippet<[{ props: Record<string, unknown> }]>
     oncancel: (key: string) => void
     onpause: () => void
@@ -99,7 +99,7 @@
     {/snippet}
   </Popover.Trigger>
   <Popover.Portal>
-    <Popover.Content align="end" sideOffset={8} collisionPadding={8} onInteractOutside={keepOnBackForward}>
+    <Popover.Content side="right" align="end" sideOffset={8} collisionPadding={8} onInteractOutside={keepOnBackForward}>
       {#snippet child({ props, wrapperProps })}
         <div {...wrapperProps}>
           <div {...props} class="pop" role="dialog" aria-label={t('downloads.title')}>

@@ -34,6 +34,8 @@ pub struct AppState {
     dirs: Dirs,
     http: reqwest::Client,
     shared: Mutex<Shared>,
+    /// Held from reading the lists in SQLite to publishing them in `shared`. Taken before `shared`, never after.
+    lists_write: Mutex<()>,
     cover_jobs: tokio::sync::Semaphore,
     /// Held across every Steam logon (download size, DLC, owned games), so they never stack.
     steam_size: tokio::sync::Mutex<()>,
@@ -157,6 +159,7 @@ impl AppState {
                 status: vec![msg!(loadingLibrary)],
                 ..Shared::default()
             }),
+            lists_write: Mutex::new(()),
             cover_jobs: tokio::sync::Semaphore::new(COVER_JOBS),
             steam_size: tokio::sync::Mutex::new(()),
             scans: library::ScanTurns::default(),
