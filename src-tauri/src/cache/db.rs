@@ -410,11 +410,11 @@ pub fn set_status(
 /// A launch moves a game to Playing only while its newest status is Backlog (or none). Returns whether it wrote.
 #[allow(dead_code)] // used by the commands in a later task; drop then
 pub fn start_playing(conn: &mut Connection, keys: &[String], at: i64) -> Result<bool, Error> {
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut rows = Vec::new();
     for key in keys {
-        if let Some((status, at)) = pref(&tx, key, STATUS)?.as_deref().and_then(parse_status) {
-            rows.push((key.as_str(), status, at));
+        if let Some((status, set_at)) = pref(&tx, key, STATUS)?.as_deref().and_then(parse_status) {
+            rows.push((key.as_str(), status, set_at));
         }
     }
     if newest_status(rows) != PlayStatus::Backlog {
@@ -1255,6 +1255,12 @@ mod tests {
         set_pref(&conn, "epic-A", STATUS, Some("backlog:200")).unwrap();
         let keys = ["steam-1".to_string(), "epic-A".to_string()];
         assert!(start_playing(&mut conn, &keys, 300).unwrap());
+        for key in &keys {
+            assert_eq!(
+                pref(&conn, key, STATUS).unwrap().as_deref(),
+                Some("playing:300")
+            );
+        }
         set_pref(&conn, "steam-1", STATUS, Some("beaten:400")).unwrap();
         assert!(!start_playing(&mut conn, &keys, 500).unwrap());
     }
