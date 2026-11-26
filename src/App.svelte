@@ -190,8 +190,11 @@
 
   /** The game menu a card's right-click opened, at the pointer; bits-ui returns focus to what had it. */
   let cardMenu = $state<{ game: Card; x: number; y: number } | null>(null)
+  // Kept after close: a pick's handler runs once bits-ui has closed the menu and still reads the game.
+  let cardMenuOpen = $state(false)
   function openCardMenu(game: Card, x: number, y: number) {
     cardMenu = { game, x, y }
+    cardMenuOpen = true
   }
 
   $effect(() => {
@@ -744,7 +747,7 @@
       <GameMenu
         game={cardMenu.game}
         at={cardMenu}
-        bind:open={() => cardMenu !== null, (o) => !o && (cardMenu = null)}
+        bind:open={cardMenuOpen}
         label={cardMenu.game.title}
         onchanged={reload}
         onerror={(m) => (error = m)}
