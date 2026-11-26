@@ -209,8 +209,8 @@
       problem = null
     } catch (e) {
       problem = api.message(e)
-      // Saved by leaving the field: focus already left, so bring it back where Escape closes the note.
-      if (!nav?.contains(document.activeElement)) rowOf(c.id)?.focus()
+      // Saved by leaving the field onto nothing focusable: focus is lost, so bring it back where Escape closes the note.
+      if (!document.activeElement || document.activeElement === document.body) rowOf(c.id)?.focus()
     }
     onchanged()
   }
