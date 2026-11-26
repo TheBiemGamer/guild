@@ -1,6 +1,6 @@
 // The sidebar's pure view logic. `node --test scripts/` loads it as plain TypeScript: types only from Svelte-side modules.
 
-import type { Collection, Counts, Progress, QueueView } from './bindings.ts'
+import type { Collection, Counts, PlayStatus, Progress, QueueView } from './bindings.ts'
 import { collectionFilter, type Filter, type ListFilter } from './filters.ts'
 
 export type Pop = 'filters' | 'downloads' | 'sort' | 'update'
@@ -20,6 +20,7 @@ export function viewCount(view: View, counts: Counts, collections: readonly Coll
   if (view === null) return counts.library
   if (view === 'favorites') return counts.favorites
   if (view === 'hidden') return counts.hidden
+  if (view.startsWith('status-')) return counts[view.slice('status-'.length) as PlayStatus]
   return collections.find((c) => collectionFilter(c.id) === view)?.count ?? 0
 }
 
@@ -27,6 +28,8 @@ export function viewCount(view: View, counts: Counts, collections: readonly Coll
 export function fallbackView(view: View, counts: Counts, collections: readonly Collection[]): View {
   if (view === 'favorites') return counts.favorites > 0 ? view : null
   if (view === 'hidden') return counts.hidden > 0 ? view : null
+  if (view === 'status-playing' || view === 'status-beaten' || view === 'status-dropped') return viewCount(view, counts, collections) > 0 ? view : null
+  if (view === 'status-backlog') return view
   if (view !== null && !collections.some((c) => collectionFilter(c.id) === view)) return null
   return view
 }

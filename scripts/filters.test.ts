@@ -1,7 +1,20 @@
 // node --test scripts/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collectionFilter, filterChips, filterGroups, matches, removeChip, storeSegments, titleMatches, toggleFilter, type Filter } from '../src/lib/filters.ts'
+import {
+  collectionFilter,
+  filterChips,
+  filterGroups,
+  filterName,
+  isList,
+  matches,
+  removeChip,
+  storeSegments,
+  titleMatches,
+  toggleFilter,
+  type Filter,
+} from '../src/lib/filters.ts'
+import type { PlayStatus } from '../src/lib/bindings.ts'
 
 test('chips follow the popover order, one per filter that is on', () => {
   assert.deepEqual(filterChips([]), [])
@@ -42,7 +55,7 @@ const game = {
   ttbHours: 10,
   favorite: false,
   hidden: false,
-  status: 'backlog',
+  status: 'backlog' as PlayStatus,
   collections: [] as number[],
 }
 
@@ -100,7 +113,7 @@ test('the new groups widen inside and narrow across', () => {
 test('the popover has no Lists group', () => {
   assert.deepEqual(
     filterGroups().map((g) => g.label),
-    ['Status', 'Your playtime', 'How long to beat', 'Has'],
+    ['Install', 'Your playtime', 'How long to beat', 'Has'],
   )
 })
 
@@ -145,4 +158,16 @@ test('import picker matches part of the title, any case', () => {
   assert.equal(titleMatches('Hollow Knight', '  knight '), true)
   assert.equal(titleMatches('Hollow Knight', 'celeste'), false)
   assert.equal(titleMatches('Hollow Knight', ''), true)
+})
+
+test('a status view keeps only its status', () => {
+  assert.ok(isList('status-playing'))
+  assert.ok(matches({ ...game, status: 'beaten' }, ['status-beaten'], {}))
+  assert.ok(!matches({ ...game, status: 'backlog' }, ['status-beaten'], {}))
+  assert.ok(matches({ ...game, status: 'beaten', installed: false }, ['status-beaten', 'notInstalled'], {}))
+  assert.equal(filterName('status-backlog'), 'Backlog')
+})
+
+test('the install group is named Install', () => {
+  assert.equal(filterGroups()[0].label, 'Install')
 })

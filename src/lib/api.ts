@@ -28,7 +28,7 @@ import { render } from './messages'
 import { t } from './i18n'
 
 /** What the game menu needs of a game (a card or the game page). */
-export type Listed = Pick<Card, 'key' | 'title' | 'favorite' | 'hidden' | 'collections'>
+export type Listed = Pick<Card, 'key' | 'title' | 'favorite' | 'hidden' | 'collections' | 'status'>
 export const emptyQueue: QueueView = { jobs: [], paused: false, active: null }
 /** Where one of `keys` (a game's copy keys) is in the queue: running, paused at the head, or waiting; null when not queued. */
 export interface QueueState {

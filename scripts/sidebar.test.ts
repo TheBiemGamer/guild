@@ -5,7 +5,7 @@ import { downloadFraction, fallbackView, viewCount, viewLists, withView } from '
 import type { Filter } from '../src/lib/filters.ts'
 import type { Progress, QueueView } from '../src/lib/bindings.ts'
 
-const counts = { library: 9, favorites: 2, hidden: 1, playing: 0, backlog: 0, beaten: 0, dropped: 0 }
+const counts = { library: 9, favorites: 2, hidden: 1, playing: 2, backlog: 5, beaten: 1, dropped: 0 }
 const collections = [{ id: 3, name: 'Backlog', count: 4, covers: [] }]
 
 test('the view joins the filters matches() gets', () => {
@@ -43,4 +43,11 @@ test('the download fraction is the active job, else the average, else 0', () => 
   assert.ok(Math.abs(downloadFraction({ a: job(0.2), b: job(0.6) }, queue(null)) - 0.4) < 1e-9)
   assert.equal(downloadFraction({}, queue(null)), 0)
   assert.equal(downloadFraction({ a: job(0.5) }, queue('gone')), 0.5)
+})
+
+test('a status view counts its status and only Backlog survives an empty count', () => {
+  assert.equal(viewCount('status-playing', counts, []), 2)
+  assert.equal(fallbackView('status-dropped', counts, []), null)
+  assert.equal(fallbackView('status-playing', counts, []), 'status-playing')
+  assert.equal(fallbackView('status-backlog', { ...counts, backlog: 0 }, []), 'status-backlog')
 })

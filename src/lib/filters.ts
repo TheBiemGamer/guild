@@ -2,7 +2,7 @@
 // as plain TypeScript.
 
 import { t } from './i18n.ts'
-import type { Collection } from './bindings.ts'
+import type { Collection, PlayStatus } from './bindings.ts'
 
 export type Filter =
   | 'notInstalled'
@@ -20,17 +20,20 @@ export type Filter =
   | 'bothStores'
   | ListFilter
 
-/** The Lists group: favorites, hidden games and the owner's collections (by id). */
-export type ListFilter = 'favorites' | 'hidden' | `collection-${number}`
+export const STATUSES = ['playing', 'backlog', 'beaten', 'dropped'] as const satisfies readonly PlayStatus[]
+
+/** The Lists group: favorites, hidden games, the play statuses and the owner's collections (by id). */
+export type ListFilter = 'favorites' | 'hidden' | `status-${PlayStatus}` | `collection-${number}`
+export const statusFilter = (s: PlayStatus): ListFilter => `status-${s}`
 export const collectionFilter = (id: number): ListFilter => `collection-${id}`
-export const isList = (f: Filter): f is ListFilter => f === 'favorites' || f === 'hidden' || f.startsWith('collection-')
+export const isList = (f: Filter): f is ListFilter => f === 'favorites' || f === 'hidden' || f.startsWith('status-') || f.startsWith('collection-')
 
 export type { Collection }
 
 type Group = { label: string; filters: Filter[] }
 /** `id` names the group's words: `filters.group.<id>`. */
 type Ids = { id: string; filters: Filter[] }
-const status: Ids = { id: 'status', filters: ['notInstalled', 'update', 'downloading'] }
+const install: Ids = { id: 'install', filters: ['notInstalled', 'update', 'downloading'] }
 const rest: Ids[] = [
   { id: 'playtime', filters: ['neverPlayed', 'under10h', 'played10to50h', 'played50hPlus'] },
   { id: 'ttb', filters: ['ttbUnder5h', 'ttb5to15h', 'ttb15to40h', 'ttb40to100h', 'ttb100hPlus'] },
@@ -40,7 +43,7 @@ const rest: Ids[] = [
 /** The popover's groups, in order. Filters in one group widen each other (or); groups narrow (and).
  * Has (more than one store) is left out when the library uses fewer than two stores (`multiStore` false). */
 export function filterGroups(multiStore = true): Group[] {
-  return [status, ...rest].filter((g) => multiStore || g.id !== 'has').map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
+  return [install, ...rest].filter((g) => multiStore || g.id !== 'has').map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
 }
 
 /** The toolbar's store segments for the stores the library uses, null being All; none when there is only one store. */
@@ -50,6 +53,7 @@ export function storeSegments<S extends string>(inUse: readonly S[]): (S | null)
 
 /** A collection is named after itself; one that no longer exists has no name. */
 export function filterName(filter: Filter, collections: readonly Collection[] = []): string {
+  if (filter.startsWith('status-')) return t(`status.${filter.slice('status-'.length)}`)
   if (!filter.startsWith('collection-')) return t(`filters.${filter}`)
   return collections.find((c) => collectionFilter(c.id) === filter)?.name ?? ''
 }
@@ -88,6 +92,7 @@ export interface Filterable {
   ttbHours: number | null
   favorite: boolean
   hidden: boolean
+  status: PlayStatus
   /** Ids of the collections it is in. */
   collections: readonly number[]
 }
@@ -128,13 +133,14 @@ function test(filter: Filter, game: Filterable, progress: Record<string, unknown
     case 'hidden':
       return game.hidden
     default:
+      if (filter.startsWith('status-')) return game.status === filter.slice('status-'.length)
       return game.collections.includes(Number(filter.slice('collection-'.length)))
   }
 }
 
 /** Whether the game passes the filters that are on; `progress` is `poll`'s map, by copy key. */
 export function matches(game: Filterable, on: readonly Filter[], progress: Record<string, unknown>): boolean {
-  return [status.filters, on.filter(isList), ...rest.map((g) => g.filters)].every((filters) => {
+  return [install.filters, on.filter(isList), ...rest.map((g) => g.filters)].every((filters) => {
     const active = filters.filter((f) => on.includes(f))
     return active.length === 0 || active.some((f) => test(f, game, progress))
   })
