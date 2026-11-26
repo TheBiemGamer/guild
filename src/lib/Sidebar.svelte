@@ -276,8 +276,8 @@
     // The Menu key and Shift+F10 may come without a pointer position.
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const keyboard = e.clientX === 0 && e.clientY === 0
-    // In the rail the menu opens beside the icon, not over the rows below it.
-    ctx = { c, x: keyboard ? (rail ? r.right + 8 : r.left + 16) : e.clientX, y: keyboard ? (rail ? r.top : r.bottom) : e.clientY }
+    // In the rail the menu always opens beside the icon, not over the rows below it.
+    ctx = rail ? { c, x: r.right + 8, y: r.top } : { c, x: keyboard ? r.left + 16 : e.clientX, y: keyboard ? r.bottom : e.clientY }
     ctxOpen = true
   }
 </script>
