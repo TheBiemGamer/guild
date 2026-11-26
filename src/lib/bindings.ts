@@ -135,6 +135,7 @@ export const commands = {
 	poll: () => __TAURI_INVOKE<Poll>("poll"),
 	setFavorite: (key: string, on: boolean) => __TAURI_INVOKE<null>("set_favorite", { key, on }),
 	setHidden: (key: string, on: boolean) => __TAURI_INVOKE<null>("set_hidden", { key, on }),
+	setStatus: (key: string, status: PlayStatus) => __TAURI_INVOKE<null>("set_status", { key, status }),
 	/**  Every collection by name, with how many games are in it. */
 	collections: () => __TAURI_INVOKE<Collection[]>("collections"),
 	/**  Returns the new collection's id. */
@@ -311,6 +312,7 @@ export type Card = {
 	favorite: boolean,
 	hidden: boolean,
 	collections: number[],
+	status: PlayStatus,
 };
 
 export type Collection = {
@@ -350,6 +352,11 @@ export type Counts = {
 	/**  Favorites that are not hidden. */
 	favorites: number,
 	hidden: number,
+	/**  Play statuses over the cards that are not hidden. */
+	playing: number,
+	backlog: number,
+	beaten: number,
+	dropped: number,
 };
 
 export type Cover = {
@@ -394,6 +401,7 @@ export type Detail = {
 	favorite: boolean,
 	hidden: boolean,
 	collections: number[],
+	status: PlayStatus,
 };
 
 export type DetailArt = {
@@ -569,6 +577,9 @@ export type Msg = {
 export type Param = Msg | 
 /**  Shown as is: a title, a path, a tool's own words, or text stored before message codes. */
 string;
+
+/**  Where the owner is with a game. Stored per copy key as `"{status}:{unix seconds}"`. */
+export type PlayStatus = "playing" | "backlog" | "beaten" | "dropped";
 
 export type Poll = {
 	/**  Key of the game running: Steam's, or the Epic or added game watched since its launch here. */

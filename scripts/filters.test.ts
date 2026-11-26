@@ -42,6 +42,7 @@ const game = {
   ttbHours: 10,
   favorite: false,
   hidden: false,
+  status: 'backlog',
   collections: [] as number[],
 }
 

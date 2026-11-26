@@ -27,7 +27,7 @@ use crate::msg::{Msg, Param};
 use crate::platform::kill_tree;
 use crate::settings;
 use crate::steam_size;
-use crate::view;
+use crate::view::{self, PlayStatus};
 
 #[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +57,7 @@ pub struct Detail {
     favorite: bool,
     hidden: bool,
     collections: Vec<i64>,
+    status: PlayStatus,
 }
 
 #[derive(Serialize, specta::Type)]
@@ -147,6 +148,7 @@ fn detail(
         favorite: lists.favorite(entry, games),
         hidden: lists.hidden(entry, games),
         collections: lists.collections(entry, games),
+        status: lists.status(entry, games),
     }
 }
 

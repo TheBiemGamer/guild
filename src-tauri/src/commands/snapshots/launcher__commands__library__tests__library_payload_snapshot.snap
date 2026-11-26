@@ -24,7 +24,8 @@ expression: library
       "hidden": false,
       "collections": [
         3
-      ]
+      ],
+      "status": "backlog"
     },
     {
       "key": "gog-1425609977",
@@ -42,7 +43,8 @@ expression: library
       "ttbHours": null,
       "favorite": false,
       "hidden": false,
-      "collections": []
+      "collections": [],
+      "status": "backlog"
     }
   ],
   "groups": [
@@ -84,6 +86,10 @@ expression: library
   "counts": {
     "library": 2,
     "favorites": 1,
-    "hidden": 0
+    "hidden": 0,
+    "playing": 0,
+    "backlog": 2,
+    "beaten": 0,
+    "dropped": 0
   }
 }

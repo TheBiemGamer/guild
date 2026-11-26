@@ -5,7 +5,7 @@ import { downloadFraction, fallbackView, viewCount, viewLists, withView } from '
 import type { Filter } from '../src/lib/filters.ts'
 import type { Progress, QueueView } from '../src/lib/bindings.ts'
 
-const counts = { library: 9, favorites: 2, hidden: 1 }
+const counts = { library: 9, favorites: 2, hidden: 1, playing: 0, backlog: 0, beaten: 0, dropped: 0 }
 const collections = [{ id: 3, name: 'Backlog', count: 4, covers: [] }]
 
 test('the view joins the filters matches() gets', () => {

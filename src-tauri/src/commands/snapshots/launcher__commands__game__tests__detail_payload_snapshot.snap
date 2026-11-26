@@ -52,5 +52,6 @@ expression: detail
   ],
   "favorite": false,
   "hidden": false,
-  "collections": []
+  "collections": [],
+  "status": "backlog"
 }

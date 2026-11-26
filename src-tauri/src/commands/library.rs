@@ -21,7 +21,7 @@ use crate::library::{amazon, gog};
 use crate::msg::Msg;
 use crate::settings;
 use crate::steam_owned::{self, OwnedGame, OwnedOutcome};
-use crate::view::{self, Lists, Sort};
+use crate::view::{self, Lists, PlayStatus, Sort};
 
 /// How long a launched Epic or added game may take to show up as a process before we stop looking.
 const START_GRACE: Duration = Duration::from_secs(30);
@@ -47,6 +47,7 @@ pub struct Card {
     favorite: bool,
     hidden: bool,
     collections: Vec<i64>,
+    status: PlayStatus,
 }
 
 /// The key of the copy Play and Install use.
@@ -59,6 +60,7 @@ fn card(e: &Entry, games: &[Game], ttb: &HashMap<String, u64>, lists: &Lists) ->
         favorite: lists.favorite(e, games),
         hidden: lists.hidden(e, games),
         collections: lists.collections(e, games),
+        status: lists.status(e, games),
         key: e.key.clone(),
         chosen: chosen(e, games),
         copy_keys: e.copies.iter().map(|&i| games[i].key()).collect(),
@@ -114,6 +116,11 @@ pub struct Counts {
     /// Favorites that are not hidden.
     favorites: usize,
     hidden: usize,
+    /// Play statuses over the cards that are not hidden.
+    playing: usize,
+    backlog: usize,
+    beaten: usize,
+    dropped: usize,
 }
 
 fn sidebar_counts(entries: &[Entry], games: &[Game], lists: &Lists) -> Counts {
@@ -121,6 +128,10 @@ fn sidebar_counts(entries: &[Entry], games: &[Game], lists: &Lists) -> Counts {
         library: 0,
         favorites: 0,
         hidden: 0,
+        playing: 0,
+        backlog: 0,
+        beaten: 0,
+        dropped: 0,
     };
     for e in entries {
         if lists.hidden(e, games) {
@@ -128,6 +139,12 @@ fn sidebar_counts(entries: &[Entry], games: &[Game], lists: &Lists) -> Counts {
         } else {
             c.library += 1;
             c.favorites += usize::from(lists.favorite(e, games));
+            match lists.status(e, games) {
+                PlayStatus::Playing => c.playing += 1,
+                PlayStatus::Backlog => c.backlog += 1,
+                PlayStatus::Beaten => c.beaten += 1,
+                PlayStatus::Dropped => c.dropped += 1,
+            }
         }
     }
     c
@@ -1902,15 +1919,21 @@ mod tests {
             game("a", true, None, None),
             game("b", true, None, None),
             game("c", true, None, None),
+            game("d", true, None, None),
         ];
         let entries = entries::group(&games, &HashMap::new());
         let lists = Lists {
             favorite: HashSet::from([games[0].key(), games[1].key()]),
             hidden: HashSet::from([games[1].key(), games[2].key()]),
+            status: HashMap::from([
+                (games[0].key(), (crate::view::PlayStatus::Beaten, 1)),
+                (games[2].key(), (crate::view::PlayStatus::Playing, 1)),
+            ]),
             ..Lists::default()
         };
         let c = sidebar_counts(&entries, &games, &lists);
-        assert_eq!((c.library, c.favorites, c.hidden), (1, 1, 2));
+        assert_eq!((c.library, c.favorites, c.hidden), (2, 1, 2));
+        assert_eq!((c.playing, c.backlog, c.beaten, c.dropped), (0, 1, 1, 0));
     }
 
     #[test]

@@ -42,7 +42,6 @@ pub enum PlayStatus {
 
 impl PlayStatus {
     /// The serde spelling, as stored.
-    #[allow(dead_code)] // used by the commands in a later task; drop then
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Playing => "playing",
@@ -61,7 +60,6 @@ pub fn parse_status(value: &str) -> Option<(PlayStatus, i64)> {
 }
 
 /// The status set last across a game's copies; a tie goes to the smallest key, none is `Backlog`.
-#[allow(dead_code)] // used by the commands in a later task; drop then
 pub fn newest_status<'a>(rows: impl IntoIterator<Item = (&'a str, PlayStatus, i64)>) -> PlayStatus {
     rows.into_iter()
         .min_by_key(|&(key, _, at)| (Reverse(at), key))
@@ -110,7 +108,6 @@ impl Lists {
         ids
     }
 
-    #[allow(dead_code)] // used by the commands in a later task; drop then
     pub fn status(&self, e: &Entry, games: &[Game]) -> PlayStatus {
         let keys: Vec<String> = e.copies.iter().map(|&i| games[i].key()).collect();
         newest_status(keys.iter().filter_map(|k| {

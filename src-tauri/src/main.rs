@@ -137,6 +137,7 @@ fn bindings() -> tauri_specta::Builder<tauri::Wry> {
             commands::library::poll,
             commands::lists::set_favorite,
             commands::lists::set_hidden,
+            commands::lists::set_status,
             commands::lists::collections,
             commands::lists::create_collection,
             commands::lists::rename_collection,

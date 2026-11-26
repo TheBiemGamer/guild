@@ -7,6 +7,7 @@ use super::{AppState, Res, blocking, open_db};
 use crate::cache;
 use crate::entries;
 use crate::msg::Msg;
+use crate::view::PlayStatus;
 
 #[derive(Serialize, specta::Type)]
 pub struct Collection {
@@ -19,18 +20,17 @@ pub struct Collection {
 }
 
 /// Every copy key of the game with this key.
-fn copy_keys(state: &AppState, key: &str) -> Res<Vec<String>> {
+pub(crate) fn copy_keys(state: &AppState, key: &str) -> Res<Vec<String>> {
     let s = state.lock();
     let entry = entries::find(&s.entries, &s.games, key).ok_or(msg!(gameNotInLibrary))?;
     Ok(entry.copies.iter().map(|&i| s.games[i].key()).collect())
 }
 
 /// Runs a change on the database, then reads the lists again for the library.
-fn change<T>(app: &AppHandle, f: impl FnOnce(&mut rusqlite::Connection) -> Res<T>) -> Res<T> {
-    let state = app.state::<AppState>();
+fn change<T>(state: &AppState, f: impl FnOnce(&mut rusqlite::Connection) -> Res<T>) -> Res<T> {
     // Held to the publish below, so two changes can't publish their reads out of order.
     let _turn = state.lists_write.lock().expect("lists lock poisoned");
-    let mut conn = open_db(&state).ok_or(msg!(noDb))?;
+    let mut conn = open_db(state).ok_or(msg!(noDb))?;
     let out = f(&mut conn)?;
     let lists = cache::db::lists(&conn)?;
     state.lock().lists = lists;
@@ -40,7 +40,7 @@ fn change<T>(app: &AppHandle, f: impl FnOnce(&mut rusqlite::Connection) -> Res<T
 async fn set_flag(app: AppHandle, key: String, name: &'static str, on: bool) -> Res<()> {
     blocking(move || {
         let keys = copy_keys(&app.state::<AppState>(), &key)?;
-        change(&app, |conn| {
+        change(&app.state::<AppState>(), |conn| {
             keys.iter()
                 .try_for_each(|k| cache::db::set_pref(conn, k, name, on.then_some("1")))
                 .map_err(Msg::from)
@@ -59,6 +59,20 @@ pub async fn set_favorite(app: AppHandle, key: String, on: bool) -> Res<()> {
 #[specta::specta]
 pub async fn set_hidden(app: AppHandle, key: String, on: bool) -> Res<()> {
     set_flag(app, key, cache::db::HIDDEN, on).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_status(app: AppHandle, key: String, status: PlayStatus) -> Res<()> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let keys = copy_keys(&state, &key)?;
+        change(&state, |conn| {
+            cache::db::set_status(conn, &keys, status, crate::library::unix_now())
+                .map_err(Msg::from)
+        })
+    })
+    .await
 }
 
 /// Every collection by name, with how many games are in it.
@@ -127,7 +141,7 @@ fn collections_in(conn: &rusqlite::Connection) -> Res<Vec<(i64, String)>> {
 #[specta::specta]
 pub async fn create_collection(app: AppHandle, name: String) -> Res<i64> {
     blocking(move || {
-        change(&app, |conn| {
+        change(&app.state::<AppState>(), |conn| {
             let name = check_name(&name, &collections_in(conn)?, None)?;
             cache::db::create_collection(conn, &name).map_err(Msg::from)
         })
@@ -139,7 +153,7 @@ pub async fn create_collection(app: AppHandle, name: String) -> Res<i64> {
 #[specta::specta]
 pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()> {
     blocking(move || {
-        change(&app, |conn| {
+        change(&app.state::<AppState>(), |conn| {
             let name = check_name(&name, &collections_in(conn)?, Some(id))?;
             cache::db::rename_collection(conn, id, &name).map_err(Msg::from)
         })
@@ -152,7 +166,7 @@ pub async fn rename_collection(app: AppHandle, id: i64, name: String) -> Res<()>
 #[specta::specta]
 pub async fn delete_collection(app: AppHandle, id: i64) -> Res<()> {
     blocking(move || {
-        change(&app, |conn| {
+        change(&app.state::<AppState>(), |conn| {
             cache::db::delete_collection(conn, id).map_err(Msg::from)
         })
     })
@@ -164,7 +178,7 @@ pub async fn delete_collection(app: AppHandle, id: i64) -> Res<()> {
 pub async fn set_in_collection(app: AppHandle, key: String, id: i64, on: bool) -> Res<()> {
     blocking(move || {
         let keys = copy_keys(&app.state::<AppState>(), &key)?;
-        change(&app, |conn| {
+        change(&app.state::<AppState>(), |conn| {
             if !collections_in(conn)?.iter().any(|(c, _)| *c == id) {
                 return Err(msg!(collectionGone));
             }

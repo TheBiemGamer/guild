@@ -84,7 +84,7 @@
     amazon: null,
     amazonAttention: false,
     stores: [],
-    counts: { library: 0, favorites: 0, hidden: 0 },
+    counts: { library: 0, favorites: 0, hidden: 0, playing: 0, backlog: 0, beaten: 0, dropped: 0 },
   })
   let featured = $state<Featured | null>(null)
   let version = $state(0)

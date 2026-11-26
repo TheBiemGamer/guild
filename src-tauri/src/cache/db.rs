@@ -391,7 +391,6 @@ pub const HIDDEN: &str = "hidden";
 pub const STATUS: &str = "status";
 
 /// Writes the status to every copy key in one transaction.
-#[allow(dead_code)] // used by the commands in a later task; drop then
 pub fn set_status(
     conn: &mut Connection,
     keys: &[String],
