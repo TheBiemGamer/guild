@@ -209,6 +209,8 @@
       problem = null
     } catch (e) {
       problem = api.message(e)
+      // Saved by leaving the field: focus already left, so bring it back where Escape closes the note.
+      if (!nav?.contains(document.activeElement)) rowOf(c.id)?.focus()
     }
     onchanged()
   }
@@ -300,7 +302,17 @@
   </Tip>
 {/snippet}
 
-<nav class="side" class:rail class:over={narrow.current && editing} aria-label={t('sidebar.label')} bind:this={nav}>
+<!-- Nothing else closes a failure note, and in a narrow window it holds the overlay open. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<nav
+  class="side"
+  class:rail
+  class:over={narrow.current && editing}
+  aria-label={t('sidebar.label')}
+  bind:this={nav}
+  onkeydown={(e) => e.key === 'Escape' && (problem = null)}
+  onfocusout={(e) => !nav?.contains(e.relatedTarget as Node | null) && (problem = null)}
+>
   {@render row(
     null,
     t('app.library'),
@@ -451,7 +463,9 @@
 <style>
   .side {
     flex: none;
-    width: 224px;
+    --open-width: 224px;
+    --rail-width: 64px;
+    width: var(--open-width);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -740,7 +754,7 @@
 
   /* Instant, no width transition: the virtualised grid's column count follows its width. */
   .rail {
-    width: 64px;
+    width: var(--rail-width);
     padding: 14px 10px;
     align-items: center;
   }
@@ -822,7 +836,7 @@
   .over {
     position: relative;
     z-index: 25;
-    margin-right: -160px;
+    margin-right: calc(var(--rail-width) - var(--open-width));
     background: var(--surface-2);
     box-shadow: var(--shadow-modal);
   }
