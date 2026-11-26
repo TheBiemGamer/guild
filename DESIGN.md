@@ -270,11 +270,11 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
   - Escape or a click outside closes only the top layer (a menu, popover or tooltip opened inside, or Steam log in over Settings) and returns focus to what opened it. Mouse Back and Forward never close a dialog (`keepOnBackForward`), and App ignores them while one is open.
   - Stacking: Settings and Add a game 20, the install popup and Notes 30, Steam log in 40, menus and the other popovers 50, tooltips 60.
 - **Cover card:**
-  - States: installed is full color. Not installed is `saturate(0.5) brightness(0.75)` with a bottom-left glass Install chip. Running gets the green badge and ring. Installing gets a 6px progress strip. Queued and Paused get glass chips.
-  - In the playtime and length sorts, a stat chip ("38 h played", "~25 h to beat") takes the same spot.
+  - States: installed is full color. Not installed is `saturate(0.5) brightness(0.75)`, with no chip at rest; its cover button's label says it isn't installed. Running gets the green badge and ring. Installing gets a 6px progress strip. Queued and Paused get glass chips.
+  - In the playtime and length sorts, a stat chip ("38 h played", "~25 h to beat") sits bottom-left. An installed game with an update gets an Update chip there.
   - Loading: while the cover loads the card shows `surface-2`, then the cover's average color, then the image fading in over 150ms.
-  - The store logo sits top-right in a 26px glass circle.
-  - On hover: lift, white ring, title, and a small Play or Install pill. The hover overlay is absent when idle, not transparent, to keep scrolling cheap.
+  - The store logos sit top-right, one 26px glass circle per store, at 77% scale and 60% opacity at rest and full size and opacity on hover and focus.
+  - On hover and focus: lift, white ring, title, and a small pill: the white Play pill when installed, a glass Install pill when not. The hover overlay is absent when idle, not transparent, to keep scrolling cheap.
 - **Notices:** `glass-strong`, 12px radius, with a dismiss button. Errors get a red border and `error-text` and are `role="alert"`; the others are `role="status"`.
 - **Fields:** 36px, `glass` fill, `glass-line` border, `text-3` placeholder. Saved secrets show only as a read-only "••••••••" field with "Saved", Replace and Remove; the real value never reaches the UI.
 - **Toggle:** 40×22 pill, white 18% off, `accent` on, a bits-ui `Switch`; Space and Enter flip it.
@@ -318,7 +318,7 @@ No UI text below 11px. Counts and numbers use tabular figures. Folder paths in t
 ## Owner decisions
 
 - The look: last-played art blurred and saturated behind everything, dark glass chrome, white pill for the primary action (2026-11-05).
-- Covers carry the real store logo top-right. Not installed means faded, with an Install chip bottom-left (option C).
+- Covers carry the real store logo top-right. Not installed means faded, with no chip at rest; Install shows on hover (2026-11-26).
 - The game page's fact tiles are Playtime, Last played and How long to beat, not size. Size lives in Details.
 - Settings is a frosted panel with Accounts, General and About, as grouped rows (settings v4, 2026-11-07). Its section list switches sections instead of scrolling to them, and Services moved into Accounts as Game data (2026-11-09). Don't show tool versions there, except when an update is available.
 - Ambient color can be turned off, which gives a neutral dark gradient.

@@ -27,7 +27,7 @@
     game: Card
     /** Place in the grid; covers are asked in this order. */
     index: number
-    /** Which hours the bottom-left badge shows; it takes Install's place on a game that isn't installed. */
+    /** Which hours the bottom-left badge shows. */
     stat?: 'playtime' | 'ttb' | null
     running: boolean
     /** Its Play is starting. */
@@ -65,7 +65,7 @@
   /** The status chip's id: the cover button is described by it. */
   const statusId = $props.id()
   /** A badge or chip shows (the same order as the markup; the progress strip has no text). */
-  const hasStatus = $derived(running || !!waiting || (!progress && ((game.installed && game.update) || !!statText || !game.installed)))
+  const hasStatus = $derived(running || !!waiting || (!progress && ((game.installed && game.update) || !!statText)))
 
   let el: HTMLDivElement
   // undefined: still asking. null: no art, so the title shows.
@@ -116,7 +116,7 @@
     onpointerleave={() => clearTimeout(resting)}
     onfocus={() => prefetch(game)}
     title={game.title}
-    aria-label={t('common.openGame', { title: game.title })}
+    aria-label={game.installed ? t('common.openGame', { title: game.title }) : t('card.openNotInstalled', { title: game.title })}
     aria-describedby={hasStatus ? statusId : undefined}
   >
     {#if art === null}
@@ -170,11 +170,6 @@
     </span>
   {:else if statText}
     <span class="chip stat" id={statusId}>{statText}</span>
-  {:else if !game.installed}
-    <span class="chip" id={statusId}>
-      <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-      {t('common.install')}
-    </span>
   {/if}
 
   {#if !running && (!progress || waiting)}
@@ -197,7 +192,7 @@
           {t('play.play')}
         </button>
       {:else if !game.installed}
-        <button class="pill small" onclick={() => oninstall(game.chosen, el.getBoundingClientRect())}>
+        <button class="glass small" onclick={() => oninstall(game.chosen, el.getBoundingClientRect())}>
           <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
           {t('common.install')}
         </button>
@@ -286,7 +281,7 @@
     object-fit: cover;
   }
 
-  /* Option C: not installed fades a little, and the chip says what's next. */
+  /* Not installed fades a little; Install waits for hover. */
   .out .open img {
     filter: saturate(0.5) brightness(0.75);
   }
@@ -333,6 +328,19 @@
     flex-direction: column;
     gap: 4px;
     pointer-events: none;
+    /* Quiet at rest (26px × 0.77 ≈ 20px); transform and opacity keep scrolling composite-only. */
+    opacity: 0.6;
+    transform: scale(0.77);
+    transform-origin: top right;
+    transition:
+      transform 160ms ease-out,
+      opacity 160ms ease-out;
+  }
+
+  .card:hover .logos,
+  .card:focus-within .logos {
+    opacity: 1;
+    transform: none;
   }
 
   .logo {

@@ -283,6 +283,7 @@
   "card.hoursPlayed": "{n} h played",
   "card.favorite": "Favorite {title}",
   "card.queued": "Queued",
+  "card.openNotInstalled": "Open {title}, not installed",
   "filters.title": "Filters",
   "filters.clear": "Clear",
   "filters.manage": "Manage collections…",

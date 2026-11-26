@@ -283,6 +283,7 @@
   "card.hoursPlayed": "{n} u gespeeld",
   "card.favorite": "Favoriet: {title}",
   "card.queued": "In wachtrij",
+  "card.openNotInstalled": "{title} openen, niet geïnstalleerd",
   "filters.title": "Filters",
   "filters.clear": "Wissen",
   "filters.manage": "Collecties beheren…",
