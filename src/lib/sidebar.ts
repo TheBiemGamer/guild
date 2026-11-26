@@ -14,7 +14,7 @@ export type View = ListFilter | null
 export const withView = (filters: readonly Filter[], view: View): Filter[] => (view ? [...filters, view] : [...filters])
 
 /** What `library(lists)` gets. */
-export const viewLists = (view: View): string[] => (view ? [view] : [])
+export const viewLists = (view: View): ListFilter[] => (view ? [view] : [])
 
 export function viewCount(view: View, counts: Counts, collections: readonly Collection[]): number {
   if (view === null) return counts.library

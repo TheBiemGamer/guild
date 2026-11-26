@@ -41,6 +41,7 @@
   } from './lib/bindings'
   import Ambient from './lib/Ambient.svelte'
   import Toolbar from './lib/Toolbar.svelte'
+  import Sidebar from './lib/Sidebar.svelte'
   import Continue from './lib/Continue.svelte'
   import Grid from './lib/Grid.svelte'
   import Detail from './lib/Detail.svelte'
@@ -49,7 +50,8 @@
   import GameMenu from './lib/GameMenu.svelte'
   import AddGame from './lib/AddGame.svelte'
   import NotesPopover, { installedNotes } from './lib/NotesPopover.svelte'
-  import { collectionFilter, isList, matches, type Filter } from './lib/filters'
+  import { filterName, matches, type Filter } from './lib/filters'
+  import { fallbackView, RAIL_BELOW, viewCount, viewLists, withView, type Pop, type View } from './lib/sidebar'
   import { around, t } from './lib/i18n'
   import { setLanguage } from './lib/lang.svelte'
 
@@ -59,7 +61,13 @@
   let installedOnly = $state(false)
   /** The Filters popover's extra filters, applied here to the loaded list. */
   let filters = $state<Filter[]>([])
-  let popoverOpen = $state(false)
+  /** The sidebar's chosen row; never a filter. */
+  let view = $state<View>(null)
+  /** The view the loaded `lib` is for: the grid filters and groups against it, not a newer one still loading. */
+  let libView = $state<View>(null)
+  let pop = $state<Pop | null>(null)
+  /** A popover is open; mouse Back/Forward are ignored meanwhile, as for Settings. */
+  const popoverOpen = $derived(pop !== null)
   let collections = $state<Collection[]>([])
 
   let lib = $state<Library>({
@@ -101,6 +109,8 @@
   let refreshedAt = $state<number | null>(null)
   /** The saved library has been read; until then the window stays quiet instead of saying "loading". */
   let started = $state(false)
+  /** The first screen of covers has settled; the sidebar's cover stacks wait for it. */
+  let coversReady = $state(false)
   let benchSpeed = $state<number | null>(null)
   /** The benchmark waits for both stores, so it scrolls the whole library. */
   let ready = $state(false)
@@ -139,9 +149,16 @@
     }
   }
 
+  let loads = 0
   async function load() {
-    // Rust needs the Lists filters: Hidden brings hidden games back, and they decide whether favorites go on top.
-    lib = await api.library(query, store, installedOnly, sort, filters.filter(isList))
+    const n = ++loads
+    const asked = view
+    // Rust needs the view: Hidden brings hidden games back, and it decides whether favorites go on top.
+    const got = await api.library(query, store, installedOnly, sort, viewLists(asked))
+    // Only the newest request publishes, so a late answer for an earlier view or search can't replace it.
+    if (n !== loads) return
+    lib = got
+    libView = asked
     version++
     // A store the toolbar no longer offers (logged out, or the only one left) stops filtering; so does Has.
     const multi = lib.stores.length > 1
@@ -155,9 +172,7 @@
     const [, f, c] = await Promise.all([load(), api.featured(), commands.collections().catch(() => collections), withSettings && loadSettings()])
     featured = f
     collections = c
-    // A collection that went away takes its filter along.
-    const gone = (f: Filter) => f.startsWith('collection-') && !c.some((x) => collectionFilter(x.id) === f)
-    if (filters.some(gone)) filters = filters.filter((f) => !gone(f))
+    view = fallbackView(view, lib.counts, c)
   }
 
   /** The heart fills at once; the reload after moves the game into or out of Favorites. */
@@ -180,7 +195,7 @@
   }
 
   $effect(() => {
-    void [query, store, sort, installedOnly, filters]
+    void [query, store, sort, installedOnly, filters, view]
     load()
   })
 
@@ -336,7 +351,7 @@
   async function firstCovers() {
     // The grid's card pitch (180 px card + 16 px gap, rows 286 px); measured from the window, since the
     // hidden window may not lay out yet. A few extra covers are harmless.
-    const cols = Math.max(1, Math.floor((window.innerWidth - 16) / 196))
+    const cols = Math.max(1, Math.floor((window.innerWidth - (window.innerWidth < RAIL_BELOW ? 64 : 224) - 16) / 196))
     const rows = Math.ceil(window.innerHeight / 286)
     const covers = lib.games.slice(0, cols * rows).map((g, i) => api.cover(g.key, i))
     await Promise.race([Promise.allSettled(covers), new Promise((done) => setTimeout(done, 300))])
@@ -356,6 +371,7 @@
       await reload()
       started = true
       await firstCovers()
+      coversReady = true
       commands.ready()
       loadSettings()
       // Holds the flag so a focus event during startup doesn't start a second full refresh.
@@ -410,12 +426,13 @@
   /** The last page closed this session, for the Forward button. */
   let lastClosed: string | null = null
 
-  async function closeGame() {
+  /** `restore` false leaves focus where it is (a sidebar row was chosen). */
+  async function closeGame(restore = true) {
     if (open) lastClosed = open
     open = null
     saveConflict = null
     tint = undefined
-    const back = opener
+    const back = restore ? opener : null
     opener = null
     // The library is visible again only after the update; a recycled-away card is gone (isConnected).
     await tick()
@@ -445,11 +462,12 @@
 
   // Worked out when the list, the filters or (with "Downloading" on) the progress change; never per frame.
   // Filtering keeps each group's cards together and drops groups left empty.
-  const view = $derived.by((): { games: Library['games']; sections: Section[] | null } => {
+  const grid = $derived.by((): { games: Library['games']; sections: Section[] | null } => {
     const sections = lib.groups.length ? lib.groups : null
-    if (filters.length === 0) return { games: lib.games, sections }
-    const p = filters.includes('downloading') ? progress : {}
-    const keep = (g: Library['games'][number]) => matches(g, filters, p)
+    const on = withView(filters, libView)
+    if (on.length === 0) return { games: lib.games, sections }
+    const p = on.includes('downloading') ? progress : {}
+    const keep = (g: Library['games'][number]) => matches(g, on, p)
     if (!sections) return { games: lib.games.filter(keep), sections }
     const games: Library['games'] = []
     const kept: Section[] = []
@@ -463,7 +481,7 @@
     // No favorite left: under Title the rest is one list again.
     return { games, sections: kept.length === 1 && kept[0].group === 'allGames' ? null : kept }
   })
-  const shown = $derived(view.games)
+  const shown = $derived(grid.games)
   /** The hours every card's badge shows while sorting by them: how long to beat or playtime. */
   const stat = $derived(sort === 'longestToBeat' || sort === 'shortestToBeat' ? 'ttb' : sort === 'mostPlayed' ? 'playtime' : null)
 
@@ -483,17 +501,19 @@
   /** A store needs the owner: the dot on the Settings button and on Settings' Accounts. */
   const attention = $derived(lib.epicAttention || lib.steamAttention || lib.gogAttention || lib.amazonAttention)
   const ambientHero = $derived(open !== null && tint !== undefined ? tint : (featured?.hero ?? null))
-  const showContinue = $derived(featured !== null && query === '' && (settings?.showBanner ?? true))
+  const showContinue = $derived(libView === null && featured !== null && query === '' && (settings?.showBanner ?? true))
   const BANNER_H = 180
   const LABEL_H = 18
   // Grouped, each group has its own label row in the grid instead of the one "Library" label.
-  const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + (view.sections ? 0 : LABEL_H))
+  const headerHeight = $derived((showContinue ? BANNER_H + 24 : 0) + (grid.sections ? 0 : LABEL_H))
   /** The Epic filter with no Epic games at all: say why and offer the fix. */
   const epicEmpty = $derived(store === 'epic' && query === '' && !installedOnly && lib.games.length === 0)
   /** Store, Installed or a Filters filter is on. */
   const filtered = $derived(store !== null || installedOnly || filters.length > 0)
   /** A finished scan found nothing: Rust's lone "no games found" status. */
   const noGames = $derived(lib.total === 0 && lib.status.length === 1 && lib.status[0].code === 'noGamesFound')
+  /** The view's own size, before search and filters. */
+  const viewTotal = $derived(viewCount(libView, lib.counts, collections))
 </script>
 
 <svelte:window onmouseup={mouseNav} onauxclick={mouseNav} />
@@ -504,188 +524,213 @@
   <!-- Screen readers and focus skip the app behind a dialog. The dialogs below are portalled to body; main
        comes before them, so Svelte lifts inert before a closing dialog hands focus back to its opener in here. -->
   <main inert={settingsOpen || adding !== null}>
-    <Toolbar
-      bind:query
-      bind:store
-      bind:installedOnly
-      bind:filters
-      bind:sort
-      bind:popoverOpen
+    <Sidebar
+      bind:view
+      bind:pop
+      counts={lib.counts}
+      {collections}
+      modal={settingsOpen || adding !== null}
       {attention}
       {progress}
       {queue}
       games={lib.games}
-      storesInUse={lib.stores}
-      modal={settingsOpen || adding !== null}
+      {coversReady}
       oncancel={cancelDownload}
       onpause={() => changeQueue(commands.pauseDownloads)}
       onresume={resumeDownloads}
       onmove={(key, up) => changeQueue(() => commands.moveDownload(key, up))}
       onsettings={() => openSettings()}
-      onadd={() => openAddGame()}
-      {update}
-      appVersion={settings?.appVersion ?? ''}
-      running={running !== null}
-      {installing}
-      {installError}
-      oninstall={installUpdate}
+      onchanged={reload}
+      onnavigate={() => open && closeGame(false)}
     />
 
-    {#if updatedTo}
-      {@const notes = installedNotes(updatedTo)}
-      {@const [before, after] = around('app.updatedTo', 'version')}
-      <div class="notice" role="status">
-        <span>{before}<b>{updatedTo}</b>{after}</span>
-        {#if notes}
-          <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
-          <NotesPopover version={updatedTo} {notes} bind:open={updatedNotesOpen} anchor={updatedNotesButton} />
-        {/if}
-        <button class="close" onclick={() => (updatedTo = null)} aria-label={t('common.dismiss')}>✕</button>
-      </div>
-    {/if}
-    {#if lib.epicNotice}
-      <div class="notice" role="status">
-        <span>{t('app.epicLoggedOut')}</span>
-        <button class="glass" onclick={() => openSettings()}>{t('toolbar.settings')}</button>
-        <button class="close" onclick={dismissNotice} aria-label={t('common.dismiss')}>✕</button>
-      </div>
-    {/if}
-    {#if error}
-      <div class="notice error" role="alert">
-        <span>{error}</span>
-        <button class="close" onclick={() => (error = null)} aria-label={t('common.dismiss')}>✕</button>
-      </div>
-    {/if}
+    <div class="pane">
+      <Toolbar
+        bind:query
+        bind:store
+        bind:installedOnly
+        bind:filters
+        bind:sort
+        bind:pop
+        storesInUse={lib.stores}
+        modal={settingsOpen || adding !== null}
+        onadd={() => openAddGame()}
+        {update}
+        appVersion={settings?.appVersion ?? ''}
+        running={running !== null}
+        {installing}
+        {installError}
+        oninstall={installUpdate}
+      />
 
-    {#if confirming}
-      <!-- A fresh popup per game, so a late size never lands on another game. -->
-      {#key confirming.game.key}
-        <InstallPanel
-          game={confirming.game}
-          anchor={confirming.anchor}
-          oncancel={() => (confirming = null)}
-          onconfirm={(choice) => {
-            const { key } = confirming!.game
-            confirming = null
-            act('install', key, { choice })
-          }}
-        />
-      {/key}
-    {/if}
+      {#if updatedTo}
+        {@const notes = installedNotes(updatedTo)}
+        {@const [before, after] = around('app.updatedTo', 'version')}
+        <div class="notice" role="status">
+          <span>{before}<b>{updatedTo}</b>{after}</span>
+          {#if notes}
+            <button class="glass" bind:this={updatedNotesButton} onclick={() => (updatedNotesOpen = !updatedNotesOpen)}>{t('app.whatsNew')}</button>
+            <NotesPopover version={updatedTo} {notes} bind:open={updatedNotesOpen} anchor={updatedNotesButton} />
+          {/if}
+          <button class="close" onclick={() => (updatedTo = null)} aria-label={t('common.dismiss')}>✕</button>
+        </div>
+      {/if}
+      {#if lib.epicNotice}
+        <div class="notice" role="status">
+          <span>{t('app.epicLoggedOut')}</span>
+          <button class="glass" onclick={() => openSettings()}>{t('toolbar.settings')}</button>
+          <button class="close" onclick={dismissNotice} aria-label={t('common.dismiss')}>✕</button>
+        </div>
+      {/if}
+      {#if error}
+        <div class="notice error" role="alert">
+          <span>{error}</span>
+          <button class="close" onclick={() => (error = null)} aria-label={t('common.dismiss')}>✕</button>
+        </div>
+      {/if}
 
-    <div class="content">
-      <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
-      <div class="library" class:away={open !== null}>
-        {#if shown.length > 0}
-          <Grid
-            games={shown}
-            sections={view.sections}
-            {stat}
-            resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}`}
-            {running}
-            {launching}
+      {#if confirming}
+        <!-- A fresh popup per game, so a late size never lands on another game. -->
+        {#key confirming.game.key}
+          <InstallPanel
+            game={confirming.game}
+            anchor={confirming.anchor}
+            oncancel={() => (confirming = null)}
+            onconfirm={(choice) => {
+              const { key } = confirming!.game
+              confirming = null
+              act('install', key, { choice })
+            }}
+          />
+        {/key}
+      {/if}
+
+      <div class="content">
+        <!-- Hidden, not unmounted, under the game page: the grid keeps its scroll position. -->
+        <div class="library" class:away={open !== null}>
+          {#if shown.length > 0}
+            <Grid
+              games={shown}
+              sections={grid.sections}
+              {stat}
+              resetKey={`${query}|${store}|${sort}|${installedOnly}|${filters.join()}|${libView}`}
+              {running}
+              {launching}
+              {settingUp}
+              {setupPercent}
+              {progress}
+              {queue}
+              onopen={openGame}
+              onplay={(key) => act('play', key)}
+              oninstall={install}
+              oncancel={cancelDownload}
+              onresume={resumeDownloads}
+              onfavorite={setFavorite}
+              onmenu={openCardMenu}
+              benchSpeed={ready ? benchSpeed : null}
+              {headerHeight}
+            >
+              {#snippet header()}
+                {#if showContinue && featured}
+                  <div style="height: {BANNER_H}px; margin-bottom: 24px">
+                    <Continue
+                      {featured}
+                      running={running !== null && featured.copyKeys.includes(running)}
+                      launching={launching.has(featured.chosen)}
+                      {settingUp}
+                      {setupPercent}
+                      onplay={(key) => act('play', key)}
+                      onopen={openGame}
+                    />
+                  </div>
+                {/if}
+                {#if !grid.sections}
+                  <h2 class="label">
+                    {query || filtered ? t('app.results') : libView ? filterName(libView, collections) : t('app.library')}
+                    <span>{shown.length}</span>
+                  </h2>
+                {/if}
+              {/snippet}
+            </Grid>
+          {:else if epicEmpty && lib.epic === 'noTool'}
+            <div class="empty">
+              <p>{t('app.noLegendary')}</p>
+              <small>{t('app.noLegendaryHint')}</small>
+              <div class="actions">
+                <button class="pill" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
+                  {#if legendaryJob === null}{t('settings.installTool', { tool: 'Legendary' })}
+                  {:else if legendaryJob.percent === null}{t('settings.job.install')}
+                  {:else}{t('settings.job.installPercent', { percent: legendaryJob.percent })}{/if}
+                </button>
+              </div>
+            </div>
+          {:else if epicEmpty && lib.epic === 'loggedOut'}
+            <div class="empty">
+              <p>{t('app.epicLoggedOutEmpty')}</p>
+              <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
+            </div>
+          {:else if epicEmpty && lib.epic === 'unreachable'}
+            <div class="empty">
+              <p>{t('app.epicUnreachable')}</p>
+              <small>{t('app.epicUnreachableHint')}</small>
+            </div>
+          {:else if started && lib.counts.library + lib.counts.hidden > 0 && !query && !filtered && viewTotal === 0}
+            <div class="empty">
+              <p>
+                {libView === null
+                  ? t('sidebar.allHidden')
+                  : libView === 'favorites'
+                    ? t('sidebar.emptyFavorites')
+                    : libView === 'hidden'
+                      ? t('sidebar.emptyHidden')
+                      : t('sidebar.emptyCollection', { name: filterName(libView, collections) })}
+              </p>
+            </div>
+          {:else if started && viewTotal > 0}
+            <div class="empty">
+              <p>{t('app.noMatch')}</p>
+              <small>{query && filtered ? t('app.noMatchQueryFilters', { query }) : query ? t('app.noMatchQuery', { query }) : t('app.noMatchFilters')}</small>
+              <div class="actions">
+                <button class="glass" onclick={clearSearchAndFilters}>
+                  {query && filtered ? t('app.clearAll') : query ? t('app.clearSearch') : t('app.clearFilters')}
+                </button>
+              </div>
+            </div>
+          {:else if started && noGames}
+            <div class="empty">
+              <p>{t('app.noGames')}</p>
+              <small>{t('app.noGamesHint')}</small>
+              <div class="actions">
+                <button class="pill" onclick={() => openSettings('accounts')}>{t('app.openSettings')}</button>
+                <button class="glass" onclick={() => openAddGame()}>{t('toolbar.addGame')}</button>
+              </div>
+            </div>
+          {:else if started}
+            <div class="empty">
+              <p>{lib.status.map(api.message).join('\n')}</p>
+            </div>
+          {/if}
+        </div>
+        {#if open}
+          <Detail
+            gameKey={open}
+            runningKey={running}
             {settingUp}
             {setupPercent}
-            {progress}
+            progressByKey={progress}
             {queue}
-            onopen={openGame}
-            onplay={(key) => act('play', key)}
-            oninstall={install}
             oncancel={cancelDownload}
             onresume={resumeDownloads}
-            onfavorite={setFavorite}
-            onmenu={openCardMenu}
-            benchSpeed={ready ? benchSpeed : null}
-            {headerHeight}
-          >
-            {#snippet header()}
-              {#if showContinue && featured}
-                <div style="height: {BANNER_H}px; margin-bottom: 24px">
-                  <Continue
-                    {featured}
-                    running={running !== null && featured.copyKeys.includes(running)}
-                    launching={launching.has(featured.chosen)}
-                    {settingUp}
-                    {setupPercent}
-                    onplay={(key) => act('play', key)}
-                    onopen={openGame}
-                  />
-                </div>
-              {/if}
-              {#if !view.sections}
-                <h2 class="label">
-                  {query || store || installedOnly || filters.length ? t('app.results') : t('app.library')}
-                  <span>{shown.length}</span>
-                </h2>
-              {/if}
-            {/snippet}
-          </Grid>
-        {:else if epicEmpty && lib.epic === 'noTool'}
-          <div class="empty">
-            <p>{t('app.noLegendary')}</p>
-            <small>{t('app.noLegendaryHint')}</small>
-            <div class="actions">
-              <button class="pill" disabled={legendaryJob !== null} aria-live="polite" onclick={installLegendary}>
-                {#if legendaryJob === null}{t('settings.installTool', { tool: 'Legendary' })}
-                {:else if legendaryJob.percent === null}{t('settings.job.install')}
-                {:else}{t('settings.job.installPercent', { percent: legendaryJob.percent })}{/if}
-              </button>
-            </div>
-          </div>
-        {:else if epicEmpty && lib.epic === 'loggedOut'}
-          <div class="empty">
-            <p>{t('app.epicLoggedOutEmpty')}</p>
-            <button class="pill" disabled={loggingIn} onclick={logIn}>{loggingIn ? t('common.loggingIn') : t('app.logInEpic')}</button>
-          </div>
-        {:else if epicEmpty && lib.epic === 'unreachable'}
-          <div class="empty">
-            <p>{t('app.epicUnreachable')}</p>
-            <small>{t('app.epicUnreachableHint')}</small>
-          </div>
-        {:else if started && lib.total > 0}
-          <div class="empty">
-            <p>{t('app.noMatch')}</p>
-            <small>{query && filtered ? t('app.noMatchQueryFilters', { query }) : query ? t('app.noMatchQuery', { query }) : t('app.noMatchFilters')}</small>
-            <div class="actions">
-              <button class="glass" onclick={clearSearchAndFilters}>
-                {query && filtered ? t('app.clearAll') : query ? t('app.clearSearch') : t('app.clearFilters')}
-              </button>
-            </div>
-          </div>
-        {:else if started && noGames}
-          <div class="empty">
-            <p>{t('app.noGames')}</p>
-            <small>{t('app.noGamesHint')}</small>
-            <div class="actions">
-              <button class="pill" onclick={() => openSettings('accounts')}>{t('app.openSettings')}</button>
-              <button class="glass" onclick={() => openAddGame()}>{t('toolbar.addGame')}</button>
-            </div>
-          </div>
-        {:else if started}
-          <div class="empty">
-            <p>{lib.status.map(api.message).join('\n')}</p>
-          </div>
+            {version}
+            onback={() => closeGame()}
+            onerror={(m) => (error = m)}
+            onchanged={reload}
+            ontint={(url) => (tint = url)}
+            onedit={openAddGame}
+            conflict={saveConflict}
+          />
         {/if}
       </div>
-      {#if open}
-        <Detail
-          gameKey={open}
-          runningKey={running}
-          {settingUp}
-          {setupPercent}
-          progressByKey={progress}
-          {queue}
-          oncancel={cancelDownload}
-          onresume={resumeDownloads}
-          {version}
-          onback={closeGame}
-          onerror={(m) => (error = m)}
-          onchanged={reload}
-          ontint={(url) => (tint = url)}
-          onedit={openAddGame}
-          conflict={saveConflict}
-        />
-      {/if}
     </div>
   </main>
 
@@ -744,6 +789,12 @@
     position: relative;
     z-index: 1;
     height: 100%;
+    display: flex;
+  }
+
+  .pane {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
   }
