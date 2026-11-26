@@ -154,6 +154,8 @@
   /** A name field, a delete question or a failure doesn't fit the rail: the full sidebar lies over the content meanwhile, so the grid keeps its width. */
   const editing = $derived(naming || renaming !== null || deleting !== null || problem !== null)
   const rail = $derived(narrow.current && !editing)
+  // Past the rail's edge, so a tooltip never covers the next icon.
+  const tipSide = $derived(rail ? ({ side: 'right', sideOffset: 16 } as const) : {})
   const settingsName = $derived(attention ? t('toolbar.settingsAttention') : t('toolbar.settings'))
 
   const rowOf = (id: number) => nav?.querySelector<HTMLElement>(`[data-collection="${id}"]`)
@@ -274,13 +276,14 @@
     // The Menu key and Shift+F10 may come without a pointer position.
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const keyboard = e.clientX === 0 && e.clientY === 0
-    ctx = { c, x: keyboard ? r.left + 16 : e.clientX, y: keyboard ? r.bottom : e.clientY }
+    // In the rail the menu opens beside the icon, not over the rows below it.
+    ctx = { c, x: keyboard ? (rail ? r.right + 8 : r.left + 16) : e.clientX, y: keyboard ? (rail ? r.top : r.bottom) : e.clientY }
     ctxOpen = true
   }
 </script>
 
 {#snippet row(v: View, label: string, count: number, icon: string)}
-  <Tip text={rail ? rowName(label, count) : ''}>
+  <Tip text={rail ? rowName(label, count) : ''} {...tipSide}>
     {#snippet children({ props })}
       <button
         {...mergeProps(props, { onclick: (e: MouseEvent) => choose(v, e) })}
@@ -301,7 +304,7 @@
 {/snippet}
 
 {#snippet plus()}
-  <Tip text={t('sidebar.newCollection')}>
+  <Tip text={t('sidebar.newCollection')} {...tipSide}>
     {#snippet children({ props })}
       <button {...props} class="plus" bind:this={plusButton} aria-label={t('sidebar.newCollection')} onclick={startNaming}>
         <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -368,7 +371,7 @@
           />
         {:else}
           {@const label = rowName(c.name, t('sidebar.gamesCount', { n: c.count }))}
-          <Tip text={rail ? label : ''}>
+          <Tip text={rail ? label : ''} {...tipSide}>
             {#snippet children({ props })}
               <button
                 {...mergeProps(props, { onclick: (e: MouseEvent) => choose(v, e) })}
@@ -426,7 +429,7 @@
     {#if downloading}
       <DownloadsPopover {progress} {queue} {games} bind:open={() => pop === 'downloads', showDownloads} {oncancel} {onpause} {onresume} {onmove}>
         {#snippet trigger({ props })}
-          <Tip text={rail ? rowName(t('downloads.title'), jobCount) : ''}>
+          <Tip text={rail ? rowName(t('downloads.title'), jobCount) : ''} {...tipSide}>
             {#snippet children({ props: tip })}
               <button {...mergeProps(tip, props)} class="item downloads" bind:this={downloadsRow} aria-label={rowName(t('downloads.title'), jobCount)}>
                 {#if rail}<span class="ring" style="--done: {fraction * 100}%"></span>{/if}
@@ -440,7 +443,7 @@
         {/snippet}
       </DownloadsPopover>
     {/if}
-    <Tip text={rail ? settingsName : ''}>
+    <Tip text={rail ? settingsName : ''} {...tipSide}>
       {#snippet children({ props })}
         <button {...mergeProps(props, { onclick: onsettings })} class="item" bind:this={settingsRow} aria-label={settingsName}>
           <svg class="line" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
@@ -569,6 +572,10 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    /* Room for the 2px focus ring and its 2px offset, which the scroll box would clip. */
+    padding: 4px;
+    margin: -4px;
+    scroll-padding-block: 4px;
   }
 
   .coll {
@@ -597,7 +604,7 @@
   /* Up to three covers, newest in front; the ones behind sit a step up and to the right, dimmer. */
   .stack {
     position: relative;
-    width: 26px;
+    width: 30px;
     height: 32px;
     flex: none;
   }
@@ -605,12 +612,12 @@
   .stack img,
   .tile {
     position: absolute;
-    left: calc(var(--i) * 3px);
+    left: calc(var(--i) * 5px);
     top: calc(2px - var(--i) * 1px);
     width: 20px;
     height: 30px;
     border-radius: 3px;
-    opacity: calc(1 - var(--i) * 0.22);
+    opacity: calc(1 - var(--i) * 0.15);
   }
 
   .stack img {
@@ -798,7 +805,7 @@
   }
 
   .rail .stack {
-    width: 30px;
+    width: 33px;
     height: 36px;
   }
 

@@ -578,7 +578,7 @@
     <dd class="chips">
       {#each kinds as kind (kind)}
         <button class="chip" onclick={() => run(() => commands.openLink(game!.key, kind))}>
-          <LinkIcon {kind} />{linkNames[kind]}
+          <LinkIcon {kind} /><span>{linkNames[kind]}</span>
         </button>
       {/each}
     </dd>
@@ -1503,6 +1503,18 @@
 
   .chip:hover:not(:disabled) {
     background: var(--glass-on);
+  }
+
+  /* A narrow details column shortens a long link name instead of letting the chip stick out. */
+  .chips .chip {
+    max-width: 100%;
+  }
+
+  .chips .chip span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .chip[aria-pressed='true'] {

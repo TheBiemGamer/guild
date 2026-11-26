@@ -147,43 +147,43 @@
     </FilterPopover>
   </div>
 
-  <span class="spacer"></span>
-
-  <ChoiceMenu bind:value={sort} options={sorts} label={t('toolbar.sortBy')} bind:open={() => pop === 'sort', (v) => show('sort', v)}>
-    {#snippet trigger({ props })}
-      <button {...props} class="chip" aria-label={t('toolbar.sort', { sort: sortName ?? '' })}>
-        {sortName}
-        <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-      </button>
-    {/snippet}
-  </ChoiceMenu>
-
-  {#if update}
-    <UpdatePopover
-      {update}
-      current={appVersion}
-      {running}
-      {installing}
-      error={installError}
-      bind:open={() => pop === 'update', (v) => show('update', v)}
-      {oninstall}
-    >
+  <div class="end">
+    <ChoiceMenu bind:value={sort} options={sorts} label={t('toolbar.sortBy')} bind:open={() => pop === 'sort', (v) => show('sort', v)}>
       {#snippet trigger({ props })}
-        <button {...props} class="chip">
-          <svg class="line up" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
-          {t('play.update')}
+        <button {...props} class="chip" aria-label={t('toolbar.sort', { sort: sortName ?? '' })}>
+          {sortName}
+          <svg class="line" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
         </button>
       {/snippet}
-    </UpdatePopover>
-  {/if}
+    </ChoiceMenu>
 
-  <Tip text={t('toolbar.addGame')}>
-    {#snippet children({ props })}
-      <button {...props} class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')}>
-        <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-      </button>
-    {/snippet}
-  </Tip>
+    {#if update}
+      <UpdatePopover
+        {update}
+        current={appVersion}
+        {running}
+        {installing}
+        error={installError}
+        bind:open={() => pop === 'update', (v) => show('update', v)}
+        {oninstall}
+      >
+        {#snippet trigger({ props })}
+          <button {...props} class="chip">
+            <svg class="line up" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+            {t('play.update')}
+          </button>
+        {/snippet}
+      </UpdatePopover>
+    {/if}
+
+    <Tip text={t('toolbar.addGame')}>
+      {#snippet children({ props })}
+        <button {...props} class="chip icon" onclick={onadd} aria-label={t('toolbar.addGame')}>
+          <svg class="line" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+      {/snippet}
+    </Tip>
+  </div>
 </nav>
 
 <style>
@@ -192,7 +192,8 @@
     z-index: 5;
     display: flex;
     align-items: center;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
     padding: 16px 24px 12px;
   }
 
@@ -205,7 +206,8 @@
   }
 
   .search {
-    flex: 0 1 380px;
+    flex: 1 1 160px;
+    max-width: 380px;
     min-width: 160px;
     height: 36px;
     display: flex;
@@ -263,6 +265,7 @@
 
   .chips {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
   }
@@ -359,7 +362,11 @@
     color: var(--accent-2);
   }
 
-  .spacer {
-    flex: 1;
+  /* Sort, Update and Add a game wrap together and stay on the right. */
+  .end {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
 </style>
