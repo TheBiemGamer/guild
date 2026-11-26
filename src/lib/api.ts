@@ -43,7 +43,7 @@ export function queueState(queue: QueueView, keys: string[]): QueueState | null 
   return { key, action, state: at > 0 ? 'queued' : queue.paused ? 'paused' : 'active' }
 }
 
-/** `lists`: the Lists filters that are on; Hidden brings hidden games back, and favorites go on top unless Favorites is the only one. */
+/** `lists`: the Lists filters that are on (favorites, hidden, status, collections); Hidden brings hidden games back, and favorites go on top unless Favorites is the only one. */
 export const library = (query: string, store: Store | null, installedOnly: boolean, sort: Sort, lists: ListFilter[]) =>
   commands.library(query, store, installedOnly, sort, lists)
 /**

@@ -1,4 +1,4 @@
-//! Favorites, hidden games and collections. Stored per copy key, so setting one on a game sets every copy.
+//! Favorites, hidden games, play status and collections. Stored per copy key, so setting one on a game sets every copy.
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};

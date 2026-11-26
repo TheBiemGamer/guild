@@ -558,6 +558,7 @@
   h2 {
     flex: 1;
     margin: 0;
+    line-height: 24px;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;

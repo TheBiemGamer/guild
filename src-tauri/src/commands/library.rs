@@ -150,7 +150,7 @@ fn sidebar_counts(entries: &[Entry], games: &[Game], lists: &Lists) -> Counts {
     c
 }
 
-/// `lists` are the Lists filters that are on ("favorites", "hidden", "collection-<id>"); the UI applies
+/// `lists` are the Lists filters that are on ("favorites", "hidden", "status-<status>", "collection-<id>"); the UI applies
 /// them, like its other filters. Here, Hidden brings hidden games back, and favorites go on top unless
 /// Favorites is the only one.
 #[tauri::command]

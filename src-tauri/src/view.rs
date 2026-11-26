@@ -109,6 +109,9 @@ impl Lists {
     }
 
     pub fn status(&self, e: &Entry, games: &[Game]) -> PlayStatus {
+        if self.status.is_empty() {
+            return PlayStatus::Backlog;
+        }
         let keys: Vec<String> = e.copies.iter().map(|&i| games[i].key()).collect();
         newest_status(keys.iter().filter_map(|k| {
             let &(status, at) = self.status.get(k)?;
