@@ -456,6 +456,9 @@
   }
 
   .glass.small {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 6px 14px;
     border-radius: 999px;
     font-size: 12px;
