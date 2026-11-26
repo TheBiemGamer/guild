@@ -4,8 +4,8 @@
   import { mergeProps } from 'bits-ui'
   import * as api from './api'
   import { onOpenDownloads } from './api'
-  import { commands, type Card, type Collection, type Counts, type Progress, type QueueView } from './bindings'
-  import { collectionFilter } from './filters'
+  import { commands, type Card, type Collection, type Counts, type PlayStatus, type Progress, type QueueView } from './bindings'
+  import { collectionFilter, STATUSES, statusFilter } from './filters'
   import { t } from './i18n'
   import { downloadFraction, fallbackView, RAIL_BELOW, type Pop, type View } from './sidebar'
   import ActionMenu, { type Action } from './ActionMenu.svelte'
@@ -67,6 +67,13 @@
 
   /** The row that is the Tab stop: the view, or Library while a gone row waits for App's fallback. */
   const current = $derived(fallbackView(view, counts, collections))
+
+  const STATUS_ICON: Record<PlayStatus, string> = {
+    playing: 'M6.5 4.8v14.4a1 1 0 0 0 1.5.86l12-7.2a1 1 0 0 0 0-1.72l-12-7.2a1 1 0 0 0-1.5.86z',
+    backlog: 'M5 13h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1zM5.5 9h13M7.5 5h9',
+    beaten: 'M5 21V4h14l-3 4.5 3 4.5H5',
+    dropped: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM5.6 5.6l12.8 12.8',
+  }
 
   const rowName = (name: string, count: number | string) => t('sidebar.rowName', { name, count })
 
@@ -335,6 +342,17 @@
   {/if}
 
   <div class="sec">
+    <h2 id="sidebar-status" class:visually-hidden={rail}>{t('sidebar.status')}</h2>
+  </div>
+  <div class="status" role="group" aria-labelledby="sidebar-status">
+    {#each STATUSES as s (s)}
+      {#if s === 'backlog' || counts[s] > 0}
+        {@render row(statusFilter(s), t(`status.${s}`), counts[s], STATUS_ICON[s])}
+      {/if}
+    {/each}
+  </div>
+
+  <div class="sec">
     <h2 id="sidebar-collections" class:visually-hidden={rail}>{t('sidebar.collections')}</h2>
     {#if !rail}{@render plus()}{/if}
   </div>
@@ -562,6 +580,13 @@
   .plus:hover:not(:disabled) {
     background: var(--glass-hover);
     color: var(--text);
+  }
+
+  .status {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
   /* Only the collections scroll; the rows above and below stay put. */

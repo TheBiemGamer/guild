@@ -3,7 +3,8 @@
   import { tick, type Snippet } from 'svelte'
   import * as api from './api'
   import type { Listed } from './api'
-  import { commands, type Collection } from './bindings'
+  import { commands, type Collection, type PlayStatus } from './bindings'
+  import { STATUSES } from './filters'
   import { t } from './i18n'
   import Check from './Check.svelte'
   import { keepOnBackForward } from './outside'
@@ -48,6 +49,7 @@
   let content = $state<HTMLElement | null>(null)
   let sub = $state<HTMLElement | null>(null)
   let subTrigger = $state<HTMLButtonElement>()
+  let statusTrigger = $state<HTMLButtonElement>()
   let collections = $state<Collection[]>([])
   let naming = $state(false)
   let name = $state('')
@@ -209,6 +211,47 @@
                   </button>
                 {/snippet}
               </DropdownMenu.CheckboxItem>
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger>
+                  {#snippet child({ props })}
+                    <button {...props} bind:this={statusTrigger}>
+                      {t('menu.status')}<span class="more" aria-hidden="true">›</span>
+                    </button>
+                  {/snippet}
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.SubContent
+                  sideOffset={10}
+                  alignOffset={-6}
+                  collisionPadding={8}
+                  aria-label={t('menu.status')}
+                  escapeKeydownBehavior="close"
+                  onEscapeKeydown={() => statusTrigger?.focus()}
+                  onInteractOutside={keepOnBackForward}
+                >
+                  {#snippet child({ props, wrapperProps })}
+                    <div {...wrapperProps}>
+                      <div {...props} class="menu sub">
+                        <!-- bits-ui reports a pick of the chosen item too. -->
+                        <DropdownMenu.RadioGroup
+                          value={game.status}
+                          onValueChange={(s) => s !== game.status && change(() => commands.setStatus(game.key, s as PlayStatus))}
+                        >
+                          {#each STATUSES as s (s)}
+                            <DropdownMenu.RadioItem value={s}>
+                              {#snippet child({ props, checked })}
+                                <button {...props}>
+                                  {t(`status.${s}`)}
+                                  {#if checked}<Check />{/if}
+                                </button>
+                              {/snippet}
+                            </DropdownMenu.RadioItem>
+                          {/each}
+                        </DropdownMenu.RadioGroup>
+                      </div>
+                    </div>
+                  {/snippet}
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Sub>
               <DropdownMenu.Sub onOpenChange={(o) => !o && (naming = false)}>
                 <DropdownMenu.SubTrigger>
                   {#snippet child({ props })}

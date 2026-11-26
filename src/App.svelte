@@ -685,7 +685,9 @@
                       ? t('sidebar.emptyFavorites')
                       : libView === 'hidden'
                         ? t('sidebar.emptyHidden')
-                        : t('sidebar.emptyCollection', { name: filterName(libView, collections) })}
+                        : libView === 'status-backlog'
+                          ? t('sidebar.emptyBacklog')
+                          : t('sidebar.emptyCollection', { name: filterName(libView, collections) })}
                 </p>
               </div>
             {/if}
