@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavio
 
 use crate::library::custom::CustomGame;
 use crate::library::{Art, Error, Game, Image, ProviderKind};
-use crate::view::Lists;
+use crate::view::{Lists, PlayStatus, newest_status, parse_status};
 
 /// Migration steps; `PRAGMA user_version` is how many have run. Schema changes are new steps at the end,
 /// never edits to old ones, and the file name never changes.
@@ -387,21 +387,72 @@ pub fn set_pref(
 /// `game_prefs` names that mark a copy as a favorite or hidden; the value is "1", no row is off.
 pub const FAVORITE: &str = "favorite";
 pub const HIDDEN: &str = "hidden";
+/// The play status of a copy, `"{status}:{unix seconds}"` (`view::parse_status`).
+pub const STATUS: &str = "status";
 
-/// Favorites, hidden games and collection members, by copy key.
+/// Writes the status to every copy key in one transaction.
+#[allow(dead_code)] // used by the commands in a later task; drop then
+pub fn set_status(
+    conn: &mut Connection,
+    keys: &[String],
+    status: PlayStatus,
+    at: i64,
+) -> Result<(), Error> {
+    let tx = conn.transaction()?;
+    let value = format!("{}:{at}", status.as_str());
+    for key in keys {
+        set_pref(&tx, key, STATUS, Some(&value))?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// A launch moves a game to Playing only while its newest status is Backlog (or none). Returns whether it wrote.
+#[allow(dead_code)] // used by the commands in a later task; drop then
+pub fn start_playing(conn: &mut Connection, keys: &[String], at: i64) -> Result<bool, Error> {
+    let tx = conn.transaction()?;
+    let mut rows = Vec::new();
+    for key in keys {
+        if let Some((status, at)) = pref(&tx, key, STATUS)?.as_deref().and_then(parse_status) {
+            rows.push((key.as_str(), status, at));
+        }
+    }
+    if newest_status(rows) != PlayStatus::Backlog {
+        return Ok(false);
+    }
+    let value = format!("{}:{at}", PlayStatus::Playing.as_str());
+    for key in keys {
+        set_pref(&tx, key, STATUS, Some(&value))?;
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
+/// Favorites, hidden games, play status and collection members, by copy key.
 pub fn lists(conn: &Connection) -> Result<Lists, Error> {
     let mut lists = Lists::default();
-    let mut stmt = conn.prepare("SELECT key, name FROM game_prefs WHERE name IN (?1, ?2)")?;
-    for row in stmt.query_map([FAVORITE, HIDDEN], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    let mut stmt =
+        conn.prepare("SELECT key, name, value FROM game_prefs WHERE name IN (?1, ?2, ?3)")?;
+    for row in stmt.query_map([FAVORITE, HIDDEN, STATUS], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
     })? {
-        let (key, name) = row?;
-        if name == FAVORITE {
-            &mut lists.favorite
+        let (key, name, value) = row?;
+        if name == STATUS {
+            match parse_status(&value) {
+                Some(parsed) => {
+                    lists.status.insert(key, parsed);
+                }
+                None => tracing::warn!(key, value, "skipping a malformed play status"),
+            }
+        } else if name == FAVORITE {
+            lists.favorite.insert(key);
         } else {
-            &mut lists.hidden
+            lists.hidden.insert(key);
         }
-        .insert(key);
     }
     let mut stmt =
         conn.prepare("SELECT key, collection_id FROM collection_games ORDER BY collection_id")?;
@@ -1159,5 +1210,59 @@ mod tests {
             None
         );
         assert_eq!(cached_info(&conn, "steam-1", "ttb", 50, 120).unwrap(), None);
+    }
+
+    #[test]
+    fn status_writes_every_copy_and_lists_read_it() {
+        let mut conn = memory();
+        let keys = ["steam-1".to_string(), "epic-A".to_string()];
+        set_status(&mut conn, &keys, PlayStatus::Beaten, 100).unwrap();
+        assert_eq!(
+            pref(&conn, "epic-A", STATUS).unwrap().as_deref(),
+            Some("beaten:100")
+        );
+        assert_eq!(
+            lists(&conn).unwrap().status["steam-1"],
+            (PlayStatus::Beaten, 100)
+        );
+    }
+
+    #[test]
+    fn start_playing_moves_only_backlog() {
+        let mut conn = memory();
+        let keys = ["steam-1".to_string(), "epic-A".to_string()];
+        assert!(start_playing(&mut conn, &keys, 10).unwrap());
+        assert_eq!(
+            pref(&conn, "steam-1", STATUS).unwrap().as_deref(),
+            Some("playing:10")
+        );
+        set_status(&mut conn, &keys, PlayStatus::Backlog, 20).unwrap();
+        assert!(start_playing(&mut conn, &keys, 30).unwrap());
+        for kept in [PlayStatus::Playing, PlayStatus::Beaten, PlayStatus::Dropped] {
+            set_status(&mut conn, &keys, kept, 40).unwrap();
+            assert!(!start_playing(&mut conn, &keys, 50).unwrap());
+            assert_eq!(
+                pref(&conn, "epic-A", STATUS).unwrap(),
+                Some(format!("{}:40", kept.as_str()))
+            );
+        }
+    }
+
+    #[test]
+    fn start_playing_leaves_a_status_set_since() {
+        let mut conn = memory();
+        set_pref(&conn, "steam-1", STATUS, Some("beaten:100")).unwrap();
+        set_pref(&conn, "epic-A", STATUS, Some("backlog:200")).unwrap();
+        let keys = ["steam-1".to_string(), "epic-A".to_string()];
+        assert!(start_playing(&mut conn, &keys, 300).unwrap());
+        set_pref(&conn, "steam-1", STATUS, Some("beaten:400")).unwrap();
+        assert!(!start_playing(&mut conn, &keys, 500).unwrap());
+    }
+
+    #[test]
+    fn lists_skip_a_malformed_status() {
+        let conn = memory();
+        set_pref(&conn, "steam-1", STATUS, Some("won")).unwrap();
+        assert!(lists(&conn).unwrap().status.is_empty());
     }
 }

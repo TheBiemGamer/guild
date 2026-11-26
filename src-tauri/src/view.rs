@@ -30,14 +30,54 @@ impl Sort {
     }
 }
 
-/// The owner's favorites, hidden games and collections, by copy key (`cache::db::lists`). An entry is in
-/// one when any of its copies is, so the choice survives entries merging or splitting.
+/// Where the owner is with a game. Stored per copy key as `"{status}:{unix seconds}"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum PlayStatus {
+    Playing,
+    Backlog,
+    Beaten,
+    Dropped,
+}
+
+impl PlayStatus {
+    /// The serde spelling, as stored.
+    #[allow(dead_code)] // used by the commands in a later task; drop then
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Playing => "playing",
+            Self::Backlog => "backlog",
+            Self::Beaten => "beaten",
+            Self::Dropped => "dropped",
+        }
+    }
+}
+
+/// A stored status value; an unknown name or a non-integer time is `None`.
+pub fn parse_status(value: &str) -> Option<(PlayStatus, i64)> {
+    let (name, at) = value.split_once(':')?;
+    let status = serde_json::from_value(serde_json::Value::String(name.into())).ok()?;
+    Some((status, at.parse().ok()?))
+}
+
+/// The status set last across a game's copies; a tie goes to the smallest key, none is `Backlog`.
+#[allow(dead_code)] // used by the commands in a later task; drop then
+pub fn newest_status<'a>(rows: impl IntoIterator<Item = (&'a str, PlayStatus, i64)>) -> PlayStatus {
+    rows.into_iter()
+        .min_by_key(|&(key, _, at)| (Reverse(at), key))
+        .map_or(PlayStatus::Backlog, |(_, status, _)| status)
+}
+
+/// The owner's favorites, hidden games, collections and play status, by copy key (`cache::db::lists`). An
+/// entry is in one when any of its copies is, so the choice survives entries merging or splitting.
 #[derive(Debug, Default)]
 pub struct Lists {
     pub favorite: HashSet<String>,
     pub hidden: HashSet<String>,
     /// Collection ids by copy key.
     pub collections: HashMap<String, Vec<i64>>,
+    /// Play status and when it was set, by copy key.
+    pub status: HashMap<String, (PlayStatus, i64)>,
 }
 
 impl Lists {
@@ -68,6 +108,15 @@ impl Lists {
         ids.sort_unstable();
         ids.dedup();
         ids
+    }
+
+    #[allow(dead_code)] // used by the commands in a later task; drop then
+    pub fn status(&self, e: &Entry, games: &[Game]) -> PlayStatus {
+        let keys: Vec<String> = e.copies.iter().map(|&i| games[i].key()).collect();
+        newest_status(keys.iter().filter_map(|k| {
+            let &(status, at) = self.status.get(k)?;
+            Some((k.as_str(), status, at))
+        }))
     }
 }
 
@@ -749,6 +798,54 @@ pub(crate) mod tests {
         assert!(!lists.hidden(&entries[0], &games));
         assert_eq!(lists.collections(&entries[0], &games), [1, 2]);
         assert!(Lists::default().collections(&entries[0], &games).is_empty());
+    }
+
+    #[test]
+    fn status_values_parse_and_reject_garbage() {
+        assert_eq!(
+            parse_status("playing:1764150000"),
+            Some((PlayStatus::Playing, 1764150000))
+        );
+        assert_eq!(parse_status("backlog:5"), Some((PlayStatus::Backlog, 5)));
+        for bad in ["", "playing", "playing:", "playing:x", "won:1", "Playing:1"] {
+            assert_eq!(parse_status(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_newest_status_wins_and_ties_go_to_the_first_key() {
+        assert_eq!(newest_status([]), PlayStatus::Backlog);
+        assert_eq!(
+            newest_status([
+                ("steam-1", PlayStatus::Beaten, 100),
+                ("epic-A", PlayStatus::Backlog, 200)
+            ]),
+            PlayStatus::Backlog
+        );
+        assert_eq!(
+            newest_status([
+                ("steam-1", PlayStatus::Beaten, 100),
+                ("epic-A", PlayStatus::Dropped, 100)
+            ]),
+            PlayStatus::Dropped
+        );
+    }
+
+    #[test]
+    fn an_entry_takes_the_status_of_its_copies() {
+        let mut epic = game("Pumpkin", false, None, None);
+        epic.provider = ProviderKind::Epic;
+        let games = vec![epic, game("635320", false, None, None)];
+        let entries = entries::group(
+            &games,
+            &HashMap::from([("epic-Pumpkin".to_string(), 635320)]),
+        );
+        let mut lists = Lists::default();
+        assert_eq!(lists.status(&entries[0], &games), PlayStatus::Backlog);
+        lists
+            .status
+            .insert("epic-Pumpkin".into(), (PlayStatus::Beaten, 5));
+        assert_eq!(lists.status(&entries[0], &games), PlayStatus::Beaten);
     }
 
     #[test]
