@@ -1,7 +1,5 @@
 //! Favorites, hidden games and collections. Stored per copy key, so setting one on a game sets every copy.
 
-use std::collections::HashMap;
-
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -16,6 +14,8 @@ pub struct Collection {
     name: String,
     /// Games in it.
     count: usize,
+    /// Up to three entry keys of its games, most recently played first.
+    covers: Vec<String>,
 }
 
 /// Every copy key of the game with this key.
@@ -28,6 +28,8 @@ fn copy_keys(state: &AppState, key: &str) -> Res<Vec<String>> {
 /// Runs a change on the database, then reads the lists again for the library.
 fn change<T>(app: &AppHandle, f: impl FnOnce(&mut rusqlite::Connection) -> Res<T>) -> Res<T> {
     let state = app.state::<AppState>();
+    // Held to the publish below, so two changes can't publish their reads out of order.
+    let _turn = state.lists_write.lock().expect("lists lock poisoned");
     let mut conn = open_db(&state).ok_or(msg!(noDb))?;
     let out = f(&mut conn)?;
     let lists = cache::db::lists(&conn)?;
@@ -67,22 +69,37 @@ pub async fn collections(app: AppHandle) -> Res<Vec<Collection>> {
         let state = app.state::<AppState>();
         let list = collections_in(&open_db(&state).ok_or(msg!(noDb))?)?;
         let s = state.lock();
-        let mut counts: HashMap<i64, usize> = HashMap::new();
-        for e in &s.entries {
-            for id in s.lists.collections(e, &s.games) {
-                *counts.entry(id).or_default() += 1;
-            }
-        }
         Ok(list
             .into_iter()
-            .map(|(id, name)| Collection {
-                id,
-                count: counts.get(&id).copied().unwrap_or(0),
-                name,
+            .map(|(id, name)| {
+                let (count, covers) = collection_summary(id, &s.entries, &s.games, &s.lists);
+                Collection {
+                    id,
+                    name,
+                    count,
+                    covers,
+                }
             })
             .collect())
     })
     .await
+}
+
+/// How many games a collection holds, hidden ones left out, and up to three of their keys, most recently
+/// played first. `entries` are in title order, so the stable sort puts never-played ones after, by title.
+fn collection_summary(
+    id: i64,
+    entries: &[entries::Entry],
+    games: &[crate::library::Game],
+    lists: &crate::view::Lists,
+) -> (usize, Vec<String>) {
+    let mut members: Vec<&entries::Entry> = entries
+        .iter()
+        .filter(|e| !lists.hidden(e, games) && lists.collections(e, games).contains(&id))
+        .collect();
+    members.sort_by_key(|e| std::cmp::Reverse(entries::last_played(e, games).map(|p| p.0)));
+    let covers = members.iter().take(3).map(|e| e.key.clone()).collect();
+    (members.len(), covers)
 }
 
 /// The name to store: trimmed, not empty, and not another collection's in any case.
@@ -173,5 +190,27 @@ mod tests {
         // Renaming a collection to its own name in another case is fine; to another's isn't.
         assert_eq!(check_name("BACKLOG", &taken, Some(1)).unwrap(), "BACKLOG");
         assert!(check_name("co-op ", &taken, Some(1)).is_err());
+    }
+
+    #[test]
+    fn collection_summary_skips_hidden_and_takes_three_latest_covers() {
+        use crate::view::tests::game;
+        use std::collections::{HashMap, HashSet};
+        // Titles sort a..e; played 1..4 for a..d, e never, and "b" hidden.
+        let games: Vec<_> = [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 0)]
+            .into_iter()
+            .map(|(t, n)| game(t, true, None, (n > 0).then_some(n)))
+            .collect();
+        let entries = entries::group(&games, &HashMap::new());
+        let keys: Vec<String> = games.iter().map(|g| g.key()).collect();
+        let lists = crate::view::Lists {
+            hidden: HashSet::from([keys[1].clone()]),
+            collections: keys.iter().map(|k| (k.clone(), vec![7])).collect(),
+            ..Default::default()
+        };
+        let (count, covers) = collection_summary(7, &entries, &games, &lists);
+        assert_eq!(count, 4);
+        assert_eq!(covers, [keys[3].clone(), keys[2].clone(), keys[0].clone()]);
+        assert_eq!(collection_summary(8, &entries, &games, &lists), (0, vec![]));
     }
 }
