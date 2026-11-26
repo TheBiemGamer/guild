@@ -4,7 +4,7 @@
   import DownloadsPopover from './DownloadsPopover.svelte'
   import UpdatePopover from './UpdatePopover.svelte'
   import ChoiceMenu from './ChoiceMenu.svelte'
-  import { filterChips, removeChip, storeSegments, type Collection, type Filter } from './filters'
+  import { filterChips, removeChip, storeSegments, type Filter } from './filters'
   import { t } from './i18n'
   import Tip from './Tip.svelte'
   import { mergeProps, RadioGroup } from 'bits-ui'
@@ -17,7 +17,6 @@
     store = $bindable(),
     installedOnly = $bindable(),
     filters = $bindable(),
-    collections,
     sort = $bindable(),
     popoverOpen = $bindable(),
     attention,
@@ -32,7 +31,6 @@
     onmove,
     onsettings,
     onadd,
-    oncollections,
     update,
     appVersion,
     running,
@@ -46,7 +44,6 @@
     /** The Filters popover's extra filters. */
     filters: Filter[]
     /** For the Lists filters' names. */
-    collections: Collection[]
     sort: Sort
     /** A popover is open; App ignores mouse Back/Forward meanwhile, as for Settings. */
     popoverOpen: boolean
@@ -69,7 +66,6 @@
     /** Opens the Add a game dialog. */
     onadd: () => void
     /** A collection was renamed or deleted in the Filters popover. */
-    oncollections: () => void
     /** A newer release: the Update chip shows while it's set. */
     update: UpdateInfo | null
     appVersion: string
@@ -83,7 +79,7 @@
   /** The store segments, in order; null is All. Empty (no control) with fewer than two stores. */
   const stores = $derived(storeSegments(storesInUse))
   const storeIndex = $derived(stores.indexOf(store))
-  const chips = $derived(filterChips(filters, collections))
+  const chips = $derived(filterChips(filters))
 
   const sorts = $derived(
     (['lastPlayed', 'mostPlayed', 'longestToBeat', 'shortestToBeat', 'title'] as const).map((value) => ({ value, label: t(`sort.${value}`) })),
@@ -184,13 +180,7 @@
         {chip.label}<i aria-hidden="true">✕</i>
       </button>
     {/each}
-    <FilterPopover
-      bind:filters
-      {collections}
-      multiStore={storesInUse.length > 1}
-      bind:open={() => open === 'filters', (v) => show('filters', v)}
-      onchanged={oncollections}
-    >
+    <FilterPopover bind:filters multiStore={storesInUse.length > 1} bind:open={() => open === 'filters', (v) => show('filters', v)}>
       {#snippet trigger({ props })}
         <button {...props} class="chip">
           <svg class="line" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">

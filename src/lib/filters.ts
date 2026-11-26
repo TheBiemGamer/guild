@@ -37,11 +37,10 @@ const rest: Ids[] = [
   { id: 'has', filters: ['bothStores'] },
 ]
 
-/** The popover's groups, in order, the Lists group made from `collections`. Filters in one group widen each other (or); groups narrow (and).
+/** The popover's groups, in order. Filters in one group widen each other (or); groups narrow (and).
  * Has (more than one store) is left out when the library uses fewer than two stores (`multiStore` false). */
-export function filterGroups(collections: readonly Collection[], multiStore = true): Group[] {
-  const lists: Ids = { id: 'lists', filters: ['favorites', ...collections.map((c) => collectionFilter(c.id)), 'hidden'] }
-  return [status, lists, ...rest].filter((g) => multiStore || g.id !== 'has').map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
+export function filterGroups(multiStore = true): Group[] {
+  return [status, ...rest].filter((g) => multiStore || g.id !== 'has').map((g) => ({ label: t(`filters.group.${g.id}`), filters: g.filters }))
 }
 
 /** The toolbar's store segments for the stores the library uses, null being All; none when there is only one store. */
@@ -50,7 +49,7 @@ export function storeSegments<S extends string>(inUse: readonly S[]): (S | null)
 }
 
 /** A collection is named after itself; one that no longer exists has no name. */
-export function filterName(filter: Filter, collections: readonly Collection[]): string {
+export function filterName(filter: Filter, collections: readonly Collection[] = []): string {
   if (!filter.startsWith('collection-')) return t(`filters.${filter}`)
   return collections.find((c) => collectionFilter(c.id) === filter)?.name ?? ''
 }
@@ -62,10 +61,10 @@ export interface Chip {
 }
 
 /** The toolbar chips for the filters that are on, in popover order. */
-export function filterChips(on: readonly Filter[], collections: readonly Collection[] = []): Chip[] {
-  return filterGroups(collections)
+export function filterChips(on: readonly Filter[]): Chip[] {
+  return filterGroups()
     .flatMap((g) => g.filters.filter((f) => on.includes(f)))
-    .map((filter) => ({ filter, label: filterName(filter, collections) }))
+    .map((filter) => ({ filter, label: filterName(filter) }))
 }
 
 /** The filters left after the chip's ✕. */

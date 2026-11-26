@@ -509,8 +509,6 @@
       bind:store
       bind:installedOnly
       bind:filters
-      {collections}
-      oncollections={reload}
       bind:sort
       bind:popoverOpen
       {attention}
